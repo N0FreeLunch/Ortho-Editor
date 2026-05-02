@@ -63,7 +63,8 @@ pub fn peek_item_header_at(
     let loc = reader.read::<3, u8>().ok()?;
     let x = reader.read::<4, u8>().ok()?;
     
-    let is_compact = (flags & (1 << 21)) != 0;
+    let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+    let is_compact = axiom.is_compact(flags);
     let mut header_len = 32 + 3 + 3 + 3 + 4; // flags(32) + v(3) + m(3) + l(3) + x(4)
     
     let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
@@ -71,7 +72,8 @@ pub fn peek_item_header_at(
 
     if geometry.has_header_gap {
         if version == 5 || version == 0 {
-            let is_v105_shadow = (flags & (1 << 26)) != 0;
+            let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+            let is_v105_shadow = axiom.is_v105_shadow(flags);
             let is_rw = axiom.is_runeword(flags);
             if is_rw || is_v105_shadow {
                 header_len += 8; // Alpha v105 Version 5 Consolidated Gap
@@ -353,7 +355,7 @@ impl Item {
 
         if geometry.has_header_gap {
             if self.version == 5 || self.version == 0 {
-                let is_v105_shadow = (self.flags & (1 << 26)) != 0;
+                let is_v105_shadow = axiom.is_v105_shadow(self.flags);
                 let is_rw = axiom.is_runeword(self.flags);
 
                 if is_rw || is_v105_shadow {
@@ -401,8 +403,9 @@ impl Item {
         } else {
             let encoded_code = huffman.encode(&self.code)?;
             emitter.extend_bits(encoded_code)?;
-            if alpha_mode && self.version == 5 {
-                emitter.write_bits(0, 2)?; // 2-bit nudge
+            if alpha_mode && (self.version == 5 || self.version == 0 || self.version == 1) {
+                let nudge = if self.version == 0 { 2 } else { 0 };
+                emitter.write_bits(nudge, 2)?; // 2-bit nudge
             }
         }
 
@@ -417,7 +420,7 @@ impl Item {
                 trimmed == "hp1" || trimmed == "hp2" || trimmed == "hp3" || trimmed == "hp4" || trimmed == "hp5" ||
                 trimmed == "mp1" || trimmed == "mp2" || trimmed == "mp3" || trimmed == "mp4" || trimmed == "mp5" ||
                 trimmed == "rvl" || trimmed == "rvs" || trimmed == "isc" || trimmed == "tsc" || trimmed == "w8cs" || 
-                trimmed == "us g" || trimmed == "xrs" || trimmed == "6cs" || trimmed == "7mgw"
+                trimmed == "w88w" || trimmed == "us g" || trimmed == "xrs" || trimmed == "6cs" || trimmed == "7mgw"
             );
 
             let quality_val = self.quality.unwrap_or(ItemQuality::Normal);
@@ -440,8 +443,11 @@ impl Item {
                         }
                     }
                 } else {
-                    let is_frag = (self.flags & (1 << 26)) != 0 || (self.flags & (1 << 27)) != 0;
-                    if self.version == 5 && (self.is_runeword || is_frag) {
+                    let is_compact = axiom.is_compact(self.flags);
+                    let is_personalized = axiom.is_personalized(self.flags);
+                    let is_runeword = axiom.is_runeword(self.flags);
+                    let is_frag = axiom.is_fragment(self.flags);
+                    if self.version == 5 && (is_runeword || is_frag) {
                         // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
                         emitter.write_bits(self.body.v5_runeword_extra.unwrap_or(0) as u32, 2)?;
                     }
@@ -455,8 +461,8 @@ impl Item {
                     emitter.write_bits(quality_val as u32, 4)?;
                 }
 
-                if is_item_alpha && self.version != 5 {
-                    // Early exit for v104/v101 in ExtendedStats
+                if is_item_alpha && (self.version == 1 || self.version == 4) {
+                    // Early exit for v101/v104 in ExtendedStats (must mirror read-side gate).
                 } else {
                     if self.has_multiple_graphics {
                         emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?;
@@ -491,17 +497,17 @@ impl Item {
                         _ => {}
                     }
 
-                    if self.is_runeword && !axiom.is_alpha() && self.version != 5 {
+                    if axiom.is_runeword(self.flags) && !axiom.is_alpha() && self.version != 5 {
                         emitter.write_bits(self.runeword_id.unwrap_or(0) as u32, 12)?;
                         emitter.write_bits(self.runeword_level.unwrap_or(0) as u32, 12)?;
                         emitter.write_bits(0, 4)?; // Runeword unknown bits
                     }
 
-                    if self.is_personalized {
-                        write_player_name(&mut emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && self.version == 5)?;
-                        if alpha_mode && self.version == 5 {
+                    if axiom.is_personalized(self.flags) {
+                        if alpha_mode && (self.version == 5 || self.version == 0 || self.version == 1) {
                             emitter.byte_align()?;
                         }
+                        write_player_name(&mut emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && (self.version == 5 || self.version == 0 || self.version == 1))?;
                     }
 
                     if self.code.trim() == "tbk" || self.code.trim() == "ibk" {
@@ -542,7 +548,7 @@ impl Item {
                     }
                 }
 
-                let is_v105_shadow = alpha_mode && self.version == 5 && (self.flags & (1 << 26)) != 0;
+                let is_v105_shadow = axiom.is_v105_shadow(self.flags);
                 if is_v105_shadow {
                     // Alpha v105 forensic: Shadow skip
                     emitter.write_bits(0, 47)?;
@@ -550,9 +556,9 @@ impl Item {
 
                 let has_props = !self.properties.is_empty();
                 if self.version != 5 || is_v105_shadow || self.is_runeword || (alpha_mode && self.is_compact) || has_props {
-                    write_property_list(&mut emitter, &self.properties, self.version, self.is_runeword, self.terminator_bit, quality_val, is_v105_shadow, &axiom)?;
+                    write_property_list(&mut emitter, &self.code, &self.properties, self.version, self.is_runeword, self.terminator_bit, quality_val, is_v105_shadow, &axiom)?;
                     for set_props in &self.set_attributes {
-                        write_property_list(&mut emitter, set_props, self.version, false, false, quality_val, false, &axiom)?;
+                        write_property_list(&mut emitter, &self.code, set_props, self.version, false, false, quality_val, false, &axiom)?;
                     }
                 }
             }
@@ -618,29 +624,26 @@ fn item_template(code: &str) -> Option<&'static crate::data::item_codes::ItemTem
         .find(|template| template.code == code.trim())
 }
 
-fn write_property_list(emitter: &mut BitEmitter, props: &[ItemProperty], _version: u8, alpha_runeword: bool, terminator_bit: bool, _quality: ItemQuality, is_v105_shadow: bool, axiom: &StatsAxiom) -> io::Result<()> {
-    let is_compact = props.is_empty();
+fn write_property_list(emitter: &mut BitEmitter, code: &str, props: &[ItemProperty], version: u8, alpha_runeword: bool, terminator_bit: bool, _quality: ItemQuality, is_v105_shadow: bool, axiom: &StatsAxiom) -> io::Result<()> {
+    // Mirror read-side heuristic for compact rhythm selection.
+    let is_compact = code.trim().is_empty() || code.len() < 3;
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact);
     
     let id_bits = rhythm.id_bits;
     let terminator = (1 << id_bits) - 1;
 
     for prop in props {
-        let raw_id = axiom.lookup_alpha_map_by_effective(prop.stat_id).map(|m| m.raw_id).unwrap_or(prop.stat_id);
+        // Keep parsed/raw stat IDs as-is for forensic bit parity.
+        let raw_id = prop.stat_id;
         emitter.write_bits(raw_id, id_bits)?;
 
         if let Some(width) = rhythm.value_bits {
-            let effective_width = if axiom.is_alpha() && axiom.version == 5 {
-                match raw_id {
-                    114 | 289 | 287 | 309 | 310 | 311 | 312 => 14,
-                    _ => width,
-                }
-            } else {
-                width
-            };
+            let effective_width = axiom.stat_bit_width(raw_id, width);
+
             emitter.write_bits(prop.raw_value as u32, effective_width)?;
         } else {
-             if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == prop.stat_id) {
+             let mapped_id = axiom.map_alpha_id(raw_id);
+             if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
                  if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }
                  emitter.write_bits(prop.raw_value as u32, stat.save_bits as u32)?;
              } else { emitter.write_bits(prop.raw_value as u32, 9)?; }
@@ -648,12 +651,16 @@ fn write_property_list(emitter: &mut BitEmitter, props: &[ItemProperty], _versio
     }
 
     emitter.write_bits(terminator, id_bits)?;
+    let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
     if rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit {
-            emitter.write_bit(false)?; // Alpha v105 forensic: Mandatory extra terminal bit
+            // Keep extra terminal bit coupled to parsed terminal polarity for alpha parity.
+            emitter.write_bit(terminator_bit)?;
         }
-        emitter.byte_align()?;
+        if !preserve_trailing_align {
+            emitter.byte_align()?;
+        }
     }
     Ok(())
 }

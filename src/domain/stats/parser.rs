@@ -27,8 +27,19 @@ where
     // Heuristic for compact items in Alpha
     let is_compact = code.trim().is_empty() || code.len() < 3;
 
+    let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
     loop {
-        let result = parse_single_property_internal(recorder, version, huffman, alpha_runeword, is_compact, is_v105_shadow, axiom, &mut recovery_fn)?;
+        let result = parse_single_property_internal(
+            recorder,
+            version,
+            huffman,
+            alpha_runeword,
+            is_compact,
+            is_v105_shadow,
+            preserve_trailing_align,
+            axiom,
+            &mut recovery_fn,
+        )?;
         match result {
             Some((prop, is_term, term_bit)) => {
                 if is_term {
@@ -57,7 +68,7 @@ where
     R: BitRead,
     F: FnMut(&[u8], u64, &HuffmanTree, usize, bool) -> ParsingResult<(crate::domain::item::Item, u64)>,
 {
-    parse_single_property_internal(recorder, version, huffman, alpha_runeword, false, false, axiom, section_recovery)
+    parse_single_property_internal(recorder, version, huffman, alpha_runeword, false, false, false, axiom, section_recovery)
 }
 
 fn parse_single_property_internal<R, F>(
@@ -67,6 +78,7 @@ fn parse_single_property_internal<R, F>(
     alpha_runeword: bool,
     is_compact: bool,
     is_v105_shadow: bool,
+    preserve_trailing_align: bool,
     axiom: &StatsAxiom,
     mut _section_recovery: F,
 ) -> ParsingResult<Option<(ItemProperty, bool, bool)>>
@@ -90,8 +102,10 @@ where
             if rhythm.has_extra_terminal_bit {
                 let _extra = recorder.read_bit()?;
             }
-            while recorder.pos() % 8 != 0 {
-                let _p = recorder.read_bit()?;
+            if !preserve_trailing_align {
+                while recorder.pos() % 8 != 0 {
+                    let _p = recorder.read_bit()?;
+                }
             }
         }
         return Ok(Some((
@@ -112,14 +126,8 @@ where
     let mut param = 0;
 
     if let Some(width) = rhythm.value_bits {
-        let effective_width = if axiom.is_alpha() && axiom.version == 5 {
-            match stat_id {
-                114 | 289 | 287 | 309 | 310 | 311 | 312 => 14,
-                _ => width,
-            }
-        } else {
-            width
-        };
+        let effective_width = axiom.stat_bit_width(stat_id, width);
+
         raw_value = recorder.read_bits::<u32>(effective_width)?;
     } else {
         let mapped_id = axiom.map_alpha_id(stat_id);
