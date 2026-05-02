@@ -57,7 +57,10 @@ Before execution, evaluate complexity. Pause and report if:
   - Avoid hardcoding relative paths (e.g., `../../d2r-data`) in source code or extractors.
   - For tests, provide a fallback to `CARGO_MANIFEST_DIR` but prioritize `.env` if present.
 - **Type Safety**: Use **`elm-rs`** for 1:1 Rust-to-Elm type mapping. No intermediate TS layers.
-- **No Scripts**: Prohibited use of persistent OS-dependent orchestration scripts (`.ps1`, `.sh`, `.bat`) or standalone Python/Node orchestrators in tracked project workflow. Temporary harness scripts in `./tmp/` for verification/debugging are allowed and must be purged before task completion.
+- **No Scripts (Default & Exceptions)**: Prohibited use of persistent OS-dependent orchestration scripts (`.ps1`, `.sh`, `.bat`) or standalone Python/Node orchestrators in the primary tracked project workflow.
+  - **Exception (`scripts/`)**: Tracked automation, workflow management, or exploratory scripts may reside in `./scripts/` until they meet the **Rust Promotion Criteria** (Stability, Core Logic Reuse, or Standardization).
+  - **Promotion Criteria**: Promote scripts to Rust binaries in `src/bin/verify/` when they are used frequently, require core library types, or need mandatory `--json` output for agent integration.
+  - **Temporary Harness**: Scripts in `./tmp/` for one-off verification/debugging are allowed and must be purged before task completion.
 - **Quality**: Prioritize scalability and readability. AI-written code must be treated as potential debt—ensure high architectural alignment.
 - **Data Boundary (Copyright-Safe by Design)**:
   - `d2r-core` contains parser/engine logic, integration points, and public-safe verification only.
