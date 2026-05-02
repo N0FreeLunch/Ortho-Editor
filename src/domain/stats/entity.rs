@@ -44,4 +44,8 @@ pub const ALPHA_STAT_MAPS: &[AlphaStatMap] = &[
     AlphaStatMap { raw_id: 309, effective_id: 9,   name: "maxmana_alpha_309",        save_bits: Some(14), save_add: Some(0) },
     AlphaStatMap { raw_id: 310, effective_id: 7,   name: "maxlife_alpha_310",        save_bits: Some(14), save_add: Some(0) },
     AlphaStatMap { raw_id: 311, effective_id: 7,   name: "maxlife_alpha_311",        save_bits: Some(14), save_add: Some(0) },
+    AlphaStatMap { raw_id: 68,  effective_id: 20,  name: "item_block_percent_alpha", save_bits: Some(6),  save_add: Some(-5) },
+    AlphaStatMap { raw_id: 112, effective_id: 31,  name: "item_defense_alpha",       save_bits: Some(6),  save_add: Some(-10) },
+    AlphaStatMap { raw_id: 69,  effective_id: 45,  name: "item_poisonresist_alpha",  save_bits: Some(6),  save_add: Some(1) },
+    AlphaStatMap { raw_id: 70,  effective_id: 9,   name: "maxmana_alpha",            save_bits: Some(6),  save_add: Some(0) },
 ];
