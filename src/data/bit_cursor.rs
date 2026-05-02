@@ -187,6 +187,14 @@ impl<R: BitRead> BitCursor<R> {
         self.segments.retain(|s| s.end <= checkpoint);
     }
 
+    pub fn byte_align(&mut self) -> ParsingResult<()> {
+        let padding = (8 - (self.bit_pos % 8)) % 8;
+        for _ in 0..padding {
+            let _ = self.read_bit()?;
+        }
+        Ok(())
+    }
+
     /// Forensic utility to peek at next bits as a string without advancing the cursor.
     /// This only works if the underlying reader supports rollback, which might be tricky.
     /// Actually, BitCursor doesn't support easy reader-level rollback if it's a generic BitRead.

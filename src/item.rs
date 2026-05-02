@@ -256,7 +256,6 @@ impl Item {
         let mut page = 0;
         let mut header_socket_hint = 0;
 
-        // Use axiom to determine header geometry
         let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode); 
         let geometry = axiom.header_geometry(flags, is_compact);
 
@@ -304,7 +303,10 @@ impl Item {
             cursor.begin_segment(ItemSegmentType::Unknown);
             ear_class = Some(cursor.read_bits::<u8>(3)? as u8);
             ear_level = Some(cursor.read_bits::<u8>(7)? as u8);
-            ear_player_name = Some(read_player_name(cursor)?);
+            ear_player_name = Some(read_player_name(cursor, alpha_mode && version == 5)?);
+            if alpha_mode && version == 5 {
+                cursor.byte_align()?;
+            }
             cursor.end_segment();
         } else {
             cursor.begin_segment(ItemSegmentType::Code);
@@ -481,7 +483,7 @@ impl Item {
         cursor: &mut BitCursor<R>,
         code: &str,
         is_compact: bool,
-        _is_socketed: bool,
+        is_socketed_flag: bool,
         is_runeword: bool,
         is_personalized: bool,
         version: u8,
@@ -586,7 +588,12 @@ impl Item {
         }
 
         let mut personalized_player_name = None;
-        if is_personalized { personalized_player_name = Some(read_player_name(cursor)?); }
+        if is_personalized { 
+            personalized_player_name = Some(read_player_name(cursor, alpha_mode && version == 5)?); 
+            if alpha_mode && version == 5 {
+                cursor.byte_align()?;
+            }
+        }
 
         let tbk_ibk_teleport = if trimmed_code == "tbk" || trimmed_code == "ibk" { Some(cursor.read_bits::<u8>(5)? as u8) } else { None };
         let timestamp_flag = cursor.read_bit()?;
@@ -610,7 +617,7 @@ impl Item {
             if m_dur > 0 { current_durability = Some(cursor.read_bits::<u32>(cur_bits)?); let _extra = cursor.read_bit()?; }
         }
         if reads_quantity && axiom.reads_quantity() { quantity = Some(cursor.read_bits::<u32>(9)?); }
-        if axiom.is_socketed(0, is_compact) { sockets = Some(cursor.read_bits::<u8>(4)? as u8); }
+        if is_socketed_flag { sockets = Some(cursor.read_bits::<u8>(4)? as u8); }
 
         cursor.end_segment();
         Ok((
@@ -692,10 +699,11 @@ fn read_item_stats<R: BitRead>(
     Ok((props, complete, term, alpha_v5_runeword_extra, None))
 }
 
-fn read_player_name<R: BitRead>(cursor: &mut BitCursor<R>) -> ParsingResult<String> {
+fn read_player_name<R: BitRead>(cursor: &mut BitCursor<R>, alpha_v5: bool) -> ParsingResult<String> {
     let mut name = String::new();
+    let width = if alpha_v5 { 8 } else { 7 };
     loop {
-        let ch = cursor.read_bits::<u8>(7)?;
+        let ch = cursor.read_bits::<u8>(width)?;
         if ch == 0 { break; }
         name.push(ch as char);
     }

@@ -394,7 +394,10 @@ impl Item {
         if self.is_ear {
             emitter.write_bits(self.ear_class.unwrap_or(0) as u32, 3)?;
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
-            write_player_name(&mut emitter, self.ear_player_name.as_deref().unwrap_or(""))?;
+            write_player_name(&mut emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.version == 5)?;
+            if alpha_mode && self.version == 5 {
+                emitter.byte_align()?;
+            }
         } else {
             let encoded_code = huffman.encode(&self.code)?;
             emitter.extend_bits(encoded_code)?;
@@ -492,7 +495,10 @@ impl Item {
                     }
 
                     if self.is_personalized {
-                        write_player_name(&mut emitter, self.personalized_player_name.as_deref().unwrap_or(""))?;
+                        write_player_name(&mut emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && self.version == 5)?;
+                        if alpha_mode && self.version == 5 {
+                            emitter.byte_align()?;
+                        }
                     }
 
                     if self.code.trim() == "tbk" || self.code.trim() == "ibk" {
@@ -594,11 +600,12 @@ impl Item {
     }
 }
 
-fn write_player_name(emitter: &mut BitEmitter, name: &str) -> io::Result<()> {
+fn write_player_name(emitter: &mut BitEmitter, name: &str, alpha_v5: bool) -> io::Result<()> {
+    let width = if alpha_v5 { 8 } else { 7 };
     for ch in name.chars() {
-        emitter.write_bits((ch as u8 & 0x7F) as u32, 7)?;
+        emitter.write_bits((ch as u8) as u32, width)?;
     }
-    emitter.write_bits(0, 7)?;
+    emitter.write_bits(0, width)?;
     Ok(())
 }
 

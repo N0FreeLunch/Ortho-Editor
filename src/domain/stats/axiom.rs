@@ -135,9 +135,9 @@ impl StatsAxiom {
     pub fn property_rhythm(&self, _is_runeword: bool, is_shadow: bool, is_compact: bool) -> PropertyRhythm {
         if self.save_is_alpha {
             if self.version == 5 {
-                // Alpha v105 Property Rhythm: 7-bit ID, 6-bit Value (Verified by GAP tool)
+                // Alpha v105 Property Rhythm: 9-bit ID, 6-bit Value
                 return PropertyRhythm {
-                    id_bits: 7,
+                    id_bits: 9,
                     value_bits: Some(6),
                     has_terminal_bit: true,
                     has_extra_terminal_bit: true,
