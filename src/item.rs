@@ -516,7 +516,7 @@ impl Item {
                 let quality_raw = cursor.read_bits::<u8>(3)?;
                 let quality = ItemQuality::from(quality_raw);
                 alpha_quality_raw = Some(quality_raw);
-                if version == 5 && (is_runeword || is_fragment) {
+                if version == 5 && is_runeword {
                     // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
                     // Found only in runeword/shadow items.
                     v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);

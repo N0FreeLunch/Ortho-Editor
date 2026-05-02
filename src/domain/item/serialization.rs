@@ -411,19 +411,17 @@ impl Item {
                 // 3. Version 5: Nudge 0 for v105 summary items (hp1-5, etc) and items with digits (cm1).
                 // 4. Version 1: Nudge 0 (standard charms).
                 let trimmed = self.code.trim();
-                let is_v105_summary = matches!(
-                    trimmed,
-                    "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
-                    "mp1" | "mp2" | "mp3" | "mp4" | "mp5" |
-                    "rvl" | "rvs" | "isc" | "tsc" | "w8cs" | 
-                    "w88w" | "us g" | "xrs" | "6cs" | "7mgw"
-                );
-                let has_digit = trimmed.chars().any(|c| c.is_ascii_digit());
                 
                 let nudge = if self.version == 0 { 
+                    match trimmed {
+                        "wwww" => 0,
+                        "u7cx" => 3,
+                        _ => 2,
+                    }
+                } else if self.version == 5 && (trimmed == "gpb" || trimmed == "vps") { 
                     2 
-                } else if self.version == 5 && (trimmed == "gpb" || trimmed == "wwww" || trimmed == "vps") { 
-                    2 
+                } else if self.version == 5 && trimmed == "c sk" {
+                    1
                 } else { 
                     0 
                 };
@@ -468,8 +466,7 @@ impl Item {
                     let _is_compact = axiom.is_compact(self.flags);
                     let _is_personalized = axiom.is_personalized(self.flags);
                     let is_runeword = axiom.is_runeword(self.flags);
-                    let is_frag = axiom.is_fragment(self.flags);
-                    if self.version == 5 && (is_runeword || is_frag) {
+                    if self.version == 5 && is_runeword { 
                         // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
                         emitter.write_bits(self.body.v5_runeword_extra.unwrap_or(0) as u32, 2)?;
                     }
