@@ -38,6 +38,10 @@ pub struct ItemHeader {
     pub is_runeword: bool,
     pub is_ethereal: bool,
     pub is_ear: bool,
+
+    // Alpha Forensic Preservation Fields
+    pub alpha_quality_raw: Option<u8>,
+    pub alpha_v5_runeword_extra: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +52,7 @@ pub struct HeaderAxiom {
 
 impl HeaderAxiom {
     pub fn is_alpha(&self) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 0)
+        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0)
     }
 
     pub fn is_plausible(&self, mode: u8, location: u8, code: &str, flags: u32) -> bool {
