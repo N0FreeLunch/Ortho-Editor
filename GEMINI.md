@@ -33,6 +33,7 @@ For simple, well-bounded execution or review requests with clear scope, respond 
 
 ## Core Work Must-Do Floor
 Use this section when working on `d2r-core` from a wider `d2r` workspace where Strategy Hub instructions may not be automatically loaded.
+- **Context Efficiency & Custom Tool Priority**: NEVER use generic shell commands like `cat`, `grep`, `sed`, or `ls` via `run_shell_command`. You MUST prioritize custom system tools (`read_file`, `grep_search`, `replace`, `list_directory`) to minimize context token usage.
 - If Gemini CLI was launched from the top-level `d2r` workspace, first follow the workspace `GEMINI.md` (tracked source: `d2r-spec/.gemini/UPPER-ROOT-GEMINI.md`).
 - Resolve the Strategy Hub through `D2R_SPEC_PATH` first; if unset, check the sibling `../d2r-spec/` path.
 - Before non-trivial core edits, read the relevant Strategy Hub entrypoint and task context when available: `GEMINI.md`, `AGENTS.md`, `AI_WORKFLOW.md`, and active `.agents/tasks/*.md`.
