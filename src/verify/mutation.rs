@@ -49,7 +49,7 @@ pub fn flip_bit(bytes: &mut [u8], bit_offset: usize) {
 pub fn mutate_absolute_bit_and_finalize(bytes: &[u8], bit_offset: usize) -> io::Result<Vec<u8>> {
     let mut mutated = bytes.to_vec();
     flip_bit(&mut mutated, bit_offset);
-    finalize_save_bytes(&mut mutated)?;
+    finalize_save_bytes(&mut mutated, false)?;
     Ok(mutated)
 }
 

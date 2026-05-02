@@ -320,7 +320,7 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
         huffman,
     )?;
     working[CHAR_LEVEL_OFFSET] = new_level;
-    finalize_save_bytes(&mut working)?;
+    finalize_save_bytes(&mut working, false)?;
     Ok(working)
 }
 
@@ -345,7 +345,7 @@ pub fn patch_skill_section(
 
     let mut rebuilt = bytes.to_vec();
     rebuilt[start..end].copy_from_slice(skills.as_slice());
-    finalize_save_bytes(&mut rebuilt)?;
+    finalize_save_bytes(&mut rebuilt, false)?;
     Ok(rebuilt)
 }
 
@@ -662,7 +662,7 @@ impl Save {
             ));
         }
         bytes[..header_len].copy_from_slice(&header_bytes);
-        finalize_save_bytes(bytes)?;
+        finalize_save_bytes(bytes, false)?;
         Ok(())
     }
 }
@@ -717,7 +717,7 @@ pub fn rebuild_item_section(
     /*
     if serialized_section != original_section {
         let mut fallback = bytes.to_vec();
-        finalize_save_bytes(&mut fallback)?;
+        finalize_save_bytes(&mut fallback, false)?;
         return Ok(fallback);
     }
     */
@@ -730,7 +730,7 @@ pub fn rebuild_item_section(
     rebuilt.extend_from_slice(&serialized_section);
     rebuilt.extend_from_slice(&bytes[section_end..]);
 
-    finalize_save_bytes(&mut rebuilt)?;
+    finalize_save_bytes(&mut rebuilt, false)?;
     Ok(rebuilt)
 }
 

@@ -1,3 +1,4 @@
+use anyhow::{bail, Context};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::save_integrity::verify_save_integrity;
@@ -9,6 +10,7 @@ fn main() -> anyhow::Result<()> {
         ArgSpec::option("dump-bits", None, Some("dump-bits"), "Dump raw bits from start <bit> and count <bits>")
             .value_count(2),
     );
+    parser.add_spec(ArgSpec::flag("fix", Some('f'), Some("fix"), "Automatically fix checksums if mismatch is detected"));
     parser.add_spec(ArgSpec::repeated_positional("files", "Save files to verify"));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -22,6 +24,7 @@ fn main() -> anyhow::Result<()> {
 
     let files = parsed.get_vec("files").cloned().unwrap_or_default();
     let is_json = parsed.is_set("json");
+    let fix_mode = parsed.is_set("fix");
 
     if let Some(bits_args) = parsed.get_vec("dump-bits") {
         if files.is_empty() {
@@ -62,6 +65,14 @@ fn main() -> anyhow::Result<()> {
         };
 
         let (report, failed) = verify_save_integrity(path, &bytes);
+
+        if fix_mode && failed {
+            let mut bytes_to_fix = bytes.clone();
+            d2r_core::engine::checksum::Checksum::fix(&mut bytes_to_fix);
+            fs::write(path, &bytes_to_fix).context(format!("Failed to write fixed {}", path))?;
+            println!("  [FIXED] Checksum updated for {}", path);
+        }
+
         if is_json {
             println!("{}", serde_json::to_string(&report)?);
         } else {
