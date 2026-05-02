@@ -70,7 +70,7 @@ pub fn peek_item_header_at(
     let geometry = axiom.header_geometry(flags, is_compact);
 
     if geometry.has_header_gap {
-        if version == 5 {
+        if version == 5 || version == 0 {
             let is_v105_shadow = (flags & (1 << 26)) != 0;
             let is_rw = axiom.is_runeword(flags);
             if is_rw || is_v105_shadow {
@@ -352,7 +352,7 @@ impl Item {
         let geometry = axiom.header_geometry(self.flags, self.is_compact);
 
         if geometry.has_header_gap {
-            if self.version == 5 {
+            if self.version == 5 || self.version == 0 {
                 let is_v105_shadow = (self.flags & (1 << 26)) != 0;
                 let is_rw = axiom.is_runeword(self.flags);
 
@@ -401,6 +401,9 @@ impl Item {
         } else {
             let encoded_code = huffman.encode(&self.code)?;
             emitter.extend_bits(encoded_code)?;
+            if alpha_mode && self.version == 5 {
+                emitter.write_bits(0, 2)?; // 2-bit nudge
+            }
         }
 
         if crate::item::item_trace_enabled() {
@@ -627,7 +630,15 @@ fn write_property_list(emitter: &mut BitEmitter, props: &[ItemProperty], _versio
         emitter.write_bits(raw_id, id_bits)?;
 
         if let Some(width) = rhythm.value_bits {
-            emitter.write_bits(prop.raw_value as u32, width)?;
+            let effective_width = if axiom.is_alpha() && axiom.version == 5 {
+                match raw_id {
+                    114 | 289 | 287 | 309 | 310 | 311 | 312 => 14,
+                    _ => width,
+                }
+            } else {
+                width
+            };
+            emitter.write_bits(prop.raw_value as u32, effective_width)?;
         } else {
              if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == prop.stat_id) {
                  if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }

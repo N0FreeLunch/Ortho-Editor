@@ -48,7 +48,7 @@ impl StatsAxiom {
 
     pub fn header_geometry(&self, flags: u32, is_compact: bool) -> HeaderGeometry {
         if self.save_is_alpha {
-            if self.version == 5 {
+            if self.version == 5 || self.version == 0 {
                 let is_v105_shadow = (flags & (1 << 26)) != 0;
                 let is_rw = self.is_runeword(flags);
                 
@@ -64,7 +64,7 @@ impl StatsAxiom {
                     HeaderGeometry {
                         y_bits: if is_compact { 0 } else { 4 },
                         page_bits: if is_compact { 0 } else { 3 },
-                        socket_hint_bits: if is_compact { 0 } else { 1 },
+                        socket_hint_bits: if is_compact { 0 } else { 4 },
                         has_header_gap: true,
                         skip_geometry: false,
                     }

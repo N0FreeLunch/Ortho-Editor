@@ -261,7 +261,7 @@ impl Item {
 
         let mut alpha_header_gap = None;
         if geometry.has_header_gap {
-            if version == 5 {
+            if version == 5 || version == 0 {
                 let is_v105_shadow = (flags & (1 << 26)) != 0;
                 let is_rw = axiom.is_runeword(flags);
                 
@@ -312,6 +312,9 @@ impl Item {
             cursor.begin_segment(ItemSegmentType::Code);
             for _ in 0..4 {
                 code.push(huff.decode_recorded(cursor)?);
+            }
+            if alpha_mode && version == 5 {
+                let _nudge = cursor.read_bits::<u8>(2)?;
             }
             cursor.end_segment();
         }

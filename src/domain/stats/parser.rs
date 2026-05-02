@@ -112,7 +112,15 @@ where
     let mut param = 0;
 
     if let Some(width) = rhythm.value_bits {
-        raw_value = recorder.read_bits::<u32>(width)?;
+        let effective_width = if axiom.is_alpha() && axiom.version == 5 {
+            match stat_id {
+                114 | 289 | 287 | 309 | 310 | 311 | 312 => 14,
+                _ => width,
+            }
+        } else {
+            width
+        };
+        raw_value = recorder.read_bits::<u32>(effective_width)?;
     } else {
         let mapped_id = axiom.map_alpha_id(stat_id);
         if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
@@ -125,7 +133,10 @@ where
         }
     }
 
+    recorder.push_context(&format!("Stat({})", stat_id));
     let entry_end = recorder.pos();
+    recorder.pop_context();
+    
     Ok(Some((
         ItemProperty {
             stat_id,
