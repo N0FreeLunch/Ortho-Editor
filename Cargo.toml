@@ -306,3 +306,6 @@ path = "src/bin/verify/d2save_baseline_audit.rs"
 [[bin]]
 name = "d2item_alignment_oracle"
 path = "src/bin/verify/d2item_alignment_oracle.rs"
+[[bin]]
+name = "d2item_serialization_audit"
+path = "src/bin/verify/d2item_serialization_audit.rs"

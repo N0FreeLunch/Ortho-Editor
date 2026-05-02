@@ -406,7 +406,8 @@ impl Item {
 
         if !self.is_compact {
             let trimmed = self.code.trim();
-            let is_v105_summary = alpha_mode && self.version == 5 && (
+            let is_v105_shadow = alpha_mode && self.version == 5 && (self.flags & (1 << 26)) != 0;
+            let is_v105_summary = alpha_mode && self.version == 5 && !is_v105_shadow && (
                 trimmed == "hp1" || trimmed == "hp2" || trimmed == "hp3" || trimmed == "hp4" || trimmed == "hp5" ||
                 trimmed == "mp1" || trimmed == "mp2" || trimmed == "mp3" || trimmed == "mp4" || trimmed == "mp5" ||
                 trimmed == "rvl" || trimmed == "rvs" || trimmed == "isc" || trimmed == "tsc" || trimmed == "w8cs" || 
@@ -416,32 +417,33 @@ impl Item {
             let quality_val = self.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = axiom.is_alpha();
 
-            if is_v105_summary {
-                if trimmed == "7mgw" {
-                    // Alpha v105 forensic: 7mgw special 28-bit payload
-                    if let Some(payload) = &self.body.v105_7mgw_payload {
-                        for &bit in payload {
-                            emitter.write_bit(bit)?;
+            if is_item_alpha {
+                // Alpha v105: Quality is 3 bits in read_extended_stats, even for summary items.
+                let quality_to_write = self.header.alpha_quality_raw.unwrap_or(self.quality.map(|q| q as u8).unwrap_or(0));
+                emitter.write_bits(quality_to_write as u32, 3)?;
+
+                if is_v105_summary {
+                    if trimmed == "7mgw" {
+                        // Alpha v105 forensic: 7mgw special 28-bit payload
+                        if let Some(payload) = &self.body.v105_7mgw_payload {
+                            for &bit in payload {
+                                emitter.write_bit(bit)?;
+                            }
+                        } else {
+                            emitter.write_bits(0, 28)?;
                         }
-                    } else {
-                        emitter.write_bits(0, 28)?;
                     }
-                    return Ok(emitter.into_bytes());
-                }
-                // Other summary items have NO property list and NO terminator.
-            } else {
-                if is_item_alpha {
-                    // Skip ID and Level for v105/v104/v101 in ExtendedStats
-                    // Alpha v105: Quality is 3 bits in read_extended_stats
-                    let quality_to_write = self.header.alpha_quality_raw.unwrap_or(self.quality.map(|q| q as u8).unwrap_or(0));
-                    emitter.write_bits(quality_to_write as u32, 3)?;
-                    
+                } else {
                     let is_frag = (self.flags & (1 << 26)) != 0 || (self.flags & (1 << 27)) != 0;
                     if self.version == 5 && (self.is_runeword || is_frag) {
                         // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
                         emitter.write_bits(self.body.v5_runeword_extra.unwrap_or(0) as u32, 2)?;
                     }
-                } else {
+                }
+            }
+
+            if !is_v105_summary {
+                if !is_item_alpha {
                     emitter.write_bits(self.id.unwrap_or(0), 32)?;
                     emitter.write_bits(self.level.unwrap_or(0) as u32, 7)?;
                     emitter.write_bits(quality_val as u32, 4)?;
