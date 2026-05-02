@@ -190,13 +190,22 @@ fn main() {
         );
         for (i, item) in items.iter().enumerate() {
             println!(
-                "Item {:2}: '{}' mode={} loc={} socketed_children={}",
+                "Item {:2}: '{:4}' mode={} loc={} flags=0x{:08X} name={:?} children={}",
                 i,
                 item.code,
-                item.mode,
-                item.location,
+                item.header.mode,
+                item.header.location,
+                item.flags,
+                item.personalized_player_name,
                 item.socketed_items.len()
             );
+            for prop in &item.properties {
+                println!("  Prop: id={} value={} param={} bits {}-{}", 
+                    prop.stat_id, prop.raw_value, prop.param, prop.range.start, prop.range.end);
+            }
+
+
+
             for (socket_index, child) in item.socketed_items.iter().enumerate() {
                 println!(
                     "  socket {:2}: '{}' mode={} loc={}",
