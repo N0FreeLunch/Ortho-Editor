@@ -109,6 +109,8 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`dump_character`** | Save | **Comprehensive**: Dumps full character status, skills, and item map. |
 | **`d2save_inventory_check`**| Logic | Verifies inventory grid integrity (no overlaps, valid coordinates). |
 | **`v105_unlocker`** | Save | CLI example for unlocking progression bits in Alpha v105. |
+| **`d2save_poison`** | Save | **Forensic XOR**: Flips a single bit at a given offset (LSB-first) for corruption testing. |
+| **`d2save_arch`**   | Save | **Bit Archaeologist**: Unified bit-level `dump` and `diff` for deep forensic exploration. |
 
 ### 🔍 Related Toolsets
 - **Game Data & Extraction**: See [`d2r-data/NAVIGATOR.md`](./d2r-data/NAVIGATOR.md) for `d2r-data-extractor` and `probe`.
