@@ -132,12 +132,50 @@ impl StatsAxiom {
         }
     }
 
+    pub fn is_compact(&self, flags: u32) -> bool {
+        if self.save_is_alpha {
+            (flags & (1 << 23)) != 0
+        } else {
+            (flags & (1 << 21)) != 0
+        }
+    }
+
+    pub fn is_ethereal(&self, flags: u32) -> bool {
+        if self.save_is_alpha {
+            (flags & (1 << 24)) != 0
+        } else {
+            (flags & (1 << 22)) != 0
+        }
+    }
+
+    pub fn is_identified(&self, flags: u32) -> bool {
+        (flags & (1 << 4)) != 0
+    }
+
+
+    pub fn is_personalized(&self, flags: u32) -> bool {
+        if self.save_is_alpha {
+            (flags & (1 << 29)) != 0
+        } else {
+            (flags & (1 << 28)) != 0
+        }
+    }
+
+    pub fn is_v105_shadow(&self, flags: u32) -> bool {
+        self.save_is_alpha && self.version == 5 && (flags & (1 << 27)) != 0
+    }
+
+    pub fn is_fragment(&self, flags: u32) -> bool {
+        self.save_is_alpha && (self.version == 5 || self.version == 1) && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
+    }
+
+
     pub fn property_rhythm(&self, _is_runeword: bool, is_shadow: bool, is_compact: bool) -> PropertyRhythm {
         if self.save_is_alpha {
             if self.version == 5 {
-                // Alpha v105 Property Rhythm: 9-bit ID, 6-bit Value
+                // Alpha v105 Property Rhythm: 7-bit ID, 6-bit Value
                 return PropertyRhythm {
-                    id_bits: 9,
+                    id_bits: 7,
                     value_bits: Some(6),
                     has_terminal_bit: true,
                     has_extra_terminal_bit: true,
@@ -249,6 +287,18 @@ impl StatsAxiom {
 
     pub fn lookup_alpha_map_by_effective(&self, effective_id: u32) -> Option<&'static AlphaStatMap> {
         ALPHA_STAT_MAPS.iter().find(|m| m.effective_id == effective_id)
+    }
+
+    /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
+    pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
+        if self.save_is_alpha && self.version == 5 {
+            if let Some(map) = self.lookup_alpha_map_by_raw(raw_id) {
+                if let Some(bits) = map.save_bits {
+                    return bits;
+                }
+            }
+        }
+        default_width
     }
 }
 
