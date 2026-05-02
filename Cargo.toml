@@ -311,5 +311,9 @@ name = "d2save_poison"
 path = "src/bin/verify/d2save_poison.rs"
 
 [[bin]]
+name = "d2save_arch"
+path = "src/bin/verify/d2save_arch.rs"
+
+[[bin]]
 name = "d2item_serialization_audit"
 path = "src/bin/verify/d2item_serialization_audit.rs"
