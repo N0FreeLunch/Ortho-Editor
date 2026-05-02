@@ -248,7 +248,8 @@ impl Item {
         let location = cursor.read_bits::<u8>(3)? as u8;
         let x = cursor.read_bits::<u8>(4)? as u8;
         
-        let is_compact = (flags & (1 << 21)) != 0;
+        let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+        let is_compact = axiom.is_compact(flags);
         if alpha_mode {
             // println!("[DEBUG] Header flags=0x{:08X} is_compact={} bit={}", flags, is_compact, cursor.pos() - 32);
         }
@@ -256,13 +257,12 @@ impl Item {
         let mut page = 0;
         let mut header_socket_hint = 0;
 
-        let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode); 
         let geometry = axiom.header_geometry(flags, is_compact);
 
         let mut alpha_header_gap = None;
         if geometry.has_header_gap {
             if version == 5 || version == 0 {
-                let is_v105_shadow = (flags & (1 << 26)) != 0;
+                let is_v105_shadow = axiom.is_v105_shadow(flags);
                 let is_rw = axiom.is_runeword(flags);
                 
                 if is_rw || is_v105_shadow {
@@ -313,19 +313,19 @@ impl Item {
             for _ in 0..4 {
                 code.push(huff.decode_recorded(cursor)?);
             }
-            if alpha_mode && version == 5 {
+            if alpha_mode && (version == 5 || version == 0 || version == 1) {
                 let _nudge = cursor.read_bits::<u8>(2)?;
             }
             cursor.end_segment();
         }
 
-        let is_frag = alpha_mode && (version == 5 || version == 1) && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0);
+        let is_frag = alpha_mode && (version == 5 || version == 1) && (axiom.is_v105_shadow(flags) || (flags & (1 << 27)) != 0); // TODO: check bit 27
 
         let stats = if !is_compact {
             let socket_flag = axiom.is_socketed(flags, is_compact);
             let runeword_flag = axiom.is_runeword(flags);
                 
-            Self::read_extended_stats(cursor, &code, is_compact, socket_flag, runeword_flag, (flags & (1 << 25)) != 0, version, alpha_mode, is_frag, &axiom)?
+            Self::read_extended_stats(cursor, &code, is_compact, socket_flag, runeword_flag, axiom.is_personalized(flags), version, alpha_mode, is_frag, &axiom)?
         } else {
             (None, None, None, false, None, false, None, None, None, None, None, None, [None; 6], None, None, None, None, None, false, None, None, None, None, None, 0, None, None)
         };
@@ -375,12 +375,12 @@ impl Item {
             level: stats.1,
             quality: stats.2,
             low_high_graphic_bits: stats.7,
-            is_compact,
+            is_compact: axiom.is_compact(flags),
             is_socketed: axiom.is_socketed(flags, is_compact),
             is_identified: (flags & (1 << 4)) != 0,
-            is_personalized: (flags & (1 << 25)) != 0,
+            is_personalized: axiom.is_personalized(flags),
             is_runeword: axiom.is_runeword(flags),
-            is_ethereal: (flags & (1 << 22)) != 0,
+            is_ethereal: axiom.is_ethereal(flags),
             magic_prefix: stats.8,
             magic_suffix: stats.9,
             rare_name_1: stats.10,
@@ -408,12 +408,12 @@ impl Item {
                 socket_hint: header_socket_hint,
                 id: stats.0,
                 quality: stats.2,
-                is_compact,
-                is_identified: (flags & (1 << 4)) != 0,
+                is_compact: axiom.is_compact(flags),
+                is_identified: axiom.is_identified(flags),
                 is_socketed: axiom.is_socketed(flags, is_compact),
-                is_personalized: (flags & (1 << 25)) != 0,
+                is_personalized: axiom.is_personalized(flags),
                 is_runeword: axiom.is_runeword(flags),
-                is_ethereal: (flags & (1 << 22)) != 0,
+                is_ethereal: axiom.is_ethereal(flags),
                 is_ear,
                 alpha_quality_raw: stats.26,
                 alpha_v5_runeword_extra: stats.25,
@@ -433,8 +433,8 @@ impl Item {
             expected_start_bit: 0,
         };
 
-        if !is_compact {
-            let is_v105_shadow = alpha_mode && item.version == 5 && (item.flags & (1 << 26)) != 0;
+        if !axiom.is_compact(item.flags) {
+            let is_v105_shadow = axiom.is_v105_shadow(item.flags);
             let (props, complete, term, extra_bits, reserved_7mgw) = read_item_stats(cursor, &item.code, item.version, ctx, huff, alpha_mode, item.quality, item.is_runeword, is_v105_shadow)?;
             item.properties = props.clone();
             item.stats.properties = props;
@@ -521,8 +521,8 @@ impl Item {
                     // Found only in runeword/shadow items.
                     v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);
                     (Some(0u32), None, Some(quality), false, false, false)
-                } else if version == 5 {
-                    // Alpha v105 Version 5 Summary items early exit after quality.
+                } else if version == 5 && is_v105_summary_code(trimmed_code) {
+                    // Alpha v105 Version 5 summary items early exit after quality.
                     cursor.end_segment();
                     return Ok((
                         Some(0u32), None, Some(quality),
@@ -592,10 +592,10 @@ impl Item {
 
         let mut personalized_player_name = None;
         if is_personalized { 
-            personalized_player_name = Some(read_player_name(cursor, alpha_mode && version == 5)?); 
-            if alpha_mode && version == 5 {
+            if alpha_mode && (version == 5 || version == 0 || version == 1) {
                 cursor.byte_align()?;
             }
+            personalized_player_name = Some(read_player_name(cursor, alpha_mode && (version == 5 || version == 0 || version == 1))?); 
         }
 
         let tbk_ibk_teleport = if trimmed_code == "tbk" || trimmed_code == "ibk" { Some(cursor.read_bits::<u8>(5)? as u8) } else { None };
@@ -700,6 +700,32 @@ fn read_item_stats<R: BitRead>(
     }
     
     Ok((props, complete, term, alpha_v5_runeword_extra, None))
+}
+
+fn is_v105_summary_code(code: &str) -> bool {
+    matches!(
+        code,
+        "hp1"
+            | "hp2"
+            | "hp3"
+            | "hp4"
+            | "hp5"
+            | "mp1"
+            | "mp2"
+            | "mp3"
+            | "mp4"
+            | "mp5"
+            | "rvl"
+            | "rvs"
+            | "isc"
+            | "tsc"
+            | "w8cs"
+            | "w88w"
+            | "us g"
+            | "xrs"
+            | "6cs"
+            | "7mgw"
+    )
 }
 
 fn read_player_name<R: BitRead>(cursor: &mut BitCursor<R>, alpha_v5: bool) -> ParsingResult<String> {
