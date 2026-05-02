@@ -404,7 +404,29 @@ impl Item {
             let encoded_code = huffman.encode(&self.code)?;
             emitter.extend_bits(encoded_code)?;
             if alpha_mode && (self.version == 5 || self.version == 0 || self.version == 1) {
-                let nudge = if self.version == 0 { 2 } else { 0 };
+                // Alpha v105: 2-bit nudge after item code.
+                // Forensic Alignment (Discussion 0230 & Slice 10 Audit):
+                // 1. Version 0: Always nudge 2 (binary 10).
+                // 2. Version 5: Nudge 2 for "legacy-style" or "marker" items (no digits, not v105-summary).
+                // 3. Version 5: Nudge 0 for v105 summary items (hp1-5, etc) and items with digits (cm1).
+                // 4. Version 1: Nudge 0 (standard charms).
+                let trimmed = self.code.trim();
+                let is_v105_summary = matches!(
+                    trimmed,
+                    "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
+                    "mp1" | "mp2" | "mp3" | "mp4" | "mp5" |
+                    "rvl" | "rvs" | "isc" | "tsc" | "w8cs" | 
+                    "w88w" | "us g" | "xrs" | "6cs" | "7mgw"
+                );
+                let has_digit = trimmed.chars().any(|c| c.is_ascii_digit());
+                
+                let nudge = if self.version == 0 { 
+                    2 
+                } else if self.version == 5 && (trimmed == "gpb" || trimmed == "wwww" || trimmed == "vps") { 
+                    2 
+                } else { 
+                    0 
+                };
                 emitter.write_bits(nudge, 2)?; // 2-bit nudge
             }
         }
@@ -443,8 +465,8 @@ impl Item {
                         }
                     }
                 } else {
-                    let is_compact = axiom.is_compact(self.flags);
-                    let is_personalized = axiom.is_personalized(self.flags);
+                    let _is_compact = axiom.is_compact(self.flags);
+                    let _is_personalized = axiom.is_personalized(self.flags);
                     let is_runeword = axiom.is_runeword(self.flags);
                     let is_frag = axiom.is_fragment(self.flags);
                     if self.version == 5 && (is_runeword || is_frag) {
