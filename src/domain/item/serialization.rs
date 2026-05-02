@@ -463,8 +463,6 @@ impl Item {
                         }
                     }
                 } else {
-                    let _is_compact = axiom.is_compact(self.flags);
-                    let _is_personalized = axiom.is_personalized(self.flags);
                     let is_runeword = axiom.is_runeword(self.flags);
                     if self.version == 5 && is_runeword { 
                         // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
