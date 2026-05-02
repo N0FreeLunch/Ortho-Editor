@@ -38,7 +38,15 @@ Use this section when working on `d2r-core` from a wider `d2r` workspace where S
 - Before non-trivial core edits, read the relevant Strategy Hub entrypoint and task context when available: `GEMINI.md`, `AGENTS.md`, `AI_WORKFLOW.md`, and active `.agents/tasks/*.md`.
 - For quick recent-delta context, prefer `<D2R_SPEC_PATH>/.agents/navigation/active-context.md` or `d2map-query context` when those tools/files are available; do not duplicate detailed indexing rules here.
 - Use verifier JSON output (`--json`) when supported, and trust structured `hints`/`metadata` over guesses.
-- On Windows/Gemini CLI, follow the workspace `GEMINI.md` `Gemini CLI Encoding Floor`: use the UTF-8 PowerShell preamble or Strategy Hub helper for non-trivial shell commands, and stop immediately on mojibake.
+- On Windows/Gemini CLI, follow the workspace `GEMINI.md` `Gemini CLI Encoding Floor` to prevent terminal mojibake:
+  - **Mandatory Preamble**: Prefix ALL `run_shell_command` calls with:
+    ```powershell
+    $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+    ```
+  - **Preferred Tool**: Use the Strategy Hub native helper for complex execution or Korean text: `..\d2r-spec\.agents\tools\d2r-agent-helper\target\debug\d2r-agent-helper.exe exec -- <command>`
+  - **Argument Protection**: For commands with complex Korean arguments, use PowerShell `-EncodedCommand` (UTF-16LE + Base64) to prevent shell-level corruption.
+  - **Mojibake Gate**: Stop immediately if output shows `??`, replacement blocks, or unreadable Korean. Re-run through the helper or UTF-8 preamble.
+
 - If the work spans 3+ files, reopens bit-level ambiguity, or needs private reasoning, stop for Strategy Hub planning instead of broad direct implementation.
 - If the Strategy Hub is unavailable and the task depends on private fixture/research truth, stop and report the missing context rather than inventing assumptions.
 
