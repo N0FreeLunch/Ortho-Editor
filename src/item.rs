@@ -319,7 +319,7 @@ impl Item {
             cursor.end_segment();
         }
 
-        let is_frag = alpha_mode && (version == 5 || version == 1) && (axiom.is_v105_shadow(flags) || (flags & (1 << 27)) != 0); // TODO: check bit 27
+        let is_frag = axiom.is_fragment(flags);
 
         let stats = if !is_compact {
             let socket_flag = axiom.is_socketed(flags, is_compact);

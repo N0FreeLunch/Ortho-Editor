@@ -148,6 +148,9 @@ impl BitEmitter {
     }
 
     pub fn write_bit(&mut self, bit: bool) -> io::Result<()> {
+        if crate::item::item_trace_enabled() {
+            println!("[TRACE] BitEmitter: bit {} at pos {}", bit as u8, self.written);
+        }
         self.writer.write_bit(bit)?;
         self.written += 1;
         Ok(())
@@ -421,7 +424,7 @@ impl Item {
                 } else if self.version == 5 && (trimmed == "gpb" || trimmed == "vps") { 
                     2 
                 } else if self.version == 5 && trimmed == "c sk" {
-                    1
+                    0
                 } else { 
                     0 
                 };
@@ -464,7 +467,8 @@ impl Item {
                     }
                 } else {
                     let is_runeword = axiom.is_runeword(self.flags);
-                    if self.version == 5 && is_runeword { 
+                    let is_frag = axiom.is_fragment(self.flags);
+                    if self.version == 5 && (is_runeword || is_frag) { 
                         // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
                         emitter.write_bits(self.body.v5_runeword_extra.unwrap_or(0) as u32, 2)?;
                     }

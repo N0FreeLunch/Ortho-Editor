@@ -162,7 +162,11 @@ impl StatsAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        self.save_is_alpha && self.version == 5 && (flags & (1 << 27)) != 0
+        let is_shadow = self.save_is_alpha && self.version == 5 && (flags & (1 << 27)) != 0;
+        if crate::item::item_trace_enabled() && is_shadow {
+            println!("[TRACE] is_v105_shadow: TRUE for flags 0x{:08X}", flags);
+        }
+        is_shadow
     }
 
     pub fn is_fragment(&self, flags: u32) -> bool {
@@ -172,8 +176,8 @@ impl StatsAxiom {
 
     pub fn property_rhythm(&self, _is_runeword: bool, is_shadow: bool, is_compact: bool) -> PropertyRhythm {
         if self.save_is_alpha {
-            if self.version == 5 {
-                // Alpha v105 Property Rhythm: 7-bit ID, 6-bit Value
+            if self.version == 5 && self.quality < ItemQuality::Magic {
+                // Alpha v105 Summary Items (Version 5): 7-bit ID, 6-bit Value
                 return PropertyRhythm {
                     id_bits: 7,
                     value_bits: Some(6),
@@ -181,7 +185,7 @@ impl StatsAxiom {
                     has_extra_terminal_bit: true,
                 };
             }
-            // Older Alpha versions
+            // All other Alpha versions and high-quality Version 5 items
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: if is_compact {
