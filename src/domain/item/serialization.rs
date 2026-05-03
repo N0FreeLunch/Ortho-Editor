@@ -467,6 +467,7 @@ impl Item {
                     }
                 } else {
                     let is_runeword = axiom.is_runeword(self.flags);
+                    let is_runeword = axiom.is_runeword(self.flags);
                     let is_frag = axiom.is_fragment(self.flags);
                     if self.version == 5 && (is_runeword || is_frag) { 
                         // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets

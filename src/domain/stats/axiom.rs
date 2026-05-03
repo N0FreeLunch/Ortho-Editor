@@ -162,11 +162,7 @@ impl StatsAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        let is_shadow = self.save_is_alpha && self.version == 5 && (flags & (1 << 27)) != 0;
-        if crate::item::item_trace_enabled() && is_shadow {
-            println!("[TRACE] is_v105_shadow: TRUE for flags 0x{:08X}", flags);
-        }
-        is_shadow
+        self.save_is_alpha && self.version == 5 && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
     }
 
     pub fn is_fragment(&self, flags: u32) -> bool {
