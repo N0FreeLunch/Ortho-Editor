@@ -69,6 +69,7 @@ pub fn parse_header<R: BitRead>(
         is_ear,
         alpha_quality_raw: None,
         alpha_v5_runeword_extra: None,
+        alpha_unique_id_raw: None,
     })
 }
 
@@ -126,5 +127,6 @@ fn alpha_sync<R: BitRead>(
         is_ear: false,
         alpha_quality_raw: None,
         alpha_v5_runeword_extra: None,
+        alpha_unique_id_raw: None,
     })
 }

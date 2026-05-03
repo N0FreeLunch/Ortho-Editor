@@ -42,6 +42,7 @@ pub struct ItemHeader {
     // Alpha Forensic Preservation Fields
     pub alpha_quality_raw: Option<u8>,
     pub alpha_v5_runeword_extra: Option<u8>,
+    pub alpha_unique_id_raw: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

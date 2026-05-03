@@ -295,29 +295,31 @@ impl Item {
         }
         cursor.end_segment(); // End Header
 
-        let mut code = String::new();
         let is_ear = (flags & (1 << 24)) != 0;
-        let (mut ear_class, mut ear_level, mut ear_player_name) = (None, None, None);
-
-        if is_ear {
+        let (code, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
             cursor.begin_segment(ItemSegmentType::Unknown);
-            ear_class = Some(cursor.read_bits::<u8>(3)? as u8);
-            ear_level = Some(cursor.read_bits::<u8>(7)? as u8);
-            ear_player_name = Some(read_player_name(cursor, alpha_mode && version == 5)?);
+            let class = Some(cursor.read_bits::<u8>(3)? as u8);
+            let level = Some(cursor.read_bits::<u8>(7)? as u8);
+            let name = Some(read_player_name(cursor, alpha_mode && version == 5)?);
             if alpha_mode && version == 5 {
                 cursor.byte_align()?;
             }
             cursor.end_segment();
+            (String::new(), None, class, level, name)
         } else {
             cursor.begin_segment(ItemSegmentType::Code);
+            let mut code = String::new();
             for _ in 0..4 {
                 code.push(huff.decode_recorded(cursor)?);
             }
+            println!("[TRACE] Decoded Code: '{}' at bit {}", code, cursor.pos());
+            let mut nudge = None;
             if alpha_mode && (version == 5 || version == 0 || version == 1) {
-                let _nudge = cursor.read_bits::<u8>(2)?;
+                nudge = Some(cursor.read_bits::<u8>(2)?);
             }
             cursor.end_segment();
-        }
+            (code, nudge, None, None, None)
+        };
 
         let is_frag = axiom.is_fragment(flags);
 
@@ -327,7 +329,7 @@ impl Item {
                 
             Self::read_extended_stats(cursor, &code, is_compact, socket_flag, runeword_flag, axiom.is_personalized(flags), version, alpha_mode, is_frag, &axiom)?
         } else {
-            (None, None, None, false, None, false, None, None, None, None, None, None, [None; 6], None, None, None, None, None, false, None, None, None, None, None, 0, None, None)
+            (None, None, None, false, None, false, None, None, None, None, None, None, [None; 6], None, None, None, None, None, false, None, None, None, None, None, 0, None, None, None)
         };
 
         let mut item = Item {
@@ -344,6 +346,7 @@ impl Item {
                 quantity: stats.22,
                 v5_runeword_extra: stats.25,
                 v105_7mgw_payload: None,
+                alpha_nudge,
                 alpha_header_gap,
                 alpha_alignment_padding: Vec::new(),
             },
@@ -387,6 +390,7 @@ impl Item {
             rare_name_2: stats.11,
             rare_affixes: stats.12,
             unique_id: stats.13,
+            alpha_unique_id_raw: stats.27,
             runeword_id: stats.14,
             runeword_level: stats.15,
             properties: Vec::new(),
@@ -417,6 +421,7 @@ impl Item {
                 is_ear,
                 alpha_quality_raw: stats.26,
                 alpha_v5_runeword_extra: stats.25,
+                alpha_unique_id_raw: stats.27,
             },
             set_list_count: stats.24,
             tbk_ibk_teleport: stats.17,
@@ -501,7 +506,7 @@ impl Item {
         Option<u16>, Option<u16>, Option<u8>,
         Option<String>, Option<u8>, bool,
         Option<u32>, Option<u32>, Option<u32>, Option<u32>,
-        Option<u8>, u8, Option<u8>, Option<u8>,
+        Option<u8>, u8, Option<u8>, Option<u8>, Option<u16>,
     )> {
         cursor.begin_segment(ItemSegmentType::ExtendedStats);
         let trimmed_code = code.trim();
@@ -509,6 +514,7 @@ impl Item {
 
         let mut v5_runeword_extra = None;
         let mut alpha_quality_raw = None;
+        let mut alpha_unique_id_raw = None;
 
         let (item_id, item_level, item_quality, has_multiple_graphics, has_class_specific_data, timestamp_flag) = if axiom.is_alpha() {
             if !is_compact {
@@ -516,9 +522,9 @@ impl Item {
                 let quality_raw = cursor.read_bits::<u8>(3)?;
                 let quality = ItemQuality::from(quality_raw);
                 alpha_quality_raw = Some(quality_raw);
-                if version == 5 && is_runeword {
+                if version == 5 && (is_runeword || is_fragment) {
                     // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
-                    // Found only in runeword/shadow items.
+                    // Found in both runeword and shadow items.
                     v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);
                     (Some(0u32), None, Some(quality), false, false, false)
                 } else if version == 5 && is_v105_summary_code(trimmed_code) {
@@ -530,7 +536,7 @@ impl Item {
                         None, None, None, None, None, [None; 6],
                         None, None, None,
                         None, None, false,
-                        None, None, None, None, None, 0, None, alpha_quality_raw
+                        None, None, None, None, None, 0, None, alpha_quality_raw, None
                     ));
                 } else {
                     (Some(0u32), None, Some(quality), false, false, false)
@@ -553,7 +559,7 @@ impl Item {
                 false, None, false, None,
                 None, None, None, None, None, [None; 6],
                 None, None, None, None, None, timestamp_flag,
-                None, None, None, None, None, 0, None, alpha_quality_raw
+                None, None, None, None, None, 0, None, alpha_quality_raw, None
             ));
         }
 
@@ -579,7 +585,13 @@ impl Item {
                 rare_name_2 = Some(cursor.read_bits::<u8>(8)? as u8);
                 for i in 0..6 { if cursor.read_bit()? { rare_affixes[i] = Some(cursor.read_bits::<u16>(11)? as u16); } }
             }
-            ItemQuality::Set | ItemQuality::Unique => { unique_id = Some(cursor.read_bits::<u16>(12)? as u16); }
+            ItemQuality::Set | ItemQuality::Unique => { 
+                let uid = cursor.read_bits::<u16>(12)? as u16;
+                if alpha_mode {
+                    alpha_unique_id_raw = Some(uid);
+                }
+                unique_id = Some(uid); 
+            }
             _ => {}
         }
 
@@ -631,7 +643,7 @@ impl Item {
             rare_name_1, rare_name_2, rare_affixes,
             unique_id, runeword_id, runeword_level,
             personalized_player_name, tbk_ibk_teleport,
-            timestamp_flag, defense, max_durability, current_durability, quantity, sockets, 0, v5_runeword_extra, alpha_quality_raw
+            timestamp_flag, defense, max_durability, current_durability, quantity, sockets, 0, v5_runeword_extra, alpha_quality_raw, alpha_unique_id_raw
         ))
     }
 }

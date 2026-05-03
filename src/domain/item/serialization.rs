@@ -415,7 +415,9 @@ impl Item {
                 // 4. Version 1: Nudge 0 (standard charms).
                 let trimmed = self.code.trim();
                 
-                let nudge = if self.version == 0 { 
+                let nudge = if let Some(n) = self.body.alpha_nudge {
+                    n
+                } else if self.version == 0 { 
                     match trimmed {
                         "wwww" => 0,
                         "u7cx" => 3,
@@ -428,7 +430,7 @@ impl Item {
                 } else { 
                     0 
                 };
-                emitter.write_bits(nudge, 2)?; // 2-bit nudge
+                emitter.write_bits(nudge as u32, 2)?; // 2-bit nudge
             }
         }
 
@@ -466,7 +468,6 @@ impl Item {
                         }
                     }
                 } else {
-                    let is_runeword = axiom.is_runeword(self.flags);
                     let is_runeword = axiom.is_runeword(self.flags);
                     let is_frag = axiom.is_fragment(self.flags);
                     if self.version == 5 && (is_runeword || is_frag) { 
@@ -514,7 +515,12 @@ impl Item {
                             }
                         }
                         ItemQuality::Set | ItemQuality::Unique => {
-                            emitter.write_bits(self.unique_id.unwrap_or(0) as u32, 12)?;
+                            let uid_to_write = if axiom.is_alpha() {
+                                self.header.alpha_unique_id_raw.unwrap_or(self.unique_id.unwrap_or(0))
+                            } else {
+                                self.unique_id.unwrap_or(0)
+                            };
+                            emitter.write_bits(uid_to_write as u32, 12)?;
                         }
                         _ => {}
                     }

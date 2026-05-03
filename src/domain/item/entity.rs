@@ -55,6 +55,7 @@ pub struct ItemBody {
     pub alpha_header_gap: Option<u8>,
     pub v5_runeword_extra: Option<u8>,
     pub v105_7mgw_payload: Option<Vec<bool>>,
+    pub alpha_nudge: Option<u8>,
     pub alpha_alignment_padding: Vec<bool>,
 }
 
@@ -114,6 +115,7 @@ pub struct Item {
     pub rare_name_2: Option<u8>,
     pub rare_affixes: [Option<u16>; 6],
     pub unique_id: Option<u16>,
+    pub alpha_unique_id_raw: Option<u16>,
     pub runeword_id: Option<u16>,
     pub runeword_level: Option<u8>,
     pub properties: Vec<ItemProperty>,
@@ -230,6 +232,7 @@ impl Item {
             is_ear: self.is_ear,
             alpha_quality_raw: self.header.alpha_quality_raw,
             alpha_v5_runeword_extra: self.header.alpha_v5_runeword_extra,
+            alpha_unique_id_raw: self.alpha_unique_id_raw,
         }
     }
 
@@ -248,6 +251,7 @@ impl Item {
             alpha_header_gap: self.body.alpha_header_gap,
             v5_runeword_extra: self.body.v5_runeword_extra,
             v105_7mgw_payload: self.body.v105_7mgw_payload.clone(),
+            alpha_nudge: self.body.alpha_nudge,
             alpha_alignment_padding: self.body.alpha_alignment_padding.clone(),
         }
     }
