@@ -120,3 +120,69 @@ impl<T> Report<T> {
         self
     }
 }
+
+use std::fs::{self, File};
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub struct OutputManager {
+    writer: Option<Box<dyn Write>>,
+    is_antigravity: bool,
+    is_json: bool,
+}
+
+impl OutputManager {
+    pub fn new(tool_name: &str, args: &args::ParsedArgs) -> Self {
+        let is_json = args.is_json();
+        let is_antigravity = args.is_set("antigravity");
+        let output_path = args.get("output");
+
+        let mut writer = None;
+
+        if is_antigravity {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            
+            let _ = fs::create_dir_all("antigravity/outputs");
+            
+            let path = format!("antigravity/outputs/{}_{}.txt", tool_name, timestamp);
+            if let Ok(f) = File::create(&path) {
+                println!("[ANTIGRAVITY] Log saved to: {}", path);
+                writer = Some(Box::new(f) as Box<dyn Write>);
+            }
+        } else if let Some(path) = output_path {
+            if let Ok(f) = File::create(path) {
+                writer = Some(Box::new(f) as Box<dyn Write>);
+            }
+        }
+
+        Self {
+            writer,
+            is_antigravity,
+            is_json,
+        }
+    }
+
+    pub fn println(&mut self, text: &str) {
+        if let Some(w) = &mut self.writer {
+            let _ = writeln!(w, "{}", text);
+        }
+        
+        if !self.is_antigravity || self.is_json {
+            println!("{}", text);
+        }
+    }
+    
+    pub fn summary(&mut self, text: &str) {
+        println!("{}", text);
+        if let Some(w) = &mut self.writer {
+            let _ = writeln!(w, "{}", text);
+        }
+    }
+    
+    pub fn is_json(&self) -> bool {
+        self.is_json
+    }
+}

@@ -1,4 +1,4 @@
-﻿use bitstream_io::{BitRead, BitReader, LittleEndian};
+use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::{HuffmanTree, is_plausible_item_header, peek_item_header_at};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
@@ -50,7 +50,8 @@ fn main() -> io::Result<()> {
     let list_anchors = parsed.is_set("list-anchors");
     let auto_map = parsed.is_set("auto-map");
     let heatmap = parsed.is_set("heatmap");
-    let show_json = parsed.is_json();
+    let mut om = d2r_core::verify::OutputManager::new("d2item_oracle_mapper", &parsed);
+    let show_json = om.is_json();
     let heatmap_width: u32 = parsed.get("width").and_then(|s| s.parse().ok()).unwrap_or(10);
 
     let bytes = fs::read(path)?;
@@ -104,10 +105,10 @@ fn main() -> io::Result<()> {
     if list_anchors || auto_map {
         if show_json {
             let report = Report::new(path, scan_results.clone());
-            println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            om.println(&serde_json::to_string_pretty(&report).unwrap());
         } else {
-            println!("| Anchor Bit | Code | Flags      | Ver | Mode | Loc | Width | Score |");
-            println!("|------------|------|------------|-----|------|-----|-------|-------|");
+            om.println("| Anchor Bit | Code | Flags      | Ver | Mode | Loc | Width | Score |");
+            om.println("|------------|------|------------|-----|------|-----|-------|-------|");
             for a in &scan_results {
                 let width_str = a
                     .best_width
@@ -117,7 +118,7 @@ fn main() -> io::Result<()> {
                     .score
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "-".to_string());
-                println!(
+                om.println(&format!(
                     "| {:10} | {:4} | {:#010x} | {:3} | {:4} | {:3} | {:5} | {:5} |",
                     a.bit_offset,
                     a.code,
@@ -127,7 +128,7 @@ fn main() -> io::Result<()> {
                     a.location,
                     width_str,
                     score_str
-                );
+                ));
             }
         }
     }
@@ -137,10 +138,10 @@ fn main() -> io::Result<()> {
             if a.code == "gp" {
                 continue;
             }
-            println!(
+            om.println(&format!(
                 "\n[Heatmap] Code: {}, Start: {}, Width: {}",
                 a.code, a.bit_offset, heatmap_width
-            );
+            ));
             let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
             let start = a.bit_offset + 60;
             if reader.skip(start as u32).is_err() {
@@ -148,16 +149,17 @@ fn main() -> io::Result<()> {
             }
 
             for row in 0..10 {
-                print!("  Row {:2}: ", row);
+                let mut line = format!("  Row {:2}: ", row);
                 for _ in 0..heatmap_width {
                     let bit = reader.read_bit().unwrap_or(false);
-                    print!("{}", if bit { "1" } else { "0" });
+                    line.push(if bit { '1' } else { '0' });
                 }
-                println!();
+                om.println(&line);
             }
         }
     }
 
+    om.summary("Scan complete.");
     Ok(())
 }
 

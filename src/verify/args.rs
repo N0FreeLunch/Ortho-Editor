@@ -189,6 +189,14 @@ impl ArgParser {
                     return Err(ArgError::Help(self.usage()));
                 } else if long_name == "json" {
                     flags.insert("json".to_string(), true);
+                } else if long_name == "antigravity" {
+                    flags.insert("antigravity".to_string(), true);
+                } else if long_name == "output" {
+                    if let Some(val) = it.next() {
+                        values.insert("output".to_string(), vec![val.to_string_lossy().to_string()]);
+                    } else {
+                        return Err(ArgError::Error("Option --output requires 1 value".to_string()));
+                    }
                 } else {
                     return Err(ArgError::Error(format!("Unknown option --{}", long_name)));
                 }
@@ -214,6 +222,12 @@ impl ArgParser {
                     }
                 } else if short_name == 'h' {
                     return Err(ArgError::Help(self.usage()));
+                } else if short_name == 'o' {
+                    if let Some(val) = it.next() {
+                        values.insert("output".to_string(), vec![val.to_string_lossy().to_string()]);
+                    } else {
+                        return Err(ArgError::Error("Option -o requires 1 value".to_string()));
+                    }
                 } else {
                     return Err(ArgError::Error(format!("Unknown option -{}", short_name)));
                 }
@@ -316,6 +330,8 @@ impl ArgParser {
         
         options_txt.push_str("  -h, --help           Show this help message\n");
         options_txt.push_str("      --json           Output in machine-readable JSON format\n");
+        options_txt.push_str("  -o, --output <PATH>  Save execution output to a file\n");
+        options_txt.push_str("      --antigravity    AI mode: save to antigravity/outputs/ and summarize\n");
 
         usage.push_str(&options_txt);
         usage

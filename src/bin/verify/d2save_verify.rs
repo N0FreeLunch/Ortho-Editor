@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::Context;
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::save_integrity::verify_save_integrity;
@@ -23,8 +23,9 @@ fn main() -> anyhow::Result<()> {
     };
 
     let files = parsed.get_vec("files").cloned().unwrap_or_default();
-    let is_json = parsed.is_set("json");
     let fix_mode = parsed.is_set("fix");
+    let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &parsed);
+    let is_json = om.is_json();
 
     if let Some(bits_args) = parsed.get_vec("dump-bits") {
         if files.is_empty() {
@@ -32,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         }
         let start_bit: u64 = bits_args[0].parse().unwrap_or(0);
         let count: u64 = bits_args[1].parse().unwrap_or(0);
-        dump_bits(&files[0], start_bit, count)?;
+        dump_bits(&mut om, &files[0], start_bit, count)?;
         return Ok(());
     }
 
@@ -55,9 +56,9 @@ fn main() -> anyhow::Result<()> {
                         message: format!("Cannot read file: {}", e),
                         bit_offset: None,
                     }]);
-                    println!("{}", serde_json::to_string(&report)?);
+                    om.println(&serde_json::to_string(&report)?);
                 } else {
-                    eprintln!("=== {} ===\n  [ERROR] Cannot read file: {}", path, e);
+                    om.println(&format!("=== {} ===\n  [ERROR] Cannot read file: {}", path, e));
                 }
                 all_ok = false;
                 continue;
@@ -70,19 +71,19 @@ fn main() -> anyhow::Result<()> {
             let mut bytes_to_fix = bytes.clone();
             d2r_core::engine::checksum::Checksum::fix(&mut bytes_to_fix);
             fs::write(path, &bytes_to_fix).context(format!("Failed to write fixed {}", path))?;
-            println!("  [FIXED] Checksum updated for {}", path);
+            om.summary(&format!("  [FIXED] Checksum updated for {}", path));
         }
 
         if is_json {
-            println!("{}", serde_json::to_string(&report)?);
+            om.println(&serde_json::to_string(&report)?);
         } else {
-            println!("=== {} ===", path);
-            println!("  status: {:?}", report.status);
+            om.println(&format!("=== {} ===", path));
+            om.println(&format!("  status: {:?}", report.status));
             if let Some(results) = report.scan_results.as_ref() {
-                println!(
+                om.println(&format!(
                     "  version=0x{:04X} alpha={} size={} checksum={}",
                     results.header_version, results.alpha_mode, results.file_size_actual, results.checksum_stored
-                );
+                ));
                 let prog = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode);
                 let diff_str = match prog.difficulty {
                     0 => "Normal",
@@ -90,10 +91,10 @@ fn main() -> anyhow::Result<()> {
                     2 => "Hell",
                     _ => "Unknown",
                 };
-                println!("  Difficulty: {}", diff_str);
+                om.println(&format!("  Difficulty: {}", diff_str));
             }
             for issue in &report.issues {
-                println!(
+                om.println(&format!(
                     "  [{}] {}{}",
                     issue.kind,
                     issue.message,
@@ -101,9 +102,9 @@ fn main() -> anyhow::Result<()> {
                         .bit_offset
                         .map(|b| format!(" (bit {})", b))
                         .unwrap_or_default()
-                );
+                ));
             }
-            println!();
+            om.println("");
         }
         if failed {
             all_ok = false;
@@ -111,27 +112,34 @@ fn main() -> anyhow::Result<()> {
     }
 
     if all_ok {
+        om.summary("Verification complete: OK");
         Ok(())
     } else {
+        om.summary("Verification complete: FAILED");
         process::exit(1);
     }
 }
 
-fn dump_bits(path: &str, start_bit: u64, count: u64) -> anyhow::Result<()> {
+fn dump_bits(om: &mut d2r_core::verify::OutputManager, path: &str, start_bit: u64, count: u64) -> anyhow::Result<()> {
     let bytes = fs::read(path)?;
-    println!("Dumping {} bits starting at {}:", count, start_bit);
+    om.summary(&format!("Dumping {} bits starting at {}:", count, start_bit));
     let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
     reader.skip(start_bit as u32)?;
+    let mut line = String::new();
     for i in 0..count {
         let bit = if reader.read_bit()? { '1' } else { '0' };
-        print!("{}", bit);
+        line.push(bit);
         if (i + 1) % 8 == 0 {
-            print!(" ");
+            line.push(' ');
         }
         if (i + 1) % 64 == 0 {
-            println!();
+            om.println(&line);
+            line.clear();
         }
     }
-    println!();
+    if !line.is_empty() {
+        om.println(&line);
+    }
+    om.println("");
     Ok(())
 }
