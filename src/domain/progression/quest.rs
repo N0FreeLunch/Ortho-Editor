@@ -2,14 +2,20 @@ use crate::data::quests::{QuestEntry, V105_QUESTS};
 
 /// Alpha v105 quest sections include a 12-byte header before the quest payload.
 pub const V105_QUEST_PAYLOAD_START: usize = 12;
-/// Den of Evil (Normal) absolute file offset in Alpha v105.
-pub const V105_QUEST_NORMAL_START_FILE: usize = 415;
 
 #[derive(Clone, Copy)]
 pub struct Quest {
     entry: &'static QuestEntry,
     state: u16,
 }
+
+impl PartialEq for Quest {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.entry, other.entry) && self.state == other.state
+    }
+}
+
+impl Eq for Quest {}
 
 impl std::fmt::Debug for Quest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -69,6 +75,7 @@ impl Quest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuestSet {
     quests: Vec<Quest>,
 }
@@ -79,15 +86,41 @@ impl QuestSet {
         Self { quests }
     }
 
-    pub fn from_v105_bytes(bytes: &[u8]) -> Self {
+    pub fn from_v105_bytes(bytes: &[u8], normal_anchor: usize, act5_anchor: usize) -> Self {
         let quests = V105_QUESTS
             .iter()
             .map(|entry| {
-                // Ground absolute file offset to the payload start (Den of Evil = 415)
-                let payload_offset = entry.v105_offset - V105_QUEST_NORMAL_START_FILE;
+                // Grounding Logic: metadata (V105_QUESTS) uses a legacy 415 base.
+                // Discussion 0230 revealed that Act 5 starts at a drifted anchor (0x90).
+                let legacy_base = 415;
+                const STRIDE: usize = 2;
+
+                let (anchor, base_index) = if entry.act == 5 {
+                    (act5_anchor, 24 * STRIDE)
+                } else {
+                    (normal_anchor, 0)
+                };
                 
-                // Add the section-local payload start (12)
-                let section_offset = payload_offset + V105_QUEST_PAYLOAD_START;
+                let quest_index_bytes = if entry.v105_offset >= legacy_base {
+                    entry.v105_offset - legacy_base
+                } else {
+                    0
+                };
+
+                // The offset relative to the specific act's anchor
+                let relative_to_anchor = if quest_index_bytes >= base_index {
+                    quest_index_bytes - base_index
+                } else {
+                    0
+                };
+
+                // The payload starts at the anchor + relative quest index.
+                let absolute_payload_start = anchor + relative_to_anchor;
+                let section_offset = if absolute_payload_start >= crate::domain::progression::axiom::V105_QUEST_OFFSET {
+                    absolute_payload_start - crate::domain::progression::axiom::V105_QUEST_OFFSET
+                } else {
+                    V105_QUEST_PAYLOAD_START
+                };
 
                 let state = if section_offset + 1 < bytes.len() {
                     u16::from_le_bytes([bytes[section_offset], bytes[section_offset + 1]])
@@ -100,13 +133,35 @@ impl QuestSet {
         Self { quests }
     }
 
-    pub fn sync_to_v105_bytes(&self, bytes: &mut [u8]) {
+    pub fn sync_to_v105_bytes(&self, bytes: &mut [u8], normal_anchor: usize, act5_anchor: usize) {
         for quest in &self.quests {
-            // Ground absolute file offset to the payload start (Den of Evil = 415)
-            let payload_offset = quest.v105_offset() - V105_QUEST_NORMAL_START_FILE;
-            
-            // Add the section-local payload start (12)
-            let section_offset = payload_offset + V105_QUEST_PAYLOAD_START;
+            let legacy_base = 415;
+            const STRIDE: usize = 2;
+
+            let (anchor, base_index) = if quest.act() == 5 {
+                (act5_anchor, 24 * STRIDE)
+            } else {
+                (normal_anchor, 0)
+            };
+
+            let quest_index_bytes = if quest.v105_offset() >= legacy_base {
+                quest.v105_offset() - legacy_base
+            } else {
+                0
+            };
+
+            let relative_to_anchor = if quest_index_bytes >= base_index {
+                quest_index_bytes - base_index
+            } else {
+                0
+            };
+
+            let absolute_payload_start = anchor + relative_to_anchor;
+            let section_offset = if absolute_payload_start >= crate::domain::progression::axiom::V105_QUEST_OFFSET {
+                absolute_payload_start - crate::domain::progression::axiom::V105_QUEST_OFFSET
+            } else {
+                V105_QUEST_PAYLOAD_START
+            };
 
             if section_offset + 1 < bytes.len() {
                 let le_bytes = quest.state().to_le_bytes();
@@ -153,25 +208,25 @@ impl QuestSection {
         &self.raw_bytes
     }
 
-    pub fn is_v105_completed_by_name(&self, name: &str) -> bool {
-        let set = QuestSet::from_v105_bytes(&self.raw_bytes);
+    pub fn is_v105_completed_by_name(&self, name: &str, normal_anchor: usize, act5_anchor: usize) -> bool {
+        let set = QuestSet::from_v105_bytes(&self.raw_bytes, normal_anchor, act5_anchor);
         set.find_by_name(name).map(|q| q.is_completed()).unwrap_or(false)
     }
 
-    pub fn set_v105_completed_by_name(&mut self, name: &str, completed: bool) -> bool {
-        let mut set = QuestSet::from_v105_bytes(&self.raw_bytes);
+    pub fn set_v105_completed_by_name(&mut self, name: &str, completed: bool, normal_anchor: usize, act5_anchor: usize) -> bool {
+        let mut set = QuestSet::from_v105_bytes(&self.raw_bytes, normal_anchor, act5_anchor);
         if let Some(q) = set.quests_mut().iter_mut().find(|q| q.name() == name) {
             q.set_completed(completed);
-            set.sync_to_v105_bytes(&mut self.raw_bytes);
+            set.sync_to_v105_bytes(&mut self.raw_bytes, normal_anchor, act5_anchor);
             return true;
         }
         false
     }
 
     /// Unlocks the Durance of Hate gate (Act 3) by setting semantic bits discovered in forensics.
-    pub fn unlock_durance_gate(&mut self) {
+    pub fn unlock_durance_gate(&mut self, normal_anchor: usize, act5_anchor: usize) {
         // 1. Set "Khalim's Will" Quest Completed Bits
-        self.set_v105_completed_by_name("Khalim's Will", true);
+        self.set_v105_completed_by_name("Khalim's Will", true, normal_anchor, act5_anchor);
 
         // 2. Set "Sacred Authority" / Gate Flag in the Quest Section Header (approx byte 8)
         if self.raw_bytes.len() > 8 {
