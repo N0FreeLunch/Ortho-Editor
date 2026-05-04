@@ -105,11 +105,12 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
 
-                if results.fidelity_score < 1.0 {
+                if results.fidelity_score < 1.0 || results.alpha_mode {
                     om.println("  [FORENSIC RATIONALE]");
                     for finding in &results.forensic_audit.findings {
-                        if finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
-                            om.println(&format!("    - [{:?}] {}", finding.confidence, finding.rationale));
+                        // For Alpha, show everything. For others, show only speculative/fragile.
+                        if results.alpha_mode || finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
+                            om.println(&format!("    - [{:?}] [{:?}] {}", finding.confidence, finding.intentionality, finding.rationale));
                         }
                     }
                 }

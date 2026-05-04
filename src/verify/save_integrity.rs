@@ -205,7 +205,13 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     }
 
     let prog_res = crate::domain::progression::Progression::from_bytes(bytes, alpha_mode);
-    let forensic_audit = prog_res.audit;
+    let mut forensic_audit = prog_res.audit;
+    
+    // Aggregate audits from all items
+    for item in &items {
+        forensic_audit.extend(item.forensic_audit.clone());
+    }
+
     let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
 
     let hints = synthesize_hints(&issues);

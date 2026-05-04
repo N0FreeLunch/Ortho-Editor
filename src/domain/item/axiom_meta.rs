@@ -208,7 +208,16 @@ impl ForensicAudit {
         self.findings.push(meta);
     }
 
+    /// Extends this audit with findings from another audit.
+    pub fn extend(&mut self, other: ForensicAudit) {
+        if other.combined_confidence < self.combined_confidence {
+            self.combined_confidence = other.combined_confidence;
+        }
+        self.findings.extend(other.findings);
+    }
+
     /// Generates a human-readable audit report.
+
     pub fn report(&self) -> String {
         let score = FidelityScore::from_audit(self);
         let mut report = String::new();
