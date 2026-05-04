@@ -6,7 +6,7 @@ use std::io::Cursor;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 4 {
-        println!("Usage: v105_attribute_search <file_path> <start_byte_offset> <target_value> [bit_width]");
+        println!("Usage: v105_attribute_search <file_path> <start_byte_offset> <target_value> [bit_width] [search_limit_bytes]");
         return Ok(());
     }
 
@@ -14,12 +14,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_offset: usize = args[2].parse()?;
     let target_value: u64 = args[3].parse()?;
     let bit_width: u32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(9); // Default to 9 bits for stats
+    let limit_bytes: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(200);
 
     let buffer = fs::read(file_path)?;
-    println!("[Forensic] Searching for value {} (width {} bits) starting from byte offset {}", target_value, bit_width, start_offset);
+    println!("[Forensic] Searching for value {} (width {} bits) starting from byte offset {} (limit {} bytes)", target_value, bit_width, start_offset, limit_bytes);
 
-    // Total bits to search (up to 200 bytes for forensics)
-    let max_bits = 200 * 8;
+    let max_bits = limit_bytes * 8;
     
     let mut found = false;
     for bit_idx in 0..max_bits {
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         // Skip to current bit
         for _ in 0..bit_idx {
-            let _ = probe.read_bit()?;
+            if probe.read_bit().is_err() { break; }
         }
 
         // Manual read_bits implementation for compatibility
