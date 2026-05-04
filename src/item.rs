@@ -312,7 +312,6 @@ impl Item {
             for _ in 0..4 {
                 code.push(huff.decode_recorded(cursor)?);
             }
-            println!("[TRACE] Decoded Code: '{}' at bit {}", code, cursor.pos());
             let mut nudge = None;
             if alpha_mode && (version == 5 || version == 0 || version == 1) {
                 nudge = Some(cursor.read_bits::<u8>(2)?);

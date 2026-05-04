@@ -174,7 +174,6 @@ impl StatsAxiom {
         if self.save_is_alpha {
             if self.version == 5 {
                 // Alpha v105 Version 5 items: 7-bit ID, 6-bit Value
-                println!("[TRACE] Rhythm for Version 5: 7/6");
                 return PropertyRhythm {
                     id_bits: 7,
                     value_bits: Some(6),
@@ -183,7 +182,6 @@ impl StatsAxiom {
                 };
             }
             // All other Alpha versions
-            println!("[TRACE] Rhythm for Version {}: 9/9", self.version);
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: if is_compact {
