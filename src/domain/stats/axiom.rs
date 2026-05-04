@@ -162,7 +162,7 @@ impl StatsAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        self.save_is_alpha && self.version == 5 && (flags & (1 << 27)) != 0
+        self.save_is_alpha && self.version == 5 && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
     }
 
     pub fn is_fragment(&self, flags: u32) -> bool {
