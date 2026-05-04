@@ -21,7 +21,8 @@ pub use crate::domain::item::serialization::{HuffmanTree, find_next_item_match, 
 pub use crate::error::{ParsingError, ParsingFailure, ParsingResult};
 pub use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::{read_property_list, stat_save_bits, StatsAxiom};
-use crate::domain::item::axiom_meta::ForensicAudit;
+use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 
 #[derive(Debug, Clone)]
 pub struct PropertyReaderContext<'a> {
@@ -316,6 +317,7 @@ impl Item {
             let mut nudge = None;
             if alpha_mode && (version == 5 || version == 0 || version == 1) {
                 nudge = Some(cursor.read_bits::<u8>(2)?);
+                // We'll record this in forensic_audit after the Item struct is created.
             }
             cursor.end_segment();
             (code, nudge, None, None, None)
@@ -440,6 +442,18 @@ impl Item {
             expected_start_bit: 0,
             forensic_audit: ForensicAudit::new(),
         };
+
+        if item.body.alpha_nudge.is_some() {
+            item.forensic_audit.record(V105NudgeAxiom.metadata());
+        }
+
+        if item.body.alpha_header_gap.is_some() {
+            item.forensic_audit.record(V105HeaderGapAxiom.metadata());
+        }
+
+        if item.body.alpha_shadow_skip_bits.is_some() {
+            item.forensic_audit.record(V105ShadowAxiom.metadata());
+        }
 
         if !axiom.is_compact(item.flags) {
             let is_v105_shadow = axiom.is_v105_shadow(item.flags);

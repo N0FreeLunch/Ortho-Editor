@@ -375,7 +375,9 @@ impl Item {
                 let is_rw = axiom.is_runeword(self.flags);
 
                 if is_rw || is_v105_shadow {
+                    // Alpha v105 forensic: V105HeaderGapAxiom
                     let mut gap = self.body.alpha_header_gap.unwrap_or(0);
+
                     if !self.is_compact {
                         // Ensure fields are synced if gap was captured
                         if self.body.alpha_header_gap.is_none() {
@@ -595,7 +597,7 @@ impl Item {
 
                 let is_v105_shadow = axiom.is_v105_shadow(self.flags);
                 if is_v105_shadow {
-                    // Alpha v105 forensic: Shadow skip
+                    // Alpha v105 forensic: V105ShadowAxiom (47-bit shadow skip)
                     if let Some(bits) = self.body.alpha_shadow_skip_bits {
                         emitter.write_bits_u64(bits, 47)?;
                     } else {

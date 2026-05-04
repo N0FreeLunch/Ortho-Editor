@@ -1,5 +1,6 @@
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 use super::entity::{ALPHA_STAT_MAPS, AlphaStatMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,11 +13,17 @@ pub struct StatsAxiom {
 impl ForensicAxiom for StatsAxiom {
     fn metadata(&self) -> ForensicMetadata {
         if self.save_is_alpha {
-            ForensicMetadata::new(
-                Confidence::StrongPattern,
-                Intentionality::Structural,
-                format!("Alpha v105 Version {} forensic rules (Stat mapping, property rhythm, and byte alignment)", self.version)
-            )
+            let parts = vec![
+                V105NudgeAxiom.metadata(),
+                V105ShadowAxiom.metadata(),
+                V105HeaderGapAxiom.metadata(),
+                ForensicMetadata::new(
+                    Confidence::StrongPattern,
+                    Intentionality::Structural,
+                    format!("Alpha v105 Version {} Stat mapping and property rhythm rules", self.version)
+                )
+            ];
+            ForensicMetadata::aggregate(&parts)
         } else {
             ForensicMetadata::new(
                 Confidence::VerifiedTruth,
@@ -242,12 +249,13 @@ impl StatsAxiom {
 
             if is_compact {
                 // Alpha v105 forensic: Compact items have specific fixed bit-lengths.
+                // These are axiomatic alignments for byte-aligned save files.
                 let min_bits = if is_scroll {
-                    72 // 9 bytes for scrolls
+                    72 // 9 bytes: V105HeaderGapAxiom context
                 } else if trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))) {
-                    88 // 11 bytes for runes
+                    88 // 11 bytes: V105NudgeAxiom context
                 } else {
-                    80 // 10 bytes for potions and other compacts
+                    80 // 10 bytes: Standard Alpha compact alignment
                 };
 
                 if final_len < min_bits {
@@ -259,13 +267,14 @@ impl StatsAxiom {
                     final_len = 112;
                 }
             } else if is_potion {
-                // Extended potions (unlikely but possible in Alpha)
+                // Extended potions
                 if final_len < 80 { final_len = 80; }
             } else if is_scroll {
                 // Extended scrolls
                 if final_len < 72 { final_len = 72; }
             } else {
                 // Alpha v105 forensic: Non-compact items align to at least 88 bits (11 bytes).
+                // Supported by V105NudgeAxiom and V105ShadowAxiom evidence.
                 if final_len < 88 {
                     final_len = 88;
                 }
@@ -374,7 +383,9 @@ mod tests {
         let alpha = StatsAxiom::new(5, ItemQuality::Unique, true);
 
         assert_eq!(retail.metadata().confidence, Confidence::VerifiedTruth);
-        assert_eq!(alpha.metadata().confidence, Confidence::StrongPattern);
+        // Aggregated confidence is the weakest link. 
+        // V105HeaderGapAxiom is EmergingHypothesis, so the whole axiom becomes EmergingHypothesis.
+        assert_eq!(alpha.metadata().confidence, Confidence::EmergingHypothesis);
         assert!(alpha.metadata().rationale.contains("Alpha v105 Version 5"));
     }
 }

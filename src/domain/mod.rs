@@ -7,3 +7,4 @@ pub mod stats;
 pub mod character;
 
 pub mod inventory;
+pub mod forensic;
