@@ -103,6 +103,14 @@ fn main() -> anyhow::Result<()> {
                     if act5_completed > 0 {
                         om.println(&format!("  Act 5 Quests: {} completed", act5_completed));
                     }
+
+                    let activated_wps = prog.waypoints.waypoints()
+                        .iter()
+                        .filter(|w| w.is_active())
+                        .count();
+                    if activated_wps > 0 {
+                        om.println(&format!("  Waypoints: {} activated", activated_wps));
+                    }
                 }
 
                 if results.fidelity_score < 1.0 || results.alpha_mode {

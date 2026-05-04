@@ -722,11 +722,11 @@ fn read_item_stats<R: BitRead>(
     };
     if is_v105_shadow_final {
         // Alpha v105 forensic: Shadow items contain a copy of the shadowed item before their own properties.
-        // Bit-level discovery confirms a 47-bit gap between extended header and shadow properties.
-        let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(47))?;
+        // Bit-level discovery confirms a 47-bit gap for Version 5 and a 16-bit gap for Version 2.
+        let skip_bits_count = if version == 5 { 47 } else { 16 };
+        let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);
     }
-
     let (props, complete, term) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |_, _, _, _, _| {
         // Return a dummy item or minimal info to avoid recursion
         Ok((Item::default(), 0))
