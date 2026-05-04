@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::io::Cursor;
 
 use crate::item::{HuffmanTree, Item};
+use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct DiffReport {
@@ -26,6 +27,8 @@ pub struct ItemDiff {
     pub first_mismatch_offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segment: Option<String>,
+    pub fidelity_score: f32,
+    pub forensic_audit: ForensicAudit,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<ItemDiff>,
 }
@@ -108,6 +111,8 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
         code: item.code.trim().to_string(),
         original_len: original_bits.len(),
         target_len: rebuilt_bits.len(),
+        fidelity_score: FidelityScore::from_audit(&item.forensic_audit).value,
+        forensic_audit: item.forensic_audit.clone(),
         ..Default::default()
     };
 
@@ -151,6 +156,8 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
         code: item_a.code.trim().to_string(),
         original_len: item_a.bits.len(),
         target_len: item_b.bits.len(),
+        fidelity_score: FidelityScore::from_audit(&item_a.forensic_audit).value,
+        forensic_audit: item_a.forensic_audit.clone(),
         ..Default::default()
     };
 

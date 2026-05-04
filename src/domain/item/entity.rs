@@ -141,6 +141,7 @@ pub struct Item {
     pub gap_bits: Vec<bool>,
     pub segments: Vec<BitSegment>,
     pub expected_start_bit: u64,
+    pub forensic_audit: crate::domain::item::axiom_meta::ForensicAudit,
 }
 
 impl Item {

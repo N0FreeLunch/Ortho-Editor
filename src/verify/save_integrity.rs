@@ -1,5 +1,6 @@
 use crate::domain::header::axiom::{ACTIVE_ACT_OFFSET, EXPANSION_FLAG_OFFSET, PROGRESS_FLAG_OFFSET};
 use crate::domain::progression::axiom::{V105_NPC_OFFSET, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET};
+use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
 use crate::item::{HuffmanTree, Item, ParsingError};
 use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save};
 use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
@@ -19,6 +20,8 @@ pub struct D2SaveVerifyPayload {
     pub progression_flag: u8,
     pub expansion_flag: u8,
     pub issue_count: usize,
+    pub fidelity_score: f32,
+    pub forensic_audit: ForensicAudit,
 }
 
 pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPayload>, bool) {
@@ -38,7 +41,23 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
                 ReportStatus::Fail,
             )
             .with_issues(issues)
-            .with_hints(vec!["Header is corrupted or in an unsupported format.".to_string()]);
+            .with_hints(vec!["Header is corrupted or in an unsupported format.".to_string()])
+            .with_results(D2SaveVerifyPayload {
+                header_version: 0,
+                alpha_mode: false,
+                file_size_header: 0,
+                file_size_actual: bytes.len(),
+                file_size_delta: 0,
+                checksum_stored: "0x00000000".to_string(),
+                checksum_calculated: None,
+                jm_marker_count: 0,
+                active_act: 0,
+                progression_flag: 0,
+                expansion_flag: 0,
+                issue_count: 1,
+                fidelity_score: 0.0,
+                forensic_audit: ForensicAudit::new(),
+            });
             return (report, true);
         }
     };
@@ -185,6 +204,10 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         }
     }
 
+    let prog_res = crate::domain::progression::Progression::from_bytes(bytes, alpha_mode);
+    let forensic_audit = prog_res.audit;
+    let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
+
     let hints = synthesize_hints(&issues);
     let issue_count = issues.len();
     let status = if fail { ReportStatus::Fail } else { ReportStatus::Ok };
@@ -220,6 +243,8 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
             0
         },
         issue_count,
+        fidelity_score,
+        forensic_audit,
     });
 
     (report, fail)
