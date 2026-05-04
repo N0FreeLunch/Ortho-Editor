@@ -134,6 +134,48 @@ macro_rules! impl_forensic_axiom {
     };
 }
 
+impl Confidence {
+    /// Returns a numerical weight for this confidence level (0.0 to 1.0).
+    pub fn weight(&self) -> f32 {
+        match self {
+            Confidence::Fragile => 0.0,
+            Confidence::Speculative => 0.1,
+            Confidence::EmergingHypothesis => 0.4,
+            Confidence::StrongPattern => 0.8,
+            Confidence::VerifiedTruth => 1.0,
+        }
+    }
+}
+
+/// A numerical representation of the reliability of a parsed object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FidelityScore {
+    /// The score value, ranging from 0.0 (completely unreliable) to 1.0 (verified truth).
+    pub value: f32,
+}
+
+impl FidelityScore {
+    /// Calculates a fidelity score from a forensic audit.
+    ///
+    /// The score is determined by the minimum confidence encountered (the weakest link)
+    /// and the average confidence of all findings.
+    pub fn from_audit(audit: &ForensicAudit) -> Self {
+        if audit.findings.is_empty() {
+            return Self { value: 1.0 };
+        }
+
+        let min_weight = audit.combined_confidence.weight();
+        let total_weight: f32 = audit.findings.iter().map(|f| f.confidence.weight()).sum();
+        let avg_weight = total_weight / audit.findings.len() as f32;
+
+        // The final score is the minimum of the weakest link and the average.
+        // This ensures that one "Fragile" part drags the whole score down.
+        Self {
+            value: min_weight.min(avg_weight),
+        }
+    }
+}
+
 /// Cumulative record of forensic findings during a pipeline execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForensicAudit {
@@ -399,5 +441,25 @@ mod tests {
         assert_eq!(final_res.value, Err("Initial Error".to_string()));
         assert_eq!(final_res.audit.combined_confidence, Confidence::VerifiedTruth);
         assert_eq!(final_res.audit.findings.len(), 1);
+    }
+
+    #[test]
+    fn test_fidelity_score_calculation() {
+        // Case 1: Perfect audit
+        let mut audit = ForensicAudit::new();
+        audit.record(ForensicMetadata::new(Confidence::VerifiedTruth, Intentionality::Structural, "Ok"));
+        assert_eq!(FidelityScore::from_audit(&audit).value, 1.0);
+
+        // Case 2: One Fragile finding
+        audit.record(ForensicMetadata::new(Confidence::Fragile, Intentionality::Artifactual, "Bad"));
+        assert_eq!(FidelityScore::from_audit(&audit).value, 0.0);
+
+        // Case 3: Mixed findings
+        let mut audit2 = ForensicAudit::new();
+        audit2.record(ForensicMetadata::new(Confidence::StrongPattern, Intentionality::Structural, "A"));
+        audit2.record(ForensicMetadata::new(Confidence::VerifiedTruth, Intentionality::Structural, "B"));
+        // Combined min is StrongPattern (0.8). Average is (0.8 + 1.0) / 2 = 0.9.
+        // Min(0.8, 0.9) = 0.8.
+        assert_eq!(FidelityScore::from_audit(&audit2).value, 0.8);
     }
 }
