@@ -12,7 +12,7 @@ fn main() {
 
     let bytes = fs::read(&args[1]).expect("read fail");
     let map = map_core_sections(&bytes).expect("map fail");
-    let attr = AttributeSection::parse(&bytes, &map).expect("parse fail");
+    let attr = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos).expect("parse fail");
 
     println!("=== GF Stats ===");
     for entry in attr.entries {

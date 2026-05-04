@@ -21,6 +21,7 @@ pub use crate::domain::item::serialization::{HuffmanTree, find_next_item_match, 
 pub use crate::error::{ParsingError, ParsingFailure, ParsingResult};
 pub use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::{read_property_list, stat_save_bits, StatsAxiom};
+use crate::domain::item::axiom_meta::ForensicAudit;
 
 #[derive(Debug, Clone)]
 pub struct PropertyReaderContext<'a> {
@@ -437,6 +438,7 @@ impl Item {
             gap_bits: Vec::new(),
             segments: Vec::new(),
             expected_start_bit: 0,
+            forensic_audit: ForensicAudit::new(),
         };
 
         if !axiom.is_compact(item.flags) {

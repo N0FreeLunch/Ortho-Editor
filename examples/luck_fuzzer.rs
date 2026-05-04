@@ -70,7 +70,7 @@ fn main() {
 
     // Parse core sections
     let map = map_core_sections(&bytes).expect("Failed to map sections");
-    let mut attrs = AttributeSection::parse(&bytes, &map).expect("Failed to parse attributes");
+    let mut attrs = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos).expect("Failed to parse attributes");
     let mut items = Item::read_player_items(&bytes, &huffman, true).unwrap_or_default();
 
     match mode.as_str() {
@@ -177,7 +177,7 @@ fn main() {
     )
     .expect("Failed to rebuild save bytes");
 
-    finalize_save_bytes(&mut save_bytes).expect("Failed to finalize checksums");
+    finalize_save_bytes(&mut save_bytes, true).expect("Failed to finalize checksums");
     fs::write(output_path, &save_bytes).expect("Failed to write output file");
 
     println!("--------------------------------------------------");
