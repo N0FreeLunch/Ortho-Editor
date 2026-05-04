@@ -5,12 +5,13 @@ pub mod axiom;
 pub use quest::{Quest, QuestSet, QuestSection};
 pub use waypoint::{Waypoint, WaypointSet, WaypointSection};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicResult, ForensicAxiom};
-use crate::domain::progression::axiom::{AlphaDifficultyAxiom, V105QuestAxiom, PROG_START_FILE, V105_QUEST_OFFSET};
+use crate::domain::progression::axiom::{AlphaDifficultyAxiom, V105QuestAxiom, V105WaypointAxiom, PROG_START_FILE, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Progression {
     pub difficulty: u8,
     pub quests: QuestSet,
+    pub waypoints: WaypointSet,
     pub audit: ForensicAudit,
 }
 
@@ -38,14 +39,25 @@ impl Progression {
             } else {
                 &[]
             };
-
             let quests = QuestSet::from_v105_bytes(quest_bytes, normal_anchor, act5_anchor);
+
+            let wp_axiom = V105WaypointAxiom;
+            audit.record(wp_axiom.metadata());
+            let wp_anchor = PROG_START_FILE + V105WaypointAxiom::start_offset();
             
-            ForensicResult { value: Ok(Progression { difficulty, quests, audit: audit.clone() }), audit }
+            let wp_bytes = if bytes.len() > V105_WAYPOINT_OFFSET {
+                &bytes[V105_WAYPOINT_OFFSET..]
+            } else {
+                &[]
+            };
+            let waypoints = WaypointSet::from_bytes(wp_bytes, difficulty, wp_anchor);
+            
+            ForensicResult { value: Ok(Progression { difficulty, quests, waypoints, audit: audit.clone() }), audit }
         } else {
             let difficulty = if bytes.len() > 0x0257 { bytes[0x0257] } else { 0 };
             let quests = QuestSet::new_v105_empty(); // Placeholder for retail
-            ForensicResult { value: Ok(Progression { difficulty, quests, audit: audit.clone() }), audit }
+            let waypoints = WaypointSet::new_empty(difficulty);
+            ForensicResult { value: Ok(Progression { difficulty, quests, waypoints, audit: audit.clone() }), audit }
         }
     }
 }

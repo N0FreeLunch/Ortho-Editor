@@ -234,6 +234,8 @@ fn main() -> io::Result<()> {
         // Waypoints
         println!("Activated Waypoints:");
         let mut wp_any = false;
+        let wp_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE + d2r_core::domain::progression::axiom::V105WaypointAxiom::start_offset();
+
         for diff in 0..3 {
             let mut diff_wps = Vec::new();
             for wp in d2r_core::data::waypoints::WAYPOINTS {
@@ -241,7 +243,7 @@ fn main() -> io::Result<()> {
                     save.header
                         .waypoints
                         .as_ref()
-                        .map(|w| w.is_activated_by_name(wp.name, diff as u8))
+                        .map(|w| w.is_activated_by_name(wp.name, diff as u8, wp_anchor))
                         .unwrap_or(false)
                 } else {
                     match diff {
@@ -249,7 +251,7 @@ fn main() -> io::Result<()> {
                             .header
                             .waypoints
                             .as_ref()
-                            .map(|w| w.is_activated_by_name(wp.name, 0))
+                            .map(|w| w.is_activated_by_name(wp.name, 0, wp_anchor))
                             .unwrap_or(false),
                         1 | 2 => save
                             .header

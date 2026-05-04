@@ -10,6 +10,14 @@ pub struct Waypoint {
     active: bool,
 }
 
+impl PartialEq for Waypoint {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.entry, other.entry) && self.active == other.active
+    }
+}
+
+impl Eq for Waypoint {}
+
 impl std::fmt::Debug for Waypoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Waypoint")
@@ -52,6 +60,7 @@ impl Waypoint {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaypointSet {
     difficulty: u8,
     waypoints: Vec<Waypoint>,
@@ -66,16 +75,30 @@ impl WaypointSet {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8], difficulty: u8) -> Self {
+    pub fn from_bytes(bytes: &[u8], difficulty: u8, wp_anchor: usize) -> Self {
         let waypoints = WAYPOINTS
             .iter()
             .map(|entry| {
-                // Alpha v105 waypoint bitstream starts at byte 10 (bit 80)
-                let payload_start_bits = V105_WAYPOINT_PAYLOAD_START * 8;
+                // Ground absolute file offset to the payload start
+                // Discussion 0230 verified waypoint anchor at 0x126 (294) from progression base.
+                // 295 + 294 = 589.
+                // The waypoint section has a 10-byte header.
+                let absolute_payload_start = wp_anchor + V105_WAYPOINT_PAYLOAD_START;
+                
+                // Waypoint bits are packed by difficulty.
                 let difficulty_bits = difficulty as usize * DIFFICULTY_STRIDE_BITS;
-                let global_bit_idx = payload_start_bits + difficulty_bits + entry.ws_bit as usize;
-                let byte_idx = global_bit_idx / 8;
-                let bit_in_byte = global_bit_idx % 8;
+                let global_bit_idx = (absolute_payload_start * 8) + difficulty_bits + entry.ws_bit as usize;
+
+                // from_bytes is called with a slice starting at V105_WAYPOINT_OFFSET (701).
+                let section_start_bits = crate::domain::progression::axiom::V105_WAYPOINT_OFFSET * 8;
+                let relative_bit_idx = if global_bit_idx >= section_start_bits {
+                    global_bit_idx - section_start_bits
+                } else {
+                    0
+                };
+
+                let byte_idx = relative_bit_idx / 8;
+                let bit_in_byte = relative_bit_idx % 8;
                 
                 let active = if byte_idx < bytes.len() {
                     (bytes[byte_idx] & (1 << bit_in_byte)) != 0
@@ -91,13 +114,21 @@ impl WaypointSet {
         }
     }
 
-    pub fn sync_to_bytes(&self, bytes: &mut [u8]) {
+    pub fn sync_to_bytes(&self, bytes: &mut [u8], wp_anchor: usize) {
         for wp in &self.waypoints {
-            let payload_start_bits = V105_WAYPOINT_PAYLOAD_START * 8;
+            let absolute_payload_start = wp_anchor + V105_WAYPOINT_PAYLOAD_START;
             let difficulty_bits = self.difficulty as usize * DIFFICULTY_STRIDE_BITS;
-            let global_bit_idx = payload_start_bits + difficulty_bits + wp.ws_bit() as usize;
-            let byte_idx = global_bit_idx / 8;
-            let bit_in_byte = global_bit_idx % 8;
+            let global_bit_idx = (absolute_payload_start * 8) + difficulty_bits + wp.ws_bit() as usize;
+
+            let section_start_bits = crate::domain::progression::axiom::V105_WAYPOINT_OFFSET * 8;
+            let relative_bit_idx = if global_bit_idx >= section_start_bits {
+                global_bit_idx - section_start_bits
+            } else {
+                0
+            };
+
+            let byte_idx = relative_bit_idx / 8;
+            let bit_in_byte = relative_bit_idx % 8;
             
             if byte_idx < bytes.len() {
                 if wp.is_active() {
@@ -160,16 +191,16 @@ impl WaypointSection {
         }
     }
 
-    pub fn is_activated_by_name(&self, name: &str, difficulty: u8) -> bool {
-        let set = WaypointSet::from_bytes(&self.raw_bytes, difficulty);
+    pub fn is_activated_by_name(&self, name: &str, difficulty: u8, wp_anchor: usize) -> bool {
+        let set = WaypointSet::from_bytes(&self.raw_bytes, difficulty, wp_anchor);
         set.find_by_name(name).map(|w| w.is_active()).unwrap_or(false)
     }
 
-    pub fn set_activated_by_name(&mut self, name: &str, difficulty: u8, active: bool) -> bool {
-        let mut set = WaypointSet::from_bytes(&self.raw_bytes, difficulty);
+    pub fn set_activated_by_name(&mut self, name: &str, difficulty: u8, active: bool, wp_anchor: usize) -> bool {
+        let mut set = WaypointSet::from_bytes(&self.raw_bytes, difficulty, wp_anchor);
         if let Some(wp) = set.waypoints_mut().iter_mut().find(|w: &&mut Waypoint| w.name() == name) {
             wp.set_active(active);
-            set.sync_to_bytes(&mut self.raw_bytes);
+            set.sync_to_bytes(&mut self.raw_bytes, wp_anchor);
             return true;
         }
         false
@@ -189,5 +220,12 @@ mod tests {
         assert_eq!(act1_town.act(), 1);
         assert_eq!(act1_town.ws_bit(), 0);
         assert!(!act1_town.is_active());
+    }
+
+    #[test]
+    fn test_waypoint_parsing() {
+        let bytes = vec![0u8; 100];
+        // Test with a dummy anchor (e.g., 295)
+        let _ = WaypointSet::from_bytes(&bytes, 0, 295);
     }
 }

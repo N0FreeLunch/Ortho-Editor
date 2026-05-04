@@ -47,3 +47,16 @@ crate::impl_forensic_axiom!(
     Intentionality::Structural,
     "Alpha v105 quest offsets 0x78 (Normal) and 0x90 (Act 5) are relative to progression section (0x127). Verification from Discussion 0230."
 );
+
+pub struct V105WaypointAxiom;
+
+impl V105WaypointAxiom {
+    pub fn start_offset() -> usize { 294 } // 0x126
+}
+
+crate::impl_forensic_axiom!(
+    V105WaypointAxiom,
+    Confidence::VerifiedTruth,
+    Intentionality::Structural,
+    "Alpha v105 waypoint offset 0x126 (294) is relative to progression section (0x127). Verification from Discussion 0230."
+);
