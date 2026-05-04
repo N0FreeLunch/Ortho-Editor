@@ -283,6 +283,12 @@ impl StatsAxiom {
             if final_len % 8 != 0 {
                 final_len += 8 - (final_len % 8);
             }
+            
+            if self.version == 2 {
+                // Alpha v105 Version 2 forensic: Larzuk whwt (Set/Personalized) 
+                // shows an extra 8-bit buffer after standard alignment.
+                final_len += 8;
+            }
         } else if final_len % 8 != 0 {
             // Retail: Only byte align at the end of the item section
             final_len += 8 - (final_len % 8);

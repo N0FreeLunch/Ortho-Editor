@@ -266,7 +266,7 @@ impl Item {
             if version == 5 || version == 0 {
                 let is_v105_shadow = axiom.is_v105_shadow(flags);
                 let is_rw = axiom.is_runeword(flags);
-                
+
                 if is_rw || is_v105_shadow {
                     let gap = cursor.read_bits::<u8>(8)? as u8;
                     alpha_header_gap = Some(gap);
@@ -290,7 +290,9 @@ impl Item {
                 header_socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
                 alpha_header_gap = Some(cursor.read_bits::<u8>(8)? as u8);
             }
-        } else if !geometry.skip_geometry {
+        }
+
+ else if !geometry.skip_geometry {
             y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
             page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
             header_socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
@@ -317,7 +319,6 @@ impl Item {
             let mut nudge = None;
             if alpha_mode && (version == 5 || version == 0 || version == 1) {
                 nudge = Some(cursor.read_bits::<u8>(2)?);
-                // We'll record this in forensic_audit after the Item struct is created.
             }
             cursor.end_segment();
             (code, nudge, None, None, None)
@@ -722,8 +723,8 @@ fn read_item_stats<R: BitRead>(
     };
     if is_v105_shadow_final {
         // Alpha v105 forensic: Shadow items contain a copy of the shadowed item before their own properties.
-        // Bit-level discovery confirms a 47-bit gap for Version 5 and a 16-bit gap for Version 2.
-        let skip_bits_count = if version == 5 { 47 } else { 16 };
+        // Bit-level discovery confirms a 47-bit gap for Version 5 and a 24-bit gap for Version 2.
+        let skip_bits_count = if version == 5 { 47 } else { 24 };
         let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);
     }

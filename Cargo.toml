@@ -20,12 +20,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
 dotenvy = "0.15"
-
 anyhow = "1.0"
 thiserror = "2.0.18"
-syn = { version = "2.0", features = ["full", "visit", "extra-traits", "visit"] }
-proc-macro2 = { version = "1.0", features = ["span-locations"] }
-pulldown-cmark = "0.12"
 
 [[bin]]
 name = "d2save_status_inspect"
@@ -213,25 +209,25 @@ path = "src/bin/verify/d2gf_bit_diff.rs"
 name = "d2bit_diff"
 path = "src/bin/verify/d2bit_diff.rs"
 
-[[bin]]
-name = "BitShiftScanner"
-path = "src/bin/verify/bit_shift_scanner.rs"
+# [[bin]]
+# name = "BitShiftScanner"
+# path = "src/bin/verify/bit_shift_scanner.rs"
 
-[[bin]]
-name = "SymmetryBitDiff"
-path = "src/bin/verify/symmetry_bit_diff.rs"
+# [[bin]]
+# name = "SymmetryBitDiff"
+# path = "src/bin/verify/symmetry_bit_diff.rs"
 
-[[bin]]
-name = "BitNudgeExplorer"
-path = "src/bin/verify/bit_nudge_explorer.rs"
+# [[bin]]
+# name = "BitNudgeExplorer"
+# path = "src/bin/verify/bit_nudge_explorer.rs"
 
-[[bin]]
-name = "bsmt_mutate"
-path = "src/bin/verify/bsmt_mutate.rs"
+# [[bin]]
+# name = "bsmt_mutate"
+# path = "src/bin/verify/bsmt_mutate.rs"
 
-[[bin]]
-name = "ast_probe"
-path = "src/bin/verify/ast_probe.rs"
+# [[bin]]
+# name = "ast_probe"
+# path = "src/bin/verify/ast_probe.rs"
 
 [[bin]]
 name = "d2save_ssa"
@@ -279,6 +275,9 @@ path = "src/bin/verify/d2item_xray.rs"
 [[bin]]
 name = "forensic_scaffold"
 path = "src/bin/verify/forensic_scaffold.rs"
+# [[bin]]
+# name = "d2r_forensic_audit"
+# path = "src/bin/verify/d2r_forensic_audit.rs"
 [[bin]]
 name = "d2item_geometry_scanner"
 path = "src/bin/verify/d2item_geometry_scanner.rs"
@@ -313,6 +312,10 @@ path = "src/bin/verify/d2save_poison.rs"
 [[bin]]
 name = "d2save_arch"
 path = "src/bin/verify/d2save_arch.rs"
+
+# [[bin]]
+# name = "d2r-forensic-audit"
+# path = "src/bin/verify/d2r_forensic_audit.rs"
 
 [[bin]]
 name = "d2item_serialization_audit"
