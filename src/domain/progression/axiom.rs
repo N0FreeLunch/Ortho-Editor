@@ -19,3 +19,12 @@ pub const V105_WAYPOINT_LEN: usize = 81; // 0x30E - 0x2BD
 /// NPC Section (Expansion) starts at 0x30E (782).
 pub const V105_NPC_OFFSET: usize = 0x30E;
 pub const V105_NPC_LEN: usize = 51; // 833 - 0x30E
+
+pub struct AlphaDifficultyAxiom;
+
+crate::impl_forensic_axiom!(
+    AlphaDifficultyAxiom,
+    Confidence::VerifiedTruth,
+    Intentionality::Structural,
+    "Alpha v105 uses bits 3-4 of active_act (offset 21) for difficulty. 0x00A1 hypothesis was rejected in Discussion 0230."
+);
