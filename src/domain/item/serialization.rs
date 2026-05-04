@@ -169,6 +169,19 @@ impl BitEmitter {
         Ok(())
     }
 
+    pub fn write_bits_u64(&mut self, value: u64, count: u32) -> io::Result<()> {
+        if count == 0 { return Ok(()); }
+        for i in 0..count {
+            let bit = if i < 64 {
+                (value >> i) & 1 != 0
+            } else {
+                false
+            };
+            self.write_bit(bit)?;
+        }
+        Ok(())
+    }
+
     pub fn extend_bits<I>(&mut self, bits: I) -> io::Result<()>
     where
         I: IntoIterator<Item = bool>,
@@ -569,8 +582,12 @@ impl Item {
                     }
 
                     if quality_val == ItemQuality::Set {
-                        let set_list_val = match self.set_list_count {
-                            1 => 1, 2 => 3, 3 => 7, 4 => 15, 5 => 31, _ => 0
+                        let set_list_val = if let Some(val) = self.body.alpha_set_list_val {
+                            val as u32
+                        } else {
+                            match self.set_list_count {
+                                1 => 1, 2 => 3, 3 => 7, 4 => 15, 5 => 31, _ => 0
+                            }
                         };
                         emitter.write_bits(set_list_val, 5)?;
                     }
@@ -579,7 +596,11 @@ impl Item {
                 let is_v105_shadow = axiom.is_v105_shadow(self.flags);
                 if is_v105_shadow {
                     // Alpha v105 forensic: Shadow skip
-                    emitter.write_bits(0, 47)?;
+                    if let Some(bits) = self.body.alpha_shadow_skip_bits {
+                        emitter.write_bits_u64(bits, 47)?;
+                    } else {
+                        emitter.write_bits(0, 47)?;
+                    }
                 }
 
                 let has_props = !self.properties.is_empty();

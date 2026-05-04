@@ -56,6 +56,8 @@ pub struct ItemBody {
     pub v5_runeword_extra: Option<u8>,
     pub v105_7mgw_payload: Option<Vec<bool>>,
     pub alpha_nudge: Option<u8>,
+    pub alpha_set_list_val: Option<u8>,
+    pub alpha_shadow_skip_bits: Option<u64>,
     pub alpha_alignment_padding: Vec<bool>,
 }
 
@@ -238,20 +240,22 @@ impl Item {
 
     pub fn body_view(&self) -> ItemBody {
         ItemBody {
-            code: self.code.clone(),
-            x: self.x,
-            y: self.y,
-            page: self.page,
-            location: self.location,
-            mode: self.mode,
-            defense: self.defense,
-            max_durability: self.max_durability,
-            current_durability: self.current_durability,
-            quantity: self.quantity,
+            code: self.body.code.clone(),
+            x: self.body.x,
+            y: self.body.y,
+            page: self.body.page,
+            location: self.body.location,
+            mode: self.body.mode,
+            defense: self.body.defense,
+            max_durability: self.body.max_durability,
+            current_durability: self.body.current_durability,
+            quantity: self.body.quantity,
             alpha_header_gap: self.body.alpha_header_gap,
             v5_runeword_extra: self.body.v5_runeword_extra,
             v105_7mgw_payload: self.body.v105_7mgw_payload.clone(),
             alpha_nudge: self.body.alpha_nudge,
+            alpha_set_list_val: self.body.alpha_set_list_val,
+            alpha_shadow_skip_bits: self.body.alpha_shadow_skip_bits,
             alpha_alignment_padding: self.body.alpha_alignment_padding.clone(),
         }
     }

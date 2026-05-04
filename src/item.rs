@@ -325,10 +325,10 @@ impl Item {
         let stats = if !is_compact {
             let socket_flag = axiom.is_socketed(flags, is_compact);
             let runeword_flag = axiom.is_runeword(flags);
-                
+
             Self::read_extended_stats(cursor, &code, is_compact, socket_flag, runeword_flag, axiom.is_personalized(flags), version, alpha_mode, is_frag, &axiom)?
         } else {
-            (None, None, None, false, None, false, None, None, None, None, None, None, [None; 6], None, None, None, None, None, false, None, None, None, None, None, 0, None, None, None)
+            (None, None, None, false, None, false, None, None, None, None, None, None, [None; 6], None, None, None, None, None, false, None, None, None, None, None, 0, None, None, None, None)
         };
 
         let mut item = Item {
@@ -347,6 +347,8 @@ impl Item {
                 v105_7mgw_payload: None,
                 alpha_nudge,
                 alpha_header_gap,
+                alpha_set_list_val: stats.28,
+                alpha_shadow_skip_bits: None,
                 alpha_alignment_padding: Vec::new(),
             },
             stats: ItemStats {
@@ -439,11 +441,12 @@ impl Item {
 
         if !axiom.is_compact(item.flags) {
             let is_v105_shadow = axiom.is_v105_shadow(item.flags);
-            let (props, complete, term, extra_bits, reserved_7mgw) = read_item_stats(cursor, &item.code, item.version, ctx, huff, alpha_mode, item.quality, item.is_runeword, is_v105_shadow)?;
+            let (props, complete, term, extra_bits, reserved_7mgw, shadow_bits) = read_item_stats(cursor, &item.code, item.version, ctx, huff, alpha_mode, item.quality, item.is_runeword, is_v105_shadow)?;
             item.properties = props.clone();
             item.stats.properties = props;
             item.properties_complete = complete;
             item.terminator_bit = term;
+            item.body.alpha_shadow_skip_bits = shadow_bits;
             if let Some(extra) = extra_bits {
                 item.header.alpha_v5_runeword_extra = Some(extra);
                 item.body.v5_runeword_extra = Some(extra);
@@ -505,7 +508,7 @@ impl Item {
         Option<u16>, Option<u16>, Option<u8>,
         Option<String>, Option<u8>, bool,
         Option<u32>, Option<u32>, Option<u32>, Option<u32>,
-        Option<u8>, u8, Option<u8>, Option<u8>, Option<u16>,
+        Option<u8>, u8, Option<u8>, Option<u8>, Option<u16>, Option<u8>
     )> {
         cursor.begin_segment(ItemSegmentType::ExtendedStats);
         let trimmed_code = code.trim();
@@ -535,7 +538,7 @@ impl Item {
                         None, None, None, None, None, [None; 6],
                         None, None, None,
                         None, None, false,
-                        None, None, None, None, None, 0, None, alpha_quality_raw, None
+                        None, None, None, None, None, 0, None, alpha_quality_raw, None, None
                     ));
                 } else {
                     (Some(0u32), None, Some(quality), false, false, false)
@@ -558,7 +561,7 @@ impl Item {
                 false, None, false, None,
                 None, None, None, None, None, [None; 6],
                 None, None, None, None, None, timestamp_flag,
-                None, None, None, None, None, 0, None, alpha_quality_raw, None
+                None, None, None, None, None, 0, None, alpha_quality_raw, None, None
             ));
         }
 
@@ -633,6 +636,16 @@ impl Item {
         if reads_quantity && axiom.reads_quantity() { quantity = Some(cursor.read_bits::<u32>(9)?); }
         if is_socketed_flag { sockets = Some(cursor.read_bits::<u8>(4)? as u8); }
 
+        let mut set_list_val_raw = None;
+        let mut set_list_count = 0;
+        if quality_val == ItemQuality::Set {
+            let val = cursor.read_bits::<u8>(5)?;
+            set_list_val_raw = Some(val);
+            set_list_count = match val {
+                1 => 1, 3 => 2, 7 => 3, 15 => 4, 31 => 5, _ => 0
+            };
+        }
+
         cursor.end_segment();
         Ok((
             item_id, item_level, item_quality,
@@ -642,7 +655,7 @@ impl Item {
             rare_name_1, rare_name_2, rare_affixes,
             unique_id, runeword_id, runeword_level,
             personalized_player_name, tbk_ibk_teleport,
-            timestamp_flag, defense, max_durability, current_durability, quantity, sockets, 0, v5_runeword_extra, alpha_quality_raw, alpha_unique_id_raw
+            timestamp_flag, defense, max_durability, current_durability, quantity, sockets, set_list_count, v5_runeword_extra, alpha_quality_raw, alpha_unique_id_raw, set_list_val_raw
         ))
     }
 }
@@ -657,8 +670,9 @@ fn read_item_stats<R: BitRead>(
     quality: Option<ItemQuality>,
     is_runeword: bool,
     is_v105_shadow: bool,
-) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>)> {
+) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>)> {
     let mut alpha_v5_runeword_extra = None;
+    let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
     let trimmed_code = code.trim();
     let quality_val = quality.unwrap_or(ItemQuality::Normal);
@@ -679,10 +693,10 @@ fn read_item_stats<R: BitRead>(
               for _ in 0..28 {
                   payload.push(cursor.read_bit()?);
               }
-              return Ok((Vec::new(), true, false, None, Some(payload)));
+              return Ok((Vec::new(), true, false, None, Some(payload), None));
           }
           crate::item_trace!("[DEBUG] Skipping properties for Alpha v105 Summary Item '{}'", trimmed_code);
-          return Ok((Vec::new(), true, false, None, None));
+          return Ok((Vec::new(), true, false, None, None, None));
     }
 
     let section_recovery = if let Some((bytes, start)) = ctx {
@@ -693,7 +707,8 @@ fn read_item_stats<R: BitRead>(
     if is_v105_shadow_final {
         // Alpha v105 forensic: Shadow items contain a copy of the shadowed item before their own properties.
         // Bit-level discovery confirms a 47-bit gap between extended header and shadow properties.
-        let _ = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(47))?;
+        let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(47))?;
+        alpha_shadow_skip_bits = Some(skip_bits);
     }
 
     let (props, complete, term) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |_, _, _, _, _| {
@@ -710,7 +725,7 @@ fn read_item_stats<R: BitRead>(
         cursor.end_segment();
     }
     
-    Ok((props, complete, term, alpha_v5_runeword_extra, None))
+    Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits))
 }
 
 fn is_v105_summary_code(code: &str) -> bool {
