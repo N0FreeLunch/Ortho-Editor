@@ -84,14 +84,16 @@ fn main() -> anyhow::Result<()> {
                     "  version=0x{:04X} alpha={} size={} checksum={}",
                     results.header_version, results.alpha_mode, results.file_size_actual, results.checksum_stored
                 ));
-                let prog = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode);
-                let diff_str = match prog.difficulty {
-                    0 => "Normal",
-                    1 => "Nightmare",
-                    2 => "Hell",
-                    _ => "Unknown",
-                };
-                om.println(&format!("  Difficulty: {}", diff_str));
+                let prog_res = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode);
+                if let Ok(prog) = prog_res.value {
+                    let diff_str = match prog.difficulty {
+                        0 => "Normal",
+                        1 => "Nightmare",
+                        2 => "Hell",
+                        _ => "Unknown",
+                    };
+                    om.println(&format!("  Difficulty: {}", diff_str));
+                }
             }
             for issue in &report.issues {
                 om.println(&format!(

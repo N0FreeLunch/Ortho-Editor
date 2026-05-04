@@ -1,3 +1,6 @@
+use crate::domain::item::axiom_meta::{Confidence, Intentionality, ForensicAxiom};
+// Note: impl_forensic_axiom! is available via crate::impl_forensic_axiom!
+
 /// Alpha v105 Fixed Header Offsets and Lengths
 /// 
 /// These constants define the physical layout of the progression data within 
