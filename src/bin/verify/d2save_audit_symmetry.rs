@@ -1,23 +1,27 @@
 use d2r_core::data::quests::V105_QUESTS;
 use d2r_core::data::waypoints::WAYPOINTS;
-use d2r_core::domain::progression::quest::V105_QUEST_NORMAL_START_FILE;
 use std::process;
 
 fn main() {
     println!("--- Alpha v105 Grounding Symmetry Audit ---");
     let mut failures = 0;
 
+    // Legacy grounding anchor for metadata verification.
+    // Discussion 0230 verified that physical truth shifted to 0x78 (448),
+    // but generated metadata in d2r-data still uses the 415 hypothesis.
+    const METADATA_GROUNDING_ANCHOR: usize = 415;
+
     // 1. Quest Audit
     println!("Auditing Alpha v105 Quests...");
     for (i, entry) in V105_QUESTS.iter().enumerate() {
-        if entry.v105_offset < V105_QUEST_NORMAL_START_FILE {
-            println!("  [FAIL] Quest[{}]: {} offset {} is below grounding anchor {}", i, entry.name, entry.v105_offset, V105_QUEST_NORMAL_START_FILE);
+        if entry.v105_offset < METADATA_GROUNDING_ANCHOR {
+            println!("  [FAIL] Quest[{}]: {} offset {} is below grounding anchor {}", i, entry.name, entry.v105_offset, METADATA_GROUNDING_ANCHOR);
             failures += 1;
         } else {
-            let relative = entry.v105_offset - V105_QUEST_NORMAL_START_FILE;
-            if relative % 4 != 0 {
-                // Actually in Alpha v105, they are spaced by 4 bytes (stride 4)
-                println!("  [FAIL] Quest[{}]: {} offset {} is not 4-byte aligned relative to anchor {}", i, entry.name, entry.v105_offset, V105_QUEST_NORMAL_START_FILE);
+            let relative = entry.v105_offset - METADATA_GROUNDING_ANCHOR;
+            if relative % 2 != 0 {
+                // Verified in Discussion 0230: Alpha v105 uses 2-byte stride (u16)
+                println!("  [FAIL] Quest[{}]: {} offset {} is not 2-byte aligned relative to anchor {}", i, entry.name, entry.v105_offset, METADATA_GROUNDING_ANCHOR);
                 failures += 1;
             }
         }

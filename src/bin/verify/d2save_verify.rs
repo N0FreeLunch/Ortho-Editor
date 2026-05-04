@@ -95,6 +95,14 @@ fn main() -> anyhow::Result<()> {
                         _ => "Unknown",
                     };
                     om.println(&format!("  Difficulty: {}", diff_str));
+
+                    let act5_completed = prog.quests.quests()
+                        .iter()
+                        .filter(|q| q.difficulty() == prog.difficulty && q.act() == 5 && q.is_completed())
+                        .count();
+                    if act5_completed > 0 {
+                        om.println(&format!("  Act 5 Quests: {} completed", act5_completed));
+                    }
                 }
 
                 if results.fidelity_score < 1.0 {

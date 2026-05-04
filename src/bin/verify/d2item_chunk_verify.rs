@@ -210,8 +210,11 @@ fn main() -> io::Result<()> {
         println!("Completed Quests:");
         let mut completed_any = false;
         if let Some(ref quests) = save.header.quests {
+            let normal_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE + d2r_core::domain::progression::axiom::V105QuestAxiom::normal_start();
+            let act5_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE + d2r_core::domain::progression::axiom::V105QuestAxiom::act5_start();
+            
             for quest in d2r_core::data::quests::V105_QUESTS {
-                if quests.is_v105_completed_by_name(quest.name) {
+                if quests.is_v105_completed_by_name(quest.name, normal_anchor, act5_anchor) {
                     let diff_str = match quest.difficulty {
                         0 => "Normal",
                         1 => "NM",
