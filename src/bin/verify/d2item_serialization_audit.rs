@@ -39,15 +39,16 @@ fn main() {
             } else {
                 println!("Serialization Audit for: {}", path);
                 println!("{:-<80}", "");
-                println!("{:>5} | {:<10} | {:>8} | {:>8} | {:<5}", "Idx", "Code", "OrigLen", "SerLen", "Match");
-                println!("{:-<80}", "");
+                println!("{:>5} | {:<10} | {:>8} | {:>8} | {:>5} | {:<5}", "Idx", "Code", "OrigLen", "SerLen", "Match", "Fid");
+                println!("{:-<90}", "");
                 
                 for (i, item) in report.items.iter().enumerate() {
-                    println!("{:5} | {:10} | {:8} | {:8} | {:5}",
+                    println!("{:5} | {:10} | {:8} | {:8} | {:5} | {:.2}",
                         i, item.code, item.original_len, item.target_len,
-                        if item.is_match { "OK" } else { "FAIL" }
+                        if item.is_match { "OK" } else { "FAIL" },
+                        item.fidelity_score
                     );
-                    if !item.is_match {
+                    if !item.is_match || item.fidelity_score < 1.0 {
                         if let Some(m_type) = &item.mismatch_type {
                             println!("      [REASON] {}", m_type);
                         }
@@ -57,9 +58,17 @@ fn main() {
                         if let Some(offset) = item.first_mismatch_offset {
                             println!("      [OFFSET] bit {}", offset);
                         }
+                        if item.fidelity_score < 1.0 {
+                            println!("      [FORENSIC RATIONALE]");
+                            for finding in &item.forensic_audit.findings {
+                                if finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
+                                    println!("        - [{:?}] {}", finding.confidence, finding.rationale);
+                                }
+                            }
+                        }
                     }
                 }
-                println!("{:-<80}", "");
+                println!("{:-<90}", "");
                 
                 if report.success {
                     println!("MATCH: 100% fidelity");

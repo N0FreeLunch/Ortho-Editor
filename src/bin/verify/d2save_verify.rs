@@ -84,6 +84,8 @@ fn main() -> anyhow::Result<()> {
                     "  version=0x{:04X} alpha={} size={} checksum={}",
                     results.header_version, results.alpha_mode, results.file_size_actual, results.checksum_stored
                 ));
+                om.println(&format!("  Fidelity Score: {:.1}% ({:?})", results.fidelity_score * 100.0, results.forensic_audit.combined_confidence));
+                
                 let prog_res = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode);
                 if let Ok(prog) = prog_res.value {
                     let diff_str = match prog.difficulty {
@@ -93,6 +95,15 @@ fn main() -> anyhow::Result<()> {
                         _ => "Unknown",
                     };
                     om.println(&format!("  Difficulty: {}", diff_str));
+                }
+
+                if results.fidelity_score < 1.0 {
+                    om.println("  [FORENSIC RATIONALE]");
+                    for finding in &results.forensic_audit.findings {
+                        if finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
+                            om.println(&format!("    - [{:?}] {}", finding.confidence, finding.rationale));
+                        }
+                    }
                 }
             }
             for issue in &report.issues {
