@@ -1,4 +1,5 @@
 use crate::domain::item::quality::ItemQuality;
+use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
 use super::entity::{ALPHA_STAT_MAPS, AlphaStatMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6,6 +7,24 @@ pub struct StatsAxiom {
     pub version: u8,
     pub quality: ItemQuality,
     pub save_is_alpha: bool,
+}
+
+impl ForensicAxiom for StatsAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        if self.save_is_alpha {
+            ForensicMetadata::new(
+                Confidence::StrongPattern,
+                Intentionality::Structural,
+                format!("Alpha v105 Version {} forensic rules (Stat mapping, property rhythm, and byte alignment)", self.version)
+            )
+        } else {
+            ForensicMetadata::new(
+                Confidence::VerifiedTruth,
+                Intentionality::Structural,
+                "Standard Retail item bitstream layout (1.10 - 1.14d)"
+            )
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -347,5 +366,15 @@ mod tests {
         assert_eq!(axiom.calculate_alignment(64, true, "r01"), 88);
         assert_eq!(axiom.calculate_alignment(87, true, "r01"), 88);
         assert_eq!(axiom.calculate_alignment(88, true, "r01"), 88);
+    }
+
+    #[test]
+    fn test_stats_axiom_forensic_metadata() {
+        let retail = StatsAxiom::new(14, ItemQuality::Unique, false);
+        let alpha = StatsAxiom::new(5, ItemQuality::Unique, true);
+
+        assert_eq!(retail.metadata().confidence, Confidence::VerifiedTruth);
+        assert_eq!(alpha.metadata().confidence, Confidence::StrongPattern);
+        assert!(alpha.metadata().rationale.contains("Alpha v105 Version 5"));
     }
 }
