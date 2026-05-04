@@ -134,6 +134,119 @@ macro_rules! impl_forensic_axiom {
     };
 }
 
+/// Cumulative record of forensic findings during a pipeline execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForensicAudit {
+    /// The combined confidence level (minimum of all recorded findings).
+    pub combined_confidence: Confidence,
+    /// Detailed list of all metadata recorded during the process.
+    pub findings: Vec<ForensicMetadata>,
+}
+
+impl Default for ForensicAudit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ForensicAudit {
+    /// Creates a new, empty forensic audit with maximum confidence.
+    pub fn new() -> Self {
+        Self {
+            combined_confidence: Confidence::VerifiedTruth,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Records a new piece of forensic metadata and updates the combined confidence.
+    pub fn record(&mut self, meta: ForensicMetadata) {
+        if meta.confidence < self.combined_confidence {
+            self.combined_confidence = meta.confidence;
+        }
+        self.findings.push(meta);
+    }
+}
+
+/// A wrapper that carries a result along with its forensic audit trail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForensicResult<T> {
+    /// The actual data or an error message.
+    pub value: Result<T, String>,
+    /// The cumulative forensic evidence accumulated so far.
+    pub audit: ForensicAudit,
+}
+
+impl<T> ForensicResult<T> {
+    /// Creates a successful forensic result with the given data and initial metadata.
+    pub fn ok(data: T, meta: ForensicMetadata) -> Self {
+        let mut audit = ForensicAudit::new();
+        audit.record(meta);
+        Self {
+            value: Ok(data),
+            audit,
+        }
+    }
+
+    /// Creates a failed forensic result with the given error and initial metadata.
+    pub fn err(error: impl Into<String>, meta: ForensicMetadata) -> Self {
+        let mut audit = ForensicAudit::new();
+        audit.record(meta);
+        Self {
+            value: Err(error.into()),
+            audit,
+        }
+    }
+
+    /// Transforms the inner value if it is `Ok`, recording new forensic metadata.
+    pub fn map_forensic<U, F>(self, f: F) -> ForensicResult<U>
+    where
+        F: FnOnce(T) -> (U, ForensicMetadata),
+    {
+        match self.value {
+            Ok(data) => {
+                let (new_data, new_meta) = f(data);
+                let mut new_audit = self.audit;
+                new_audit.record(new_meta);
+                ForensicResult {
+                    value: Ok(new_data),
+                    audit: new_audit,
+                }
+            }
+            Err(e) => ForensicResult {
+                value: Err(e),
+                audit: self.audit,
+            },
+        }
+    }
+
+    /// Chains another forensic operation if the current result is `Ok`.
+    pub fn and_then_forensic<U, F>(self, f: F) -> ForensicResult<U>
+    where
+        F: FnOnce(T) -> ForensicResult<U>,
+    {
+        match self.value {
+            Ok(data) => {
+                let next_result = f(data);
+                let mut combined_audit = self.audit;
+                
+                // Merge findings from the next result into our audit
+                for finding in next_result.audit.findings {
+                    combined_audit.record(finding);
+                }
+                
+                ForensicResult {
+                    value: next_result.value,
+                    audit: combined_audit,
+                }
+            }
+            Err(e) => ForensicResult {
+                value: Err(e),
+                audit: self.audit,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +345,59 @@ mod tests {
         assert_eq!(meta.confidence, Confidence::Speculative);
         assert_eq!(meta.intentionality, Intentionality::Structural);
         assert_eq!(meta.rationale, "Part A; Part B");
+    }
+
+    #[test]
+    fn test_forensic_audit_confidence_downgrade() {
+        let mut audit = ForensicAudit::new();
+        assert_eq!(audit.combined_confidence, Confidence::VerifiedTruth);
+
+        audit.record(ForensicMetadata::new(Confidence::StrongPattern, Intentionality::Structural, "Ok"));
+        assert_eq!(audit.combined_confidence, Confidence::StrongPattern);
+
+        audit.record(ForensicMetadata::new(Confidence::Fragile, Intentionality::Artifactual, "Suspicious"));
+        assert_eq!(audit.combined_confidence, Confidence::Fragile);
+
+        audit.record(ForensicMetadata::new(Confidence::VerifiedTruth, Intentionality::Structural, "Perfect"));
+        assert_eq!(audit.combined_confidence, Confidence::Fragile); // Stays at minimum
+    }
+
+    #[test]
+    fn test_forensic_result_pipeline_chaining() {
+        let initial_meta = ForensicMetadata::new(Confidence::VerifiedTruth, Intentionality::Structural, "Start");
+        let result = ForensicResult::ok(10, initial_meta);
+
+        let final_result = result
+            .map_forensic(|val| {
+                (val * 2, ForensicMetadata::new(Confidence::StrongPattern, Intentionality::Structural, "Step 1"))
+            })
+            .and_then_forensic(|val| {
+                let meta = ForensicMetadata::new(Confidence::Fragile, Intentionality::Artifactual, "Step 2");
+                if val > 15 {
+                    ForensicResult::ok(val + 5, meta)
+                } else {
+                    ForensicResult::err("Too small", meta)
+                }
+            });
+
+        assert_eq!(final_result.value, Ok(25));
+        assert_eq!(final_result.audit.combined_confidence, Confidence::Fragile);
+        assert_eq!(final_result.audit.findings.len(), 3);
+        assert_eq!(final_result.audit.findings[0].rationale, "Start");
+        assert_eq!(final_result.audit.findings[1].rationale, "Step 1");
+        assert_eq!(final_result.audit.findings[2].rationale, "Step 2");
+    }
+
+    #[test]
+    fn test_forensic_result_error_propagation() {
+        let meta1 = ForensicMetadata::new(Confidence::VerifiedTruth, Intentionality::Structural, "P1");
+        let meta2 = ForensicMetadata::new(Confidence::Fragile, Intentionality::Artifactual, "P2");
+        
+        let res: ForensicResult<i32> = ForensicResult::err("Initial Error", meta1);
+        let final_res = res.map_forensic(|val| (val + 1, meta2));
+
+        assert_eq!(final_res.value, Err("Initial Error".to_string()));
+        assert_eq!(final_res.audit.combined_confidence, Confidence::VerifiedTruth);
+        assert_eq!(final_res.audit.findings.len(), 1);
     }
 }

@@ -10,4 +10,4 @@ pub use entity::{
 };
 // Removed redundant re-exports: ItemProperty, ItemStats moved to domain::stats
 pub use serialization::{BitEmitter, HuffmanTree};
-pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata};
+pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata, ForensicAudit, ForensicResult};
