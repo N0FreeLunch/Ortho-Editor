@@ -207,6 +207,30 @@ impl ForensicAudit {
         }
         self.findings.push(meta);
     }
+
+    /// Generates a human-readable audit report.
+    pub fn report(&self) -> String {
+        let score = FidelityScore::from_audit(self);
+        let mut report = String::new();
+        
+        report.push_str("[FORENSIC AUDIT REPORT]\n");
+        report.push_str("-----------------------\n");
+        report.push_str(&format!("Fidelity Score: {:.1}%\n", score.value * 100.0));
+        report.push_str(&format!("Overall Status: {:?}\n\n", self.combined_confidence));
+        
+        report.push_str(&format!("Findings ({}):\n", self.findings.len()));
+        for finding in &self.findings {
+            report.push_str(&format!(
+                "- [{:?}] [{:?}] {}\n",
+                finding.confidence,
+                finding.intentionality,
+                finding.rationale
+            ));
+        }
+        report.push_str("-----------------------");
+        
+        report
+    }
 }
 
 /// A wrapper that carries a result along with its forensic audit trail.
@@ -461,5 +485,21 @@ mod tests {
         // Combined min is StrongPattern (0.8). Average is (0.8 + 1.0) / 2 = 0.9.
         // Min(0.8, 0.9) = 0.8.
         assert_eq!(FidelityScore::from_audit(&audit2).value, 0.8);
+    }
+
+    #[test]
+    fn test_forensic_audit_report() {
+        let mut audit = ForensicAudit::new();
+        audit.record(ForensicMetadata::new(Confidence::StrongPattern, Intentionality::Structural, "Logic A confirmed"));
+        audit.record(ForensicMetadata::new(Confidence::Fragile, Intentionality::Artifactual, "Bit pattern B suspicious"));
+        
+        let report = audit.report();
+        
+        assert!(report.contains("[FORENSIC AUDIT REPORT]"));
+        assert!(report.contains("Fidelity Score: 0.0%")); // Because of Fragile
+        assert!(report.contains("Overall Status: Fragile"));
+        assert!(report.contains("Findings (2):"));
+        assert!(report.contains("- [StrongPattern] [Structural] Logic A confirmed"));
+        assert!(report.contains("- [Fragile] [Artifactual] Bit pattern B suspicious"));
     }
 }
