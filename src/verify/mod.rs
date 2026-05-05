@@ -5,6 +5,7 @@ pub mod mutation;
 pub mod sba;
 pub mod save_integrity;
 pub mod symmetry;
+pub mod v2;
 
 pub trait Verifier {
     fn verify(&self, fixture: &[u8], reproduced: &[u8]) -> VerificationReport;

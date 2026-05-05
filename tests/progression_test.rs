@@ -135,7 +135,8 @@ fn test_alpha_v105_progression_mutation_verification() -> std::io::Result<()> {
     // 2. Perform Mutations via Domain Models
     
     // 2a. Waypoint Mutation
-    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0); // Normal
+    let wp_anchor = 589; // 295 + 294
+    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor);
     {
         let name = "Act 1 - Wilderness 2";
         let mut wp = wp_set.find_by_name(name).expect("Should find Cold Plains (Wilderness 2)");
@@ -146,17 +147,19 @@ fn test_alpha_v105_progression_mutation_verification() -> std::io::Result<()> {
         let wp_mut = wp_set.waypoints_mut().iter_mut().find(|w| w.name() == name).unwrap();
         wp_mut.set_active(true);
     }
-    wp_set.sync_to_bytes(&mut wps_section.raw_bytes);
+    wp_set.sync_to_bytes(&mut wps_section.raw_bytes, wp_anchor);
 
     // 2b. Quest Mutation
-    let mut q_set = QuestSet::from_v105_bytes(&quests_section.raw_bytes);
+    let normal_anchor = 415; // 295 + 120
+    let act5_anchor = 439;  // 295 + 144
+    let mut q_set = QuestSet::from_v105_bytes(&quests_section.raw_bytes, normal_anchor, act5_anchor);
     {
         let den = q_set.find_by_name("Den of Evil").expect("Should find Den of Evil");
         assert!(!den.is_completed());
         let q_mut = q_set.quests_mut().iter_mut().find(|q| q.name() == "Den of Evil").unwrap();
         q_mut.set_completed(true);
     }
-    q_set.sync_to_v105_bytes(&mut quests_section.raw_bytes);
+    q_set.sync_to_v105_bytes(&mut quests_section.raw_bytes, normal_anchor, act5_anchor);
 
     // 2c. Expansion (kept as raw for now as no domain model exists)
     expansion.raw_bytes[5] = 0xFF;
@@ -242,24 +245,25 @@ fn test_alpha_v105_act2_transition_integrity() -> std::io::Result<()> {
     // 2. Perform Mutation: Complete Act 1, Unlock Act 2 Town
     
     // 2a. Quest: Sisters to the Slaughter (Normal)
-    let mut q_set = QuestSet::from_v105_bytes(&quests_section.raw_bytes);
+    let mut q_set = QuestSet::from_v105_bytes(&quests_section.raw_bytes, 415, 439);
     {
         let q = q_set.quests_mut().iter_mut()
             .find(|q| q.difficulty() == 0 && q.act() == 1 && q.index() == 5)
             .expect("Should find Sisters to the Slaughter");
         q.set_completed(true);
     }
-    q_set.sync_to_v105_bytes(&mut quests_section.raw_bytes);
+    q_set.sync_to_v105_bytes(&mut quests_section.raw_bytes, 415, 439);
 
     // 2b. Waypoint: Act 2 - Town (Normal)
-    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0);
+    let wp_anchor = 589;
+    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor);
     {
         let wp = wp_set.waypoints_mut().iter_mut()
             .find(|w| w.name() == "Act 2 - Town")
             .expect("Should find Act 2 - Town");
         wp.set_active(true);
     }
-    wp_set.sync_to_bytes(&mut wps_section.raw_bytes);
+    wp_set.sync_to_bytes(&mut wps_section.raw_bytes, wp_anchor);
 
     // 3. Rebuild
     let items = d2r_core::item::Item::read_player_items(&bytes, &huffman, version == 105)?;
@@ -307,15 +311,16 @@ fn test_alpha_v105_waypoint_name_mapping() -> std::io::Result<()> {
     let mut ex = ExpansionSection::from_slice(&[0u8; 80]);
 
     // Act 1 Town (Index 0 in Act 1 Block, ws_bit 0)
-    wps.set_activated_by_name("Act 1 - Town", 0, true);
-    ex.set_activated_by_name("Act 1 - Town", 1, true);
+    let wp_anchor = 589;
+    wps.set_activated_by_name("Act 1 - Town", 0, true, wp_anchor);
+    ex.set_activated_by_name("Act 1 - Town", 0, true); // ExpansionSection uses difficulty as difficulty?
 
     assert_eq!(wps.raw_bytes[10], 0x01);
     assert_eq!(ex.raw_bytes[34], 0x01);
 
     // Act 2 Town (Index 0 in Act 2 Block, ws_bit 9)
-    wps.set_activated_by_name("Act 2 - Town", 0, true);
-    ex.set_activated_by_name("Act 2 - Town", 1, true);
+    wps.set_activated_by_name("Act 2 - Town", 0, true, wp_anchor);
+    ex.set_activated_by_name("Act 2 - Town", 0, true);
 
     assert_eq!(wps.raw_bytes[11], 0x02);
     assert_eq!(ex.raw_bytes[35], 0x02);
