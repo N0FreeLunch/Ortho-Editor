@@ -50,6 +50,38 @@ impl DomainVerifier for ItemVerifier {
                     bit_offset: parsing_error_offset(&e.error),
                 });
             }
+
+            // Slice 7: Additive Item Parity Comparison
+            let original_bits: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
+            let mut emitted_bits = Vec::new();
+            for &byte in &item_bits {
+                for i in 0..8 {
+                    emitted_bits.push((byte >> i) & 1 != 0);
+                }
+            }
+            
+            let mut mismatch = false;
+            if emitted_bits.len() < original_bits.len() {
+                mismatch = true;
+            } else {
+                for i in 0..original_bits.len() {
+                    if emitted_bits[i] != original_bits[i] {
+                        mismatch = true;
+                        break;
+                    }
+                }
+            }
+
+            if mismatch {
+                issues.push(ReportIssue {
+                    kind: "item_parity".to_string(),
+                    message: format!(
+                        "Item parity mismatch ({}): bits do not match source",
+                        item.code.trim()
+                    ),
+                    bit_offset: Some(item.range.start),
+                });
+            }
         }
 
         // 3. JM Markers & Coherence
