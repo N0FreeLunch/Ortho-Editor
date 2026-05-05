@@ -1,7 +1,7 @@
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
-use super::entity::{ALPHA_STAT_MAPS, AlphaStatMap};
+use crate::domain::forensic::registry::{get_registry, MappingInfo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsAxiom {
@@ -79,9 +79,9 @@ impl StatsAxiom {
         if !self.save_is_alpha {
             return raw_id;
         }
-        ALPHA_STAT_MAPS
-            .iter()
-            .find(|m| m.raw_id == raw_id)
+        let reg = get_registry();
+        reg.mappings
+            .get(&raw_id.to_string())
             .map(|m| m.effective_id)
             .unwrap_or(raw_id)
     }
@@ -257,40 +257,39 @@ impl StatsAxiom {
         }
 
         if self.save_is_alpha {
+            let reg = get_registry();
             let trimmed = code.trim();
             let is_potion = trimmed.starts_with('h') || trimmed.starts_with('m') || (self.version == 5 && trimmed.starts_with('7')) || (trimmed.starts_with('r') && trimmed.len() <= 3);
             let is_scroll = trimmed == "tsc" || trimmed == "isc";
 
             if is_compact {
                 // Alpha v105 forensic: Compact items have specific fixed bit-lengths.
-                // These are axiomatic alignments for byte-aligned save files.
-                let min_bits = if is_scroll {
-                    72 // 9 bytes: V105HeaderGapAxiom context
+                let mut min_bits = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(80);
+                
+                if is_scroll {
+                    min_bits = reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(72);
                 } else if trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))) {
-                    88 // 11 bytes: V105NudgeAxiom context
-                } else {
-                    80 // 10 bytes: Standard Alpha compact alignment
-                };
+                    min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
+                }
 
                 if final_len < min_bits {
                     final_len = min_bits;
                 }
             } else if trimmed == "7mgw" && self.version == 5 {
-                // Alpha v105 forensic: 7mgw aligns to 112 bits (14 bytes)
-                if final_len < 112 {
-                    final_len = 112;
+                let min_bits = reg.axioms.get("7mgw_fixed_width").cloned().unwrap_or(112);
+                if final_len < min_bits {
+                    final_len = min_bits;
                 }
             } else if is_potion {
-                // Extended potions
-                if final_len < 80 { final_len = 80; }
+                let min_bits = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(80);
+                if final_len < min_bits { final_len = min_bits; }
             } else if is_scroll {
-                // Extended scrolls
-                if final_len < 72 { final_len = 72; }
+                let min_bits = reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(72);
+                if final_len < min_bits { final_len = min_bits; }
             } else {
-                // Alpha v105 forensic: Non-compact items align to at least 88 bits (11 bytes).
-                // Supported by V105NudgeAxiom and V105ShadowAxiom evidence.
-                if final_len < 88 {
-                    final_len = 88;
+                let min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
+                if final_len < min_bits {
+                    final_len = min_bits;
                 }
             }
 
@@ -299,12 +298,9 @@ impl StatsAxiom {
             }
             
             if self.version == 2 {
-                // Alpha v105 Version 2 forensic: Larzuk whwt (Set/Personalized) 
-                // shows an extra 8-bit buffer after standard alignment.
                 final_len += 8;
             }
         } else if final_len % 8 != 0 {
-            // Retail: Only byte align at the end of the item section
             final_len += 8 - (final_len % 8);
         }
 
@@ -328,34 +324,41 @@ impl StatsAxiom {
         !self.is_alpha()
     }
 
-    pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<&'static AlphaStatMap> {
-
-        ALPHA_STAT_MAPS.iter().find(|m| m.raw_id == raw_id)
+    pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<MappingInfo> {
+        let reg = get_registry();
+        reg.mappings.get(&raw_id.to_string()).cloned()
     }
 
-    pub fn lookup_alpha_map_by_effective(&self, effective_id: u32) -> Option<&'static AlphaStatMap> {
-        ALPHA_STAT_MAPS.iter().find(|m| m.effective_id == effective_id)
+    pub fn lookup_alpha_map_by_effective(&self, effective_id: u32) -> Option<MappingInfo> {
+        let reg = get_registry();
+        reg.mappings.values().find(|m| m.effective_id == effective_id).cloned()
     }
 
     /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
         if self.save_is_alpha {
-            if let Some(map) = self.lookup_alpha_map_by_raw(raw_id) {
-                if let Some(bits) = map.save_bits {
+            let reg = get_registry();
+            let trimmed = self.code.trim();
+
+            // 1. Check item-specific overrides (highest priority)
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(item_map) = overrides.get(trimmed) {
+                    if let Some(&width) = item_map.get(&raw_id.to_string()) {
+                        return width;
+                    }
+                }
+            }
+
+            // 2. Check stat-specific defaults from mappings
+            if let Some(mapping) = self.lookup_alpha_map_by_raw(raw_id) {
+                if let Some(bits) = mapping.save_bits {
                     return bits;
                 }
             }
 
-            // Alpha v105 forensic: Guarded branches for Act 5 reward stats (8, 317, 320).
-            // These large-width stats are axiomatic for specific Act 5 quest reward items.
-            if self.is_personalized && (self.version == 3 || self.version == 4) {
-                let trimmed = self.code.trim();
-                match raw_id {
-                    317 if trimmed == "7pw" => return 544 - 9,  // 535-bit payload
-                    320 if trimmed == "oesw" => return 2880 - 9, // 2871-bit payload
-                    8 if trimmed == "c mt" => return 4400 - 9,  // 4391-bit payload
-                    _ => {}
-                }
+            // 3. Fallback to generic stat widths in registry
+            if let Some(stat_info) = reg.stats.get(&raw_id.to_string()) {
+                return stat_info.width;
             }
         }
         default_width
