@@ -93,7 +93,7 @@ impl StatsAxiom {
                 let is_v105_shadow = self.is_v105_shadow(flags);
                 let is_compact = (flags & (1 << 21)) != 0;
 
-                if is_rw || is_v105_shadow {
+                if is_rw || is_v105_shadow || self.is_personalized {
                     HeaderGeometry {
                         y_bits: 0,
                         page_bits: 0,
@@ -164,7 +164,7 @@ impl StatsAxiom {
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
         if self.save_is_alpha {
             if self.version == 5 {
-                !is_compact && ((flags & (1 << 23)) != 0 || (flags & (1 << 11)) != 0)
+                !is_compact && (flags & (1 << 11)) != 0
             } else {
                 (flags & (1 << 27)) != 0
             }
@@ -217,8 +217,8 @@ impl StatsAxiom {
 
     pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool) -> PropertyRhythm {
         if self.save_is_alpha {
-            if self.is_personalized || self.version == 6 {
-                // Personalized or Version 6 items in Alpha v105 use 9-bit rhythm
+            if self.version == 6 {
+                // Version 6 items in Alpha v105 use 9-bit rhythm
                 return PropertyRhythm {
                     id_bits: 9,
                     value_bits: if _is_compact { None } else { Some(if _is_shadow { 8 } else { 9 }) },
@@ -248,7 +248,7 @@ impl StatsAxiom {
 
 
     /// Determines the final bit alignment for an item based on consumed bits and version.
-    pub fn calculate_alignment(&self, consumed_bits: u64, is_compact: bool, code: &str) -> u64 {
+    pub fn calculate_alignment(&self, consumed_bits: u64, is_compact: bool, code: &str, flags: u32) -> u64 {
         let mut final_len = consumed_bits;
 
         // All versions except version 5 and 7 (Retail and some Alpha variants) 
@@ -300,6 +300,10 @@ impl StatsAxiom {
             
             if self.version == 2 {
                 final_len += 8;
+            }
+
+            if self.version == 5 && (flags & (1 << 11)) != 0 {
+                final_len += 16;
             }
         } else if final_len % 8 != 0 {
             final_len += 8 - (final_len % 8);
@@ -398,19 +402,19 @@ mod tests {
         let axiom = StatsAxiom::new(5, ItemQuality::Normal, true);
         
         // Scroll (tsc) should align to 72 bits
-        assert_eq!(axiom.calculate_alignment(64, true, "tsc"), 72);
-        assert_eq!(axiom.calculate_alignment(71, true, "tsc"), 72);
-        assert_eq!(axiom.calculate_alignment(72, true, "tsc"), 72);
+        assert_eq!(axiom.calculate_alignment(64, true, "tsc", 0), 72);
+        assert_eq!(axiom.calculate_alignment(71, true, "tsc", 0), 72);
+        assert_eq!(axiom.calculate_alignment(72, true, "tsc", 0), 72);
         
         // Potion (hp1) should align to 80 bits
-        assert_eq!(axiom.calculate_alignment(64, true, "hp1"), 80);
-        assert_eq!(axiom.calculate_alignment(79, true, "hp1"), 80);
-        assert_eq!(axiom.calculate_alignment(80, true, "hp1"), 80);
+        assert_eq!(axiom.calculate_alignment(64, true, "hp1", 0), 80);
+        assert_eq!(axiom.calculate_alignment(79, true, "hp1", 0), 80);
+        assert_eq!(axiom.calculate_alignment(80, true, "hp1", 0), 80);
         
         // Rune (r01) should align to 88 bits
-        assert_eq!(axiom.calculate_alignment(64, true, "r01"), 88);
-        assert_eq!(axiom.calculate_alignment(87, true, "r01"), 88);
-        assert_eq!(axiom.calculate_alignment(88, true, "r01"), 88);
+        assert_eq!(axiom.calculate_alignment(64, true, "r01", 0), 88);
+        assert_eq!(axiom.calculate_alignment(87, true, "r01", 0), 88);
+        assert_eq!(axiom.calculate_alignment(88, true, "r01", 0), 88);
     }
 
     #[test]
