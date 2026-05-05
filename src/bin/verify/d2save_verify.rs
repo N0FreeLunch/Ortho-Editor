@@ -115,13 +115,18 @@ fn main() -> anyhow::Result<()> {
 
                 if results.fidelity_score < 1.0 || results.alpha_mode {
                     om.println("  [FORENSIC RATIONALE]");
+                    let mut unique_findings = std::collections::HashSet::new();
                     for finding in &results.forensic_audit.findings {
                         // For Alpha, show everything. For others, show only speculative/fragile.
                         if results.alpha_mode || finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
-                            om.println(&format!("    - [{:?}] [{:?}] {}", finding.confidence, finding.intentionality, finding.rationale));
+                            let line = format!("    - [{:?}] [{:?}] {}", finding.confidence, finding.intentionality, finding.rationale);
+                            if unique_findings.insert(line.clone()) {
+                                om.println(&line);
+                            }
                         }
                     }
                 }
+
             }
             for issue in &report.issues {
                 om.println(&format!(
