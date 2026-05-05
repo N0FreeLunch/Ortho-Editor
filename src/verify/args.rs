@@ -189,8 +189,8 @@ impl ArgParser {
                     return Err(ArgError::Help(self.usage()));
                 } else if long_name == "json" {
                     flags.insert("json".to_string(), true);
-                } else if long_name == "antigravity" {
-                    flags.insert("antigravity".to_string(), true);
+                } else if long_name == "antigravity" || long_name == "token-efficient" {
+                    flags.insert("token-efficient".to_string(), true);
                 } else if long_name == "output" {
                     if let Some(val) = it.next() {
                         values.insert("output".to_string(), vec![val.to_string_lossy().to_string()]);
@@ -227,6 +227,13 @@ impl ArgParser {
                         values.insert("output".to_string(), vec![val.to_string_lossy().to_string()]);
                     } else {
                         return Err(ArgError::Error("Option -o requires 1 value".to_string()));
+                    }
+                } else if short_name == 't' {
+                    // Check if it's -te
+                    if arg_str == "-te" {
+                         flags.insert("token-efficient".to_string(), true);
+                    } else {
+                         return Err(ArgError::Error(format!("Unknown option -{}", short_name)));
                     }
                 } else {
                     return Err(ArgError::Error(format!("Unknown option -{}", short_name)));
@@ -331,7 +338,7 @@ impl ArgParser {
         options_txt.push_str("  -h, --help           Show this help message\n");
         options_txt.push_str("      --json           Output in machine-readable JSON format\n");
         options_txt.push_str("  -o, --output <PATH>  Save execution output to a file\n");
-        options_txt.push_str("      --antigravity    AI mode: save to antigravity/outputs/ and summarize\n");
+        options_txt.push_str("  -te, --token-efficient AI mode: save to antigravity/outputs/ and summarize\n");
 
         usage.push_str(&options_txt);
         usage

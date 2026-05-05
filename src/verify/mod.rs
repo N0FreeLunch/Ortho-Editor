@@ -127,19 +127,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct OutputManager {
     writer: Option<Box<dyn Write>>,
-    is_antigravity: bool,
+    is_token_efficient: bool,
     is_json: bool,
 }
 
 impl OutputManager {
     pub fn new(tool_name: &str, args: &args::ParsedArgs) -> Self {
         let is_json = args.is_json();
-        let is_antigravity = args.is_set("antigravity");
+        let is_token_efficient = args.is_set("token-efficient");
         let output_path = args.get("output");
 
         let mut writer = None;
 
-        if is_antigravity {
+        if is_token_efficient {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -149,7 +149,7 @@ impl OutputManager {
             
             let path = format!("antigravity/outputs/{}_{}.txt", tool_name, timestamp);
             if let Ok(f) = File::create(&path) {
-                println!("[ANTIGRAVITY] Log saved to: {}", path);
+                println!("[TOKEN-EFFICIENT] Log saved to: {}", path);
                 writer = Some(Box::new(f) as Box<dyn Write>);
             }
         } else if let Some(path) = output_path {
@@ -160,7 +160,7 @@ impl OutputManager {
 
         Self {
             writer,
-            is_antigravity,
+            is_token_efficient,
             is_json,
         }
     }
@@ -170,7 +170,7 @@ impl OutputManager {
             let _ = writeln!(w, "{}", text);
         }
         
-        if !self.is_antigravity || self.is_json {
+        if !self.is_token_efficient || self.is_json {
             println!("{}", text);
         }
     }
