@@ -8,6 +8,18 @@ pub struct StatsAxiom {
     pub version: u8,
     pub quality: ItemQuality,
     pub save_is_alpha: bool,
+    pub is_personalized: bool,
+}
+
+impl StatsAxiom {
+    pub fn new(version: u8, quality: ItemQuality, save_is_alpha: bool) -> Self {
+        Self { version, quality, save_is_alpha, is_personalized: false }
+    }
+
+    pub fn with_personalization(mut self, is_personalized: bool) -> Self {
+        self.is_personalized = is_personalized;
+        self
+    }
 }
 
 impl ForensicAxiom for StatsAxiom {
@@ -52,10 +64,6 @@ pub struct PropertyRhythm {
 }
 
 impl StatsAxiom {
-    pub fn new(version: u8, quality: ItemQuality, save_is_alpha: bool) -> Self {
-        Self { version, quality, save_is_alpha }
-    }
-
     pub fn is_alpha(&self) -> bool {
         self.save_is_alpha
     }
@@ -196,28 +204,24 @@ impl StatsAxiom {
     }
 
 
-    pub fn property_rhythm(&self, _is_runeword: bool, is_shadow: bool, is_compact: bool) -> PropertyRhythm {
+    pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool) -> PropertyRhythm {
         if self.save_is_alpha {
-            if self.version == 5 {
-                // Alpha v105 Version 5 items: 7-bit ID, 6-bit Value
+            if self.is_personalized || self.version == 6 {
+                // Personalized or Version 6 items in Alpha v105 use 9-bit rhythm
                 return PropertyRhythm {
-                    id_bits: 7,
-                    value_bits: Some(6),
+                    id_bits: 9,
+                    value_bits: if _is_compact { None } else { Some(if _is_shadow { 8 } else { 9 }) },
                     has_terminal_bit: true,
-                    has_extra_terminal_bit: true,
+                    has_extra_terminal_bit: false,
                 };
             }
-            // All other Alpha versions
+            
+            // All other Alpha items use 7-bit ID, 6-bit Value
             PropertyRhythm {
-                id_bits: 9,
-                value_bits: if is_compact {
-                    None // Use STAT_COSTS (e.g. for quantity)
-                } else {
-                    // For extended items, Alpha often uses a fixed 9-bit width
-                    Some(if is_shadow { 8 } else { 9 })
-                },
+                id_bits: 7,
+                value_bits: Some(6),
                 has_terminal_bit: true,
-                has_extra_terminal_bit: false,
+                has_extra_terminal_bit: true,
             }
         } else {
             // Retail

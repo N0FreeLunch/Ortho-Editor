@@ -54,18 +54,34 @@ impl Item {
             });
         }
 
-        for (idx, &start_offset) in jm_positions.iter().enumerate() {
+        let mut real_jm_positions = Vec::new();
+        for &pos in &jm_positions {
+            if bytes.len() < pos + 4 { continue; }
+            let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+            if count > 100 { continue; } // Unlikely for a single section
+            
+            if count == 0 {
+                real_jm_positions.push(pos);
+            } else {
+                let payload_start = pos + 4;
+                if let Some((mode, loc, _, code, flags, v, _, _, _)) = peek_item_header_at(bytes, (payload_start * 8) as u64, huffman, alpha) {
+                    if is_plausible_item_header(mode, loc, &code, flags, v, alpha) {
+                        real_jm_positions.push(pos);
+                    }
+                }
+            }
+        }
+
+        item_trace!("[DEBUG] Identified {} real JM sections at: {:?}", real_jm_positions.len(), real_jm_positions);
+
+        for (idx, &start_offset) in real_jm_positions.iter().enumerate() {
             let count = u16::from_le_bytes([bytes[start_offset + 2], bytes[start_offset + 3]]);
             let payload_start = start_offset + 4;
-
-            let next_jm = jm_positions.get(idx + 1).cloned().unwrap_or(bytes.len());
-            if next_jm <= payload_start && next_jm != bytes.len() {
-                // Empty section header
-                continue;
-            }
-
+            
+            let next_jm = real_jm_positions.get(idx + 1).cloned().unwrap_or(bytes.len());
             let section_bytes = &bytes[payload_start..next_jm];
-            item_trace!("[DEBUG] Parsing JM section at offset {} with count {}", start_offset, count);
+            
+            item_trace!("[DEBUG] Parsing verified JM section at offset {} with count {}", start_offset, count);
 
             match Self::read_section(section_bytes, count, huffman, alpha) {
                 Ok(mut items) => {
@@ -73,8 +89,6 @@ impl Item {
                 }
                 Err(e) => {
                     item_trace!("[DEBUG] Failed to parse section at offset {}: {:?}", start_offset, e);
-                    // Continue to next section if possible, or return error if critical?
-                    // In Alpha mode, we should be resilient.
                     if !alpha { return Err(e); }
                 }
             }
@@ -91,52 +105,40 @@ impl Item {
 
         while items.len() < top_level_count as usize && bit_pos < section_bits {
             let start = if alpha_mode {
-                if let Some(pos) = find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode) {
-                    pos
-                } else {
-                    item_trace!("[DEBUG] read_section: No more plausible items found at bit_pos {}", bit_pos);
-                    break; 
-                }
+                find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode).unwrap_or(bit_pos)
             } else {
                 bit_pos
             };
 
             if start > bit_pos {
-                let mut gap_reader = IoBitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                if gap_reader.skip(bit_pos as u32).is_ok() {
+                let mut bit_reader = IoBitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                if bit_reader.skip(bit_pos as u32).is_ok() {
                     for _ in 0..(start - bit_pos) {
-                        if let Ok(b) = gap_reader.read_bit() {
+                        if let Ok(b) = bit_reader.read_bit() {
                             pending_gap_bits.push(b);
                         }
                     }
                 }
             }
 
-            item_trace!("[DEBUG] read_section: Found item candidate at bit {}", start);
-            
-            // Alpha v105 Forensic: Use Lookahead to set a strict bit limit for the item.
-            let next_item_start = if alpha_mode {
-                section_bits // Disable lookahead for Alpha to avoid ghost items in flags
-            } else {
-                section_bits
-            };
-            let strict_limit = next_item_start - start;
-            match parse_item_at_with_limit(section_bytes, start, huffman, items.len(), alpha_mode, Some(strict_limit)) {
+            match parse_item_at_with_limit(section_bytes, start, huffman, items.len(), alpha_mode, Some(section_bits - start)) {
                 Ok((item, consumed_bits)) => {
-                    // Use axiom to determine final alignment
-                    let axiom = StatsAxiom::new(item.version, item.quality.unwrap_or(ItemQuality::Normal), alpha_mode);
+                    let axiom = StatsAxiom::new(item.version, item.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+                        .with_personalization(item.is_personalized);
                     let final_consumed = axiom.calculate_alignment(consumed_bits, item.is_compact, &item.code);
 
                     let end = start + final_consumed;
                     let mut final_item = item;
                     final_item.range.start = start;
                     final_item.range.end = end;
-                    final_item.expected_start_bit = start;
-                    final_item.total_bits = final_consumed;
-                    final_item.gap_bits = pending_gap_bits;
+                    
+                    let mut gap_recorded = Vec::new();
+                    for &b in &pending_gap_bits {
+                        gap_recorded.push(b);
+                    }
+                    final_item.gap_bits = gap_recorded;
                     pending_gap_bits = Vec::new();
 
-                    // Capture EXACT bits including padding for bit-perfect roundtrip
                     let mut actual_bits = Vec::new();
                     let mut bit_reader = IoBitReader::endian(Cursor::new(section_bytes), LittleEndian);
                     if bit_reader.skip(start as u32).is_ok() {
@@ -151,52 +153,22 @@ impl Item {
                         }
                     }
                     final_item.bits = actual_bits;
-
-                    item_trace!("[DEBUG] read_section: Item {} ({}) consumed {} bits", items.len(), final_item.code.trim(), final_consumed);
-
-
                     
                     bit_pos = end;
                     items.push(final_item);
                 }
                 Err(e) => {
-                    item_trace!("[DEBUG] read_section: Failed to parse item at bit {}: {:?}", start, e);
                     if alpha_mode {
-                        if let Some(next_real_start) = find_next_item_match(section_bytes, start + 8, huffman, alpha_mode) {
-                            item_trace!("[DEBUG] Alpha Rescue (Error): Skipping to next item at bit {}", next_real_start);
-                            
-                            let mut gap_reader = IoBitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                            if gap_reader.skip(start as u32).is_ok() {
-                                for _ in 0..(next_real_start - start) {
-                                    if let Ok(b) = gap_reader.read_bit() {
-                                        pending_gap_bits.push(b);
-                                    }
-                                }
-                            }
-
+                        if let Some(next_real_start) = find_next_item_match(section_bytes, start + 1, huffman, alpha_mode) {
                             bit_pos = next_real_start;
                             continue;
                         }
                     }
-                    
                     if let ParsingError::Io(ref s) = e.error {
                         if s.contains("Bit limit exceeded") || s.contains("unexpected end of file") { break; }
                     }
-                    
-                    if alpha_mode { 
-                        let skip_bits = 8;
-                        let mut gap_reader = IoBitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                        if gap_reader.skip(start as u32).is_ok() {
-                            for _ in 0..skip_bits {
-                                if let Ok(b) = gap_reader.read_bit() {
-                                    pending_gap_bits.push(b);
-                                }
-                            }
-                        }
-                        bit_pos = start + skip_bits; 
-                    } else { 
-                        return Err(e); 
-                    }
+                    if !alpha_mode { return Err(e); }
+                    bit_pos = start + 8;
                 }
             }
         }
@@ -240,9 +212,7 @@ impl Item {
         
         let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
         let is_compact = axiom.is_compact(flags);
-        if alpha_mode {
-            // println!("[DEBUG] Header flags=0x{:08X} is_compact={} bit={}", flags, is_compact, cursor.pos() - 32);
-        }
+        
         let mut y = 0;
         let mut page = 0;
         let mut header_socket_hint = 0;
@@ -272,20 +242,17 @@ impl Item {
                     alpha_header_gap = Some(cursor.read_bits::<u8>(8)? as u8);
                 }
             } else {
-                // Version 1
                 y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
                 page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
                 header_socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
                 alpha_header_gap = Some(cursor.read_bits::<u8>(8)? as u8);
             }
-        }
-
- else if !geometry.skip_geometry {
+        } else if !geometry.skip_geometry {
             y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
             page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
             header_socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
         }
-        cursor.end_segment(); // End Header
+        cursor.end_segment();
 
         let is_ear = (flags & (1 << 24)) != 0;
         let (code, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
@@ -293,9 +260,7 @@ impl Item {
             let class = Some(cursor.read_bits::<u8>(3)? as u8);
             let level = Some(cursor.read_bits::<u8>(7)? as u8);
             let name = Some(read_player_name(cursor, alpha_mode && version == 5)?);
-            if alpha_mode && version == 5 {
-                cursor.byte_align()?;
-            }
+            if alpha_mode && version == 5 { cursor.byte_align()?; }
             cursor.end_segment();
             (String::new(), None, class, level, name)
         } else {
@@ -312,13 +277,10 @@ impl Item {
             (code, nudge, None, None, None)
         };
 
-        let is_frag = axiom.is_fragment(flags);
-
         let stats = if !is_compact {
             let socket_flag = axiom.is_socketed(flags, is_compact);
             let runeword_flag = axiom.is_runeword(flags);
-
-            Self::read_extended_stats(cursor, &code, is_compact, socket_flag, runeword_flag, axiom.is_personalized(flags), version, alpha_mode, is_frag, &axiom)?
+            Self::read_extended_stats(cursor, &code, is_compact, socket_flag, runeword_flag, axiom.is_personalized(flags), version, alpha_mode, axiom.is_fragment(flags), &axiom)?
         } else {
             (None, None, None, false, None, false, None, None, None, None, None, None, [None; 6], None, None, None, None, None, false, None, None, None, None, None, 0, None, None, None, None)
         };
@@ -326,11 +288,7 @@ impl Item {
         let mut item = Item {
             body: ItemBody {
                 code: code.clone(),
-                x,
-                y,
-                page,
-                location,
-                mode,
+                x, y, page, location, mode,
                 defense: stats.19,
                 max_durability: stats.20,
                 current_durability: stats.21,
@@ -343,68 +301,32 @@ impl Item {
                 alpha_shadow_skip_bits: None,
                 alpha_alignment_padding: Vec::new(),
             },
-            stats: ItemStats {
-                properties: Vec::new(),
-                set_attributes: Vec::new(),
-                runeword_attributes: Vec::new(),
-            },
+            stats: ItemStats { properties: Vec::new(), set_attributes: Vec::new(), runeword_attributes: Vec::new() },
             bits: Vec::new(),
             code: code.clone(),
-            flags,
-            version,
-            is_ear,
-            ear_class,
-            ear_level,
-            ear_player_name,
+            flags, version, is_ear, ear_class, ear_level, ear_player_name,
             personalized_player_name: stats.16,
-            mode,
-            x,
-            y,
-            page,
-            location,
-            header_socket_hint,
-            has_multiple_graphics: stats.3,
-            multi_graphics_bits: stats.4,
-            has_class_specific_data: stats.5,
-            class_specific_bits: stats.6,
-            id: stats.0,
-            level: stats.1,
-            quality: stats.2,
-            low_high_graphic_bits: stats.7,
+            mode, x, y, page, location, header_socket_hint,
+            has_multiple_graphics: stats.3, multi_graphics_bits: stats.4,
+            has_class_specific_data: stats.5, class_specific_bits: stats.6,
+            id: stats.0, level: stats.1, quality: stats.2, low_high_graphic_bits: stats.7,
             is_compact: axiom.is_compact(flags),
             is_socketed: axiom.is_socketed(flags, is_compact),
             is_identified: (flags & (1 << 4)) != 0,
             is_personalized: axiom.is_personalized(flags),
             is_runeword: axiom.is_runeword(flags),
             is_ethereal: axiom.is_ethereal(flags),
-            magic_prefix: stats.8,
-            magic_suffix: stats.9,
-            rare_name_1: stats.10,
-            rare_name_2: stats.11,
-            rare_affixes: stats.12,
-            unique_id: stats.13,
-            alpha_unique_id_raw: stats.27,
-            runeword_id: stats.14,
-            runeword_level: stats.15,
-            properties: Vec::new(),
-            set_attributes: Vec::new(),
-            runeword_attributes: Vec::new(),
-            num_socketed_items: 0,
-            socketed_items: Vec::new(),
+            magic_prefix: stats.8, magic_suffix: stats.9,
+            rare_name_1: stats.10, rare_name_2: stats.11, rare_affixes: stats.12,
+            unique_id: stats.13, alpha_unique_id_raw: stats.27, runeword_id: stats.14, runeword_level: stats.15,
+            properties: Vec::new(), set_attributes: Vec::new(), runeword_attributes: Vec::new(),
+            num_socketed_items: 0, socketed_items: Vec::new(),
             timestamp_flag: stats.18,
             properties_complete: false,
             terminator_bit: false,
             header: ItemHeader {
-                flags,
-                version,
-                mode,
-                location,
-                x,
-                y,
-                page,
-                socket_hint: header_socket_hint,
-                id: stats.0,
-                quality: stats.2,
+                flags, version, mode, location, x, y, page, socket_hint: header_socket_hint,
+                id: stats.0, quality: stats.2,
                 is_compact: axiom.is_compact(flags),
                 is_identified: axiom.is_identified(flags),
                 is_socketed: axiom.is_socketed(flags, is_compact),
@@ -432,21 +354,14 @@ impl Item {
             forensic_audit: ForensicAudit::new(),
         };
 
-        if item.body.alpha_nudge.is_some() {
-            item.forensic_audit.record(V105NudgeAxiom.metadata());
-        }
-
-        if item.body.alpha_header_gap.is_some() {
-            item.forensic_audit.record(V105HeaderGapAxiom.metadata());
-        }
-
-        if item.body.alpha_shadow_skip_bits.is_some() {
-            item.forensic_audit.record(V105ShadowAxiom.metadata());
-        }
+        if item.body.alpha_nudge.is_some() { item.forensic_audit.record(V105NudgeAxiom.metadata()); }
+        if item.body.alpha_header_gap.is_some() { item.forensic_audit.record(V105HeaderGapAxiom.metadata()); }
+        if item.body.alpha_shadow_skip_bits.is_some() { item.forensic_audit.record(V105ShadowAxiom.metadata()); }
 
         if !axiom.is_compact(item.flags) {
             let is_v105_shadow = axiom.is_v105_shadow(item.flags);
-            let (props, complete, term, extra_bits, reserved_7mgw, shadow_bits) = read_item_stats(cursor, &item.code, item.version, ctx, huff, alpha_mode, item.quality, item.is_runeword, is_v105_shadow)?;
+            let axiom = axiom.with_personalization(item.is_personalized);
+            let (props, complete, term, extra_bits, reserved_7mgw, shadow_bits) = read_item_stats(cursor, &item.code, item.version, ctx, huff, alpha_mode, item.quality, item.is_runeword, is_v105_shadow, item.is_personalized)?;
             item.properties = props.clone();
             item.stats.properties = props;
             item.properties_complete = complete;
@@ -456,21 +371,20 @@ impl Item {
                 item.header.alpha_v5_runeword_extra = Some(extra);
                 item.body.v5_runeword_extra = Some(extra);
             }
-            if let Some(res) = reserved_7mgw {
-                item.body.v105_7mgw_payload = Some(res);
-            }
+            if let Some(res) = reserved_7mgw { item.body.v105_7mgw_payload = Some(res); }
+            
+            // Recalculate consumed bits if needed? No, cursor moved.
         }
 
-
+        let axiom = StatsAxiom::new(version, item.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+            .with_personalization(item.is_personalized);
         let consumed_bits = cursor.pos() - start_bit;
         let final_consumed = axiom.calculate_alignment(consumed_bits, is_compact, &item.code);
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;
             let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
                 let mut bits = Vec::new();
-                for _ in 0..padding_count {
-                    bits.push(c.read_bit()?);
-                }
+                for _ in 0..padding_count { bits.push(c.read_bit()?); }
                 Ok(bits)
             })?;
             item.body.alpha_alignment_padding = padding;
@@ -490,7 +404,7 @@ impl Item {
             .cloned()
             .collect();
 
-        cursor.end_segment(); // End Root
+        cursor.end_segment();
         Ok(item)
     }
 
@@ -525,32 +439,25 @@ impl Item {
 
         let (item_id, item_level, item_quality, has_multiple_graphics, has_class_specific_data, timestamp_flag) = if axiom.is_alpha() {
             if !is_compact {
-                // Alpha v105: ID and Level are omitted, but Quality (3 bits) might be present.
                 let quality_raw = cursor.read_bits::<u8>(3)?;
                 let quality = ItemQuality::from(quality_raw);
                 alpha_quality_raw = Some(quality_raw);
                 if version == 5 && (is_runeword || is_fragment) {
-                    // Alpha v105 Version 5 forensic: 2 extra bits before timestamp/sockets
-                    // Found in both runeword and shadow items.
                     v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);
                     (Some(0u32), None, Some(quality), false, false, false)
                 } else if version == 5 && is_v105_summary_code(trimmed_code) {
-                    // Alpha v105 Version 5 summary items early exit after quality.
                     cursor.end_segment();
                     return Ok((
                         Some(0u32), None, Some(quality),
                         false, None, false, None,
                         None, None, None, None, None, [None; 6],
-                        None, None, None,
-                        None, None, false,
+                        None, None, None, None, None, false,
                         None, None, None, None, None, 0, None, alpha_quality_raw, None, None
                     ));
                 } else {
                     (Some(0u32), None, Some(quality), false, false, false)
                 }
-            } else {
-                (Some(0u32), None, None, false, false, false)
-            }
+            } else { (Some(0u32), None, None, false, false, false) }
         } else {
             let id = cursor.read_bits::<u32>(32)?;
             let level = cursor.read_bits::<u8>(7)?;
@@ -594,9 +501,7 @@ impl Item {
             }
             ItemQuality::Set | ItemQuality::Unique => { 
                 let uid = cursor.read_bits::<u16>(12)? as u16;
-                if alpha_mode {
-                    alpha_unique_id_raw = Some(uid);
-                }
+                if alpha_mode { alpha_unique_id_raw = Some(uid); }
                 unique_id = Some(uid); 
             }
             _ => {}
@@ -604,16 +509,13 @@ impl Item {
 
         let (mut runeword_id, mut runeword_level) = (None, None);
         if is_runeword && !is_fragment && version != 5 {
-            // Alpha v105: Runeword ID and Level are not in the extended header.
             runeword_id = Some(cursor.read_bits::<u16>(12)? as u16);
             runeword_level = Some(cursor.read_bits::<u8>(4)? as u8);
         }
 
         let mut personalized_player_name = None;
         if is_personalized { 
-            if alpha_mode && (version == 5 || version == 0 || version == 1) {
-                cursor.byte_align()?;
-            }
+            if alpha_mode && (version == 5 || version == 0 || version == 1) { cursor.byte_align()?; }
             personalized_player_name = Some(read_player_name(cursor, alpha_mode && (version == 5 || version == 0 || version == 1))?); 
         }
 
@@ -646,9 +548,7 @@ impl Item {
         if quality_val == ItemQuality::Set {
             let val = cursor.read_bits::<u8>(5)?;
             set_list_val_raw = Some(val);
-            set_list_count = match val {
-                1 => 1, 3 => 2, 7 => 3, 15 => 4, 31 => 5, _ => 0
-            };
+            set_list_count = match val { 1 => 1, 3 => 2, 7 => 3, 15 => 4, 31 => 5, _ => 0 };
         }
 
         cursor.end_segment();
@@ -675,13 +575,15 @@ fn read_item_stats<R: BitRead>(
     quality: Option<ItemQuality>,
     is_runeword: bool,
     is_v105_shadow: bool,
+    is_personalized: bool,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>)> {
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
     let trimmed_code = code.trim();
     let quality_val = quality.unwrap_or(ItemQuality::Normal);
-    let axiom = StatsAxiom::new(version, quality_val, alpha_mode);
+    let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
+        .with_personalization(is_personalized);
     let is_alpha = axiom.is_alpha();
 
     crate::item_trace!("[DEBUG] read_item_stats for '{}', version={}, is_runeword={}, quality={:?}, is_alpha={}", trimmed_code, version, is_runeword, quality, is_alpha);
@@ -695,14 +597,16 @@ fn read_item_stats<R: BitRead>(
         return Ok((Vec::new(), true, false, None, None, None));
     }
 
+    if is_alpha && version == 4 && !is_personalized {
+        crate::item_trace!("[DEBUG] Skipping properties for non-personalized Alpha v104 Item '{}'", trimmed_code);
+        return Ok((Vec::new(), true, false, None, None, None));
+    }
+
     if is_alpha && version == 5 && !is_v105_shadow_final && 
        (is_potion || is_scroll || quality_val < ItemQuality::Magic) {
           if trimmed_code == "7mgw" {
-              // Alpha v105 forensic: 7mgw contains a special 28-bit payload.
               let mut payload = Vec::new();
-              for _ in 0..28 {
-                  payload.push(cursor.read_bit()?);
-              }
+              for _ in 0..28 { payload.push(cursor.read_bit()?); }
               return Ok((Vec::new(), true, false, None, Some(payload), None));
           }
           crate::item_trace!("[DEBUG] Skipping properties for Alpha v105 Summary Item '{}'", trimmed_code);
@@ -715,14 +619,11 @@ fn read_item_stats<R: BitRead>(
         PropertyReaderContext { bytes: &[], item_start_bit: 0 }
     };
     if is_v105_shadow_final {
-        // Alpha v105 forensic: Shadow items contain a copy of the shadowed item before their own properties.
-        // Bit-level discovery confirms a 47-bit gap for Version 5 and a 24-bit gap for Version 2.
         let skip_bits_count = if version == 5 { 47 } else { 24 };
         let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);
     }
     let (props, complete, term) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |_, _, _, _, _| {
-        // Return a dummy item or minimal info to avoid recursion
         Ok((Item::default(), 0))
     })?;
     
@@ -739,29 +640,7 @@ fn read_item_stats<R: BitRead>(
 }
 
 fn is_v105_summary_code(code: &str) -> bool {
-    matches!(
-        code,
-        "hp1"
-            | "hp2"
-            | "hp3"
-            | "hp4"
-            | "hp5"
-            | "mp1"
-            | "mp2"
-            | "mp3"
-            | "mp4"
-            | "mp5"
-            | "rvl"
-            | "rvs"
-            | "isc"
-            | "tsc"
-            | "w8cs"
-            | "w88w"
-            | "us g"
-            | "xrs"
-            | "6cs"
-            | "7mgw"
-    )
+    matches!(code, "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|"w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw")
 }
 
 fn read_player_name<R: BitRead>(cursor: &mut BitCursor<R>, alpha_v5: bool) -> ParsingResult<String> {

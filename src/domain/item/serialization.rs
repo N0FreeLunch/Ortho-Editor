@@ -10,11 +10,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
     let limit = (bytes.len() * 8) as u64;
     let mut probe = pos;
     while probe < limit {
-        // Alpha v105 items are strictly byte-aligned.
-        if alpha && probe % 8 != 0 {
-            probe += 1;
-            continue;
-        }
+        // Alpha v105 items are often byte-aligned, but can be shifted.
         if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                 return Some(probe);
@@ -30,18 +26,20 @@ pub fn is_plausible_item_header(
     location: u8,
     code: &str,
     _flags: u32,
-    _version: u8,
+    version: u8,
     alpha_mode: bool,
 ) -> bool {
     if code.len() < 3 { return false; }
     if !code.chars().all(|c| c.is_alphanumeric() || c == ' ') { return false; }
     if alpha_mode {
-        // Alpha v105 codes are usually 4 chars (e.g. '7pww', 'hp1 ', '1pww').
         if code.len() != 4 { return false; }
         if code.trim().is_empty() { return false; }
-        
+        if version > 7 { return false; }
+        if mode > 15 || location > 15 { return false; }
+    } else {
+        if version > 2 { return false; }
         if mode > 6 || location > 15 { return false; }
-    } else if mode > 6 || location > 15 { return false; }
+    }
     true
 }
 
