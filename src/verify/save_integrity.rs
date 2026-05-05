@@ -4,6 +4,7 @@ use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
 use crate::item::{HuffmanTree, Item, ParsingError};
 use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save};
 use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
+use crate::verify::v2::{DomainVerifier, header::HeaderVerifier, progression::ProgressionVerifier};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,6 +28,10 @@ pub struct D2SaveVerifyPayload {
 pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPayload>, bool) {
     let mut issues = Vec::new();
     let mut fail = false;
+
+    // Modular V2 Verifiers
+    let header_verifier = HeaderVerifier;
+    let prog_verifier = ProgressionVerifier;
 
     let save = match Save::from_bytes(bytes) {
         Ok(s) => s,
@@ -62,9 +67,20 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         }
     };
 
-    let huffman = HuffmanTree::new();
     let alpha_mode = save.header.version == 105;
+    let huffman = HuffmanTree::new();
 
+    // 1. Header V2 Integration
+    let header_report = header_verifier.verify(bytes, alpha_mode);
+    for issue in header_report.issues {
+        // Maintain legacy fail rules
+        if issue.kind == "header_parse" || issue.kind == "file_size" || issue.kind == "checksum" {
+            fail = true;
+        }
+        issues.push(issue);
+    }
+
+    // 2. Structural Checks (Alpha v105 specific, kept for Slice 4 stability)
     if alpha_mode {
         if let Ok(map) = map_core_sections(bytes) {
             for (name, found, expected) in [
@@ -102,6 +118,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         }
     }
 
+    // 3. Item Parsing and Round-trip
     let items = match Item::read_player_items(bytes, &huffman, alpha_mode) {
         Ok(items) => items,
         Err(err) => {
@@ -138,49 +155,16 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         }
     }
 
-    let header_size = save.header.file_size as usize;
-    let actual_size = bytes.len();
-    if header_size != actual_size {
-        issues.push(ReportIssue {
-            kind: "file_size".to_string(),
-            message: format!(
-                "File size header: {} bytes, actual: {} bytes",
-                header_size, actual_size
-            ),
-            bit_offset: None,
-        });
-        fail = true;
-    }
-
-    let stored_checksum = save.header.checksum;
-    let mut calculated_checksum_opt = None;
-    match recalculate_checksum(bytes) {
-        Ok(calculated_checksum) => {
-            calculated_checksum_opt = Some(calculated_checksum);
-            if stored_checksum != calculated_checksum {
-                issues.push(ReportIssue {
-                    kind: if alpha_mode { "checksum_info".to_string() } else { "checksum".to_string() },
-                    message: format!(
-                        "stored=0x{:08X}, calculated=0x{:08X}",
-                        stored_checksum, calculated_checksum
-                    ),
-                    bit_offset: None,
-                });
-                if !alpha_mode {
-                    fail = true;
-                }
-            }
-        }
-        Err(err) => {
-            issues.push(ReportIssue {
-                kind: "checksum".to_string(),
-                message: format!("recalculation error: {}", err),
-                bit_offset: None,
-            });
+    // 4. Progression V2 Integration
+    let prog_report = prog_verifier.verify(bytes, alpha_mode);
+    for issue in prog_report.issues {
+        if issue.kind == "progression_parse" {
             fail = true;
         }
+        issues.push(issue);
     }
 
+    // 5. JM Coherence (Item Domain Bridge)
     let jm_markers = find_jm_markers(bytes);
     if jm_markers.is_empty() {
         issues.push(ReportIssue {
@@ -204,20 +188,21 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         }
     }
 
-    let prog_res = crate::domain::progression::Progression::from_bytes(bytes, alpha_mode);
-    let mut forensic_audit = prog_res.audit;
-    
-    // Aggregate audits from all items
+    // 6. Forensic Audit Aggregation
+    let mut forensic_audit = prog_report.audit;
     for item in &items {
         forensic_audit.extend(item.forensic_audit.clone());
     }
 
     let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
-
     let hints = synthesize_hints(&issues);
     let issue_count = issues.len();
     let status = if fail { ReportStatus::Fail } else { ReportStatus::Ok };
     let version = format!("0x{:04X}", save.header.version);
+    
+    let stored_checksum = save.header.checksum;
+    let calculated_checksum_opt = recalculate_checksum(bytes).ok();
+
     let report = Report::<D2SaveVerifyPayload>::new(
         ReportMetadata::new("d2save_verify", path, &version),
         status,
@@ -227,9 +212,9 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     .with_results(D2SaveVerifyPayload {
         header_version: save.header.version,
         alpha_mode,
-        file_size_header: header_size,
-        file_size_actual: actual_size,
-        file_size_delta: actual_size as i64 - header_size as i64,
+        file_size_header: save.header.file_size as usize,
+        file_size_actual: bytes.len(),
+        file_size_delta: bytes.len() as i64 - save.header.file_size as i64,
         checksum_stored: format!("0x{:08X}", stored_checksum),
         checksum_calculated: calculated_checksum_opt.map(|c| format!("0x{:08X}", c)),
         jm_marker_count: jm_markers.len(),

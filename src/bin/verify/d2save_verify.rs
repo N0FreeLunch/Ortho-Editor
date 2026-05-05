@@ -100,41 +100,14 @@ fn main() -> anyhow::Result<()> {
 
                 om.println(&format!("  Fidelity Score: {:.1}% ({:?})", results.fidelity_score * 100.0, results.forensic_audit.combined_confidence));
                 
-                let prog_res = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode);
-                if let Ok(prog) = prog_res.value {
-                    let diff_str = match prog.difficulty {
+                if let Ok(prog_res) = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode).value {
+                    let diff_str = match prog_res.difficulty {
                         0 => "Normal",
                         1 => "Nightmare",
                         2 => "Hell",
                         _ => "Unknown",
                     };
                     om.println(&format!("  Difficulty: {}", diff_str));
-
-                    let act5_completed = prog.quests.quests()
-                        .iter()
-                        .filter(|q| q.difficulty() == prog.difficulty && q.act() == 5 && q.is_completed())
-                        .count();
-                    if act5_completed > 0 {
-                        om.println(&format!("  Act 5 Quests: {} completed", act5_completed));
-                    }
-
-                    let activated_wps = prog.waypoints.waypoints()
-                        .iter()
-                        .filter(|w| w.is_active())
-                        .count();
-                    if activated_wps > 0 {
-                        om.println(&format!("  Waypoints: {} activated", activated_wps));
-                    }
-
-                    // Slice 3: Use ProgressionVerifier to get semantic lines
-                    use d2r_core::verify::v2::DomainVerifier;
-                    let prog_verifier = d2r_core::verify::v2::progression::ProgressionVerifier;
-                    let prog_report = prog_verifier.verify(&bytes, results.alpha_mode);
-                    for issue in prog_report.issues {
-                        if issue.kind == "progression_semantic" {
-                            om.println(&format!("    - {}", issue.message));
-                        }
-                    }
                 }
 
                 if results.fidelity_score < 1.0 || results.alpha_mode {
