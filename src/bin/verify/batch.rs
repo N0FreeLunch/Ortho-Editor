@@ -24,6 +24,8 @@ struct BatchEntry {
     symmetry_ok: bool,
     baseline_match: Option<bool>,
     baseline_mismatch_count: usize,
+    shadow_match: Option<bool>,
+    shadow_mismatch_count: usize,
     failure_category: Option<FailureCategory>,
     integrity_issues: usize,
     error: Option<String>,
@@ -89,6 +91,7 @@ fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_batch");
     parser.add_spec(ArgSpec::option("dir", None, Some("dir"), "Directory that contains .d2s files"));
     parser.add_spec(ArgSpec::option("report", None, Some("report"), "Output Markdown report file"));
+    parser.add_spec(ArgSpec::flag("refexp", None, Some("refexp"), "Use experimental next-gen engine and show shadow comparison"));
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -124,6 +127,8 @@ fn main() -> anyhow::Result<()> {
                     symmetry_ok: false,
                     baseline_match: None,
                     baseline_mismatch_count: 0,
+                    shadow_match: None,
+                    shadow_mismatch_count: 0,
                     failure_category: Some(FailureCategory::ToolError),
                     integrity_issues: 0,
                     error: Some(format!("Failed to read file: {}", e)),
@@ -150,6 +155,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        // Phase 4: Shadow Audit
+        let mut shadow_match = None;
+        let mut shadow_mismatch_count = 0;
+        if parsed.is_set("refexp") {
+            let shadow = d2r_core::verify::run_shadow_audit(&file_name, &bytes);
+            shadow_match = Some(shadow.is_match);
+            shadow_mismatch_count = shadow.mismatch_count;
+        }
+
         let mut failure_category = None;
         let mut symmetry_ok = false;
         let mut error = None;
@@ -166,6 +180,8 @@ fn main() -> anyhow::Result<()> {
                     }
                 } else if baseline_match == Some(false) {
                     failure_category = Some(FailureCategory::Baseline);
+                } else if shadow_match == Some(false) {
+                    failure_category = Some(FailureCategory::ShadowMismatch);
                 }
             }
             Err(e) => {
@@ -180,6 +196,8 @@ fn main() -> anyhow::Result<()> {
             symmetry_ok,
             baseline_match,
             baseline_mismatch_count,
+            shadow_match,
+            shadow_mismatch_count,
             failure_category,
             integrity_issues: integrity_report.issues.len(),
             error,
@@ -215,8 +233,8 @@ fn generate_markdown_report(report: &BatchReport, path: &str) -> anyhow::Result<
     md.push_str(&format!("- **Total Mismatch Rows:** {}\n\n", report.mismatch_rows.len()));
 
     md.push_str("## File Integrity Summary\n\n");
-    md.push_str("| File | Integrity | Symmetry | Baseline | Bits | Note |\n");
-    md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
+    md.push_str("| File | Integrity | Symmetry | Baseline | Shadow | Bits | Note |\n");
+    md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
 
     for entry in &report.entries {
         let int_status = if entry.integrity_ok { "✅ OK" } else { "❌ FAIL" };
@@ -226,10 +244,25 @@ fn generate_markdown_report(report: &BatchReport, path: &str) -> anyhow::Result<
             Some(false) => "❌ FAIL",
             None => "-",
         };
-        let bits = if entry.baseline_match.is_none() { "-".to_string() } else { entry.baseline_mismatch_count.to_string() };
-        let note = if entry.symmetry_ok && entry.baseline_match == Some(false) { "⚠️ **Semantic Shift Risk**" } else { "" };
+        let shadow_status = match entry.shadow_match {
+            Some(true) => "✅ OK",
+            Some(false) => "❌ FAIL",
+            None => "-",
+        };
+        let bits = if entry.baseline_match.is_none() && entry.shadow_match.is_none() { 
+            "-".to_string() 
+        } else { 
+            format!("{}/{}", entry.baseline_mismatch_count, entry.shadow_mismatch_count)
+        };
+        let note = if entry.symmetry_ok && entry.baseline_match == Some(false) { 
+            "⚠️ **Semantic Shift Risk**" 
+        } else if entry.shadow_match == Some(false) {
+            "⚠️ **Engine Divergence**"
+        } else { 
+            "" 
+        };
         
-        md.push_str(&format!("| {} | {} | {} | {} | {} | {} |\n", entry.file, int_status, sym_status, base_status, bits, note));
+        md.push_str(&format!("| {} | {} | {} | {} | {} | {} | {} |\n", entry.file, int_status, sym_status, base_status, shadow_status, bits, note));
     }
     md.push_str("\n");
 

@@ -65,7 +65,12 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-        let (report, failed) = verify_save_integrity(path, &bytes);
+        let (mut report, failed) = verify_save_integrity(path, &bytes);
+
+        if parsed.is_set("refexp") {
+            let shadow = d2r_core::verify::run_shadow_audit(path, &bytes);
+            report = report.with_shadow_audit(shadow);
+        }
 
         if fix_mode && failed {
             let mut bytes_to_fix = bytes.clone();
@@ -84,6 +89,15 @@ fn main() -> anyhow::Result<()> {
                     "  version=0x{:04X} alpha={} size={} checksum={}",
                     results.header_version, results.alpha_mode, results.file_size_actual, results.checksum_stored
                 ));
+                
+                if let Some(shadow) = report.shadow_audit.as_ref() {
+                    let status = if shadow.is_match { "MATCH" } else { "MISMATCH" };
+                    om.println(&format!("  [SHADOW] status: {}, count: {}, family: {:?}", status, shadow.mismatch_count, shadow.mismatch_family));
+                    if let Some(msg) = &shadow.message {
+                        om.println(&format!("    - detail: {}", msg));
+                    }
+                }
+
                 om.println(&format!("  Fidelity Score: {:.1}% ({:?})", results.fidelity_score * 100.0, results.forensic_audit.combined_confidence));
                 
                 let prog_res = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode);

@@ -48,9 +48,27 @@ pub enum FailureCategory {
     Symmetry,
     Baseline,
     ToolError,
+    ShadowMismatch,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MismatchFamily {
+    ItemCount,
+    ItemContent,
+    ItemLength,
+    Metadata,
+    Structural,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ShadowAuditResult {
+    pub is_match: bool,
+    pub mismatch_count: usize,
+    pub mismatch_family: Option<MismatchFamily>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReportStatus {
     Ok,
@@ -81,6 +99,8 @@ pub struct Report<T> {
     pub scan_results: Option<T>,
     pub issues: Vec<ReportIssue>,
     pub hints: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_audit: Option<ShadowAuditResult>,
 }
 
 impl ReportMetadata {
@@ -102,6 +122,7 @@ impl<T> Report<T> {
             scan_results: None,
             issues: Vec::new(),
             hints: Vec::new(),
+            shadow_audit: None,
         }
     }
 
@@ -117,6 +138,11 @@ impl<T> Report<T> {
 
     pub fn with_hints(mut self, hints: Vec<String>) -> Self {
         self.hints = hints;
+        self
+    }
+
+    pub fn with_shadow_audit(mut self, shadow: ShadowAuditResult) -> Self {
+        self.shadow_audit = Some(shadow);
         self
     }
 }
@@ -187,5 +213,88 @@ impl OutputManager {
     
     pub fn is_json(&self) -> bool {
         self.is_json
+    }
+}
+
+pub fn run_shadow_audit(path: &str, bytes: &[u8]) -> ShadowAuditResult {
+    let original_refexp = crate::engine::config::is_refexp();
+
+    // 1. Run Baseline
+    crate::engine::config::set_refexp(false);
+    let (report_baseline, _) = save_integrity::verify_save_integrity(path, bytes);
+
+    // 2. Run Refexp
+    crate::engine::config::set_refexp(true);
+    let (report_refexp, _) = save_integrity::verify_save_integrity(path, bytes);
+
+    // Restore
+    crate::engine::config::set_refexp(original_refexp);
+
+    // 3. Compare
+    compare_reports(&report_baseline, &report_refexp)
+}
+
+fn compare_reports(
+    baseline: &Report<save_integrity::D2SaveVerifyPayload>,
+    refexp: &Report<save_integrity::D2SaveVerifyPayload>,
+) -> ShadowAuditResult {
+    let mut is_match = true;
+    let mut mismatch_count = 0;
+    let mut mismatch_family = None;
+    let mut message = None;
+
+    if baseline.status != refexp.status {
+        is_match = false;
+        mismatch_count += 1;
+        mismatch_family = Some(MismatchFamily::Structural);
+        message = Some(format!(
+            "Status mismatch: baseline={:?}, refexp={:?}",
+            baseline.status, refexp.status
+        ));
+    }
+
+    if let (Some(b_res), Some(r_res)) = (&baseline.scan_results, &refexp.scan_results) {
+        if b_res.jm_marker_count != r_res.jm_marker_count {
+            if is_match {
+                is_match = false;
+                mismatch_family = Some(MismatchFamily::ItemCount);
+                message = Some(format!(
+                    "Item count mismatch: baseline={}, refexp={}",
+                    b_res.jm_marker_count, r_res.jm_marker_count
+                ));
+            }
+            mismatch_count += 1;
+        }
+
+        if (b_res.fidelity_score - r_res.fidelity_score).abs() > 0.0001 {
+            if is_match {
+                is_match = false;
+                mismatch_family = Some(MismatchFamily::ItemContent);
+                message = Some(format!(
+                    "Fidelity score mismatch: baseline={}, refexp={}",
+                    b_res.fidelity_score, r_res.fidelity_score
+                ));
+            }
+            mismatch_count += 1;
+        }
+
+        if b_res.issue_count != r_res.issue_count {
+             if is_match {
+                is_match = false;
+                mismatch_family = Some(MismatchFamily::Metadata);
+                message = Some(format!(
+                    "Issue count mismatch: baseline={}, refexp={}",
+                    b_res.issue_count, r_res.issue_count
+                ));
+            }
+            mismatch_count += 1;
+        }
+    }
+
+    ShadowAuditResult {
+        is_match,
+        mismatch_count,
+        mismatch_family,
+        message,
     }
 }
