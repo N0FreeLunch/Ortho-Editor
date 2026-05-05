@@ -88,23 +88,24 @@ impl StatsAxiom {
 
     pub fn header_geometry(&self, flags: u32, is_compact: bool) -> HeaderGeometry {
         if self.save_is_alpha {
-            if self.version == 5 || self.version == 0 {
-                let is_v105_shadow = (flags & (1 << 26)) != 0;
+            if self.version == 5 || self.version == 0 || self.version == 7 {
                 let is_rw = self.is_runeword(flags);
-                
+                let is_v105_shadow = self.is_v105_shadow(flags);
+                let is_compact = (flags & (1 << 21)) != 0;
+
                 if is_rw || is_v105_shadow {
                     HeaderGeometry {
                         y_bits: 0,
                         page_bits: 0,
                         socket_hint_bits: 0,
                         has_header_gap: true,
-                        skip_geometry: false,
+                        skip_geometry: true,
                     }
                 } else {
                     HeaderGeometry {
                         y_bits: if is_compact { 0 } else { 4 },
                         page_bits: if is_compact { 0 } else { 3 },
-                        socket_hint_bits: if is_compact { 0 } else { 4 },
+                        socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
                         has_header_gap: true,
                         skip_geometry: false,
                     }
@@ -250,9 +251,9 @@ impl StatsAxiom {
     pub fn calculate_alignment(&self, consumed_bits: u64, is_compact: bool, code: &str) -> u64 {
         let mut final_len = consumed_bits;
 
-        // All versions except version 5 (Retail and some Alpha variants) 
+        // All versions except version 5 and 7 (Retail and some Alpha variants) 
         // add a single terminal bit (usually false/0) before alignment.
-        if self.version != 5 {
+        if self.version != 5 && self.version != 7 {
             final_len += 1;
         }
 
