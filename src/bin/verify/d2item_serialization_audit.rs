@@ -1,5 +1,5 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::calculate_symmetry_diff;
+use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff};
 use std::env;
 use std::fs;
 
@@ -58,46 +58,7 @@ fn main() {
                 println!("{:-<90}", "");
 
                 for (i, item) in report.items.iter().enumerate() {
-                    println!(
-                        "{:5} | {:10} | {:8} | {:8} | {:5} | {:.2}",
-                        i,
-                        item.code,
-                        item.original_len,
-                        item.target_len,
-                        if item.is_match { "OK" } else { "FAIL" },
-                        item.fidelity_score
-                    );
-                    if !item.is_match || item.fidelity_score < 1.0 {
-                        if let Some(m_type) = &item.mismatch_type {
-                            println!("      [REASON] {}", m_type);
-                        }
-                        if let Some(seg) = &item.segment {
-                            println!("      [SEGMENT] {}", seg);
-                        }
-                        if let Some(offset) = item.first_mismatch_offset {
-                            println!("      [OFFSET] bit {}", offset);
-                        }
-                        if item.fidelity_score < 1.0 {
-                            println!("      [FORENSIC RATIONALE]");
-                            for finding in &item.forensic_audit.findings {
-                                if finding.confidence
-                                    < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth
-                                {
-                                    println!(
-                                        "        - [{:?}] {}",
-                                        finding.confidence, finding.rationale
-                                    );
-                                }
-                            }
-                        }
-                        if use_visual {
-                            if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits)
-                            {
-                                println!("      [BITSTREAM ALIGNMENT]");
-                                print_visual_diff(orig, target);
-                            }
-                        }
-                    }
+                    print_item_diff(Some(i), item, 0, use_visual);
                 }
                 println!("{:-<90}", "");
 
@@ -116,7 +77,63 @@ fn main() {
     }
 }
 
-fn print_visual_diff(orig: &str, target: &str) {
+fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use_visual: bool) {
+    let indent = "  ".repeat(indent_level);
+    let prefix = if indent_level > 0 { "|-- " } else { "" };
+    let idx_str = idx.map(|i| i.to_string()).unwrap_or_default();
+
+    println!(
+        "{:indent$}{:<5} | {:<10} | {:>8} | {:>8} | {:>5} | {:.2}",
+        prefix,
+        idx_str,
+        item.code,
+        item.original_len,
+        item.target_len,
+        if item.is_match { "OK" } else { "FAIL" },
+        item.fidelity_score,
+        indent = indent.len()
+    );
+
+    if !item.is_match || item.fidelity_score < 1.0 {
+        if let Some(m_type) = &item.mismatch_type {
+            println!("{:indent$}      [REASON] {}", "", m_type, indent = indent.len());
+        }
+        if let Some(seg) = &item.segment {
+            println!("{:indent$}      [SEGMENT] {}", "", seg, indent = indent.len());
+        }
+        if let Some(offset) = item.first_mismatch_offset {
+            println!("{:indent$}      [OFFSET] bit {}", "", offset, indent = indent.len());
+        }
+        if item.fidelity_score < 1.0 {
+            println!("{:indent$}      [FORENSIC RATIONALE]", "", indent = indent.len());
+            for finding in &item.forensic_audit.findings {
+                if finding.confidence
+                    < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth
+                {
+                    println!(
+                        "{:indent$}        - [{:?}] {}",
+                        "",
+                        finding.confidence, finding.rationale,
+                        indent = indent.len()
+                    );
+                }
+            }
+        }
+        if use_visual {
+            if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
+                println!("{:indent$}      [BITSTREAM ALIGNMENT]", "", indent = indent.len());
+                print_visual_diff(orig, target, indent_level);
+            }
+        }
+    }
+
+    for child in &item.children {
+        print_item_diff(None, child, indent_level + 1, use_visual);
+    }
+}
+
+fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
+    let indent = "  ".repeat(indent_level);
     let mut i = 0;
     let mut j = 0;
     let mut o_out = String::new();
@@ -180,9 +197,10 @@ fn print_visual_diff(orig: &str, target: &str) {
     let chunk_size = 80;
     for k in (0..o_out.len()).step_by(chunk_size) {
         let end = (k + chunk_size).min(o_out.len());
-        println!("      Orig:   {}", &o_out[k..end]);
-        println!("      Target: {}", &t_out[k..end]);
-        println!("      Diff:   {}", &m_out[k..end]);
+        println!("{:indent$}      Orig:   {}", "", &o_out[k..end], indent = indent.len());
+        println!("{:indent$}      Target: {}", "", &t_out[k..end], indent = indent.len());
+        println!("{:indent$}      Diff:   {}", "", &m_out[k..end], indent = indent.len());
         println!();
     }
 }
+

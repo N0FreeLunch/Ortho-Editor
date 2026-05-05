@@ -124,11 +124,20 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
 
     if mismatch_idx.is_some() || original_bits.len() != rebuilt_bits.len() {
         item_diff.is_match = false;
-        item_diff.mismatch_type = Some(if original_bits.len() != rebuilt_bits.len() {
+        let mut m_type = if original_bits.len() != rebuilt_bits.len() {
             "Length".to_string()
         } else {
             "Content".to_string()
-        });
+        };
+
+        let len_diff = (original_bits.len() as i32 - rebuilt_bits.len() as i32).abs();
+        if len_diff == 2 {
+            m_type.push_str(" [Nudge (2-bit)]");
+        } else if len_diff > 0 && len_diff % 16 == 0 {
+            m_type.push_str(&format!(" [RW-Gap ({}-bit)]", len_diff));
+        }
+
+        item_diff.mismatch_type = Some(m_type);
         if let Some(idx) = mismatch_idx {
             item_diff.first_mismatch_offset = Some(idx as u64);
             item_diff.segment = Some(
@@ -171,7 +180,14 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
 
     if item_a.bits.len() != item_b.bits.len() {
         item_diff.is_match = false;
-        item_diff.mismatch_type = Some("Length".to_string());
+        let mut m_type = "Length".to_string();
+        let len_diff = (item_a.bits.len() as i32 - item_b.bits.len() as i32).abs();
+        if len_diff == 2 {
+            m_type.push_str(" [Nudge (2-bit)]");
+        } else if len_diff > 0 && len_diff % 16 == 0 {
+            m_type.push_str(&format!(" [RW-Gap ({}-bit)]", len_diff));
+        }
+        item_diff.mismatch_type = Some(m_type);
     } else {
         let mut mismatch_idx = None;
         for i in 0..item_a.bits.len() {

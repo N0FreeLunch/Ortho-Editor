@@ -2,6 +2,7 @@ use crate::verify::ReportIssue;
 use crate::domain::item::axiom_meta::ForensicAudit;
 
 pub mod header;
+pub mod progression;
 
 #[derive(Debug, Clone)]
 pub struct DomainReport {

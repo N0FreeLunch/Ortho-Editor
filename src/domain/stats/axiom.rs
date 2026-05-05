@@ -2,6 +2,7 @@ use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
+use crate::domain::header::entity::{HeaderAxiom, HeaderGeometry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsAxiom {
@@ -25,6 +26,10 @@ impl StatsAxiom {
     pub fn with_code(mut self, code: &str) -> Self {
         self.code = code.to_string();
         self
+    }
+
+    fn header_axiom(&self) -> HeaderAxiom {
+        HeaderAxiom::new(self.version, self.save_is_alpha)
     }
 }
 
@@ -53,15 +58,6 @@ impl ForensicAxiom for StatsAxiom {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct HeaderGeometry {
-    pub y_bits: u32,
-    pub page_bits: u32,
-    pub socket_hint_bits: u32,
-    pub has_header_gap: bool,
-    pub skip_geometry: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
 pub struct PropertyRhythm {
     pub id_bits: u32,
     pub value_bits: Option<u32>,
@@ -87,127 +83,36 @@ impl StatsAxiom {
     }
 
     pub fn header_geometry(&self, flags: u32, is_compact: bool) -> HeaderGeometry {
-        if self.save_is_alpha {
-            if self.version == 5 || self.version == 0 || self.version == 7 {
-                let is_rw = self.is_runeword(flags);
-                let is_v105_shadow = self.is_v105_shadow(flags);
-                let is_compact = (flags & (1 << 21)) != 0;
-
-                if is_rw || is_v105_shadow || self.is_personalized {
-                    HeaderGeometry {
-                        y_bits: 0,
-                        page_bits: 0,
-                        socket_hint_bits: 0,
-                        has_header_gap: true,
-                        skip_geometry: true,
-                    }
-                } else {
-                    HeaderGeometry {
-                        y_bits: if is_compact { 0 } else { 4 },
-                        page_bits: if is_compact { 0 } else { 3 },
-                        socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
-                        has_header_gap: true,
-                        skip_geometry: false,
-                    }
-                }
-            } else if self.version == 1 {
-                HeaderGeometry {
-                    y_bits: 4,
-                    page_bits: 3,
-                    socket_hint_bits: 3,
-                    has_header_gap: true,
-                    skip_geometry: false,
-                }
-            } else if self.version == 4 {
-                HeaderGeometry {
-                    y_bits: 0,
-                    page_bits: 0,
-                    socket_hint_bits: 0,
-                    has_header_gap: false,
-                    skip_geometry: true,
-                }
-            } else {
-                // Alpha mode but version 0 (e.g. fragments or markers)
-                HeaderGeometry {
-                    y_bits: 0,
-                    page_bits: 0,
-                    socket_hint_bits: 0,
-                    has_header_gap: false,
-                    skip_geometry: true,
-                }
-            }
-        } else {
-            // Retail
-            HeaderGeometry {
-                y_bits: if is_compact { 0 } else { 4 },
-                page_bits: if is_compact { 0 } else { 3 },
-                socket_hint_bits: if is_compact { 0 } else { 3 },
-                has_header_gap: false,
-                skip_geometry: is_compact,
-            }
-        }
+        self.header_axiom().header_geometry(flags, is_compact, self.is_personalized)
     }
 
     pub fn is_runeword(&self, flags: u32) -> bool {
-        if self.save_is_alpha {
-            if self.version == 5 || self.version == 1 {
-                let is_frag = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
-            } else {
-                (flags & (1 << 11)) != 0
-            }
-        } else {
-            (flags & (1 << 26)) != 0
-        }
+        self.header_axiom().is_runeword(flags)
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
-        if self.save_is_alpha {
-            if self.version == 5 {
-                !is_compact && (flags & (1 << 11)) != 0
-            } else {
-                (flags & (1 << 27)) != 0
-            }
-        } else {
-            (flags & (1 << 11)) != 0
-        }
+        self.header_axiom().is_socketed(flags, is_compact)
     }
 
     pub fn is_compact(&self, flags: u32) -> bool {
-        if self.save_is_alpha {
-            (flags & (1 << 23)) != 0
-        } else {
-            (flags & (1 << 21)) != 0
-        }
+        self.header_axiom().is_compact(flags)
     }
 
     pub fn is_ethereal(&self, flags: u32) -> bool {
-        if self.save_is_alpha {
-            (flags & (1 << 24)) != 0
-        } else {
-            (flags & (1 << 22)) != 0
-        }
+        self.header_axiom().is_ethereal(flags)
     }
 
     pub fn is_identified(&self, flags: u32) -> bool {
-        (flags & (1 << 4)) != 0
+        self.header_axiom().is_identified(flags)
     }
 
 
     pub fn is_personalized(&self, flags: u32) -> bool {
-        if self.save_is_alpha {
-            if self.version == 4 {
-                (flags & (1 << 28)) != 0
-            } else {
-                (flags & (1 << 29)) != 0
-            }
-        } else {
-            (flags & (1 << 28)) != 0
-        }
+        self.header_axiom().is_personalized(flags)
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        self.save_is_alpha && (self.version == 5 || self.version == 2) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
+        self.header_axiom().is_v105_shadow(flags)
     }
 
     pub fn is_fragment(&self, flags: u32) -> bool {

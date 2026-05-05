@@ -1,3 +1,8 @@
+use crate::data::bit_cursor::BitCursor;
+use crate::domain::item::huffman::{HuffmanTree, read_player_name};
+use crate::error::ParsingResult;
+use bitstream_io::BitRead;
+use crate::domain::header::entity::ItemSegmentType;
 use serde::{Serialize, Deserialize};
 use crate::domain::stats::{ItemProperty, ItemStats};
 
@@ -59,6 +64,58 @@ pub struct ItemBody {
     pub alpha_set_list_val: Option<u8>,
     pub alpha_shadow_skip_bits: Option<u64>,
     pub alpha_alignment_padding: Vec<bool>,
+}
+
+impl ItemBody {
+    pub fn read_from_cursor<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        huff: &HuffmanTree,
+        header: &ItemHeader,
+        alpha_mode: bool,
+    ) -> ParsingResult<(Self, Option<u8>, Option<u8>, Option<String>)> {
+        let is_ear = header.is_ear;
+        let (code, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
+            cursor.begin_segment(ItemSegmentType::Unknown);
+            let class = Some(cursor.read_bits::<u8>(3)? as u8);
+            let level = Some(cursor.read_bits::<u8>(7)? as u8);
+            let name = Some(read_player_name(cursor, alpha_mode && header.version == 5)?);
+            if alpha_mode && header.version == 5 { cursor.byte_align()?; }
+            cursor.end_segment();
+            (String::new(), None, class, level, name)
+        } else {
+            cursor.begin_segment(ItemSegmentType::Code);
+            let mut code = String::new();
+            for _ in 0..4 {
+                code.push(huff.decode_recorded(cursor)?);
+            }
+            let mut nudge = None;
+            if alpha_mode && (header.version == 5 || header.version == 0 || header.version == 1) {
+                nudge = Some(cursor.read_bits::<u8>(2)?);
+            }
+            cursor.end_segment();
+            (code, nudge, None, None, None)
+        };
+
+        Ok((ItemBody {
+            code,
+            x: header.x,
+            y: header.y,
+            page: header.page,
+            location: header.location,
+            mode: header.mode,
+            defense: None,
+            max_durability: None,
+            current_durability: None,
+            quantity: None,
+            alpha_header_gap: None, 
+            v5_runeword_extra: None,
+            v105_7mgw_payload: None,
+            alpha_nudge,
+            alpha_set_list_val: None,
+            alpha_shadow_skip_bits: None,
+            alpha_alignment_padding: Vec::new(),
+        }, ear_class, ear_level, ear_player_name))
+    }
 }
 
 
