@@ -3,6 +3,7 @@ use crate::domain::item::axiom_meta::ForensicAudit;
 
 pub mod header;
 pub mod progression;
+pub mod item;
 
 #[derive(Debug, Clone)]
 pub struct DomainReport {
