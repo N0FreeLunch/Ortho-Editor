@@ -13,12 +13,41 @@ impl DomainVerifier for ProgressionVerifier {
         let audit = res.audit;
         
         match res.value {
-            Ok(_) => {
+            Ok(prog) => {
                 // In Slice 2, we propagate audit findings as issues for visibility.
                 for finding in &audit.findings {
                     issues.push(ReportIssue {
                         kind: "progression_audit".to_string(),
                         message: format!("[{:?}] {}", finding.confidence, finding.rationale),
+                        bit_offset: None,
+                    });
+                }
+
+                // In Slice 3, we add semantic issues for additive CLI output.
+                let completed_act5: Vec<String> = prog.quests.quests()
+                    .iter()
+                    .filter(|q| q.difficulty() == prog.difficulty && q.act() == 5 && q.is_completed())
+                    .map(|q| q.name().to_string())
+                    .collect();
+                
+                if !completed_act5.is_empty() {
+                    issues.push(ReportIssue {
+                        kind: "progression_semantic".to_string(),
+                        message: format!("Completed Quests (Act 5): {}", completed_act5.join(", ")),
+                        bit_offset: None,
+                    });
+                }
+
+                let active_waypoints: Vec<String> = prog.waypoints.waypoints()
+                    .iter()
+                    .filter(|w| w.is_active())
+                    .map(|w| w.name().to_string())
+                    .collect();
+
+                if !active_waypoints.is_empty() {
+                    issues.push(ReportIssue {
+                        kind: "progression_semantic".to_string(),
+                        message: format!("Active Waypoints: {}", active_waypoints.join(", ")),
                         bit_offset: None,
                     });
                 }

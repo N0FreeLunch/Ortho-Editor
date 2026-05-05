@@ -125,6 +125,16 @@ fn main() -> anyhow::Result<()> {
                     if activated_wps > 0 {
                         om.println(&format!("  Waypoints: {} activated", activated_wps));
                     }
+
+                    // Slice 3: Use ProgressionVerifier to get semantic lines
+                    use d2r_core::verify::v2::DomainVerifier;
+                    let prog_verifier = d2r_core::verify::v2::progression::ProgressionVerifier;
+                    let prog_report = prog_verifier.verify(&bytes, results.alpha_mode);
+                    for issue in prog_report.issues {
+                        if issue.kind == "progression_semantic" {
+                            om.println(&format!("    - {}", issue.message));
+                        }
+                    }
                 }
 
                 if results.fidelity_score < 1.0 || results.alpha_mode {
