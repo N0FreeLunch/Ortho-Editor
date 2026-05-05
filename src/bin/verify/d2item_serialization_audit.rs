@@ -194,7 +194,7 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
         }
     }
 
-    let chunk_size = 80;
+    let chunk_size = 80usize.saturating_sub(indent_level.saturating_mul(2)).max(24);
     for k in (0..o_out.len()).step_by(chunk_size) {
         let end = (k + chunk_size).min(o_out.len());
         println!("{:indent$}      Orig:   {}", "", &o_out[k..end], indent = indent.len());
