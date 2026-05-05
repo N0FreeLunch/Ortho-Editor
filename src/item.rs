@@ -583,7 +583,8 @@ fn read_item_stats<R: BitRead>(
     let trimmed_code = code.trim();
     let quality_val = quality.unwrap_or(ItemQuality::Normal);
     let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
-        .with_personalization(is_personalized);
+        .with_personalization(is_personalized)
+        .with_code(trimmed_code);
     let is_alpha = axiom.is_alpha();
 
     crate::item_trace!("[DEBUG] read_item_stats for '{}', version={}, is_runeword={}, quality={:?}, is_alpha={}", trimmed_code, version, is_runeword, quality, is_alpha);
