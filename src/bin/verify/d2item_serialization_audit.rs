@@ -1,4 +1,4 @@
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::symmetry::calculate_symmetry_diff;
 use std::env;
 use std::fs;
@@ -6,8 +6,18 @@ use std::fs;
 fn main() {
     let mut parser = ArgParser::new("d2item_serialization_audit");
     parser.add_spec(ArgSpec::positional("save_file", "Path to save file"));
-    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
-    parser.add_spec(ArgSpec::flag("diff-visual", None, Some("diff-visual"), "Show visual bitstream alignment for mismatches"));
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Output results in JSON format",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "diff-visual",
+        None,
+        Some("diff-visual"),
+        "Show visual bitstream alignment for mismatches",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -41,12 +51,19 @@ fn main() {
             } else {
                 println!("Serialization Audit for: {}", path);
                 println!("{:-<80}", "");
-                println!("{:>5} | {:<10} | {:>8} | {:>8} | {:>5} | {:<5}", "Idx", "Code", "OrigLen", "SerLen", "Match", "Fid");
+                println!(
+                    "{:>5} | {:<10} | {:>8} | {:>8} | {:>5} | {:<5}",
+                    "Idx", "Code", "OrigLen", "SerLen", "Match", "Fid"
+                );
                 println!("{:-<90}", "");
-                
+
                 for (i, item) in report.items.iter().enumerate() {
-                    println!("{:5} | {:10} | {:8} | {:8} | {:5} | {:.2}",
-                        i, item.code, item.original_len, item.target_len,
+                    println!(
+                        "{:5} | {:10} | {:8} | {:8} | {:5} | {:.2}",
+                        i,
+                        item.code,
+                        item.original_len,
+                        item.target_len,
                         if item.is_match { "OK" } else { "FAIL" },
                         item.fidelity_score
                     );
@@ -63,13 +80,19 @@ fn main() {
                         if item.fidelity_score < 1.0 {
                             println!("      [FORENSIC RATIONALE]");
                             for finding in &item.forensic_audit.findings {
-                                if finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
-                                    println!("        - [{:?}] {}", finding.confidence, finding.rationale);
+                                if finding.confidence
+                                    < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth
+                                {
+                                    println!(
+                                        "        - [{:?}] {}",
+                                        finding.confidence, finding.rationale
+                                    );
                                 }
                             }
                         }
                         if use_visual {
-                            if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
+                            if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits)
+                            {
                                 println!("      [BITSTREAM ALIGNMENT]");
                                 print_visual_diff(orig, target);
                             }
@@ -77,7 +100,7 @@ fn main() {
                     }
                 }
                 println!("{:-<90}", "");
-                
+
                 if report.success {
                     println!("MATCH: 100% fidelity");
                 } else {
