@@ -248,3 +248,35 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
     }
     item_diff
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::item::entity::{Item, RecordedBit};
+
+    #[test]
+    fn test_mismatch_labeling() {
+        let mut item_a = Item::default();
+        item_a.code = "test".to_string();
+        for i in 0..100 {
+            item_a.bits.push(RecordedBit { bit: false, offset: i as u64 });
+        }
+        
+        let mut item_b = item_a.clone();
+        
+        // 2-bit diff
+        item_b.bits.truncate(98);
+        let diff = compare_two_items(&item_a, &item_b, "Test".to_string());
+        assert_eq!(diff.mismatch_type.unwrap(), "Length [Nudge (2-bit)]");
+        
+        // 16-bit diff
+        item_b.bits.truncate(84);
+        let diff = compare_two_items(&item_a, &item_b, "Test".to_string());
+        assert_eq!(diff.mismatch_type.unwrap(), "Length [RW-Gap (16-bit)]");
+
+        // 32-bit diff
+        item_b.bits.truncate(68);
+        let diff = compare_two_items(&item_a, &item_b, "Test".to_string());
+        assert_eq!(diff.mismatch_type.unwrap(), "Length [RW-Gap (32-bit)]");
+    }
+}
