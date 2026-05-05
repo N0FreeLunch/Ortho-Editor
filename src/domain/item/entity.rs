@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use super::quality::ItemQuality;
 use crate::domain::stats::{ItemProperty, ItemStats};
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,6 +35,7 @@ pub struct CursedItemData {
     pub curse_id: u32,
 }
 
+use std::ops::{Deref, DerefMut};
 pub use crate::domain::header::entity::ItemHeader;
 
 
@@ -82,42 +82,30 @@ pub struct Item {
     pub body: ItemBody,
     pub stats: ItemStats,
 
-    pub bits: Vec<RecordedBit>,
+    // --- Legacy Compatibility Fields (To be removed in Slice 3) ---
     pub code: String,
-    pub flags: u32,
-    pub version: u8,
-    pub is_ear: bool,
+    pub defense: Option<u32>,
+    pub max_durability: Option<u32>,
+    pub current_durability: Option<u32>,
+    pub quantity: Option<u32>,
+    // -----------------------------------------------------------
+
+    pub bits: Vec<RecordedBit>,
     pub ear_class: Option<u8>,
     pub ear_level: Option<u8>,
     pub ear_player_name: Option<String>,
     pub personalized_player_name: Option<String>,
-    pub mode: u8,
-    pub x: u8,
-    pub y: u8,
-    pub page: u8,
-    pub location: u8,
-    pub header_socket_hint: u8,
     pub has_multiple_graphics: bool,
     pub multi_graphics_bits: Option<u8>,
     pub has_class_specific_data: bool,
     pub class_specific_bits: Option<u16>,
-    pub id: Option<u32>,
-    pub level: Option<u8>,
-    pub quality: Option<ItemQuality>,
     pub low_high_graphic_bits: Option<u8>,
-    pub is_compact: bool,
-    pub is_socketed: bool,
-    pub is_identified: bool,
-    pub is_personalized: bool,
-    pub is_runeword: bool,
-    pub is_ethereal: bool,
     pub magic_prefix: Option<u16>,
     pub magic_suffix: Option<u16>,
     pub rare_name_1: Option<u8>,
     pub rare_name_2: Option<u8>,
     pub rare_affixes: [Option<u16>; 6],
     pub unique_id: Option<u16>,
-    pub alpha_unique_id_raw: Option<u16>,
     pub runeword_id: Option<u16>,
     pub runeword_level: Option<u8>,
     pub properties: Vec<ItemProperty>,
@@ -130,10 +118,6 @@ pub struct Item {
     pub terminator_bit: bool,
     pub set_list_count: u8,
     pub tbk_ibk_teleport: Option<u8>,
-    pub defense: Option<u32>,
-    pub max_durability: Option<u32>,
-    pub current_durability: Option<u32>,
-    pub quantity: Option<u32>,
     pub sockets: Option<u8>,
     pub modules: Vec<ItemModule>,
     pub range: ItemBitRange,
@@ -144,7 +128,26 @@ pub struct Item {
     pub forensic_audit: crate::domain::item::axiom_meta::ForensicAudit,
 }
 
+impl Deref for Item {
+    type Target = ItemHeader;
+    fn deref(&self) -> &Self::Target {
+        &self.header
+    }
+}
+
+impl DerefMut for Item {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.header
+    }
+}
+
 impl Item {
+    pub fn code(&self) -> &str { &self.body.code }
+    pub fn defense(&self) -> Option<u32> { self.body.defense }
+    pub fn max_durability(&self) -> Option<u32> { self.body.max_durability }
+    pub fn current_durability(&self) -> Option<u32> { self.body.current_durability }
+    pub fn quantity(&self) -> Option<u32> { self.body.quantity }
+
     pub fn query_bit(&self, offset: u64) -> Option<BitSemantic> {
         // 1. Check properties for more semantic context
         for prop in &self.properties {
@@ -204,7 +207,7 @@ impl Item {
         // Check children recursively
         for child in &self.socketed_items {
             if let Some(semantic) = child.query_bit(offset) {
-                return Some(BitSemantic { label: format!("{} -> {}", self.code.trim(), semantic.label) });
+                return Some(BitSemantic { label: format!("{} -> {}", self.body.code.trim(), semantic.label) });
             }
         }
         None
@@ -215,57 +218,20 @@ impl Item {
     }
 
     pub fn header_view(&self) -> ItemHeader {
-        ItemHeader {
-            flags: self.flags,
-            version: self.version,
-            mode: self.mode,
-            location: self.location,
-            x: self.x,
-            y: self.y,
-            page: self.page,
-            socket_hint: self.header_socket_hint,
-            id: self.id,
-            quality: self.quality,
-            is_compact: self.is_compact,
-            is_identified: self.is_identified,
-            is_socketed: self.is_socketed,
-            is_personalized: self.is_personalized,
-            is_runeword: self.is_runeword,
-            is_ethereal: self.is_ethereal,
-            is_ear: self.is_ear,
-            alpha_quality_raw: self.header.alpha_quality_raw,
-            alpha_v5_runeword_extra: self.header.alpha_v5_runeword_extra,
-            alpha_unique_id_raw: self.alpha_unique_id_raw,
-        }
+        self.header.clone()
     }
 
     pub fn body_view(&self) -> ItemBody {
-        ItemBody {
-            code: self.body.code.clone(),
-            x: self.body.x,
-            y: self.body.y,
-            page: self.body.page,
-            location: self.body.location,
-            mode: self.body.mode,
-            defense: self.body.defense,
-            max_durability: self.body.max_durability,
-            current_durability: self.body.current_durability,
-            quantity: self.body.quantity,
-            alpha_header_gap: self.body.alpha_header_gap,
-            v5_runeword_extra: self.body.v5_runeword_extra,
-            v105_7mgw_payload: self.body.v105_7mgw_payload.clone(),
-            alpha_nudge: self.body.alpha_nudge,
-            alpha_set_list_val: self.body.alpha_set_list_val,
-            alpha_shadow_skip_bits: self.body.alpha_shadow_skip_bits,
-            alpha_alignment_padding: self.body.alpha_alignment_padding.clone(),
-        }
+        self.body.clone()
     }
 
     /// Mutates the item using a checked placement.
     /// This clears the cached bitstream, forcing a re-encoding.
     pub fn set_placement(&mut self, placement: crate::domain::vo::InventoryPlacement) {
-        self.x = placement.coordinate().x();
-        self.y = placement.coordinate().y();
+        self.header.x = placement.coordinate().x();
+        self.header.y = placement.coordinate().y();
+        self.body.x = self.header.x;
+        self.body.y = self.header.y;
         // Clear bits to force re-calculation from fields
         self.bits.clear();
     }

@@ -9,7 +9,7 @@ use crate::domain::header::entity::{ItemSegmentType, ItemHeader};
 use crate::domain::stats::{read_property_list, stat_save_bits};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
-use crate::domain::item::{ItemBitRange, RecordedBit, ItemBody, BitSegment, ItemModule};
+use crate::domain::item::{ItemBitRange, RecordedBit, ItemBody};
 
 pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha: bool) -> Option<u64> {
     let limit = (bytes.len() * 8) as u64;
@@ -73,10 +73,10 @@ pub fn peek_item_header_at(
 
     if geometry.has_header_gap {
         if version == 5 || version == 0 {
-            let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
             let is_v105_shadow = axiom.is_v105_shadow(flags);
             let is_rw = axiom.is_runeword(flags);
-            if is_rw || is_v105_shadow {
+            let is_pers = axiom.is_personalized(flags);
+            if is_rw || is_v105_shadow || is_pers {
                 header_len += 8; 
             } else {
                 header_len += geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits + 8;
@@ -337,16 +337,19 @@ impl Item {
             if version == 5 || version == 0 {
                 let is_v105_shadow = axiom.is_v105_shadow(flags);
                 let is_rw = axiom.is_runeword(flags);
+if is_rw || is_v105_shadow {
+    let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+    let gap_bits = if is_v105_shadow_local { 8 } else { 24 }; // Alpha v105 Runeword Gap (8+16)
+    let gap = cursor.read_bits::<u32>(gap_bits)?;
+    alpha_header_gap = Some(gap as u8);
 
-                if is_rw || is_v105_shadow {
-                    let gap = cursor.read_bits::<u8>(8)? as u8;
-                    alpha_header_gap = Some(gap);
-                    if !is_compact {
-                        y = (gap & 0x0F) as u8;
-                        page = ((gap >> 4) & 0x07) as u8;
-                        header_socket_hint = ((gap >> 7) & 0x01) as u8;
-                    }
-                } else {
+    if !is_compact {
+        y = (gap & 0x0F) as u8;
+        page = ((gap >> 4) & 0x07) as u8;
+        header_socket_hint = ((gap >> 7) & 0x01) as u8;
+    }
+} else {
+
                     if !is_compact {
                         y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
                         page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
@@ -861,6 +864,21 @@ impl Item {
 
         Ok(emitter.into_bytes())
     }
+
+    pub fn serialize_section(items: &[Item], huffman: &HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {
+        let mut emitter = BitEmitter::new();
+        for item in items {
+            emitter.extend_bits(item.gap_bits.iter().cloned())?;
+            let item_bytes = item.to_bytes(huffman, alpha_mode)?;
+            for byte in item_bytes { emitter.write_bits(byte as u32, 8)?; }
+            for child in &item.socketed_items {
+                if alpha_mode { emitter.write_bits(2, 2)?; }
+                let child_bytes = child.to_bytes(huffman, alpha_mode)?;
+                for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
+            }
+        }
+        Ok(emitter.into_bytes())
+    }
 }
 
 pub fn read_item_stats<R: BitRead>(
@@ -1206,23 +1224,6 @@ impl HuffmanTree {
     pub fn decode<R: BitRead>(&self, reader: &mut R) -> io::Result<char> {
         self.decode_internal(|| reader.read_bit())
     }
-}
-
-impl Item {
-    pub fn serialize_section(items: &[Item], huffman: &HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {
-    let mut emitter = BitEmitter::new();
-    for item in items {
-        emitter.extend_bits(item.gap_bits.iter().cloned())?;
-        let item_bytes = item.to_bytes(huffman, alpha_mode)?;
-        for byte in item_bytes { emitter.write_bits(byte as u32, 8)?; }
-        for child in &item.socketed_items {
-            if alpha_mode { emitter.write_bits(2, 2)?; }
-            let child_bytes = child.to_bytes(huffman, alpha_mode)?;
-            for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
-        }
-    }
-    Ok(emitter.into_bytes())
-}
 }
 
 fn write_player_name(emitter: &mut BitEmitter, name: &str, alpha_v5: bool) -> io::Result<()> {

@@ -30,6 +30,7 @@ pub struct ItemHeader {
     pub socket_hint: u8,
     
     pub id: Option<u32>,
+    pub level: Option<u8>,
     pub quality: Option<ItemQuality>,
     pub is_compact: bool,
     pub is_identified: bool,
