@@ -54,19 +54,20 @@ pub fn peek_item_header_at(
     let x = reader.read::<4, u8>().ok()?;
     
     let axiom = HeaderAxiom::new(version, alpha_mode);
-    let is_compact = axiom.is_compact(flags);
-    let is_personalized = axiom.is_personalized(flags);
+    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+    let is_compact = s_axiom.is_compact(flags);
+    let is_personalized = s_axiom.is_personalized(flags);
     let mut header_len = 32 + 3 + 3 + 3 + 4; 
     
     let geometry = axiom.header_geometry(flags, is_compact, is_personalized);
 
     if geometry.has_header_gap {
-        if version == 5 || version == 0 {
-            let is_v105_shadow = alpha_mode && (version == 5 || version == 2) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0) ;
-            let is_rw = alpha_mode && (version == 5 || version == 1) && !((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0) && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0) ;
-
-            if is_rw || is_v105_shadow || is_personalized {
-                header_len += 8; 
+        if axiom.is_alpha() {
+            let is_v105_shadow = s_axiom.is_v105_shadow(flags);
+            let is_rw = s_axiom.is_runeword(flags);
+            if is_rw || is_v105_shadow {
+                let gap_bits = if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 { 8 } else { 24 }; 
+                header_len += gap_bits;
             } else {
                 header_len += geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits + 8;
             }

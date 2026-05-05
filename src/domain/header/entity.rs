@@ -3,6 +3,7 @@ use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError};
 use bitstream_io::BitRead;
 use serde::Serialize;
+use crate::domain::stats::axiom::StatsAxiom;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ItemSegmentType {
@@ -70,7 +71,7 @@ impl HeaderAxiom {
     }
 
     pub fn is_alpha(&self) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0)
+        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4)
     }
 
     pub fn is_plausible(&self, mode: u8, location: u8, code: &str, flags: u32) -> bool {
@@ -85,7 +86,7 @@ impl HeaderAxiom {
             if matches!(trimmed, "ww l" | "xlp" | "buc") {
                 return mode <= 7 && location <= 15 && (flags & 0xF8000000) == 0;
             }
-            if !(self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0) {
+            if self.version > 7 {
                 return false; 
             }
             if mode > 7 || location > 15 { 
@@ -96,7 +97,6 @@ impl HeaderAxiom {
             }
             true
         } else {
-
             if mode > 6 || location > 15 { return false; }
             true
         }
@@ -242,8 +242,9 @@ impl ItemHeader {
         let x = cursor.read_bits::<u8>(4)? as u8;
         
         let axiom = HeaderAxiom::new(version, alpha_mode);
-        let is_compact = axiom.is_compact(flags);
-        let is_personalized = axiom.is_personalized(flags);
+        let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+        let is_compact = s_axiom.is_compact(flags);
+        let is_personalized = s_axiom.is_personalized(flags);
         
         let mut y = 0;
         let mut page = 0;
@@ -254,8 +255,8 @@ impl ItemHeader {
         let mut alpha_header_gap = None;
         if geometry.has_header_gap {
             if axiom.is_alpha() {
-                let is_v105_shadow = axiom.is_v105_shadow(flags);
-                let is_rw = axiom.is_runeword(flags);
+                let is_v105_shadow = s_axiom.is_v105_shadow(flags);
+                let is_rw = s_axiom.is_runeword(flags);
                 if is_rw || is_v105_shadow {
                     let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                     let gap_bits = if is_v105_shadow_local { 8 } else { 24 }; 
@@ -303,15 +304,22 @@ impl ItemHeader {
             level: None,
             quality: None,
             is_compact,
-            is_identified: axiom.is_identified(flags),
-            is_socketed: axiom.is_socketed(flags, is_compact),
+            is_identified: s_axiom.is_identified(flags),
+            is_socketed: s_axiom.is_socketed(flags, is_compact),
             is_personalized,
-            is_runeword: axiom.is_runeword(flags),
-            is_ethereal: axiom.is_ethereal(flags),
+            is_runeword: s_axiom.is_runeword(flags),
+            is_ethereal: s_axiom.is_ethereal(flags),
             is_ear: (flags & (1 << 24)) != 0,
             alpha_quality_raw: None,
             alpha_v5_runeword_extra: None,
             alpha_unique_id_raw: None,
         }, alpha_header_gap))
     }
+}
+
+pub fn parse_item_header<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    alpha_mode: bool,
+) -> ParsingResult<(ItemHeader, Option<u32>)> {
+    ItemHeader::read_from_cursor(cursor, alpha_mode)
 }
