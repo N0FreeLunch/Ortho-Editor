@@ -9,15 +9,21 @@ pub struct StatsAxiom {
     pub quality: ItemQuality,
     pub save_is_alpha: bool,
     pub is_personalized: bool,
+    pub code: String,
 }
 
 impl StatsAxiom {
     pub fn new(version: u8, quality: ItemQuality, save_is_alpha: bool) -> Self {
-        Self { version, quality, save_is_alpha, is_personalized: false }
+        Self { version, quality, save_is_alpha, is_personalized: false, code: String::new() }
     }
 
     pub fn with_personalization(mut self, is_personalized: bool) -> Self {
         self.is_personalized = is_personalized;
+        self
+    }
+
+    pub fn with_code(mut self, code: &str) -> Self {
+        self.code = code.to_string();
         self
     }
 }
@@ -189,7 +195,11 @@ impl StatsAxiom {
 
     pub fn is_personalized(&self, flags: u32) -> bool {
         if self.save_is_alpha {
-            (flags & (1 << 29)) != 0
+            if self.version == 4 {
+                (flags & (1 << 28)) != 0
+            } else {
+                (flags & (1 << 29)) != 0
+            }
         } else {
             (flags & (1 << 28)) != 0
         }
@@ -329,10 +339,22 @@ impl StatsAxiom {
 
     /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
-        if self.save_is_alpha && self.version == 5 {
+        if self.save_is_alpha {
             if let Some(map) = self.lookup_alpha_map_by_raw(raw_id) {
                 if let Some(bits) = map.save_bits {
                     return bits;
+                }
+            }
+
+            // Alpha v105 forensic: Guarded branches for Act 5 reward stats (8, 317, 320).
+            // These large-width stats are axiomatic for specific Act 5 quest reward items.
+            if self.is_personalized && (self.version == 3 || self.version == 4) {
+                let trimmed = self.code.trim();
+                match raw_id {
+                    317 if trimmed == "7pw" => return 544 - 9,  // 535-bit payload
+                    320 if trimmed == "oesw" => return 2880 - 9, // 2871-bit payload
+                    8 if trimmed == "c mt" => return 4400 - 9,  // 4391-bit payload
+                    _ => {}
                 }
             }
         }
