@@ -22,6 +22,8 @@ serde_json = "1.0"
 dotenvy = "0.15"
 anyhow = "1.0"
 thiserror = "2.0.18"
+syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
+quote = "1.0"
 
 [[bin]]
 name = "d2save_status_inspect"
@@ -313,9 +315,9 @@ path = "src/bin/verify/d2save_poison.rs"
 name = "d2save_arch"
 path = "src/bin/verify/d2save_arch.rs"
 
-# [[bin]]
-# name = "d2r-forensic-audit"
-# path = "src/bin/verify/d2r_forensic_audit.rs"
+[[bin]]
+name = "d2r-forensic-audit"
+path = "src/bin/verify/d2r_forensic_audit.rs"
 
 [[bin]]
 name = "d2item_serialization_audit"
