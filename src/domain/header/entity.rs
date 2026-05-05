@@ -96,6 +96,7 @@ impl HeaderAxiom {
             }
             true
         } else {
+
             if mode > 6 || location > 15 { return false; }
             true
         }
