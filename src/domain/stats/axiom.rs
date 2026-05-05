@@ -67,12 +67,12 @@ pub struct PropertyRhythm {
 
 impl StatsAxiom {
     pub fn is_alpha(&self) -> bool {
-        self.save_is_alpha
+        self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0)
     }
 
     /// Maps an Alpha v105 raw stat ID to its effective (standard) ID.
     pub fn map_alpha_id(&self, raw_id: u32) -> u32 {
-        if !self.save_is_alpha {
+        if !self.is_alpha() {
             return raw_id;
         }
         let reg = get_registry();
@@ -116,23 +116,13 @@ impl StatsAxiom {
     }
 
     pub fn is_fragment(&self, flags: u32) -> bool {
-        self.save_is_alpha && (self.version == 5 || self.version == 2 || self.version == 1) && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
+        self.is_alpha() && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
     }
 
 
     pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool) -> PropertyRhythm {
-        if self.save_is_alpha {
-            if self.version == 6 {
-                // Version 6 items in Alpha v105 use 9-bit rhythm
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: if _is_compact { None } else { Some(if _is_shadow { 8 } else { 9 }) },
-                    has_terminal_bit: true,
-                    has_extra_terminal_bit: false,
-                };
-            }
-            
-            // All other Alpha items use 7-bit ID, 6-bit Value
+        if self.is_alpha() {
+            // All Alpha items use 7-bit ID, 6-bit Value
             PropertyRhythm {
                 id_bits: 7,
                 value_bits: Some(6),
@@ -140,7 +130,7 @@ impl StatsAxiom {
                 has_extra_terminal_bit: true,
             }
         } else {
-            // Retail
+            // Retail and hybrids (e.g. version 6 in Alpha)
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None, // use STAT_COSTS
@@ -196,6 +186,17 @@ impl StatsAxiom {
                 let min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
                 if final_len < min_bits {
                     final_len = min_bits;
+                }
+                
+                // Alpha v105 32-bit Alignment Axiom
+                if (self.version == 5 || self.version == 1 || self.version == 0 || self.version == 7) && !self.is_personalized(flags) {
+                    if final_len % 32 != 0 {
+                        final_len += 32 - (final_len % 32);
+                    }
+                    // Shadow nudge: shadow items are actually 8 bits shorter than full alignment
+                    if self.is_v105_shadow(flags) {
+                        final_len -= 8;
+                    }
                 }
             }
 
@@ -264,7 +265,7 @@ impl StatsAxiom {
 
     /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
-        if self.save_is_alpha {
+        if self.is_alpha() {
             let reg = get_registry();
             let trimmed = self.code.trim();
 

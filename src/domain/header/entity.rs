@@ -70,7 +70,7 @@ impl HeaderAxiom {
     }
 
     pub fn is_alpha(&self) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 6 || self.version == 7)
+        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0)
     }
 
     pub fn is_plausible(&self, mode: u8, location: u8, code: &str, flags: u32) -> bool {
@@ -85,7 +85,7 @@ impl HeaderAxiom {
             if matches!(trimmed, "ww l" | "xlp" | "buc") {
                 return mode <= 7 && location <= 15 && (flags & 0xF8000000) == 0;
             }
-            if !(self.version == 5 || self.version == 1 || self.version == 6 || self.version == 7) {
+            if !(self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0) {
                 return false; 
             }
             if mode > 7 || location > 15 { 
@@ -123,7 +123,7 @@ impl HeaderAxiom {
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
         if self.alpha_mode {
-            if self.version == 5 || self.version == 6 || self.version == 7 {
+            if self.version == 5 {
                 !is_compact && (flags & (1 << 11)) != 0
             } else {
                 (flags & (1 << 27)) != 0
@@ -147,7 +147,7 @@ impl HeaderAxiom {
 
     pub fn is_runeword(&self, flags: u32) -> bool {
         if self.alpha_mode {
-            if self.version == 5 || self.version == 1 || self.version == 6 || self.version == 7 {
+            if self.version == 5 || self.version == 1 {
                 let is_frag = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
             } else {
@@ -164,7 +164,7 @@ impl HeaderAxiom {
 
     pub fn header_geometry(&self, flags: u32, is_compact: bool, is_personalized: bool) -> HeaderGeometry {
         if self.alpha_mode {
-            if self.version == 5 || self.version == 0 || self.version == 7 || self.version == 6 {
+            if self.version == 5 || self.version == 0 || self.version == 7 {
                 let is_rw = self.is_runeword(flags);
                 let is_v105_shadow = self.is_v105_shadow(flags);
 
@@ -180,7 +180,7 @@ impl HeaderAxiom {
                     HeaderGeometry {
                         y_bits: if is_compact { 0 } else { 4 },
                         page_bits: if is_compact { 0 } else { 3 },
-                        socket_hint_bits: if is_compact { 0 } else if self.version == 7 || self.version == 6 { 1 } else { 4 },
+                        socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
                         has_header_gap: true,
                         skip_geometry: false,
                     }
