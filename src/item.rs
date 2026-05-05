@@ -32,72 +32,55 @@ pub struct PropertyReaderContext<'a> {
 
 impl Item {
     pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {
-        let mut best_jm_pos = None;
-        let mut backup_jm_pos = None;
+        let mut all_items = Vec::new();
+        let mut jm_positions = Vec::new();
 
+        // Find all JM markers
         for i in 0..bytes.len().saturating_sub(3) {
             if bytes[i] == b'J' && bytes[i + 1] == b'M' {
-                let count = u16::from_le_bytes([bytes[i + 2], bytes[i + 3]]);
-                
-                if count == 0 {
-                    if backup_jm_pos.is_none() {
-                        backup_jm_pos = Some(i);
-                    }
-                } else {
-                    // Peek at the first item to see if it's plausible.
-                    let section_payload = &bytes[i + 4..];
-                    if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = 
-                        peek_item_header_at(section_payload, 0, huffman, alpha) 
-                    {
-                        if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                            best_jm_pos = Some(i);
-                            break;
-                        }
-                    }
-                    
-                    if backup_jm_pos.is_none() {
-                        backup_jm_pos = Some(i);
-                    }
+                jm_positions.push(i);
+            }
+        }
+
+        item_trace!("[DEBUG] Found {} JM markers at positions: {:?}", jm_positions.len(), jm_positions);
+
+        if jm_positions.is_empty() {
+            return Err(ParsingFailure {
+                error: ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: 0 },
+                context_stack: vec!["read_player_items".to_string()],
+                bit_offset: 0,
+                context_relative_offset: 0,
+                hint: Some("Could not find any JM markers.".to_string()),
+            });
+        }
+
+        for (idx, &start_offset) in jm_positions.iter().enumerate() {
+            let count = u16::from_le_bytes([bytes[start_offset + 2], bytes[start_offset + 3]]);
+            let payload_start = start_offset + 4;
+
+            let next_jm = jm_positions.get(idx + 1).cloned().unwrap_or(bytes.len());
+            if next_jm <= payload_start && next_jm != bytes.len() {
+                // Empty section header
+                continue;
+            }
+
+            let section_bytes = &bytes[payload_start..next_jm];
+            item_trace!("[DEBUG] Parsing JM section at offset {} with count {}", start_offset, count);
+
+            match Self::read_section(section_bytes, count, huffman, alpha) {
+                Ok(mut items) => {
+                    all_items.append(&mut items);
+                }
+                Err(e) => {
+                    item_trace!("[DEBUG] Failed to parse section at offset {}: {:?}", start_offset, e);
+                    // Continue to next section if possible, or return error if critical?
+                    // In Alpha mode, we should be resilient.
+                    if !alpha { return Err(e); }
                 }
             }
         }
 
-        let start_offset = best_jm_pos.or(backup_jm_pos).ok_or_else(|| ParsingFailure {
-            error: ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: 0 },
-            context_stack: vec!["read_player_items".to_string()],
-            bit_offset: 0,
-            context_relative_offset: 0,
-            hint: Some("Could not find a valid start of item section.".to_string()),
-        })?;
-
-        item_trace!("[DEBUG] Selected JM section at offset {}", start_offset);
-
-        if bytes.len() < start_offset + 4 {
-            return Err(ParsingFailure {
-                error: ParsingError::MissingMarker { marker: "JM count".to_string(), bit_offset: (start_offset * 8) as u64 },
-                context_stack: vec!["read_player_items".to_string()],
-                bit_offset: (start_offset * 8) as u64,
-                context_relative_offset: 0,
-                hint: Some("Item section header (JM count) is incomplete.".to_string()),
-            });
-        }
-
-        let count = u16::from_le_bytes([bytes[start_offset + 2], bytes[start_offset + 3]]);
-        
-        let payload_start = start_offset + 4;
-
-        if bytes.len() < payload_start {
-             return Err(ParsingFailure {
-                error: ParsingError::Io("Section too short for preamble".to_string()),
-                context_stack: vec!["read_player_items".to_string()],
-                bit_offset: (payload_start * 8) as u64,
-                context_relative_offset: 0,
-                hint: Some("The item section ended before the expected preamble.".to_string()),
-            });
-        }
-
-        let section_bytes = &bytes[payload_start..];
-        Self::read_section(section_bytes, count, huffman, alpha)
+        Ok(all_items)
     }
 
     pub fn read_section(section_bytes: &[u8], top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
@@ -108,7 +91,12 @@ impl Item {
 
         while items.len() < top_level_count as usize && bit_pos < section_bits {
             let start = if alpha_mode {
-                find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode).unwrap_or(bit_pos)
+                if let Some(pos) = find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode) {
+                    pos
+                } else {
+                    item_trace!("[DEBUG] read_section: No more plausible items found at bit_pos {}", bit_pos);
+                    break; 
+                }
             } else {
                 bit_pos
             };
@@ -702,6 +690,11 @@ fn read_item_stats<R: BitRead>(
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
     let is_potion = trimmed_code.starts_with('h') || trimmed_code.starts_with('m') || (version == 5 && trimmed_code.starts_with('7')) || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
     
+    if is_alpha && trimmed_code.is_empty() {
+        crate::item_trace!("[DEBUG] Skipping properties for empty-code Alpha item");
+        return Ok((Vec::new(), true, false, None, None, None));
+    }
+
     if is_alpha && version == 5 && !is_v105_shadow_final && 
        (is_potion || is_scroll || quality_val < ItemQuality::Magic) {
           if trimmed_code == "7mgw" {
