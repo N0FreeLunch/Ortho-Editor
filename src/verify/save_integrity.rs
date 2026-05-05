@@ -1,10 +1,9 @@
 use crate::domain::header::axiom::{ACTIVE_ACT_OFFSET, EXPANSION_FLAG_OFFSET, PROGRESS_FLAG_OFFSET};
 use crate::domain::progression::axiom::{V105_NPC_OFFSET, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET};
 use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
-use crate::item::{HuffmanTree, Item, ParsingError};
 use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save};
 use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
-use crate::verify::v2::{DomainVerifier, header::HeaderVerifier, progression::ProgressionVerifier};
+use crate::verify::v2::{DomainVerifier, header::HeaderVerifier, progression::ProgressionVerifier, item::ItemVerifier};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,7 +67,6 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     };
 
     let alpha_mode = save.header.version == 105;
-    let huffman = HuffmanTree::new();
 
     // 1. Header V2 Integration
     let header_report = header_verifier.verify(bytes, alpha_mode);
@@ -118,41 +116,14 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         }
     }
 
-    // 3. Item Parsing and Round-trip
-    let items = match Item::read_player_items(bytes, &huffman, alpha_mode) {
-        Ok(items) => items,
-        Err(err) => {
-            issues.push(ReportIssue {
-                kind: "item_parse".to_string(),
-                message: format!("{}", err),
-                bit_offset: parsing_error_offset(&err.error),
-            });
-            fail = true;
-            Vec::new()
-        }
-    };
-
-    for item in &items {
-        let item_bits = match item.to_bytes(&huffman, alpha_mode) {
-            Ok(b) => b,
-            Err(e) => {
-                issues.push(ReportIssue {
-                    kind: "item_parse".to_string(),
-                    message: format!("Item to_bytes ({}): {}", item.code, e),
-                    bit_offset: None,
-                });
-                fail = true;
-                continue;
-            }
-        };
-        if let Err(e) = Item::from_bytes(&item_bits, &huffman, alpha_mode) {
-            issues.push(ReportIssue {
-                kind: "item_parse".to_string(),
-                message: format!("Item round-trip parse failure ({}): {}", item.code, e),
-                bit_offset: parsing_error_offset(&e.error),
-            });
+    // 3. Item Domain V2 Integration
+    let item_verifier = ItemVerifier;
+    let item_report = item_verifier.verify(bytes, alpha_mode);
+    for issue in item_report.issues {
+        if issue.kind == "item_parse" || issue.kind == "jm_coherence" {
             fail = true;
         }
+        issues.push(issue);
     }
 
     // 4. Progression V2 Integration
@@ -164,35 +135,12 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         issues.push(issue);
     }
 
-    // 5. JM Coherence (Item Domain Bridge)
+    // 5. JM Markers (for payload)
     let jm_markers = find_jm_markers(bytes);
-    if jm_markers.is_empty() {
-        issues.push(ReportIssue {
-            kind: "jm_markers".to_string(),
-            message: "No JM markers found".to_string(),
-            bit_offset: None,
-        });
-    }
-
-    if let Some(&jm0) = jm_markers.first() {
-        if jm0 + 3 < bytes.len() {
-            let expected = u16::from_le_bytes([bytes[jm0 + 2], bytes[jm0 + 3]]) as usize;
-            if expected != items.len() {
-                issues.push(ReportIssue {
-                    kind: "jm_coherence".into(),
-                    message: format!("JM header count ({}) != parsed items ({})", expected, items.len()),
-                    bit_offset: Some((jm0 + 2) as u64 * 8),
-                });
-                fail = true;
-            }
-        }
-    }
 
     // 6. Forensic Audit Aggregation
     let mut forensic_audit = prog_report.audit;
-    for item in &items {
-        forensic_audit.extend(item.forensic_audit.clone());
-    }
+    forensic_audit.extend(item_report.audit);
 
     let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
     let hints = synthesize_hints(&issues);
@@ -241,15 +189,6 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     (report, fail)
 }
 
-fn parsing_error_offset(error: &ParsingError) -> Option<u64> {
-    match error {
-        ParsingError::InvalidHuffmanBit { bit_offset }
-        | ParsingError::UnexpectedSegmentEnd { bit_offset }
-        | ParsingError::BitSymmetryFailure { bit_offset } => Some(*bit_offset),
-        ParsingError::InvalidStatId { bit_offset, .. } => Some(*bit_offset),
-        _ => None,
-    }
-}
 
 fn synthesize_hints(issues: &[ReportIssue]) -> Vec<String> {
     let mut hints = Vec::new();
