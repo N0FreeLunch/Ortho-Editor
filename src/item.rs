@@ -32,6 +32,10 @@ pub struct PropertyReaderContext<'a> {
 
 impl Item {
     pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {
+        if crate::engine::config::is_refexp() {
+            println!("[REFEXP] Using experimental domain engine for read_player_items");
+            return crate::domain::item::serialization::read_player_items(bytes, huffman, alpha);
+        }
         let mut all_items = Vec::new();
         let mut jm_positions = Vec::new();
 
@@ -176,6 +180,10 @@ impl Item {
     }
 
     pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
+        if crate::engine::config::is_refexp() {
+            crate::item_trace!("[REFEXP] Using experimental domain engine for from_bytes");
+            return crate::domain::item::serialization::from_bytes(bytes, huffman, alpha);
+        }
         let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None)?;
         Ok(item)
     }

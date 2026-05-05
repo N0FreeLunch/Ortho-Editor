@@ -135,7 +135,10 @@ impl OutputManager {
     pub fn new(tool_name: &str, args: &args::ParsedArgs) -> Self {
         let is_json = args.is_json();
         let is_token_efficient = args.is_set("token-efficient");
+        let is_refexp = args.is_set("refexp");
         let output_path = args.get("output");
+
+        crate::engine::config::set_refexp(is_refexp);
 
         let mut writer = None;
 
