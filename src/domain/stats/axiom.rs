@@ -207,7 +207,25 @@ impl StatsAxiom {
                 final_len += 8;
             }
 
-            if self.version == 5 && (flags & (1 << 11)) != 0 {
+            if self.version == 5 || self.version == 1 || self.version == 7 || self.version == 6 {
+                let is_shadow = self.is_v105_shadow(flags);
+                let is_rw = self.header_axiom().is_runeword(flags);
+                let mut is_v105_summary = false;
+                if (self.version == 5 || self.version == 6) && !is_shadow && !is_rw {
+                    is_v105_summary = crate::domain::item::serialization::is_v105_summary_code(trimmed);
+                }
+
+                if !is_compact && !is_v105_summary && !self.is_personalized(flags) {
+                    if final_len % 32 != 0 {
+                        final_len += 32 - (final_len % 32);
+                    }
+                    if is_shadow {
+                        final_len -= 8;
+                    }
+                }
+            }
+
+            if (self.version == 5 || self.version == 6 || self.version == 7) && (flags & (1 << 11)) != 0 && !is_compact {
                 final_len += 16;
             }
         } else if final_len % 8 != 0 {

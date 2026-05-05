@@ -179,11 +179,12 @@ fn main() {
                     });
                 } else {
                     println!(
-                        "Item {}: '{}' (start_bit={}, len={} bits)",
+                        "Item {}: '{}' (start_bit={}, len={} bits) version={}",
                         i,
                         item.code,
                         bit_start,
-                        item.bits.len()
+                        item.bits.len(),
+                        item.header.version
                     );
 
                     // Forensic BitRange Verification (Slice S2)
