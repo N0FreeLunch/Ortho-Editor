@@ -364,7 +364,9 @@ impl Item {
             println!("[DEBUG] write_item: code='{}', bits_after_basic_header={}", self.code.trim(), emitter.written_bits());
         }
         
-        let axiom = StatsAxiom::new(self.version, self.quality.unwrap_or(ItemQuality::Normal), alpha_mode);
+        let axiom = StatsAxiom::new(self.version, self.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+            .with_personalization(self.is_personalized)
+            .with_code(&self.code);
         let geometry = axiom.header_geometry(self.flags, self.is_compact);
 
         if geometry.has_header_gap {
