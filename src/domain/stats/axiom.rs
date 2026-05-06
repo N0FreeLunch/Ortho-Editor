@@ -130,8 +130,8 @@ impl StatsAxiom {
             };
         }
 
-        if self.is_alpha() && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0) {
-            // All Alpha items use 9-bit ID, 6-bit Value (fixture-verified)
+        if self.is_alpha() && self.version == 5 {
+            // Only Version 5 (Alpha v105 native) items use 9-bit ID, 6-bit Value (fixture-verified)
             // Terminator is 9-bits (111111111), no extra terminal bits like Retail.
             PropertyRhythm {
                 id_bits: 9,
@@ -140,7 +140,7 @@ impl StatsAxiom {
                 has_extra_terminal_bit: false,
             }
         } else {
-            // Retail and hybrids (e.g. version 4, 6, 7 in Alpha)
+            // Retail and other Alpha hybrids (version 0, 1, 2, 4, 6, 7)
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None, // use STAT_COSTS

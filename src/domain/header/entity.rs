@@ -95,11 +95,18 @@ impl HeaderAxiom {
     }
 
     pub fn is_compact(&self, flags: u32) -> bool {
+        if self.is_runeword(flags) {
+            return false;
+        }
         if self.alpha_mode {
-            if self.version == 5 || self.version == 2 {
-                (flags & (1 << 23)) != 0
+            let identified = (flags & 1) != 0;
+            let runeword_bit = (flags & (1 << 26)) != 0;
+            if self.version == 5 {
+                (flags & (1 << 23)) != 0 && !runeword_bit && identified
+            } else if self.version == 6 || self.version == 7 {
+                (flags & (1 << 21)) != 0 && !runeword_bit && identified
             } else {
-                (flags & (1 << 21)) != 0
+                false
             }
         } else {
             (flags & (1 << 21)) != 0
@@ -190,29 +197,29 @@ impl HeaderAxiom {
                         skip_geometry: false,
                     }
                 }
-            } else if self.version == 1 {
+            } else if self.version == 4 || self.version == 5 {
                 HeaderGeometry {
-                    y_bits: 4,
-                    page_bits: 3,
-                    socket_hint_bits: 3,
-                    has_header_gap: true,
-                    skip_geometry: false,
+                    y_bits: if is_compact { 0 } else { 4 },
+                    page_bits: if is_compact { 0 } else { 3 },
+                    socket_hint_bits: if is_compact { 0 } else { 3 },
+                    has_header_gap: self.version == 5,
+                    skip_geometry: is_compact,
                 }
-            } else if self.version == 4 {
+            } else if self.version == 0 || self.version == 1 || self.version == 2 {
                 HeaderGeometry {
-                    y_bits: 0,
-                    page_bits: 0,
-                    socket_hint_bits: 0,
+                    y_bits: if is_compact { 0 } else { 4 },
+                    page_bits: if is_compact { 0 } else { 3 },
+                    socket_hint_bits: if is_compact { 0 } else { 3 },
                     has_header_gap: false,
-                    skip_geometry: true,
+                    skip_geometry: is_compact,
                 }
             } else {
                 HeaderGeometry {
-                    y_bits: 0,
-                    page_bits: 0,
-                    socket_hint_bits: 0,
+                    y_bits: if is_compact { 0 } else { 4 },
+                    page_bits: if is_compact { 0 } else { 3 },
+                    socket_hint_bits: if is_compact { 0 } else { 3 },
                     has_header_gap: false,
-                    skip_geometry: true,
+                    skip_geometry: is_compact,
                 }
             }
         } else {

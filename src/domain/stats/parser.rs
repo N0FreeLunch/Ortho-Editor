@@ -4,7 +4,7 @@ use crate::domain::stats::{
     ItemProperty, StatsAxiom, ItemStats,
 };
 use crate::data::bit_cursor::BitCursor;
-use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext, ItemHeader};
+use crate::item::{self, HuffmanTree, ParsingResult, PropertyReaderContext, ItemHeader};
 use crate::domain::header::entity::ItemSegmentType;
 
 pub fn read_item_stats<R: BitRead>(
@@ -37,9 +37,7 @@ pub fn read_item_stats<R: BitRead>(
         return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
-    if is_alpha && version == 4 && !is_personalized {
-        return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
-    }
+    // Removed version 4 early exit to allow parsing items with stats/nested children (e.g. mxh).
 
     if is_alpha && version == 5 && !is_v105_shadow_final && 
        (is_potion || is_scroll || quality_val < ItemQuality::Magic) {
@@ -179,9 +177,6 @@ where
 
     if stat_id != (stat_id & terminator) {
         // Re-read with correct bits if rhythm changed
-    }
-    if axiom.is_alpha() && crate::item::item_trace_enabled() {
-        println!("[DEBUG] Property: stat_id={}, pos={}", stat_id, recorder.pos());
     }
     
     if stat_id == terminator {
