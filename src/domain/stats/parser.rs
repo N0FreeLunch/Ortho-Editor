@@ -105,6 +105,18 @@ where
     if depth > 5 { return Ok((props, saw_terminator, terminator_bit, nested_items)); }
 
     loop {
+        // Soft-Sync: If parsing stats block, check if current position is valid
+        if !axiom.is_alpha() {
+             let saved_pos = recorder.checkpoint();
+             if let Ok(peek_id) = recorder.read_bits::<u16>(9) {
+                 if peek_id > 511 {
+                     println!("[DEBUG] SLICE 12: Soft-Sync detected potential bit drift at pos {}, peek_id={}", recorder.pos(), peek_id);
+                 } else {
+                     recorder.rollback(saved_pos);
+                 }
+             }
+        }
+
         let result = parse_single_property_internal(
             recorder,
             version,
@@ -116,21 +128,26 @@ where
             axiom,
             _section_recovery.clone(),
             &mut recovery_fn,
-        )?;
+        );
+
         match result {
-            Some((prop, is_term, term_bit, items)) => {
-                println!("[DEBUG] SLICE 11: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
-                if is_term {
-                    saw_terminator = true;
-                    terminator_bit = term_bit;
-                    break;
-                }
+            Ok(Some((prop, _, _, items))) => {
+                println!("[DEBUG] SLICE 12: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
                 props.push(prop);
                 nested_items.extend(items);
             }
-            None => break,
+            Ok(None) => break,
+            Err(e) => {
+                println!("[DEBUG] SLICE 12: Soft-Sync error at pos {}: {:?}. Attempting re-alignment.", recorder.pos(), e);
+                if recorder.read_bit().is_err() {
+                    break;
+                }
+            }
         }
     }
+
+
+    println!("[DEBUG] SLICE 12: Loop terminated, saw_terminator={}, terminator_bit={}, props.len={}", saw_terminator, terminator_bit, props.len());
 
     Ok((props, saw_terminator, terminator_bit, nested_items))
 }
@@ -202,11 +219,12 @@ where
                 value: 0,
                 range: ItemBitRange { start: entry_start, end: recorder.pos() },
             },
-            true,
+            true, // Force is_term = true
             term_bit,
-            Vec::new()
+            Vec::new(),
         )));
     }
+
 
     let raw_value;
     let mut param = 0;
