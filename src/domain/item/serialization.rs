@@ -71,60 +71,68 @@ pub fn peek_item_header_at(
 
     // Read header structure
     let flags = reader.read::<32, u32>().ok()?;
-    let version = reader.read::<3, u8>().ok()?;
-    
-    if alpha_mode {
+    let (version, mode, loc, x, base_header_len) = if alpha_mode {
         let checksum = reader.read::<8, u8>().ok()?;
-        let calculated = ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ (version as u32)) as u8;
-        if calculated != checksum {
-            return None;
-        }
-    }
+        let v = reader.read::<3, u8>().ok()?;
+        let calculated = ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ (v as u32)) as u8;
+        if calculated != checksum { return None; }
+        let m = reader.read::<3, u8>().ok()?;
+        let l = reader.read::<3, u8>().ok()?;
+        let x_val = reader.read::<4, u8>().ok()?;
+        (v, m, l, x_val, 32 + 8 + 3 + 3 + 3 + 4)
+    } else {
+        let v = reader.read::<3, u8>().ok()?;
+        let m = reader.read::<3, u8>().ok()?;
+        let l = reader.read::<3, u8>().ok()?;
+        let x_val = reader.read::<4, u8>().ok()?;
+        (v, m, l, x_val, 32 + 3 + 3 + 3 + 4)
+    };
 
-    let mode = reader.read::<3, u8>().ok()?;
-    let loc = reader.read::<3, u8>().ok()?;
-    let x = reader.read::<4, u8>().ok()?;
-    
-    // ... rest of the function ...
     let axiom = HeaderAxiom::new(version, alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = s_axiom.is_compact(flags);
     let is_personalized = s_axiom.is_personalized(flags);
-    let mut header_len = 32 + (if alpha_mode { 8 } else { 0 }) + 3 + 3 + 3 + 4; 
-    
     let geometry = axiom.header_geometry(flags, is_compact, is_personalized);
 
+    let mut possible_gaps = Vec::new();
     if geometry.has_header_gap {
-        if axiom.is_alpha() {
+        if alpha_mode {
             let is_v105_shadow = s_axiom.is_v105_shadow(flags);
             let is_rw = s_axiom.is_runeword(flags);
             if is_rw || is_v105_shadow {
-                let gap_bits = if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 { 8 } else { 24 }; 
-                header_len += gap_bits;
+                let gap_bits = if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 { 8u64 } else { 24u64 }; 
+                possible_gaps.push(gap_bits);
+                if gap_bits == 8 { possible_gaps.push(32); }
             } else {
-                header_len += geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits + 8;
+                let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64;
+                possible_gaps.push(geom_bits + 8);
+                possible_gaps.push(geom_bits + 16);
+                possible_gaps.push(geom_bits + 24);
+                possible_gaps.push(geom_bits + 32);
+                possible_gaps.push(geom_bits + 0);
             }
         } else {
-            header_len += geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits + 8;
+            possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64 + 8);
         }
     } else if !geometry.skip_geometry {
-        header_len += geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits;
+        possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64);
+    } else {
+        possible_gaps.push(0);
     }
 
-    let mut code = String::new();
-    let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if n_reader.skip(start_bit as u32 + header_len as u32).is_err() { 
-        return None; 
-    }
-    let mut n_cursor = BitCursor::new(n_reader);
-    
-    for _ in 0..4 {
-        if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) { code.push(ch); }
-        else { return None; }
-    }
-    
-    if is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
-        return Some((mode, loc, x, code, flags, version, is_compact, header_len as u64, 0));
+    for gap in possible_gaps {
+        let mut code = String::new();
+        let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+        if n_reader.skip(start_bit as u32 + base_header_len + gap as u32).is_err() { continue; }
+        let mut n_cursor = BitCursor::new(n_reader);
+        let mut ok = true;
+        for _ in 0..4 {
+            if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) { code.push(ch); }
+            else { ok = false; break; }
+        }
+        if ok && is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
+            return Some((mode, loc, x, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8));
+        }
     }
     None
 }
@@ -206,9 +214,8 @@ impl Item {
             // peek_item_header_at already provides the flags.
             if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 32, huffman, alpha_mode) {
                 let gap_axiom = V105HeaderGapAxiom::default();
-                if let Some(gap) = gap_axiom.resolve_gap(section_bytes, flags) {
-                    start_offset += gap as u64;
-                }
+                let gap = gap_axiom.resolve_gap(None, flags);
+                start_offset += gap as u64;
             }
         }
         let markers =
@@ -278,10 +285,17 @@ impl Item {
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Root);
 
-        let (header, alpha_header_gap) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode)?;
+        let peek = if alpha_mode && ctx.is_some() {
+            let (bytes, start_bit) = ctx.unwrap();
+            peek_item_header_at(bytes, start_bit, huff, true)
+        } else { None };
+        let code_peek = peek.as_ref().map(|p| p.3.as_str());
+        let gap_override = peek.as_ref().map(|p| p.8 as usize);
+
+        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override)?;
         
         // Log gap for analysis
-        if let Some(gap) = alpha_header_gap {
+        if let Some(_gap) = alpha_header_gap {
             cursor.push_context("AlphaHeaderGap");
             // If we have an alpha_header_gap, consume or log its impact
             // This is a minimal modeling approach as per mini-spec
@@ -290,6 +304,7 @@ impl Item {
         
         let (mut body, ear_class, ear_level, ear_player_name) = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode)?;
         body.alpha_header_gap = alpha_header_gap;
+        body.alpha_header_gap_bits = alpha_header_gap_bits;
 
         let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode)
             .with_code(&body.code);

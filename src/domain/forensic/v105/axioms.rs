@@ -43,15 +43,21 @@ impl ForensicAxiom for V105HeaderGapAxiom {
 }
 
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, _section_bytes: &[u8], flags: u32) -> Option<usize> {
+    pub fn resolve_gap(&self, code: Option<&str>, flags: u32) -> usize {
+        if let Some(c) = code {
+            let trimmed = c.trim();
+            if trimmed == "hps7" { return 32; }
+            if trimmed == "ics" { return 24; }
+        }
+
         // Forensic: 'cwd' (compact) items often use a 24-bit alignment gap instead of the standard 32.
         // If flag bit 26 or 27 is set, use 8 bits, otherwise check for compact flag.
         if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
-            Some(8)
+            8
         } else if (flags & 0x00000008) != 0 { // Placeholder for compact bit
-            Some(24)
+            24
         } else {
-            Some(32)
+            32
         }
     }
 }

@@ -7,6 +7,7 @@ use crate::domain::item::axiom_meta::ForensicAudit;
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom};
+use crate::domain::forensic::v105::V105HeaderGapAxiom;
 use std::ops::{Deref, DerefMut};
 use std::io;
 
@@ -58,6 +59,7 @@ pub struct ItemBody {
     pub quantity: Option<u32>,
     // Alpha Forensic Fields
     pub alpha_header_gap: Option<u32>,
+    pub alpha_header_gap_bits: Vec<bool>,
     pub v5_runeword_extra: Option<u8>,
     pub v105_7mgw_payload: Option<Vec<bool>>,
     pub alpha_nudge: Option<u8>,
@@ -326,25 +328,27 @@ impl Item {
 
         if geometry.has_header_gap {
             if h_axiom.is_alpha() {
-                let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
-                let is_rw = h_axiom.is_runeword(self.header.flags);
-
-                if is_v105_shadow || is_rw {
-                    let is_v105_shadow_local = (self.header.flags & (1 << 26)) != 0 || (self.header.flags & (1 << 27)) != 0;
-                    let gap_bits = if is_v105_shadow_local { 8 } else { 24 };
-                    let gap = self.body.alpha_header_gap.unwrap_or(0);
-                    emitter.write_bits(gap, gap_bits)?;
-                    
-                    if !self.header.is_compact {
-                        // y, page, socket_hint are embedded in the gap for shadows/runewords
+                if !self.body.alpha_header_gap_bits.is_empty() {
+                    for &bit in &self.body.alpha_header_gap_bits {
+                        emitter.write_bit(bit)?;
                     }
                 } else {
-                    if !self.header.is_compact {
-                        emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
-                        emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-                        emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+                    let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
+                    let is_rw = h_axiom.is_runeword(self.header.flags);
+
+                    if is_v105_shadow || is_rw {
+                        let is_v105_shadow_local = (self.header.flags & (1 << 26)) != 0 || (self.header.flags & (1 << 27)) != 0;
+                        let gap_bits = if is_v105_shadow_local { 8 } else { 24 };
+                        let gap = self.body.alpha_header_gap.unwrap_or(0);
+                        emitter.write_bits(gap, gap_bits)?;
+                    } else {
+                        if !self.header.is_compact {
+                            emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
+                            emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
+                            emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+                        }
+                        emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), 8)?;
                     }
-                    emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), 8)?;
                 }
             } else {
                 if !self.header.is_compact {
@@ -495,7 +499,9 @@ impl Item {
 pub fn parse_item_header<R: BitRead>(
     cursor: &mut BitCursor<R>,
     alpha_mode: bool,
-) -> ParsingResult<(ItemHeader, Option<u32>)> {
+    code_hint: Option<&str>,
+    gap_override: Option<usize>,
+) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
     let flags = cursor.read_bits::<u32>(32)?;
@@ -514,6 +520,7 @@ pub fn parse_item_header<R: BitRead>(
     let mut y = 0; let mut page = 0; let mut socket_hint = 0;
     let geometry = h_axiom.header_geometry(flags, is_compact, is_personalized);
     let mut alpha_header_gap = None;
+    let mut alpha_header_gap_bits = Vec::new();
     if geometry.has_header_gap {
         if h_axiom.is_alpha() {
             let is_v105_shadow = h_axiom.is_v105_shadow(flags);
@@ -521,16 +528,40 @@ pub fn parse_item_header<R: BitRead>(
             if is_rw || is_v105_shadow {
                 let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 let gap_bits = if is_v105_shadow_local { 8 } else { 24 };
-                let gap = cursor.with_context("AlphaHeaderGap", |c| c.read_bits::<u32>(gap_bits))?;
+                alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits))?;
+                let gap = if gap_bits <= 32 {
+                    let mut val = 0u32;
+                    for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
+                        if bit { val |= 1 << i; }
+                    }
+                    val
+                } else { 0 };
                 alpha_header_gap = Some(gap);
                 if !is_compact { y = (gap & 0x0F) as u8; page = ((gap >> 4) & 0x07) as u8; socket_hint = ((gap >> 7) & 0x01) as u8; }
             } else {
                 if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
-                alpha_header_gap = Some(cursor.with_context("AlphaHeaderGap", |c| c.read_bits::<u32>(8))?);
+                
+                let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize;
+                let gap_bits = if let Some(go) = gap_override {
+                    if go >= geom_bits { go - geom_bits } else { 8 }
+                } else {
+                    V105HeaderGapAxiom::default().resolve_gap(code_hint, flags)
+                };
+
+                alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
+                
+                let mut val = 0u32;
+                for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
+                    if i < 32 && bit { val |= 1 << i; } 
+                }
+                alpha_header_gap = Some(val);
             }
         } else {
             if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
-            alpha_header_gap = Some(cursor.with_context("AlphaHeaderGap", |c| c.read_bits::<u32>(8))?);
+            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(8))?;
+            let mut val = 0u32;
+            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { if bit { val |= 1 << i; } }
+            alpha_header_gap = Some(val);
         }
     } else if !geometry.skip_geometry {
         y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
@@ -541,7 +572,7 @@ pub fn parse_item_header<R: BitRead>(
         is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact), is_personalized,
         is_runeword: s_axiom.is_runeword(flags), is_ethereal: s_axiom.is_ethereal(flags), is_ear: (flags & (1 << 24)) != 0,
         alpha_quality_raw: None, alpha_v5_runeword_extra: None, alpha_unique_id_raw: None,
-    }, alpha_header_gap))
+    }, alpha_header_gap, alpha_header_gap_bits))
 }
 
 pub fn parse_item_body<R: BitRead>(
@@ -574,6 +605,7 @@ pub fn parse_item_body<R: BitRead>(
     Ok((ItemBody {
         code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,
         defense: None, max_durability: None, current_durability: None, quantity: None, alpha_header_gap: None, 
+        alpha_header_gap_bits: Vec::new(),
         v5_runeword_extra: None, v105_7mgw_payload: None, alpha_nudge, alpha_set_list_val: None, alpha_shadow_skip_bits: None, 
         alpha_body_gap_bits: Vec::new(), alpha_alignment_padding: Vec::new(),
     }, ear_class, ear_level, ear_player_name))
