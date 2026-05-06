@@ -119,6 +119,7 @@ where
         )?;
         match result {
             Some((prop, is_term, term_bit, items)) => {
+                println!("[DEBUG] SLICE 11: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
                 if is_term {
                     saw_terminator = true;
                     terminator_bit = term_bit;
@@ -253,11 +254,14 @@ where
     // Slice 7: Stat 317/320 nested recovery seam
     // Prevent recursive triggering of Stat 320 recovery by checking for "nested" context
     let is_already_nested = recorder.get_context_count() > 0;
+    // Log stat identification for diagnosis
+    if crate::item::item_trace_enabled() && (stat_id == 317 || axiom.map_alpha_id(stat_id) == 317) {
+        println!("[DEBUG] SLICE 11: Stat 317 found, pos: {}, width: {}, already_nested: {}", recorder.pos(), effective_width, is_already_nested);
+    }
     if axiom.is_alpha() && (stat_id == 317 || axiom.map_alpha_id(stat_id) == 317) && effective_width > 32 && !is_already_nested {
         if crate::item::item_trace_enabled() {
-            println!("[DEBUG] SLICE 7 TRIGGER: Stat 317 nested recovery at pos {}", recorder.pos());
+            println!("[DEBUG] SLICE 11 TRIGGER: Stat 317 nested recovery at pos {}, axiom_alpha: {}", recorder.pos(), axiom.is_alpha());
         }
-
         recorder.push_context("nested");
         if let Ok((child, end_pos)) = recovery_fn(
             reader_ctx.bytes,
@@ -266,16 +270,19 @@ where
             0,
             axiom.save_is_alpha,
         ) {
+            println!("[DEBUG] SLICE 11: Child item parsed, end_pos: {}, consumed: {}", end_pos, end_pos - recorder.pos());
             if end_pos > recorder.pos() {
-                // Ensure the cursor advances to the end of the consumed nested item
                 let consumed = (end_pos - recorder.pos()) as u32;
                 recorder.skip_and_record(consumed)?;
                 effective_width = consumed;
                 nested_items.push(child);
             }
+        } else {
+            println!("[DEBUG] SLICE 11: Failed to parse child item at pos {}", recorder.pos());
         }
         recorder.pop_context();
     }
+
 
     if effective_width > 32 {
         recorder.skip_and_record(effective_width)?;
