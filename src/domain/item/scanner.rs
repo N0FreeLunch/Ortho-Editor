@@ -26,7 +26,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
         
         if max_confidence > 0 {
             markers.push(best_offset);
-            probe = best_offset + 64; 
+            probe = best_offset + 32; 
         } else {
             probe += 8;
         }

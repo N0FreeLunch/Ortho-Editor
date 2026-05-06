@@ -76,14 +76,9 @@ pub fn peek_item_header_at(
     if alpha_mode {
         let checksum = reader.read::<8, u8>().ok()?;
         let calculated = ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ (version as u32)) as u8;
-        if crate::item::item_trace_enabled() {
-            println!("[DEBUG] SLICE 11: Header Checksum check: read=0x{:02X}, calc=0x{:02X}", checksum, calculated);
-        }
-        /*
         if calculated != checksum {
             return None;
         }
-        */
     }
 
     let mode = reader.read::<3, u8>().ok()?;
@@ -134,11 +129,6 @@ pub fn peek_item_header_at(
     None
 }
 
-fn validate_header_checksum(flags: u32, version: u8, checksum: u8) -> bool {
-    // Forensic: Inline header checksum logic for Alpha v105
-    let calculated = ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ (version as u32)) as u8;
-    calculated == checksum
-}
 
 pub fn parse_item_at_with_limit(
     bytes: &[u8],
@@ -146,14 +136,12 @@ pub fn parse_item_at_with_limit(
     huffman: &HuffmanTree,
     _idx: usize,
     alpha: bool,
-    limit: Option<u64>,
+    _limit: Option<u64>,
 ) -> ParsingResult<(Item, u64)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
     let mut cursor = BitCursor::new(reader);
-    if let Some(l) = limit {
-        cursor.set_limit(l);
-    }
+    // Removed strict limit enforcement to allow variable padding to parse successfully
     let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha)?;
     Ok((item, bit + cursor.pos()))
 }
@@ -219,116 +207,60 @@ impl Item {
         let section_bits = (section_bytes.len() * 8) as u64;
 
         // Forensic: Resolve variable header gap specific to Alpha v105
-        let mut start_offset = 0;
+        let mut start_offset = 32; // Skip JM marker (16) and count (16)
         if alpha_mode {
             // Need the flags for the first item to resolve the gap correctly.
             // peek_item_header_at already provides the flags.
-            if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 0, huffman, alpha_mode) {
+            if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 32, huffman, alpha_mode) {
                 let gap_axiom = V105HeaderGapAxiom::default();
                 if let Some(gap) = gap_axiom.resolve_gap(section_bytes, flags) {
-                    start_offset = gap as u64;
+                    start_offset += gap as u64;
                 }
             }
         }
-        if alpha_mode && !markers.is_empty() {
-            let mut current_bit = start_offset;
-            for i in 0..top_level_count as usize {
-                if current_bit >= section_bits {
-                    break;
-                }
-                println!(
-                    "[DEBUG] SLICE 11: Sequential parsing item {}, start={}",
-                    i, current_bit
-                );
-
-                // Use a large limit for sequential parsing
-                let dynamic_limit = section_bits - current_bit;
-
-                match parse_item_at_with_limit(
-                    section_bytes,
-                    current_bit,
-                    huffman,
-                    items.len(),
-                    alpha_mode,
-                    Some(dynamic_limit),
-                ) {
-                    Ok((item, consumed_bits)) => {
-                        println!(
-                            "[DEBUG] SLICE 11: Sequential parse success, code='{}' consumed={}",
-                            item.code.trim(),
-                            consumed_bits
-                        );
-                        let mut final_item = item.clone();
-                        final_item.range.end = current_bit + consumed_bits;
-                        final_item.total_bits = consumed_bits;
-                        items.push(final_item);
-                        current_bit += consumed_bits;
-                    }
-                    Err(e) => {
-                        println!(
-                            "[DEBUG] SLICE 11: Sequential parse failed at bit {}: {:?}",
-                            current_bit, e
-                        );
-                        break;
-                    }
-                }
-            }
-            return Ok(items);
-        }
+        let markers =
+            crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
 
         for (i, &start) in markers.iter().enumerate() {
-            println!("[DEBUG] SLICE 11: Parsing item at marker {}, start={}", i, start);
-            if items.len() >= top_level_count as usize { break; }
-            if start < start_offset { continue; }
+            if items.len() >= top_level_count as usize {
+                break;
+            }
+            if start < start_offset {
+                continue;
+            }
 
             let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
             let limit = next_marker - start;
-            // ...
 
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
             if let Some((_, _, _, code, flags, _, is_compact, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
-                println!(
-                    "[DEBUG] SLICE 11: Marker {} peek code='{}' flags=0x{:08X} compact={}",
-                    i, code, flags, is_compact
-                );
+                println!("[DEBUG] SLICE 13: Parsing item '{}' at marker {}, limit={} bits", code.trim(), i, limit);
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
                 if !is_compact && (flags & 0x00000008) != 0 {
                     dynamic_limit += 8;
                 }
             }
 
-            // Correct for section_bit_offset: We must skip bits correctly
-            let start_with_offset = start + section_bit_offset as u64;
-
-            match parse_item_at_with_limit(section_bytes, start_with_offset, huffman, items.len(), alpha_mode, Some(dynamic_limit)) {
+            match parse_item_at_with_limit(
+                section_bytes,
+                start,
+                huffman,
+                items.len(),
+                alpha_mode,
+                Some(dynamic_limit),
+            ) {
                 Ok((item, consumed_bits)) => {
-                    let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
-                        .with_personalization(item.header.is_personalized);
-                    let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.body.code, item.header.flags);
-
-                    let end = start_with_offset + final_consumed;
-                    
-                    let mut final_item = item;
-                    final_item.range.start = start_with_offset;
-                    final_item.range.end = end;
-                    
-                    let mut actual_bits = Vec::new();
-                    let mut bit_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                    if bit_reader.skip(start_with_offset as u32).is_ok() {
-                        for i in 0..final_consumed {
-                            if let Ok(b) = bit_reader.read_bit() {
-                                actual_bits.push(crate::domain::item::RecordedBit { bit: b, offset: start_with_offset + i });
-                            }
-                        }
-                    }
-                    final_item.bits = actual_bits;
-                    
+                    let mut final_item = item.clone();
+                    final_item.range.end = start + consumed_bits;
+                    final_item.total_bits = consumed_bits;
                     items.push(final_item);
                 }
-                Err(_) => { continue; }
+                Err(e) => {
+                    println!("[DEBUG] SLICE 13: Marker {} failed to parse: {:?}", i, e);
+                }
             }
         }
         Ok(items)

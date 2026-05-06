@@ -131,10 +131,15 @@ where
         );
 
         match result {
-            Ok(Some((prop, _, _, items))) => {
+            Ok(Some((prop, is_term, term_bit, items))) => {
                 println!("[DEBUG] SLICE 12: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
                 props.push(prop);
                 nested_items.extend(items);
+                if is_term {
+                    saw_terminator = true;
+                    terminator_bit = term_bit;
+                    break;
+                }
             }
             Ok(None) => break,
             Err(e) => {
