@@ -132,7 +132,7 @@ where
 
         match result {
             Ok(Some((prop, is_term, term_bit, items))) => {
-                println!("[DEBUG] SLICE 12: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
+                println!("[DEBUG] SLICE 16: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
                 props.push(prop);
                 nested_items.extend(items);
                 if is_term {
@@ -143,7 +143,7 @@ where
             }
             Ok(None) => break,
             Err(e) => {
-                println!("[DEBUG] SLICE 12: Soft-Sync error at pos {}: {:?}. Attempting re-alignment.", recorder.pos(), e);
+                println!("[DEBUG] SLICE 16: Error at pos {} (last stat_id check might be invalid): {:?}. Attempting re-alignment.", recorder.pos(), e);
                 if recorder.read_bit().is_err() {
                     break;
                 }
@@ -193,6 +193,11 @@ where
     
     let id_bits = 9; // Placeholder for initial reading
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
+    
+    if crate::item::item_trace_enabled() {
+        println!("[DEBUG] SLICE 16: Peeked stat_id: {} at pos {}", stat_id, recorder.pos());
+    }
+
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
     
     let id_bits = rhythm.id_bits;
@@ -241,6 +246,7 @@ where
         let mapped_id = axiom.map_alpha_id(stat_id);
         let default_width = if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
             if stat.save_param_bits > 0 {
+                // 추가 안전장치: 비트 읽기 전에 충분한 데이터가 있는지 확인 (간략화된 예시)
                 param = recorder.read_bits::<u32>(stat.save_param_bits as u32)?;
             }
             stat.save_bits as u32
