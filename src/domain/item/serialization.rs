@@ -417,7 +417,12 @@ impl Item {
             let padding_count = (final_consumed - consumed_bits) as u32;
             let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
                 let mut bits = Vec::new();
-                for _ in 0..padding_count { bits.push(c.read_bit()?); }
+                for _ in 0..padding_count { 
+                    match c.read_bit() {
+                        Ok(bit) => bits.push(bit),
+                        Err(_) => break, // Stop gracefully if we hit the end
+                    }
+                }
                 Ok(bits)
             })?;
             item.body.alpha_alignment_padding = padding;
