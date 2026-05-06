@@ -175,7 +175,7 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
 
         let section_bytes = &bytes[pos + 4..];
 
-        match Item::read_section(section_bytes, 0, count, huffman, alpha) {
+        match Item::read_section(section_bytes, (pos as u64 + 4) * 8, count, huffman, alpha) {
             Ok(items) => {
                 all_items.extend(items);
             }
@@ -203,7 +203,7 @@ impl Item {
         read_player_items(bytes, huffman, alpha)
     }
 
-    pub fn read_section(section_bytes: &[u8], section_bit_offset: u8, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
+    pub fn read_section(section_bytes: &[u8], section_bit_offset: u64, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
@@ -254,7 +254,8 @@ impl Item {
             ) {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
-                    final_item.range.end = start + consumed_bits;
+                    final_item.range.start = section_bit_offset + start;
+                    final_item.range.end = section_bit_offset + start + consumed_bits;
                     final_item.total_bits = consumed_bits;
                     items.push(final_item);
                 }
