@@ -1,10 +1,73 @@
 use bitstream_io::BitRead;
-use crate::domain::item::{ItemBitRange};
+use crate::domain::item::{Item, ItemBitRange, ItemQuality};
 use crate::domain::stats::{
-    ItemProperty, StatsAxiom,
+    ItemProperty, StatsAxiom, ItemStats,
 };
 use crate::data::bit_cursor::BitCursor;
-use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext};
+use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext, ItemHeader};
+use crate::domain::header::entity::ItemSegmentType;
+
+pub fn read_item_stats<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    code: &str,
+    version: u8,
+    ctx: Option<(&[u8], u64)>,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    quality: Option<ItemQuality>,
+    is_runeword: bool,
+    is_v105_shadow: bool,
+    is_personalized: bool,
+) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>)> {
+    let mut alpha_v5_runeword_extra = None;
+    let mut alpha_shadow_skip_bits = None;
+    cursor.begin_segment(ItemSegmentType::Stats);
+    let trimmed_code = code.trim();
+    let quality_val = quality.unwrap_or(ItemQuality::Normal);
+    let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
+        .with_personalization(is_personalized)
+        .with_code(trimmed_code);
+    let is_alpha = axiom.is_alpha();
+
+    let is_v105_shadow_final = alpha_mode && version == 5 && is_v105_shadow;
+    let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
+    let is_potion = trimmed_code.starts_with('h') || trimmed_code.starts_with('m') || (version == 5 && trimmed_code.starts_with('7')) || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
+
+    if is_alpha && trimmed_code.is_empty() {
+        return Ok((Vec::new(), true, false, None, None, None));
+    }
+
+    if is_alpha && version == 4 && !is_personalized {
+        return Ok((Vec::new(), true, false, None, None, None));
+    }
+
+    if is_alpha && version == 5 && !is_v105_shadow_final && 
+       (is_potion || is_scroll || quality_val < ItemQuality::Magic) {
+          if trimmed_code == "7mgw" {
+              let mut payload = Vec::new();
+              for _ in 0..28 { payload.push(cursor.read_bit()?); }
+              return Ok((Vec::new(), true, false, None, Some(payload), None));
+          }
+          return Ok((Vec::new(), true, false, None, None, None));
+    }
+
+    let section_recovery = if let Some((bytes, start)) = ctx {
+        PropertyReaderContext { bytes, item_start_bit: start }
+    } else {
+        PropertyReaderContext { bytes: &[], item_start_bit: 0 }
+    };
+    if is_v105_shadow_final {
+        let skip_bits_count = if version == 5 { 47 } else { 24 };
+        let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
+        alpha_shadow_skip_bits = Some(skip_bits);
+    }
+    let (props, complete, term) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |_, _, _, _, _| {
+        Ok((Item::default(), 0))
+    })?;
+
+    cursor.end_segment();
+    Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits))
+}
 
 pub fn read_property_list<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
@@ -23,7 +86,7 @@ where
     let mut props = Vec::new();
     let mut terminator_bit = false;
     let mut saw_terminator = false;
-    
+
     // Heuristic for compact items in Alpha
     let is_compact = code.trim().is_empty() || code.len() < 3;
 

@@ -376,17 +376,23 @@ impl Item {
 
         if !item.header.is_compact {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
-            let (props, complete, term, extra_bits, reserved_7mgw, shadow_bits) = read_item_stats(cursor, &item.code, item.header.version, ctx, huff, alpha_mode, item.header.quality, item.header.is_runeword, is_v105_shadow, item.header.is_personalized)?;
+            let (props, complete, term, _extra_bits, _payload, shadow_bits) = crate::domain::stats::parser::read_item_stats(
+                cursor, 
+                &item.code, 
+                item.header.version, 
+                ctx, 
+                huff, 
+                alpha_mode, 
+                item.header.quality, 
+                item.header.is_runeword, 
+                is_v105_shadow, 
+                item.header.is_personalized
+            )?;
             item.properties = props.clone();
             item.stats.properties = props;
             item.properties_complete = complete;
             item.terminator_bit = term;
             item.body.alpha_shadow_skip_bits = shadow_bits;
-            if let Some(extra) = extra_bits {
-                item.header.alpha_v5_runeword_extra = Some(extra);
-                item.body.v5_runeword_extra = Some(extra);
-            }
-            if let Some(res) = reserved_7mgw { item.body.v105_7mgw_payload = Some(res); }
         }
 
         let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
