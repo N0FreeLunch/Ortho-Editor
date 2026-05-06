@@ -163,15 +163,10 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
     for &pos in &jm_positions {
         if bytes.len() < pos + 4 { continue; }
         let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
-        println!("[DEBUG] SLICE 11: read_player_items found JM at {}, count={}", pos, count);
         if count == 0 { continue; }
 
-        let payload_start = (pos + 4) * 8;
-        let section_end = bytes.len() * 8;
-        
         let section_bytes = &bytes[pos + 4..];
-        
-        // Scan for all item markers within this JM section
+
         match Item::read_section(section_bytes, 0, count, huffman, alpha) {
             Ok(items) => {
                 all_items.extend(items);
@@ -180,10 +175,8 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
                 if !alpha { return Err(e); }
             }
         }
-
-
-
     }
+
 
     Ok(all_items)
 }
@@ -237,12 +230,12 @@ impl Item {
             if let Some((_, _, _, code, flags, _, is_compact, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
-                println!("[DEBUG] SLICE 13: Parsing item '{}' at marker {}, limit={} bits", code.trim(), i, limit);
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
                 if !is_compact && (flags & 0x00000008) != 0 {
                     dynamic_limit += 8;
                 }
             }
+            dynamic_limit += 128; // Safety buffer
 
             match parse_item_at_with_limit(
                 section_bytes,
@@ -260,6 +253,13 @@ impl Item {
                 }
                 Err(e) => {
                     println!("[DEBUG] SLICE 13: Marker {} failed to parse: {:?}", i, e);
+                    // Dump bits for forensic analysis of the drift
+                    let mut dump_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                    let _ = dump_reader.skip(start as u32);
+                    let mut bits = Vec::new();
+                    for _ in 0..64 { if let Ok(b) = dump_reader.read_bit() { bits.push(if b { '1' } else { '0' }); } }
+                    println!("[DEBUG] SLICE 13: Bit-dump at failure {}: {}", start, bits.iter().collect::<String>());
+                    // Marker was plausible but parsing failed. Skip.
                 }
             }
         }
