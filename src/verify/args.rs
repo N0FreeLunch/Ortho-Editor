@@ -189,8 +189,6 @@ impl ArgParser {
                     return Err(ArgError::Help(self.usage()));
                 } else if long_name == "json" {
                     flags.insert("json".to_string(), true);
-                } else if long_name == "refexp" {
-                    flags.insert("refexp".to_string(), true);
                 } else if long_name == "antigravity" || long_name == "token-efficient" {
                     flags.insert("token-efficient".to_string(), true);
                 } else if long_name == "output" {
@@ -340,7 +338,6 @@ impl ArgParser {
         options_txt.push_str("  -h, --help           Show this help message\n");
         options_txt.push_str("      --json           Output in machine-readable JSON format\n");
         options_txt.push_str("  -o, --output <PATH>  Save execution output to a file\n");
-        options_txt.push_str("      --refexp         Compatibility: Use the promoted RefExp engine (now default)\n");
         options_txt.push_str("  -te, --token-efficient AI mode: save to antigravity/outputs/ and summarize\n");
 
         usage.push_str(&options_txt);

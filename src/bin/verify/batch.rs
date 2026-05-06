@@ -158,11 +158,6 @@ fn main() -> anyhow::Result<()> {
         // Phase 4: Shadow Audit
         let mut shadow_match = None;
         let mut shadow_mismatch_count = 0;
-        if parsed.is_set("refexp") {
-            let shadow = d2r_core::verify::run_shadow_audit(&file_name, &bytes);
-            shadow_match = Some(shadow.is_match);
-            shadow_mismatch_count = shadow.mismatch_count;
-        }
 
         let mut failure_category = None;
         let mut symmetry_ok = false;
@@ -180,8 +175,6 @@ fn main() -> anyhow::Result<()> {
                     }
                 } else if baseline_match == Some(false) {
                     failure_category = Some(FailureCategory::Baseline);
-                } else if shadow_match == Some(false) {
-                    failure_category = Some(FailureCategory::ShadowMismatch);
                 }
             }
             Err(e) => {

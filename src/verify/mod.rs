@@ -165,10 +165,6 @@ impl OutputManager {
         let is_refexp = args.is_set("refexp");
         let output_path = args.get("output");
 
-        // Slice 13: RefExp engine is now the promoted default. 
-        // We explicitly seed true here to harden the contract, while keeping the flag for compatibility.
-        crate::engine::config::set_refexp(true);
-
         let mut writer = None;
 
         if is_token_efficient {
@@ -219,85 +215,3 @@ impl OutputManager {
     }
 }
 
-pub fn run_shadow_audit(path: &str, bytes: &[u8]) -> ShadowAuditResult {
-    let original_refexp = crate::engine::config::is_refexp();
-
-    // 1. Run Baseline
-    crate::engine::config::set_refexp(false);
-    let (report_baseline, _) = save_integrity::verify_save_integrity(path, bytes);
-
-    // 2. Run Refexp
-    crate::engine::config::set_refexp(true);
-    let (report_refexp, _) = save_integrity::verify_save_integrity(path, bytes);
-
-    // Restore
-    crate::engine::config::set_refexp(original_refexp);
-
-    // 3. Compare
-    compare_reports(&report_baseline, &report_refexp)
-}
-
-fn compare_reports(
-    baseline: &Report<save_integrity::D2SaveVerifyPayload>,
-    refexp: &Report<save_integrity::D2SaveVerifyPayload>,
-) -> ShadowAuditResult {
-    let mut is_match = true;
-    let mut mismatch_count = 0;
-    let mut mismatch_family = None;
-    let mut message = None;
-
-    if baseline.status != refexp.status {
-        is_match = false;
-        mismatch_count += 1;
-        mismatch_family = Some(MismatchFamily::Structural);
-        message = Some(format!(
-            "Status mismatch: baseline={:?}, refexp={:?}",
-            baseline.status, refexp.status
-        ));
-    }
-
-    if let (Some(b_res), Some(r_res)) = (&baseline.scan_results, &refexp.scan_results) {
-        if b_res.jm_marker_count != r_res.jm_marker_count {
-            if is_match {
-                is_match = false;
-                mismatch_family = Some(MismatchFamily::ItemCount);
-                message = Some(format!(
-                    "Item count mismatch: baseline={}, refexp={}",
-                    b_res.jm_marker_count, r_res.jm_marker_count
-                ));
-            }
-            mismatch_count += 1;
-        }
-
-        if (b_res.fidelity_score - r_res.fidelity_score).abs() > 0.0001 {
-            if is_match {
-                is_match = false;
-                mismatch_family = Some(MismatchFamily::ItemContent);
-                message = Some(format!(
-                    "Fidelity score mismatch: baseline={}, refexp={}",
-                    b_res.fidelity_score, r_res.fidelity_score
-                ));
-            }
-            mismatch_count += 1;
-        }
-
-        if b_res.issue_count != r_res.issue_count {
-             if is_match {
-                is_match = false;
-                mismatch_family = Some(MismatchFamily::Metadata);
-                message = Some(format!(
-                    "Issue count mismatch: baseline={}, refexp={}",
-                    b_res.issue_count, r_res.issue_count
-                ));
-            }
-            mismatch_count += 1;
-        }
-    }
-
-    ShadowAuditResult {
-        is_match,
-        mismatch_count,
-        mismatch_family,
-        message,
-    }
-}
