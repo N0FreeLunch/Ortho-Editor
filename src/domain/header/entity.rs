@@ -74,15 +74,21 @@ impl HeaderAxiom {
         self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
     }
 
-    pub fn is_plausible(&self, mode: u8, location: u8, code: &str, _flags: u32) -> bool {
+    pub fn is_plausible(&self, mode: u8, location: u8, code: &str, flags: u32) -> bool {
         let trimmed = code.trim();
         if trimmed.is_empty() { return false; }
         
+        if code.starts_with(' ') {
+            return false;
+        }
+
         if self.alpha_mode {
-            // Maximum leniency for Alpha forensics
+            if (flags & 0xF8000000) != 0 {
+                return false;
+            }
+            // High leniency for other fields in Alpha forensics
             return mode <= 7 && location <= 15;
         } else {
-            if code.starts_with(' ') { return false; }
             if mode > 6 || location > 15 { return false; }
             true
         }
@@ -163,7 +169,7 @@ impl HeaderAxiom {
 
     pub fn header_geometry(&self, flags: u32, is_compact: bool, is_personalized: bool) -> HeaderGeometry {
         if self.alpha_mode {
-            if self.version == 5 || self.version == 0 || self.version == 7 {
+            if self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6 {
                 let is_rw = self.is_runeword(flags);
                 let is_v105_shadow = self.is_v105_shadow(flags);
 

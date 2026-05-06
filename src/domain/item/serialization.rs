@@ -266,9 +266,6 @@ impl Item {
                         }
                     }
                     
-                    if crate::item::item_trace_enabled() {
-                        println!("[TRACE] read_section: parsed item {}/{} at bit {}: code='{}', len={}", items.len() + 1, top_level_count, start, final_item.body.code, final_consumed);
-                    }
                     bit_pos = next_bit_pos;
                     items.push(final_item);
                 }

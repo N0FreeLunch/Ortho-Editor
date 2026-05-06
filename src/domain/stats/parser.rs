@@ -95,10 +95,6 @@ where
 
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
     
-    if crate::item::item_trace_enabled() {
-        println!("[TRACE] parse_single_property: read stat_id={} at bit {}", stat_id, entry_start);
-    }
-    
     if stat_id == terminator {
         let mut term_bit = false;
         if rhythm.has_terminal_bit {
@@ -132,7 +128,12 @@ where
     if let Some(width) = rhythm.value_bits {
         let effective_width = axiom.stat_bit_width(stat_id, width);
 
-        raw_value = recorder.read_bits::<u32>(effective_width)?;
+        if effective_width > 32 {
+            recorder.skip_and_record(effective_width)?;
+            raw_value = 0; // Huge payload not preserved in raw_value
+        } else {
+            raw_value = recorder.read_bits::<u32>(effective_width)?;
+        }
     } else {
         let mapped_id = axiom.map_alpha_id(stat_id);
         let default_width = if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
@@ -144,7 +145,12 @@ where
             9
         };
         let effective_width = axiom.stat_bit_width(stat_id, default_width);
-        raw_value = recorder.read_bits::<u32>(effective_width)?;
+        if effective_width > 32 {
+            recorder.skip_and_record(effective_width)?;
+            raw_value = 0;
+        } else {
+            raw_value = recorder.read_bits::<u32>(effective_width)?;
+        }
     }
 
     recorder.push_context(&format!("Stat({})", stat_id));
