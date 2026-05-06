@@ -44,10 +44,16 @@ impl ForensicAxiom for V105HeaderGapAxiom {
 
 impl V105HeaderGapAxiom {
     pub fn resolve_gap(&self, code: Option<&str>, flags: u32) -> usize {
+        let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
-            if trimmed == "hps7" { return 32; }
-            if trimmed == "ics" { return 24; }
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(item_map) = overrides.get(trimmed) {
+                    if let Some(&gap) = item_map.get("header_gap") {
+                        return gap as usize;
+                    }
+                }
+            }
         }
 
         // Forensic: 'cwd' (compact) items often use a 24-bit alignment gap instead of the standard 32.
