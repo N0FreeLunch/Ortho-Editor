@@ -270,6 +270,9 @@ impl StatsAxiom {
     /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
         if self.is_alpha() {
+            // Alpha v105 Stat-specific overrides
+            if raw_id == 25 { return 9; }
+            
             let reg = get_registry();
             let trimmed = self.code.trim();
 
