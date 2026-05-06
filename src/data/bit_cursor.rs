@@ -165,6 +165,10 @@ impl<R: BitRead> BitCursor<R> {
         self.end_segment();
     }
 
+    pub fn get_context_count(&self) -> usize {
+        self.context_stack.len()
+    }
+
     /// Returns all recorded segments.
     pub fn segments(&self) -> &[BitSegment] {
         &self.segments

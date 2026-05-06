@@ -1,4 +1,4 @@
-use bitstream_io::{BitRead, BitWrite, BitWriter, LittleEndian};
+﻿use bitstream_io::{BitRead, BitWrite, BitWriter, LittleEndian};
 use std::io::{self, Cursor};
 use crate::domain::item::Item;
 use crate::domain::item::quality::ItemQuality;
@@ -12,33 +12,20 @@ use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderG
 pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha: bool) -> Option<u64> {
     let limit = (bytes.len() * 8) as u64;
     let mut probe = pos;
-    
-    // Alpha v105 forensic: items are almost always byte-aligned.
-    // We prioritize byte-aligned headers to avoid ghost matches at bit-offsets.
-    if alpha {
-        let aligned_pos = (pos + 7) & !7;
-        let mut alt_probe = aligned_pos;
-        while alt_probe < limit {
-            if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, alt_probe, huffman, alpha) {
-                if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                    return Some(alt_probe);
-                }
-            }
-            alt_probe += 8;
-            // Only look ahead a reasonable distance for byte-aligned items
-            if alt_probe > pos + 1024 { break; }
-        }
-    }
+    let section_bits = limit;
 
-    while probe < limit {
-        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
+    // Scan until section end to ensure we don't miss items due to small search windows
+    while probe < section_bits {
+        if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                return Some(probe);
+                // Heuristic: Check if item body would fit in remaining section bits
+                // A very minimal Alpha item is at least ~80 bits
+                if probe + header_len + 80 <= section_bits {
+                    return Some(probe);
+                }
             }
         }
         probe += 1;
-        // Don't look forever for bit-granular matches if we are in Alpha mode
-        if alpha && probe > pos + 128 { break; }
     }
     None
 }
@@ -131,7 +118,7 @@ pub fn parse_item_at_with_limit(
         cursor.set_limit(l);
     }
     let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha)?;
-    Ok((item, cursor.pos()))
+    Ok((item, bit + cursor.pos()))
 }
 
 pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {
@@ -204,6 +191,7 @@ impl Item {
         let mut items: Vec<Item> = Vec::new();
         let mut bit_pos = 0;
         let mut pending_gap_bits = Vec::new();
+        // Strict boundary: JM sections are explicitly bounded by the next marker
         let section_bits = (section_bytes.len() * 8) as u64;
 
         while items.len() < top_level_count as usize && bit_pos < section_bits {
@@ -212,6 +200,9 @@ impl Item {
             } else {
                 bit_pos
             };
+
+            // If we overshoot or find no valid start, stop parsing this section
+            if start >= section_bits { break; }
 
             if start > bit_pos {
                 let mut bit_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -231,9 +222,13 @@ impl Item {
                     let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.body.code, item.header.flags);
 
                     let end = start + final_consumed;
+                    // Do not allow item to exceed section boundary
+                    if end > section_bits { break; }
+
                     let mut final_item = item;
                     final_item.range.start = start;
                     final_item.range.end = end;
+                    // ... (rest of the logic preserved)
                     
                     let mut gap_recorded = Vec::new();
                     for &b in &pending_gap_bits {
@@ -452,7 +447,7 @@ pub fn scan_socket_children(
     let section_bits = (bytes.len() * 8) as u64;
 
     while current_pos < max_pos && current_pos < section_bits {
-        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
+        if let Some((mode, location, _x, code, flags, version, is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);
@@ -573,7 +568,7 @@ pub fn write_property_list(
 ) -> io::Result<()> {
     let start_bits = emitter.written_bits();
     let is_compact = code.trim().is_empty() || code.len() < 3;
-    let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact);
+    let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, 0);
     let id_bits = rhythm.id_bits;
     let terminator = (1 << id_bits) - 1;
     let mut item_idx = 0;
@@ -774,3 +769,5 @@ pub fn write_player_name(emitter: &mut BitEmitter, name: &str, alpha_v5: bool) -
     emitter.write_bits(0, width)?;
     Ok(())
 }
+
+

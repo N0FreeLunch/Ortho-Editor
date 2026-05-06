@@ -120,7 +120,16 @@ impl StatsAxiom {
     }
 
 
-    pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool) -> PropertyRhythm {
+    pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool, stat_id: u32) -> PropertyRhythm {
+        if self.is_alpha() && (stat_id == 320 || self.map_alpha_id(stat_id) == 320) {
+            return PropertyRhythm {
+                id_bits: 9,
+                value_bits: None,
+                has_terminal_bit: false,
+                has_extra_terminal_bit: false,
+            };
+        }
+
         if self.is_alpha() && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0) {
             // All Alpha items use 9-bit ID, 6-bit Value (fixture-verified)
             // Terminator is 9-bits (111111111), no extra terminal bits like Retail.
@@ -326,7 +335,7 @@ mod tests {
     #[test]
     fn test_alpha_rhythm() {
         let axiom = StatsAxiom::new(5, ItemQuality::Unique, true);
-        let rhythm = axiom.property_rhythm(true, false, false);
+        let rhythm = axiom.property_rhythm(true, false, false, 0);
         assert_eq!(rhythm.value_bits, Some(6));
         assert!(rhythm.has_terminal_bit);
         assert!(rhythm.has_extra_terminal_bit);
