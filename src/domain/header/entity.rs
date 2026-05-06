@@ -190,7 +190,7 @@ impl HeaderAxiom {
                         y_bits: if is_compact { 0 } else { 4 },
                         page_bits: if is_compact { 0 } else { 3 },
                         socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
-                        has_header_gap: true,
+                        has_header_gap: self.version != 6,
                         skip_geometry: false,
                     }
                 }
