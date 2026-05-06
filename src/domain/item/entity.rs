@@ -249,6 +249,10 @@ impl Item {
 
     pub fn set_property_value(&mut self, stat_id: u32, value: crate::domain::vo::ItemStatValue) -> bool {
         let mut found = false;
+        // Alpha-aware stat mapping
+        let is_alpha = self.header.version == 5 || self.header.version == 6 || self.header.version == 1;
+        let axiom = crate::domain::stats::axiom::StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(crate::domain::item::ItemQuality::Normal), is_alpha);
+
         {
             let mut lists = Vec::new();
             lists.push(&mut self.properties);
@@ -256,8 +260,9 @@ impl Item {
             lists.push(&mut self.runeword_attributes);
             for list in lists.into_iter() {
                 for prop in list {
-                    if prop.stat_id == stat_id {
-                        let cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id);
+                    let effective_id = axiom.map_alpha_id(prop.stat_id);
+                    if effective_id == stat_id {
+                        let cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == effective_id);
                         if let Some(c) = cost {
                             prop.value = value.value();
                             prop.raw_value = value.value().wrapping_add(c.save_add);
