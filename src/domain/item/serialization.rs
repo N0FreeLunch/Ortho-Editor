@@ -190,31 +190,17 @@ impl Item {
     pub fn read_section(section_bytes: &[u8], top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
         let mut items: Vec<Item> = Vec::new();
         let mut bit_pos = 0;
-        let mut pending_gap_bits = Vec::new();
+        let mut pending_gap_bits: Vec<bool> = Vec::new();
         // Strict boundary: JM sections are explicitly bounded by the next marker
         let section_bits = (section_bytes.len() * 8) as u64;
 
         while items.len() < top_level_count as usize && bit_pos < section_bits {
-            let start = if alpha_mode {
-                find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode).unwrap_or(bit_pos)
-            } else {
-                bit_pos
-            };
-
-            // If we overshoot or find no valid start, stop parsing this section
+            let start = find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode).unwrap_or(section_bits);
+            
             if start >= section_bits { break; }
 
-            if start > bit_pos {
-                let mut bit_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                if bit_reader.skip(bit_pos as u32).is_ok() {
-                    for _ in 0..(start - bit_pos) {
-                        if let Ok(b) = bit_reader.read_bit() {
-                            pending_gap_bits.push(b);
-                        }
-                    }
-                }
-            }
-
+            // Marker-based recovery: If we fail to parse, don't just skip 8 bits. 
+            // Scan for the *next* plausible header instead of giving up.
             match parse_item_at_with_limit(section_bytes, start, huffman, items.len(), alpha_mode, Some(section_bits - start)) {
                 Ok((item, consumed_bits)) => {
                     let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
@@ -222,60 +208,29 @@ impl Item {
                     let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.body.code, item.header.flags);
 
                     let end = start + final_consumed;
-                    // Do not allow item to exceed section boundary
                     if end > section_bits { break; }
 
                     let mut final_item = item;
                     final_item.range.start = start;
                     final_item.range.end = end;
-                    // ... (rest of the logic preserved)
                     
-                    let mut gap_recorded = Vec::new();
-                    for &b in &pending_gap_bits {
-                        gap_recorded.push(b);
-                    }
-                    final_item.gap_bits = gap_recorded;
-                    pending_gap_bits = Vec::new();
-
                     let mut actual_bits = Vec::new();
                     let mut bit_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
                     if bit_reader.skip(start as u32).is_ok() {
                         for i in 0..final_consumed {
                             if let Ok(b) = bit_reader.read_bit() {
-                                let recorded = crate::domain::item::RecordedBit { bit: b, offset: start + i };
-                                actual_bits.push(recorded);
-                                if alpha_mode && i >= consumed_bits {
-                                    final_item.body.alpha_alignment_padding.push(b);
-                                }
+                                actual_bits.push(crate::domain::item::RecordedBit { bit: b, offset: start + i });
                             }
                         }
                     }
                     final_item.bits = actual_bits;
-
-                    let mut next_bit_pos = end;
-                    if final_item.header.is_socketed && final_item.sockets.unwrap_or(0) > 0 {
-                        let remaining = section_bits.saturating_sub(end);
-                        if let Some((children, children_end)) = scan_socket_children(section_bytes, end, huffman, items.len(), alpha_mode, remaining) {
-                            final_item.socketed_items = children;
-                            next_bit_pos = children_end;
-                        }
-                    }
                     
-                    bit_pos = next_bit_pos;
+                    bit_pos = end;
                     items.push(final_item);
                 }
-                Err(e) => {
-                    if alpha_mode {
-                        if let Some(next_real_start) = find_next_item_match(section_bytes, start + 1, huffman, alpha_mode) {
-                            bit_pos = next_real_start;
-                            continue;
-                        }
-                    }
-                    if let ParsingError::Io(ref s) = e.error {
-                        if s.contains("Bit limit exceeded") || s.contains("unexpected end of file") { break; }
-                    }
-                    if !alpha_mode { return Err(e); }
-                    bit_pos = start + 8;
+                Err(_) => {
+                    // Marker recovery: Advance slightly and search for the next valid header pattern
+                    bit_pos = start + 1;
                 }
             }
         }
