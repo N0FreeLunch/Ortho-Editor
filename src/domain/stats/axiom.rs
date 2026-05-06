@@ -152,6 +152,16 @@ impl StatsAxiom {
 
 
 
+    pub fn resolve_flag_padding(&self, flags: u32, is_socketed: bool) -> u64 {
+        let mut padding = 0;
+        if is_socketed { padding += 8; }
+        if (flags & 0x00000008) != 0 { padding += 8; }
+        if (flags & 0x00000010) != 0 { padding += 16; }
+        if (flags & 0x00000020) != 0 { padding += 24; }
+        if (flags & 0x00000040) != 0 { padding += 32; }
+        padding
+    }
+
     /// Determines the final bit alignment for an item based on consumed bits and version.
     pub fn calculate_alignment(&self, consumed_bits: u64, is_compact: bool, code: &str, flags: u32) -> u64 {
         let mut final_len = consumed_bits;
@@ -165,8 +175,8 @@ impl StatsAxiom {
         if self.save_is_alpha {
             let reg = get_registry();
             let trimmed = code.trim();
-            let is_potion = trimmed.starts_with('h') || trimmed.starts_with('m') || (self.version == 5 && trimmed.starts_with('7')) || (trimmed.starts_with('r') && trimmed.len() <= 3);
             let is_scroll = trimmed == "tsc" || trimmed == "isc";
+            let is_socketed = self.is_socketed(flags, is_compact);
 
             if is_compact {
                 // Alpha v105 forensic: Compact items have specific fixed bit-lengths.
@@ -181,17 +191,6 @@ impl StatsAxiom {
                 if final_len < min_bits {
                     final_len = min_bits;
                 }
-            } else if trimmed == "7mgw" && self.version == 5 {
-                let min_bits = reg.axioms.get("7mgw_fixed_width").cloned().unwrap_or(112);
-                if final_len < min_bits {
-                    final_len = min_bits;
-                }
-            } else if is_potion {
-                let min_bits = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(80);
-                if final_len < min_bits { final_len = min_bits; }
-            } else if is_scroll {
-                let min_bits = reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(72);
-                if final_len < min_bits { final_len = min_bits; }
             } else {
                 let mut min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
                 
@@ -208,46 +207,19 @@ impl StatsAxiom {
                     final_len = min_bits;
                 }
                 
+                // Apply dynamic flag-based padding for non-compact items
+                final_len += self.resolve_flag_padding(flags, is_socketed);
+
                 // Alpha v105 32-bit Alignment Axiom
                 if (self.version == 5 || self.version == 1 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6) && !self.is_personalized(flags) {
                     if final_len % 32 != 0 {
                         final_len += 32 - (final_len % 32);
-                    }
-                    // Shadow nudge: shadow items are actually 8 bits shorter than full alignment
-                    if self.is_v105_shadow(flags) {
-                        final_len -= 8;
                     }
                 }
             }
 
             if final_len % 8 != 0 {
                 final_len += 8 - (final_len % 8);
-            }
-            
-            if self.version == 2 {
-                final_len += 8;
-            }
-
-            if self.version == 5 || self.version == 1 || self.version == 7 || self.version == 6 {
-                let is_shadow = self.is_v105_shadow(flags);
-                let is_rw = self.header_axiom().is_runeword(flags);
-                let mut is_v105_summary = false;
-                if (self.version == 5 || self.version == 6) && !is_shadow && !is_rw {
-                    is_v105_summary = crate::domain::item::serialization::is_v105_summary_code(trimmed);
-                }
-
-                if !is_compact && !is_v105_summary && !self.is_personalized(flags) {
-                    if final_len % 32 != 0 {
-                        final_len += 32 - (final_len % 32);
-                    }
-                    if is_shadow {
-                        final_len -= 8;
-                    }
-                }
-            }
-
-            if (self.version == 5 || self.version == 6 || self.version == 7) && (flags & (1 << 11)) != 0 && !is_compact {
-                final_len += 16;
             }
         } else if final_len % 8 != 0 {
             final_len += 8 - (final_len % 8);

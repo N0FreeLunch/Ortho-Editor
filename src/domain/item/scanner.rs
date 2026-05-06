@@ -4,21 +4,34 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
     let mut markers = Vec::new();
     let limit = (bytes.len() * 8) as u64;
     
-    // Scan bit-by-bit for plausible headers to use as anchors
     let mut probe = 0;
-    while probe + 128 < limit {
-        if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
-            if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                // Heuristic: Ensure code is valid Alpha code
-                if crate::domain::item::serialization::is_v105_summary_code(&code) || is_compact {
-                    markers.push(probe);
-                    // Fast-forward by expected header length if possible
-                    probe += header_len.max(8u64);
-                    continue;
+    while probe < limit {
+        let mut best_offset = 0;
+        let mut max_confidence = 0;
+
+        for offset in 0..8 {
+            let scan_pos = probe + offset;
+            if scan_pos + 128 > limit { continue; }
+            
+            if let Some((mode, location, _x, code, flags, version, _is_compact, _header_len, _nudge)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
+                if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+                    let confidence = if crate::domain::item::serialization::is_v105_summary_code(&code) { 100 } else { 50 };
+                    if confidence > max_confidence {
+                        max_confidence = confidence;
+                        best_offset = scan_pos;
+                    }
                 }
             }
         }
-        probe += 1;
+        
+        if max_confidence > 0 {
+            markers.push(best_offset);
+            probe = best_offset + 64; 
+        } else {
+            probe += 8;
+        }
     }
+    markers.sort();
+    markers.dedup();
     markers
 }
