@@ -95,30 +95,35 @@ pub fn peek_item_header_at(
     let geometry = axiom.header_geometry(flags, is_compact, is_personalized);
 
     let mut possible_gaps = Vec::new();
-    if geometry.has_header_gap {
-        if alpha_mode {
-            let is_v105_shadow = s_axiom.is_v105_shadow(flags);
-            let is_rw = s_axiom.is_runeword(flags);
-            if is_rw || is_v105_shadow {
-                let gap_bits = if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 { 8u64 } else { 24u64 }; 
-                possible_gaps.push(gap_bits);
-                if gap_bits == 8 { possible_gaps.push(32); }
-            } else {
-                let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64;
-                possible_gaps.push(geom_bits + 8);
-                possible_gaps.push(geom_bits + 16);
-                possible_gaps.push(geom_bits + 24);
-                possible_gaps.push(geom_bits + 32);
-                possible_gaps.push(geom_bits + 0);
+    if alpha_mode {
+        // Alpha v105 forensic: Try registry-driven gaps first
+        let reg = crate::domain::forensic::registry::get_registry();
+        if let Some(overrides) = &reg.item_overrides {
+            for item_map in overrides.values() {
+                if let Some(&gap) = item_map.get("header_gap") {
+                    possible_gaps.push(gap as u64);
+                }
             }
-        } else {
-            possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64 + 8);
         }
-    } else if !geometry.skip_geometry {
-        possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64);
+        // Fallback to standard Alpha increments
+        let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64;
+        possible_gaps.push(geom_bits + 0);
+        possible_gaps.push(geom_bits + 8);
+        possible_gaps.push(geom_bits + 16);
+        possible_gaps.push(geom_bits + 24);
+        possible_gaps.push(geom_bits + 32);
     } else {
-        possible_gaps.push(0);
+        if geometry.has_header_gap {
+            possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64 + 8);
+        } else if !geometry.skip_geometry {
+            possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64);
+        } else {
+            possible_gaps.push(0);
+        }
     }
+
+    possible_gaps.sort_unstable();
+    possible_gaps.dedup();
 
     for gap in possible_gaps {
         let mut code = String::new();
@@ -444,7 +449,8 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|
         "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
-        "box"|"ibk"|"tbk"|"2swc"|"gpb"
+        "box"|"ibk"|"tbk"|"2swc"|"gpb"|
+        "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|"w"
     )
 }
 

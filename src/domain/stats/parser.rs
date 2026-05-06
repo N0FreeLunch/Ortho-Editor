@@ -176,7 +176,7 @@ where
 
 fn parse_single_property_internal<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
-    version: u8,
+    _version: u8,
     huffman: &HuffmanTree,
     alpha_runeword: bool,
     is_compact: bool,
