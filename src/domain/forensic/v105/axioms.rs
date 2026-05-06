@@ -42,6 +42,14 @@ impl ForensicAxiom for V105HeaderGapAxiom {
     }
 }
 
+impl V105HeaderGapAxiom {
+    pub fn resolve_gap(&self, _section_bytes: &[u8]) -> Option<usize> {
+        Some(32)
+    }
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

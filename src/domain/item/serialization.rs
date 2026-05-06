@@ -1,4 +1,4 @@
-﻿use bitstream_io::{BitRead, BitWrite, BitWriter, LittleEndian};
+use bitstream_io::{BitRead, BitWrite, BitWriter, LittleEndian};
 use std::io::{self, Cursor};
 use crate::domain::item::Item;
 use crate::domain::item::quality::ItemQuality;
@@ -202,27 +202,42 @@ impl Item {
 
     pub fn read_section(section_bytes: &[u8], top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
         let mut items: Vec<Item> = Vec::new();
-        let mut bit_pos = 0;
-        let mut pending_gap_bits: Vec<bool> = Vec::new();
-        // Strict boundary: JM sections are explicitly bounded by the next marker
         let section_bits = (section_bytes.len() * 8) as u64;
 
-        while items.len() < top_level_count as usize && bit_pos < section_bits {
-            let start = find_next_item_match(section_bytes, bit_pos, huffman, alpha_mode).unwrap_or(section_bits);
-            
-            if start >= section_bits { break; }
+        // Forensic: Resolve variable header gap specific to Alpha v105
+        let mut start_offset = 0;
+        if alpha_mode {
+            let gap_axiom = V105HeaderGapAxiom::default();
+            if let Some(gap) = gap_axiom.resolve_gap(section_bytes) {
+                start_offset = gap as u64;
+            }
+        }
 
-            // Marker-based recovery: If we fail to parse, don't just skip 8 bits. 
-            // Scan for the *next* plausible header instead of giving up.
-            match parse_item_at_with_limit(section_bytes, start, huffman, items.len(), alpha_mode, Some(section_bits - start)) {
+        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
+
+        for (i, &start) in markers.iter().enumerate() {
+            if items.len() >= top_level_count as usize { break; }
+            if start < start_offset { continue; }
+            
+            let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
+            let limit = next_marker - start;
+            // Refined: Dynamically adjust chunk limit for known variable padding
+            let mut dynamic_limit = limit;
+            if let Some((_, _, _, _, flags, _, is_compact, _, _)) = peek_item_header_at(section_bytes, start, huffman, alpha_mode) {
+                // Alpha v105 forensic: Socketed items add 8-bit alignment padding
+                if !is_compact && (flags & 0x00000008) != 0 {
+                    dynamic_limit += 8;
+                }
+            }
+
+            match parse_item_at_with_limit(section_bytes, start, huffman, items.len(), alpha_mode, Some(dynamic_limit)) {
                 Ok((item, consumed_bits)) => {
                     let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
                         .with_personalization(item.header.is_personalized);
                     let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.body.code, item.header.flags);
 
                     let end = start + final_consumed;
-                    if end > section_bits { break; }
-
+                    
                     let mut final_item = item;
                     final_item.range.start = start;
                     final_item.range.end = end;
@@ -238,28 +253,9 @@ impl Item {
                     }
                     final_item.bits = actual_bits;
                     
-                    bit_pos = end;
                     items.push(final_item);
                 }
-                Err(_) => {
-                    // Fuzzy Fallback: Attempt to recover just the header and then immediately rescan
-                    if alpha_mode {
-                        let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                        if reader.skip(start as u32).is_ok() {
-                            let mut cursor = BitCursor::new(reader);
-                            if let Ok((header, _gap)) = crate::domain::item::entity::parse_item_header(&mut cursor, alpha_mode) {
-                                let mut fuzzy_item = Item::default();
-                                fuzzy_item.header = header;
-                                fuzzy_item.range = crate::domain::item::ItemBitRange { start: start, end: start + 64 };
-                                items.push(fuzzy_item);
-                                // Self-healing: Immediately rescan from the end of the failed segment
-                                bit_pos = start + 64; 
-                                continue;
-                            }
-                        }
-                    }
-                    bit_pos = start + 8;
-                }
+                Err(_) => { continue; }
             }
         }
         Ok(items)
@@ -409,7 +405,13 @@ impl Item {
 
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    matches!(code, "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|"w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c")
+    let trimmed = code.trim();
+    matches!(trimmed, 
+        "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|
+        "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
+        "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
+        "box"|"ibk"|"tbk"|"2swc"|"gpb"
+    )
 }
 
 pub fn item_template(code: &str) -> Option<&'static crate::data::item_codes::ItemTemplate> {
