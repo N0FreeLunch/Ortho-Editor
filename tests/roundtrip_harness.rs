@@ -327,4 +327,32 @@ mod roundtrip_tests {
         }
         Ok(())
     }
+
+    #[test]
+    fn test_manual_item_mutation() {
+        use d2r_core::item::Item;
+        let mut item = Item::empty_for_tests();
+        item.header.version = 5; // Alpha-like
+        
+        // Set initial values
+        item.set_defense(Some(100));
+        item.set_durability(Some(10), Some(20));
+        item.set_quantity(Some(5));
+        item.set_id(Some(12345));
+        item.set_level(Some(80));
+
+        // Verify getters
+        assert_eq!(item.defense(), Some(100));
+        assert_eq!(item.current_durability(), Some(10));
+        assert_eq!(item.max_durability(), Some(20));
+        assert_eq!(item.quantity(), Some(5));
+        assert_eq!(item.header.id, Some(12345));
+        assert_eq!(item.header.level, Some(80));
+
+        // Check mirror fields (Legacy Compatibility)
+        assert_eq!(item.defense, Some(100));
+        assert_eq!(item.current_durability, Some(10));
+        assert_eq!(item.max_durability, Some(20));
+        assert_eq!(item.quantity, Some(5));
+    }
 }

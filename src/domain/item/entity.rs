@@ -271,6 +271,43 @@ impl Item {
         found
     }
 
+    pub fn empty_for_tests() -> Self {
+        let mut item = Self::default();
+        item.body.code = "    ".to_string();
+        item.code = "    ".to_string();
+        item
+    }
+
+    pub fn set_defense(&mut self, val: Option<u32>) {
+        self.body.defense = val;
+        self.defense = val;
+        self.bits.clear();
+    }
+
+    pub fn set_durability(&mut self, current: Option<u32>, max: Option<u32>) {
+        self.body.current_durability = current;
+        self.current_durability = current;
+        self.body.max_durability = max;
+        self.max_durability = max;
+        self.bits.clear();
+    }
+
+    pub fn set_quantity(&mut self, val: Option<u32>) {
+        self.body.quantity = val;
+        self.quantity = val;
+        self.bits.clear();
+    }
+
+    pub fn set_id(&mut self, val: Option<u32>) {
+        self.header.id = val;
+        self.bits.clear();
+    }
+
+    pub fn set_level(&mut self, val: Option<u8>) {
+        self.header.level = val;
+        self.bits.clear();
+    }
+
     pub fn prefixes(&self) -> Vec<&'static crate::data::item_specs::Affix> {
         let mut result = Vec::new();
         if let Some(id) = self.magic_prefix {

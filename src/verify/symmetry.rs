@@ -405,17 +405,17 @@ mod tests {
         
         // 2-bit diff
         item_b.bits.truncate(98);
-        let diff = compare_two_items(&item_a, &item_b, "Test".to_string());
+        let diff = compare_two_items(&item_a, &item_b, "Test".to_string(), &[], &[]);
         assert_eq!(diff.mismatch_type.unwrap(), "Length [Nudge (2-bit)]");
         
         // 16-bit diff
         item_b.bits.truncate(84);
-        let diff = compare_two_items(&item_a, &item_b, "Test".to_string());
+        let diff = compare_two_items(&item_a, &item_b, "Test".to_string(), &[], &[]);
         assert_eq!(diff.mismatch_type.unwrap(), "Length [RW-Gap (16-bit)]");
 
         // 32-bit diff
         item_b.bits.truncate(68);
-        let diff = compare_two_items(&item_a, &item_b, "Test".to_string());
+        let diff = compare_two_items(&item_a, &item_b, "Test".to_string(), &[], &[]);
         assert_eq!(diff.mismatch_type.unwrap(), "Length [RW-Gap (32-bit)]");
     }
 }
