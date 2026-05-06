@@ -199,8 +199,7 @@ impl StatsAxiom {
                     final_len = min_bits;
                 }
                 
-                // Alpha v105 32-bit Alignment Axiom (TEMPORARILY DISABLED)
-                /*
+                // Alpha v105 32-bit Alignment Axiom
                 if (self.version == 5 || self.version == 1 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6) && !self.is_personalized(flags) {
                     if final_len % 32 != 0 {
                         final_len += 32 - (final_len % 32);
@@ -210,7 +209,6 @@ impl StatsAxiom {
                         final_len -= 8;
                     }
                 }
-                */
             }
 
             if final_len % 8 != 0 {

@@ -432,9 +432,9 @@ impl Item {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
                 if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && self.header.is_compact) || !self.properties.is_empty() {
-                    crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, &self.properties, self.header.version, self.header.is_runeword, self.terminator_bit, quality_val, is_shadow, &s_axiom)?;
+                    crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, quality_val, is_shadow, &s_axiom)?;
                     for set_props in &self.set_attributes {
-                        crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, set_props, self.header.version, false, false, quality_val, false, &s_axiom)?;
+                        crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, set_props, &[], huffman, self.header.version, false, false, quality_val, false, &s_axiom)?;
                     }
                 }
             }

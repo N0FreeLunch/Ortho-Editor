@@ -18,7 +18,7 @@ pub fn read_item_stats<R: BitRead>(
     is_runeword: bool,
     is_v105_shadow: bool,
     is_personalized: bool,
-) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>)> {
+) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>, Vec<crate::domain::item::Item>)> {
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
@@ -34,11 +34,11 @@ pub fn read_item_stats<R: BitRead>(
     let is_potion = trimmed_code.starts_with('h') || trimmed_code.starts_with('m') || (version == 5 && trimmed_code.starts_with('7')) || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
 
     if is_alpha && trimmed_code.is_empty() {
-        return Ok((Vec::new(), true, false, None, None, None));
+        return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
     if is_alpha && version == 4 && !is_personalized {
-        return Ok((Vec::new(), true, false, None, None, None));
+        return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
     if is_alpha && version == 5 && !is_v105_shadow_final && 
@@ -46,9 +46,9 @@ pub fn read_item_stats<R: BitRead>(
           if trimmed_code == "7mgw" {
               let mut payload = Vec::new();
               for _ in 0..28 { payload.push(cursor.read_bit()?); }
-              return Ok((Vec::new(), true, false, None, Some(payload), None));
+              return Ok((Vec::new(), true, false, None, Some(payload), None, Vec::new()));
           }
-          return Ok((Vec::new(), true, false, None, None, None));
+          return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
     let section_recovery = if let Some((bytes, start)) = ctx {
@@ -61,29 +61,39 @@ pub fn read_item_stats<R: BitRead>(
         let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);
     }
-    let (props, complete, term) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |_, _, _, _, _| {
-        Ok((Item::default(), 0))
+    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |bytes, pos, huff, idx, alpha| {
+        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None)
     })?;
-
+    
+    if alpha_mode && version == 5 && is_runeword {
+        cursor.begin_segment(ItemSegmentType::ExtendedStats);
+        cursor.push_context("AlphaV5RunewordExtra");
+        let extra = cursor.read_bits::<u8>(2)?;
+        alpha_v5_runeword_extra = Some(extra);
+        cursor.pop_context();
+        cursor.end_segment();
+    }
+    
     cursor.end_segment();
-    Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits))
+    Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits, nested_items))
 }
 
 pub fn read_property_list<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
     code: &str,
     version: u8,
-    _section_recovery: PropertyReaderContext,
+    section_recovery: PropertyReaderContext,
     huffman: &HuffmanTree,
     alpha_runeword: bool,
     is_v105_shadow: bool,
     axiom: &StatsAxiom,
     mut recovery_fn: F,
-) -> ParsingResult<(Vec<ItemProperty>, bool, bool)> 
+) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Vec<crate::domain::item::Item>)> 
 where 
     F: FnMut(&[u8], u64, &HuffmanTree, usize, bool) -> ParsingResult<(crate::domain::item::Item, u64)>
 {
     let mut props = Vec::new();
+    let mut nested_items = Vec::new();
     let mut terminator_bit = false;
     let mut saw_terminator = false;
 
@@ -101,22 +111,24 @@ where
             is_v105_shadow,
             preserve_trailing_align,
             axiom,
+            section_recovery.clone(),
             &mut recovery_fn,
         )?;
         match result {
-            Some((prop, is_term, term_bit)) => {
+            Some((prop, is_term, term_bit, items)) => {
                 if is_term {
                     saw_terminator = true;
                     terminator_bit = term_bit;
                     break;
                 }
                 props.push(prop);
+                nested_items.extend(items);
             }
             None => break,
         }
     }
 
-    Ok((props, saw_terminator, terminator_bit))
+    Ok((props, saw_terminator, terminator_bit, nested_items))
 }
 
 pub fn parse_single_property<R, F>(
@@ -125,28 +137,29 @@ pub fn parse_single_property<R, F>(
     huffman: &HuffmanTree,
     alpha_runeword: bool,
     axiom: &StatsAxiom,
-    section_recovery: F,
-) -> ParsingResult<Option<(ItemProperty, bool, bool)>>
+    reader_ctx: PropertyReaderContext,
+    mut recovery_fn: F,
+) -> ParsingResult<Option<(ItemProperty, bool, bool, Vec<crate::domain::item::Item>)>>
 where
     R: BitRead,
     F: FnMut(&[u8], u64, &HuffmanTree, usize, bool) -> ParsingResult<(crate::domain::item::Item, u64)>,
 {
-    parse_single_property_internal(recorder, version, huffman, alpha_runeword, false, false, false, axiom, section_recovery)
+    parse_single_property_internal(recorder, version, huffman, alpha_runeword, false, false, false, axiom, reader_ctx, &mut recovery_fn)
 }
 
-fn parse_single_property_internal<R, F>(
+fn parse_single_property_internal<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
-    _version: u8,
-    _huffman: &HuffmanTree,
+    version: u8,
+    huffman: &HuffmanTree,
     alpha_runeword: bool,
     is_compact: bool,
     is_v105_shadow: bool,
     preserve_trailing_align: bool,
     axiom: &StatsAxiom,
-    mut _section_recovery: F,
-) -> ParsingResult<Option<(ItemProperty, bool, bool)>>
+    reader_ctx: PropertyReaderContext,
+    recovery_fn: &mut F,
+) -> ParsingResult<Option<(ItemProperty, bool, bool, Vec<crate::domain::item::Item>)>>
 where
-    R: BitRead,
     F: FnMut(&[u8], u64, &HuffmanTree, usize, bool) -> ParsingResult<(crate::domain::item::Item, u64)>,
 {
 
@@ -157,6 +170,9 @@ where
     let terminator = (1 << id_bits) - 1;
 
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
+    if axiom.is_alpha() && crate::item::item_trace_enabled() {
+        println!("[DEBUG] Property: stat_id={}, pos={}", stat_id, recorder.pos());
+    }
     
     if stat_id == terminator {
         let mut term_bit = false;
@@ -181,22 +197,17 @@ where
                 range: ItemBitRange { start: entry_start, end: recorder.pos() },
             },
             true,
-            term_bit
+            term_bit,
+            Vec::new()
         )));
     }
 
     let raw_value;
     let mut param = 0;
+    let mut nested_items = Vec::new();
 
-    if let Some(width) = rhythm.value_bits {
-        let effective_width = axiom.stat_bit_width(stat_id, width);
-
-        if effective_width > 32 {
-            recorder.skip_and_record(effective_width)?;
-            raw_value = 0; // Huge payload not preserved in raw_value
-        } else {
-            raw_value = recorder.read_bits::<u32>(effective_width)?;
-        }
+    let mut effective_width = if let Some(width) = rhythm.value_bits {
+        axiom.stat_bit_width(stat_id, width)
     } else {
         let mapped_id = axiom.map_alpha_id(stat_id);
         let default_width = if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
@@ -207,13 +218,34 @@ where
         } else {
             9
         };
-        let effective_width = axiom.stat_bit_width(stat_id, default_width);
-        if effective_width > 32 {
-            recorder.skip_and_record(effective_width)?;
-            raw_value = 0;
-        } else {
-            raw_value = recorder.read_bits::<u32>(effective_width)?;
+        axiom.stat_bit_width(stat_id, default_width)
+    };
+
+    // Slice 10: Stat 317 (item_sockets) nested recovery seam
+    if axiom.is_alpha() && (stat_id == 317 || axiom.map_alpha_id(stat_id) == 317) && effective_width > 32 {
+        println!("[DEBUG] SLICE 10 TRIGGER: Stat 317 at pos {}", recorder.pos());
+        if !reader_ctx.bytes.is_empty() {
+             // Use recovery_fn to determine actual consumed bits for nested items
+             if let Ok((child, end_pos)) = recovery_fn(
+                 reader_ctx.bytes,
+                 recorder.pos(),
+                 huffman,
+                 0,
+                 axiom.save_is_alpha,
+             ) {
+                 if end_pos > recorder.pos() {
+                     effective_width = (end_pos - recorder.pos()) as u32;
+                     nested_items.push(child);
+                 }
+             }
         }
+    }
+
+    if effective_width > 32 {
+        recorder.skip_and_record(effective_width)?;
+        raw_value = 0; // Huge payload not preserved in raw_value
+    } else {
+        raw_value = recorder.read_bits::<u32>(effective_width)?;
     }
 
     recorder.push_context(&format!("Stat({})", stat_id));
@@ -230,6 +262,7 @@ where
             range: ItemBitRange { start: entry_start, end: entry_end },
         },
         false,
-        false
+        false,
+        nested_items
     )))
 }

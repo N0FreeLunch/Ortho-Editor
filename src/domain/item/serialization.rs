@@ -376,7 +376,7 @@ impl Item {
 
         if !item.header.is_compact {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
-            let (props, complete, term, _extra_bits, _payload, shadow_bits) = crate::domain::stats::parser::read_item_stats(
+            let (props, complete, term, _extra_bits, _payload, shadow_bits, nested_items) = crate::domain::stats::parser::read_item_stats(
                 cursor, 
                 &item.code, 
                 item.header.version, 
@@ -393,6 +393,7 @@ impl Item {
             item.properties_complete = complete;
             item.terminator_bit = term;
             item.body.alpha_shadow_skip_bits = shadow_bits;
+            item.socketed_items = nested_items;
         }
 
         let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
@@ -428,75 +429,6 @@ impl Item {
     }
 }
 
-pub fn read_item_stats<R: BitRead>(
-    cursor: &mut BitCursor<R>,
-    code: &str,
-    version: u8,
-    ctx: Option<(&[u8], u64)>,
-    huffman: &HuffmanTree,
-    alpha_mode: bool,
-    quality: Option<ItemQuality>,
-    is_runeword: bool,
-    is_v105_shadow: bool,
-    is_personalized: bool,
-) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>)> {
-    let mut alpha_v5_runeword_extra = None;
-    let mut alpha_shadow_skip_bits = None;
-    cursor.begin_segment(ItemSegmentType::Stats);
-    let trimmed_code = code.trim();
-    let quality_val = quality.unwrap_or(ItemQuality::Normal);
-    let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
-        .with_personalization(is_personalized)
-        .with_code(trimmed_code);
-    let is_alpha = axiom.is_alpha();
-
-    let is_v105_shadow_final = alpha_mode && version == 5 && is_v105_shadow;
-    let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
-    let is_potion = trimmed_code.starts_with('h') || trimmed_code.starts_with('m') || (version == 5 && trimmed_code.starts_with('7')) || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
-    
-    if is_alpha && trimmed_code.is_empty() {
-        return Ok((Vec::new(), true, false, None, None, None));
-    }
-
-    if is_alpha && version == 4 && !is_personalized {
-        return Ok((Vec::new(), true, false, None, None, None));
-    }
-
-    if is_alpha && version == 5 && !is_v105_shadow_final && 
-       (is_potion || is_scroll || quality_val < ItemQuality::Magic) {
-          if trimmed_code == "7mgw" {
-              let mut payload = Vec::new();
-              for _ in 0..28 { payload.push(cursor.read_bit()?); }
-              return Ok((Vec::new(), true, false, None, Some(payload), None));
-          }
-          return Ok((Vec::new(), true, false, None, None, None));
-    }
-
-    let section_recovery = if let Some((bytes, start)) = ctx {
-        PropertyReaderContext { bytes, item_start_bit: start }
-    } else {
-        PropertyReaderContext { bytes: &[], item_start_bit: 0 }
-    };
-    if is_v105_shadow_final {
-        let skip_bits_count = if version == 5 { 47 } else { 24 };
-        let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
-        alpha_shadow_skip_bits = Some(skip_bits);
-    }
-    let (props, complete, term) = crate::domain::stats::parser::read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |_, _, _, _, _| {
-        Ok((Item::default(), 0))
-    })?;
-    
-    if alpha_mode && version == 5 && is_runeword {
-        cursor.begin_segment(ItemSegmentType::ExtendedStats);
-        cursor.push_context("AlphaV5RunewordExtra");
-        let extra = cursor.read_bits::<u8>(2)?;
-        alpha_v5_runeword_extra = Some(extra);
-        cursor.pop_context();
-        cursor.end_segment();
-    }
-    
-    Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits))
-}
 
 pub fn is_v105_summary_code(code: &str) -> bool {
     matches!(code, "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|"w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c")
@@ -630,6 +562,8 @@ pub fn write_property_list(
     emitter: &mut BitEmitter,
     code: &str,
     props: &[ItemProperty],
+    nested_items: &[Item],
+    huffman: &HuffmanTree,
     version: u8,
     alpha_runeword: bool,
     terminator_bit: bool,
@@ -642,18 +576,36 @@ pub fn write_property_list(
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact);
     let id_bits = rhythm.id_bits;
     let terminator = (1 << id_bits) - 1;
+    let mut item_idx = 0;
     for prop in props {
         let raw_id = prop.stat_id;
         emitter.write_bits(raw_id, id_bits)?;
-        if let Some(width) = rhythm.value_bits {
-            let effective_width = axiom.stat_bit_width(raw_id, width);
-            emitter.write_bits(prop.raw_value as u32, effective_width)?;
-        } else {
-             let mapped_id = axiom.map_alpha_id(raw_id);
-             if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
-                 if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }
-                 emitter.write_bits(prop.raw_value as u32, stat.save_bits as u32)?;
-             } else { emitter.write_bits(prop.raw_value as u32, 9)?; }
+        
+        let mut handled = false;
+        if axiom.is_alpha() && (raw_id == 317 || axiom.map_alpha_id(raw_id) == 317) {
+             if item_idx < nested_items.len() {
+                 let child = &nested_items[item_idx];
+                 if crate::item::item_trace_enabled() {
+                     println!("[DEBUG] write_property_list Stat 317: Writing nested item {}, start_bits={}", item_idx, emitter.written_bits());
+                 }
+                 let child_bytes = child.to_bytes(huffman, axiom.save_is_alpha)?;
+                 for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
+                 item_idx += 1;
+                 handled = true;
+             }
+        }
+
+        if !handled {
+            if let Some(width) = rhythm.value_bits {
+                let effective_width = axiom.stat_bit_width(raw_id, width);
+                emitter.write_bits(prop.raw_value as u32, effective_width)?;
+            } else {
+                 let mapped_id = axiom.map_alpha_id(raw_id);
+                 if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
+                     if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }
+                     emitter.write_bits(prop.raw_value as u32, stat.save_bits as u32)?;
+                 } else { emitter.write_bits(prop.raw_value as u32, 9)?; }
+            }
         }
     }
     emitter.write_bits(terminator, id_bits)?;
