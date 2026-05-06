@@ -83,9 +83,6 @@ impl HeaderAxiom {
         }
 
         if self.alpha_mode {
-            if (flags & 0xF8000000) != 0 {
-                return false;
-            }
             // High leniency for other fields in Alpha forensics
             return mode <= 7 && location <= 15;
         } else {

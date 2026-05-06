@@ -378,7 +378,7 @@ impl Item {
                 emitter.write_bits(quality_val as u32, 4)?;
             }
 
-            if !(is_item_alpha && (self.header.version == 1 || self.header.version == 4)) {
+            if !(is_item_alpha && (self.header.version == 2)) {
                 if self.has_multiple_graphics { emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?; }
                 if self.has_class_specific_data { emitter.write_bits(self.class_specific_bits.unwrap_or(0) as u16 as u32, 11)?; }
                 match quality_val {
@@ -496,16 +496,16 @@ pub fn parse_item_header<R: BitRead>(
             if is_rw || is_v105_shadow {
                 let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 let gap_bits = if is_v105_shadow_local { 8 } else { 24 };
-                let gap = cursor.read_bits::<u32>(gap_bits)?;
+                let gap = cursor.with_context("AlphaHeaderGap", |c| c.read_bits::<u32>(gap_bits))?;
                 alpha_header_gap = Some(gap);
                 if !is_compact { y = (gap & 0x0F) as u8; page = ((gap >> 4) & 0x07) as u8; socket_hint = ((gap >> 7) & 0x01) as u8; }
             } else {
                 if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
-                alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
+                alpha_header_gap = Some(cursor.with_context("AlphaHeaderGap", |c| c.read_bits::<u32>(8))?);
             }
         } else {
             if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
-            alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
+            alpha_header_gap = Some(cursor.with_context("AlphaHeaderGap", |c| c.read_bits::<u32>(8))?);
         }
     } else if !geometry.skip_geometry {
         y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
@@ -540,7 +540,9 @@ pub fn parse_item_body<R: BitRead>(
         let mut code = String::new();
         for _ in 0..4 { code.push(huff.decode_recorded(cursor)?); }
         let mut nudge = None;
-        if h_axiom.is_alpha() && (header.version == 5 || header.version == 0 || header.version == 1) { nudge = Some(cursor.read_bits::<u8>(2)?); }
+        if h_axiom.is_alpha() && (header.version == 5 || header.version == 0 || header.version == 1) { 
+            nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
+        }
         cursor.end_segment();
         (code, nudge, None, None, None)
     };
@@ -569,7 +571,7 @@ impl ExtendedStatsData {
         let is_personalized = header.is_personalized;
         let h_axiom = HeaderAxiom::new(version, alpha_mode);
         let is_fragment = h_axiom.is_alpha() && (version == 5 || version == 2 || version == 1) && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0) ;
-        let is_alpha_early_exit = h_axiom.is_alpha() && (version == 1 || version == 4);
+        let is_alpha_early_exit = h_axiom.is_alpha() && (version == 2);
         if axiom.is_alpha() {
             if !is_compact {
                 let quality_raw = cursor.read_bits::<u8>(3)?;
@@ -590,6 +592,8 @@ impl ExtendedStatsData {
             let quality_raw = cursor.read_bits::<u8>(4)?;
             data.quality = Some(ItemQuality::from(quality_raw));
         }
+        // Version 2 remains as early exit for now if confirmed. 
+        // Version 1 and 4 are removed from early exit to allow stats/sockets parsing.
         if is_alpha_early_exit { cursor.end_segment(); return Ok(data); }
         if data.has_multiple_graphics { data.multi_graphics_bits = Some(cursor.read_bits::<u8>(3)? as u8); }
         if data.has_class_specific_data { data.class_specific_bits = Some(cursor.read_bits::<u16>(11)? as u16); }

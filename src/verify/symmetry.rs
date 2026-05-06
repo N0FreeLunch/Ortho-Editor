@@ -32,6 +32,9 @@ pub struct ItemDiff {
     pub version: u8,
     pub flags: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_header_gap: Option<u32>,
+    pub alpha_alignment_padding_len: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub orig_bits: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_bits: Option<String>,
@@ -121,6 +124,8 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
         forensic_audit: item.forensic_audit.clone(),
         version: item.header.version,
         flags: item.header.flags,
+        alpha_header_gap: item.body.alpha_header_gap,
+        alpha_alignment_padding_len: item.body.alpha_alignment_padding.len(),
         orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(rebuilt_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
         ..Default::default()
@@ -179,6 +184,8 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
         forensic_audit: item_a.forensic_audit.clone(),
         version: item_a.header.version,
         flags: item_a.header.flags,
+        alpha_header_gap: item_a.body.alpha_header_gap,
+        alpha_alignment_padding_len: item_a.body.alpha_alignment_padding.len(),
         orig_bits: Some(item_a.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(item_b.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         ..Default::default()

@@ -9,6 +9,10 @@ name = "item_xray"
 path = "tmp/item_xray.rs"
 
 [[example]]
+name = "debug_item0"
+path = "tmp/debug_item0.rs"
+
+[[example]]
 name = "scan_all_headers"
 path = "examples/scan_all_headers.rs"
 

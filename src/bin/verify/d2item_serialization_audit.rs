@@ -105,6 +105,25 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
         }
         if let Some(offset) = item.first_mismatch_offset {
             println!("{:indent$}      [OFFSET] bit {}", "", offset, indent = indent.len());
+            if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
+                let start = (offset as usize).saturating_sub(10);
+                let end = (offset as usize + 20).min(orig.len()).min(target.len());
+                println!("{:indent$}      [BITS]  ...", "", indent = indent.len());
+                println!("{:indent$}      ORIG:   {}", "", &orig[start..end], indent = indent.len());
+                println!("{:indent$}      TARG:   {}", "", &target[start..end], indent = indent.len());
+                let mut markers = String::new();
+                for i in start..end {
+                    if i == offset as usize { markers.push('^'); }
+                    else { markers.push(' '); }
+                }
+                println!("{:indent$}              {}", "", markers, indent = indent.len());
+            }
+        }
+        if let Some(gap) = item.alpha_header_gap {
+            println!("{:indent$}      [HEADER GAP] 0x{:X}", "", gap, indent = indent.len());
+        }
+        if item.alpha_alignment_padding_len > 0 {
+            println!("{:indent$}      [ALIGNMENT PAD] {} bits", "", item.alpha_alignment_padding_len, indent = indent.len());
         }
         if item.fidelity_score < 1.0 {
             println!("{:indent$}      [FORENSIC RATIONALE]", "", indent = indent.len());
