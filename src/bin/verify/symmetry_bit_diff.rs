@@ -31,7 +31,11 @@ fn main() -> anyhow::Result<()> {
         None => None,
     };
 
-    let report = calculate_symmetry_diff(&bytes_a, bytes_b.as_deref(), roundtrip)?;
+    let report = calculate_symmetry_diff(
+        &bytes_a,
+        bytes_b.as_deref(),
+        d2r_core::verify::symmetry::SymmetryOptions::roundtrip(roundtrip),
+    )?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {

@@ -141,7 +141,11 @@ fn main() -> anyhow::Result<()> {
         let (integrity_report, integrity_failed) = verify_save_integrity(&file_name, &bytes);
         
         // Phase 2: Symmetry
-        let symmetry_res = calculate_symmetry_diff(&bytes, None, true);
+        let symmetry_res = calculate_symmetry_diff(
+            &bytes,
+            None,
+            d2r_core::verify::symmetry::SymmetryOptions::roundtrip(true),
+        );
         
         // Phase 3: Baseline
         let mut baseline_match = None;

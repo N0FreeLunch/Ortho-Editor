@@ -18,6 +18,18 @@ fn main() {
         Some("diff-visual"),
         "Show visual bitstream alignment for mismatches",
     ));
+    parser.add_spec(ArgSpec::option(
+        "target",
+        Some('t'),
+        Some("target"),
+        "Only audit a specific item index",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "fail-fast",
+        Some('f'),
+        Some("fail-fast"),
+        "Stop at first mismatch",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -35,6 +47,10 @@ fn main() {
     let path = parsed.get("save_file").unwrap();
     let use_json = parsed.is_set("json");
     let use_visual = parsed.is_set("diff-visual");
+    let target_idx = parsed
+        .get("target")
+        .and_then(|s| s.parse::<usize>().ok());
+    let fail_fast = parsed.is_set("fail-fast");
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -44,12 +60,21 @@ fn main() {
         }
     };
 
-    match calculate_symmetry_diff(&bytes, None, true) {
+    let options = d2r_core::verify::symmetry::SymmetryOptions {
+        roundtrip: true,
+        target_index: target_idx,
+        fail_fast,
+    };
+
+    match calculate_symmetry_diff(&bytes, None, options) {
         Ok(report) => {
             if use_json {
                 println!("{}", serde_json::to_string_pretty(&report).unwrap());
             } else {
                 println!("Serialization Audit for: {}", path);
+                if let Some(target) = target_idx {
+                    println!("Targeting item index: {}", target);
+                }
                 println!("{:-<80}", "");
                 println!(
                     "{:>5} | {:<10} | {:>8} | {:>8} | {:>5} | {:<5}",
@@ -57,13 +82,24 @@ fn main() {
                 );
                 println!("{:-<90}", "");
 
-                for (i, item) in report.items.iter().enumerate() {
-                    print_item_diff(Some(i), item, 0, use_visual);
+                for item in &report.items {
+                    // When targeting, the index in the report might not be the actual index if we filtered.
+                    // But our implementation currently preserves the "Item N" label.
+                    let idx_from_label = item
+                        .label
+                        .strip_prefix("Item ")
+                        .and_then(|s| s.parse::<usize>().ok());
+
+                    print_item_diff(idx_from_label, item, 0, use_visual);
                 }
                 println!("{:-<90}", "");
 
                 if report.success {
-                    println!("MATCH: 100% fidelity");
+                    if target_idx.is_some() {
+                        println!("MATCH: Target item matches with 100% fidelity");
+                    } else {
+                        println!("MATCH: 100% fidelity");
+                    }
                 } else {
                     println!("FAIL: Mismatches detected.");
                     std::process::exit(1);

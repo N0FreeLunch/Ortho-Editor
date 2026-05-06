@@ -47,27 +47,63 @@ pub struct ItemDiff {
     pub children: Vec<ItemDiff>,
 }
 
-pub fn calculate_symmetry_diff(bytes_a: &[u8], bytes_b: Option<&[u8]>, roundtrip: bool) -> anyhow::Result<DiffReport> {
+#[derive(Debug, Clone, Default)]
+pub struct SymmetryOptions {
+    pub roundtrip: bool,
+    pub target_index: Option<usize>,
+    pub fail_fast: bool,
+}
+
+impl SymmetryOptions {
+    pub fn roundtrip(roundtrip: bool) -> Self {
+        Self {
+            roundtrip,
+            ..Default::default()
+        }
+    }
+}
+
+pub fn calculate_symmetry_diff(
+    bytes_a: &[u8],
+    bytes_b: Option<&[u8]>,
+    options: SymmetryOptions,
+) -> anyhow::Result<DiffReport> {
     let huffman = HuffmanTree::new();
     let is_alpha_a = is_alpha(bytes_a);
     let mut report = DiffReport {
-        operation: if roundtrip { "roundtrip" } else { "compare" }.to_string(),
+        operation: if options.roundtrip {
+            "roundtrip"
+        } else {
+            "compare"
+        }
+        .to_string(),
         ..Default::default()
     };
 
-    if roundtrip {
+    if options.roundtrip {
         let items = Item::read_player_items(bytes_a, &huffman, is_alpha_a)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         report.item_count_a = items.len();
         report.item_count_b = items.len();
         for (i, item) in items.iter().enumerate() {
-            report.items.push(compare_item_with_reserialized(
+            if let Some(target) = options.target_index {
+                if i != target {
+                    continue;
+                }
+            }
+            let diff = compare_item_with_reserialized(
                 item,
                 &huffman,
                 is_alpha_a,
                 format!("Item {}", i),
                 bytes_a,
-            ));
+            );
+            let is_match = diff.is_match;
+            report.items.push(diff);
+
+            if options.fail_fast && !is_match {
+                break;
+            }
         }
     } else {
         let bytes_b = bytes_b.ok_or_else(|| anyhow::anyhow!("file_b is required when roundtrip is false"))?;
@@ -79,9 +115,19 @@ pub fn calculate_symmetry_diff(bytes_a: &[u8], bytes_b: Option<&[u8]>, roundtrip
         report.item_count_a = items_a.len();
         report.item_count_b = items_b.len();
         for i in 0..items_a.len().min(items_b.len()) {
-            report
-                .items
-                .push(compare_two_items(&items_a[i], &items_b[i], format!("Item {}", i), bytes_a, bytes_b));
+            if let Some(target) = options.target_index {
+                if i != target {
+                    continue;
+                }
+            }
+            let diff =
+                compare_two_items(&items_a[i], &items_b[i], format!("Item {}", i), bytes_a, bytes_b);
+            let is_match = diff.is_match;
+            report.items.push(diff);
+
+            if options.fail_fast && !is_match {
+                break;
+            }
         }
     }
 
