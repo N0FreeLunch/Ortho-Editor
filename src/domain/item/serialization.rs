@@ -73,16 +73,18 @@ pub fn peek_item_header_at(
     let flags = reader.read::<32, u32>().ok()?;
     let version = reader.read::<3, u8>().ok()?;
     
-    // Alpha v105 Integrity: Validate 8-bit inline header checksum
-    /*
     if alpha_mode {
         let checksum = reader.read::<8, u8>().ok()?;
-        if !validate_header_checksum(flags, version, checksum) {
+        let calculated = ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ (version as u32)) as u8;
+        if crate::item::item_trace_enabled() {
+            println!("[DEBUG] SLICE 11: Header Checksum check: read=0x{:02X}, calc=0x{:02X}", checksum, calculated);
+        }
+        /*
+        if calculated != checksum {
             return None;
         }
+        */
     }
-    */
-    if alpha_mode { let _ = reader.read::<8, u8>().ok()?; }
 
     let mode = reader.read::<3, u8>().ok()?;
     let loc = reader.read::<3, u8>().ok()?;
@@ -173,6 +175,7 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
     for &pos in &jm_positions {
         if bytes.len() < pos + 4 { continue; }
         let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        println!("[DEBUG] SLICE 11: read_player_items found JM at {}, count={}", pos, count);
         if count == 0 { continue; }
 
         let payload_start = (pos + 4) * 8;
@@ -227,21 +230,70 @@ impl Item {
                 }
             }
         }
-let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
-println!("[DEBUG] SLICE 11: read_section found {} markers", markers.len());
+        if alpha_mode && !markers.is_empty() {
+            let mut current_bit = start_offset;
+            for i in 0..top_level_count as usize {
+                if current_bit >= section_bits {
+                    break;
+                }
+                println!(
+                    "[DEBUG] SLICE 11: Sequential parsing item {}, start={}",
+                    i, current_bit
+                );
 
-for (i, &start) in markers.iter().enumerate() {
-    println!("[DEBUG] SLICE 11: Parsing item at marker {}, start={}", i, start);
-    if items.len() >= top_level_count as usize { break; }
-    if start < start_offset { continue; }
+                // Use a large limit for sequential parsing
+                let dynamic_limit = section_bits - current_bit;
 
-    let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
-    let limit = next_marker - start;
-    // ...
+                match parse_item_at_with_limit(
+                    section_bytes,
+                    current_bit,
+                    huffman,
+                    items.len(),
+                    alpha_mode,
+                    Some(dynamic_limit),
+                ) {
+                    Ok((item, consumed_bits)) => {
+                        println!(
+                            "[DEBUG] SLICE 11: Sequential parse success, code='{}' consumed={}",
+                            item.code.trim(),
+                            consumed_bits
+                        );
+                        let mut final_item = item.clone();
+                        final_item.range.end = current_bit + consumed_bits;
+                        final_item.total_bits = consumed_bits;
+                        items.push(final_item);
+                        current_bit += consumed_bits;
+                    }
+                    Err(e) => {
+                        println!(
+                            "[DEBUG] SLICE 11: Sequential parse failed at bit {}: {:?}",
+                            current_bit, e
+                        );
+                        break;
+                    }
+                }
+            }
+            return Ok(items);
+        }
+
+        for (i, &start) in markers.iter().enumerate() {
+            println!("[DEBUG] SLICE 11: Parsing item at marker {}, start={}", i, start);
+            if items.len() >= top_level_count as usize { break; }
+            if start < start_offset { continue; }
+
+            let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
+            let limit = next_marker - start;
+            // ...
 
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
-            if let Some((_, _, _, _, flags, _, is_compact, _, _)) = peek_item_header_at(section_bytes, start, huffman, alpha_mode) {
+            if let Some((_, _, _, code, flags, _, is_compact, _, _)) =
+                peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+            {
+                println!(
+                    "[DEBUG] SLICE 11: Marker {} peek code='{}' flags=0x{:08X} compact={}",
+                    i, code, flags, is_compact
+                );
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
                 if !is_compact && (flags & 0x00000008) != 0 {
                     dynamic_limit += 8;
@@ -305,7 +357,8 @@ for (i, &start) in markers.iter().enumerate() {
         let (mut body, ear_class, ear_level, ear_player_name) = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode)?;
         body.alpha_header_gap = alpha_header_gap;
 
-        let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode);
+        let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode)
+            .with_code(&body.code);
         
         let ext_data = if !header.is_compact {
             crate::domain::item::entity::ExtendedStatsData::read_from_cursor(cursor, &body.code, &header, alpha_mode, &axiom)?
@@ -371,6 +424,16 @@ for (i, &start) in markers.iter().enumerate() {
 
         if !item.header.is_compact {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
+
+            // Slice 11: Handle JM-to-Body alignment gap
+            let gap_len = axiom.header_gap(&item.code, item.header.flags);
+            if gap_len > 0 {
+                cursor.push_context("AlphaBodyGap");
+                let gap_bits = cursor.read_bits_as_vec(gap_len)?;
+                item.body.alpha_body_gap_bits.extend(gap_bits);
+                cursor.pop_context();
+            }
+
             let (props, complete, term, _extra_bits, _payload, shadow_bits, nested_items) = crate::domain::stats::parser::read_item_stats(
                 cursor, 
                 &item.code, 

@@ -111,6 +111,14 @@ impl<R: BitRead> BitCursor<R> {
         self.read_bits::<u64>(count)
     }
 
+    pub fn read_bits_as_vec(&mut self, count: u32) -> ParsingResult<Vec<bool>> {
+        let mut bits = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            bits.push(self.read_bit()?);
+        }
+        Ok(bits)
+    }
+
     pub fn skip_and_record(&mut self, n: u32) -> ParsingResult<()> {
         for _ in 0..n {
             let _ = self.read_bit()?;

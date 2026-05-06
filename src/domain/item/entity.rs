@@ -63,6 +63,7 @@ pub struct ItemBody {
     pub alpha_nudge: Option<u8>,
     pub alpha_set_list_val: Option<u8>,
     pub alpha_shadow_skip_bits: Option<u64>,
+    pub alpha_body_gap_bits: Vec<bool>,
     pub alpha_alignment_padding: Vec<bool>,
 }
 
@@ -432,6 +433,17 @@ impl Item {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
                 if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && self.header.is_compact) || !self.properties.is_empty() {
+                    // Slice 11: Write JM-to-Body alignment gap
+                    let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
+                    if gap_len > 0 {
+                        if !self.body.alpha_body_gap_bits.is_empty() {
+                            for &bit in &self.body.alpha_body_gap_bits {
+                                emitter.write_bit(bit)?;
+                            }
+                        } else {
+                            emitter.write_bits(0, gap_len)?;
+                        }
+                    }
                     crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, quality_val, is_shadow, &s_axiom)?;
                     for set_props in &self.set_attributes {
                         crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, set_props, &[], huffman, self.header.version, false, false, quality_val, false, &s_axiom)?;
@@ -549,7 +561,8 @@ pub fn parse_item_body<R: BitRead>(
     Ok((ItemBody {
         code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,
         defense: None, max_durability: None, current_durability: None, quantity: None, alpha_header_gap: None, 
-        v5_runeword_extra: None, v105_7mgw_payload: None, alpha_nudge, alpha_set_list_val: None, alpha_shadow_skip_bits: None, alpha_alignment_padding: Vec::new(),
+        v5_runeword_extra: None, v105_7mgw_payload: None, alpha_nudge, alpha_set_list_val: None, alpha_shadow_skip_bits: None, 
+        alpha_body_gap_bits: Vec::new(), alpha_alignment_padding: Vec::new(),
     }, ear_class, ear_level, ear_player_name))
 }
 

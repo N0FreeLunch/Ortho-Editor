@@ -115,6 +115,18 @@ impl StatsAxiom {
         self.header_axiom().is_v105_shadow(flags)
     }
 
+    pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
+        if !self.is_alpha() {
+            return 0;
+        }
+        // Forensic: Resolved variable gaps in Alpha v105 (e.g., 8wc Idx 1 -> 96 bits)
+        // These are distinct from the JM-relative header gap and occur before property parsing.
+        if _code.trim() == "8wc" {
+            return 96;
+        }
+        0
+    }
+
     pub fn is_fragment(&self, flags: u32) -> bool {
         self.is_alpha() && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
     }

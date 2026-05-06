@@ -125,6 +125,9 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
         if item.alpha_alignment_padding_len > 0 {
             println!("{:indent$}      [ALIGNMENT PAD] {} bits", "", item.alpha_alignment_padding_len, indent = indent.len());
         }
+        if item.alpha_body_gap_len > 0 {
+            println!("{:indent$}      [BODY GAP] {} bits", "", item.alpha_body_gap_len, indent = indent.len());
+        }
         if item.fidelity_score < 1.0 {
             println!("{:indent$}      [FORENSIC RATIONALE]", "", indent = indent.len());
             for finding in &item.forensic_audit.findings {
