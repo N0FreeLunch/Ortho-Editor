@@ -165,7 +165,9 @@ impl OutputManager {
         let is_refexp = args.is_set("refexp");
         let output_path = args.get("output");
 
-        crate::engine::config::set_refexp(is_refexp);
+        // Slice 13: RefExp engine is now the promoted default. 
+        // We explicitly seed true here to harden the contract, while keeping the flag for compatibility.
+        crate::engine::config::set_refexp(true);
 
         let mut writer = None;
 

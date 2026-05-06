@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static REFEXP_ENABLED: AtomicBool = AtomicBool::new(false);
+static REFEXP_ENABLED: AtomicBool = AtomicBool::new(true);
 
 pub fn set_refexp(enabled: bool) {
     REFEXP_ENABLED.store(enabled, Ordering::SeqCst);
