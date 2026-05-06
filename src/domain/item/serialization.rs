@@ -14,12 +14,25 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
     let mut probe = pos;
     let section_bits = limit;
 
-    // Scan until section end to ensure we don't miss items due to small search windows
+    // Header cache to skip regions known to produce false positives
+    let mut invalid_regions: Vec<(u64, u64)> = Vec::new();
+
     while probe < section_bits {
+        if invalid_regions.iter().any(|&(s, e)| probe >= s && probe < e) {
+            probe += 8;
+            continue;
+        }
+
         if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
+            // Code-based validation: Reject if code is not a known Alpha v105 item
+            if !crate::domain::item::serialization::is_v105_summary_code(&code) && !is_compact {
+                // Potential ghost region
+                invalid_regions.push((probe, probe + 32));
+                probe += 8;
+                continue;
+            }
+
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                // Heuristic: Check if item body would fit in remaining section bits
-                // A very minimal Alpha item is at least ~80 bits
                 if probe + header_len + 80 <= section_bits {
                     return Some(probe);
                 }
@@ -229,8 +242,23 @@ impl Item {
                     items.push(final_item);
                 }
                 Err(_) => {
-                    // Marker recovery: Advance slightly and search for the next valid header pattern
-                    bit_pos = start + 1;
+                    // Fuzzy Fallback: Attempt to recover just the header and then immediately rescan
+                    if alpha_mode {
+                        let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                        if reader.skip(start as u32).is_ok() {
+                            let mut cursor = BitCursor::new(reader);
+                            if let Ok((header, _gap)) = crate::domain::item::entity::parse_item_header(&mut cursor, alpha_mode) {
+                                let mut fuzzy_item = Item::default();
+                                fuzzy_item.header = header;
+                                fuzzy_item.range = crate::domain::item::ItemBitRange { start: start, end: start + 64 };
+                                items.push(fuzzy_item);
+                                // Self-healing: Immediately rescan from the end of the failed segment
+                                bit_pos = start + 64; 
+                                continue;
+                            }
+                        }
+                    }
+                    bit_pos = start + 8;
                 }
             }
         }
