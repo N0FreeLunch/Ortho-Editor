@@ -1,4 +1,5 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
+use rayon::prelude::*;
 use serde::Serialize;
 use std::io::Cursor;
 
@@ -85,28 +86,55 @@ pub fn calculate_symmetry_diff(
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         report.item_count_a = items.len();
         report.item_count_b = items.len();
-        for (i, item) in items.iter().enumerate() {
-            if let Some(target) = options.target_index {
-                if i != target {
-                    continue;
+
+        let filtered_items: Vec<(usize, &Item)> = items
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                if let Some(target) = options.target_index {
+                    *i == target
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        let mut diffs: Vec<ItemDiff> = if options.fail_fast {
+            let mut results = Vec::new();
+            for (i, item) in filtered_items {
+                let diff = compare_item_with_reserialized(
+                    item,
+                    &huffman,
+                    is_alpha_a,
+                    format!("Item {}", i),
+                    bytes_a,
+                );
+                let is_match = diff.is_match;
+                results.push(diff);
+                if !is_match {
+                    break;
                 }
             }
-            let diff = compare_item_with_reserialized(
-                item,
-                &huffman,
-                is_alpha_a,
-                format!("Item {}", i),
-                bytes_a,
-            );
-            let is_match = diff.is_match;
-            report.items.push(diff);
+            results
+        } else {
+            filtered_items
+                .into_par_iter()
+                .map(|(i, item)| {
+                    compare_item_with_reserialized(
+                        item,
+                        &huffman,
+                        is_alpha_a,
+                        format!("Item {}", i),
+                        bytes_a,
+                    )
+                })
+                .collect()
+        };
 
-            if options.fail_fast && !is_match {
-                break;
-            }
-        }
+        report.items.append(&mut diffs);
     } else {
-        let bytes_b = bytes_b.ok_or_else(|| anyhow::anyhow!("file_b is required when roundtrip is false"))?;
+        let bytes_b =
+            bytes_b.ok_or_else(|| anyhow::anyhow!("file_b is required when roundtrip is false"))?;
         let is_alpha_b = is_alpha(bytes_b);
         let items_a = Item::read_player_items(bytes_a, &huffman, is_alpha_a)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -114,24 +142,55 @@ pub fn calculate_symmetry_diff(
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         report.item_count_a = items_a.len();
         report.item_count_b = items_b.len();
-        for i in 0..items_a.len().min(items_b.len()) {
-            if let Some(target) = options.target_index {
-                if i != target {
-                    continue;
+
+        let len = items_a.len().min(items_b.len());
+        let filtered_indices: Vec<usize> = (0..len)
+            .filter(|&i| {
+                if let Some(target) = options.target_index {
+                    i == target
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        let mut diffs: Vec<ItemDiff> = if options.fail_fast {
+            let mut results = Vec::new();
+            for i in filtered_indices {
+                let diff = compare_two_items(
+                    &items_a[i],
+                    &items_b[i],
+                    format!("Item {}", i),
+                    bytes_a,
+                    bytes_b,
+                );
+                let is_match = diff.is_match;
+                results.push(diff);
+                if !is_match {
+                    break;
                 }
             }
-            let diff =
-                compare_two_items(&items_a[i], &items_b[i], format!("Item {}", i), bytes_a, bytes_b);
-            let is_match = diff.is_match;
-            report.items.push(diff);
+            results
+        } else {
+            filtered_indices
+                .into_par_iter()
+                .map(|i| {
+                    compare_two_items(
+                        &items_a[i],
+                        &items_b[i],
+                        format!("Item {}", i),
+                        bytes_a,
+                        bytes_b,
+                    )
+                })
+                .collect()
+        };
 
-            if options.fail_fast && !is_match {
-                break;
-            }
-        }
+        report.items.append(&mut diffs);
     }
 
-    report.success = report.item_count_a == report.item_count_b && report.items.iter().all(|i| i.is_match);
+    report.success =
+        report.item_count_a == report.item_count_b && report.items.iter().all(|i| i.is_match);
     Ok(report)
 }
 
