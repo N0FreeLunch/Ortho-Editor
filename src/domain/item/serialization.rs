@@ -12,6 +12,24 @@ use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderG
 pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha: bool) -> Option<u64> {
     let limit = (bytes.len() * 8) as u64;
     let mut probe = pos;
+    
+    // Alpha v105 forensic: items are almost always byte-aligned.
+    // We prioritize byte-aligned headers to avoid ghost matches at bit-offsets.
+    if alpha {
+        let aligned_pos = (pos + 7) & !7;
+        let mut alt_probe = aligned_pos;
+        while alt_probe < limit {
+            if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, alt_probe, huffman, alpha) {
+                if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+                    return Some(alt_probe);
+                }
+            }
+            alt_probe += 8;
+            // Only look ahead a reasonable distance for byte-aligned items
+            if alt_probe > pos + 1024 { break; }
+        }
+    }
+
     while probe < limit {
         if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
@@ -19,6 +37,8 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
             }
         }
         probe += 1;
+        // Don't look forever for bit-granular matches if we are in Alpha mode
+        if alpha && probe > pos + 128 { break; }
     }
     None
 }
@@ -246,6 +266,9 @@ impl Item {
                         }
                     }
                     
+                    if crate::item::item_trace_enabled() {
+                        println!("[TRACE] read_section: parsed item {}/{} at bit {}: code='{}', len={}", items.len() + 1, top_level_count, start, final_item.body.code, final_consumed);
+                    }
                     bit_pos = next_bit_pos;
                     items.push(final_item);
                 }

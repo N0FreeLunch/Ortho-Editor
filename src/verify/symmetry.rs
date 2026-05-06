@@ -29,6 +29,8 @@ pub struct ItemDiff {
     pub segment: Option<String>,
     pub fidelity_score: f32,
     pub forensic_audit: ForensicAudit,
+    pub version: u8,
+    pub flags: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orig_bits: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,6 +119,8 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
         target_len: rebuilt_bits.len(),
         fidelity_score: FidelityScore::from_audit(&item.forensic_audit).value,
         forensic_audit: item.forensic_audit.clone(),
+        version: item.header.version,
+        flags: item.header.flags,
         orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(rebuilt_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
         ..Default::default()
@@ -173,6 +177,8 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
         target_len: item_b.bits.len(),
         fidelity_score: FidelityScore::from_audit(&item_a.forensic_audit).value,
         forensic_audit: item_a.forensic_audit.clone(),
+        version: item_a.header.version,
+        flags: item_a.header.flags,
         orig_bits: Some(item_a.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(item_b.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         ..Default::default()

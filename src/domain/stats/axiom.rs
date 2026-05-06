@@ -67,7 +67,7 @@ pub struct PropertyRhythm {
 
 impl StatsAxiom {
     pub fn is_alpha(&self) -> bool {
-        self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0)
+        self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
     }
 
     /// Maps an Alpha v105 raw stat ID to its effective (standard) ID.
@@ -121,21 +121,22 @@ impl StatsAxiom {
 
 
     pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool) -> PropertyRhythm {
-        if self.is_alpha() {
-            // All Alpha items use 7-bit ID, 6-bit Value
+        if self.is_alpha() && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0) {
+            // All Alpha items use 9-bit ID, 6-bit Value (fixture-verified)
+            // Terminator is 9-bits (111111111), no extra terminal bits like Retail.
             PropertyRhythm {
-                id_bits: 7,
+                id_bits: 9,
                 value_bits: Some(6),
-                has_terminal_bit: true,
-                has_extra_terminal_bit: true,
+                has_terminal_bit: false,
+                has_extra_terminal_bit: false,
             }
         } else {
-            // Retail and hybrids (e.g. version 6 in Alpha)
+            // Retail and hybrids (e.g. version 4, 6, 7 in Alpha)
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None, // use STAT_COSTS
-                has_terminal_bit: false,
-                has_extra_terminal_bit: false,
+                has_terminal_bit: self.is_alpha(),
+                has_extra_terminal_bit: self.is_alpha(),
             }
         }
     }
@@ -183,13 +184,23 @@ impl StatsAxiom {
                 let min_bits = reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(72);
                 if final_len < min_bits { final_len = min_bits; }
             } else {
-                let min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
+                let mut min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
+                
+                // Check for item-specific fixed width overrides
+                if let Some(overrides) = &reg.item_overrides {
+                    if let Some(item_map) = overrides.get(trimmed) {
+                        if let Some(&f_width) = item_map.get("fixed_width") {
+                            min_bits = f_width as u64;
+                        }
+                    }
+                }
+
                 if final_len < min_bits {
                     final_len = min_bits;
                 }
                 
                 // Alpha v105 32-bit Alignment Axiom
-                if (self.version == 5 || self.version == 1 || self.version == 0 || self.version == 7) && !self.is_personalized(flags) {
+                if (self.version == 5 || self.version == 1 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6) && !self.is_personalized(flags) {
                     if final_len % 32 != 0 {
                         final_len += 32 - (final_len % 32);
                     }

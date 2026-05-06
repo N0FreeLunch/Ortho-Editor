@@ -83,7 +83,7 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
     let idx_str = idx.map(|i| i.to_string()).unwrap_or_default();
 
     println!(
-        "{:indent$}{:<5} | {:<10} | {:>8} | {:>8} | {:>5} | {:.2}",
+        "{:indent$}{:<5} | {:<10} | {:>8} | {:>8} | {:>5} | {:.2} | V:{} F:0x{:08X}",
         prefix,
         idx_str,
         item.code,
@@ -91,6 +91,8 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
         item.target_len,
         if item.is_match { "OK" } else { "FAIL" },
         item.fidelity_score,
+        item.version,
+        item.flags,
         indent = indent.len()
     );
 
