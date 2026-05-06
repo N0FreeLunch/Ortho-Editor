@@ -119,8 +119,11 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
                 println!("{:indent$}              {}", "", markers, indent = indent.len());
             }
         }
-        if let Some(gap) = item.alpha_header_gap {
-            println!("{:indent$}      [HEADER GAP] 0x{:X}", "", gap, indent = indent.len());
+        if let Some(gap) = item.discovered_alpha_header_gap {
+            println!("{:indent$}      [DISC GAP] {} bits", "", gap, indent = indent.len());
+        }
+        if let Some(gap) = item.parsed_alpha_header_gap {
+            println!("{:indent$}      [PARS GAP] {} bits", "", gap, indent = indent.len());
         }
         if item.alpha_alignment_padding_len > 0 {
             println!("{:indent$}      [ALIGNMENT PAD] {} bits", "", item.alpha_alignment_padding_len, indent = indent.len());

@@ -2,7 +2,7 @@ use bitstream_io::{BitRead, BitReader, LittleEndian};
 use serde::Serialize;
 use std::io::Cursor;
 
-use crate::item::{HuffmanTree, Item};
+use crate::item::{HuffmanTree, Item, peek_item_header_at};
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -36,6 +36,10 @@ pub struct ItemDiff {
     pub alpha_alignment_padding_len: usize,
     pub alpha_body_gap_len: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovered_alpha_header_gap: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parsed_alpha_header_gap: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub orig_bits: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_bits: Option<String>,
@@ -62,6 +66,7 @@ pub fn calculate_symmetry_diff(bytes_a: &[u8], bytes_b: Option<&[u8]>, roundtrip
                 &huffman,
                 is_alpha_a,
                 format!("Item {}", i),
+                bytes_a,
             ));
         }
     } else {
@@ -76,7 +81,7 @@ pub fn calculate_symmetry_diff(bytes_a: &[u8], bytes_b: Option<&[u8]>, roundtrip
         for i in 0..items_a.len().min(items_b.len()) {
             report
                 .items
-                .push(compare_two_items(&items_a[i], &items_b[i], format!("Item {}", i)));
+                .push(compare_two_items(&items_a[i], &items_b[i], format!("Item {}", i), bytes_a, bytes_b));
         }
     }
 
@@ -92,7 +97,7 @@ fn is_alpha(bytes: &[u8]) -> bool {
     version == 105 || version == 6
 }
 
-fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String) -> ItemDiff {
+fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
     let mut strict_item = item.clone();
     strict_item.bits.clear();
     let reserialized_bytes = strict_item.to_bytes(huffman, alpha_mode).unwrap_or_default();
@@ -128,6 +133,8 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
         alpha_header_gap: item.body.alpha_header_gap,
         alpha_alignment_padding_len: item.body.alpha_alignment_padding.len(),
         alpha_body_gap_len: item.body.alpha_body_gap_bits.len(),
+        discovered_alpha_header_gap: if alpha_mode { peek_item_header_at(original_bytes, item.range.start, huffman, alpha_mode).map(|p| p.8 as u32) } else { None },
+        parsed_alpha_header_gap: if alpha_mode { Some(item.body.alpha_header_gap_bits.len() as u32) } else { None },
         orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(rebuilt_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
         ..Default::default()
@@ -168,6 +175,7 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
             huffman,
             alpha_mode,
             format!("Child {}", i),
+            original_bytes,
         ));
     }
     if !item_diff.children.iter().all(|c| c.is_match) {
@@ -176,7 +184,9 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
     item_diff
 }
 
-fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
+fn compare_two_items(item_a: &Item, item_b: &Item, label: String, bytes_a: &[u8], bytes_b: &[u8]) -> ItemDiff {
+    let _is_alpha = is_alpha(bytes_a);
+
     let mut item_diff = ItemDiff {
         label,
         code: item_a.code.trim().to_string(),
@@ -189,6 +199,12 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
         alpha_header_gap: item_a.body.alpha_header_gap,
         alpha_alignment_padding_len: item_a.body.alpha_alignment_padding.len(),
         alpha_body_gap_len: item_a.body.alpha_body_gap_bits.len(),
+        discovered_alpha_header_gap: if item_a.header.version >= 5 {
+             // In this context, we re-parse using symmetry's huffman
+             let huffman = HuffmanTree::new();
+             peek_item_header_at(bytes_a, item_a.range.start, &huffman, true).map(|p| p.8 as u32)
+        } else { None },
+        parsed_alpha_header_gap: if item_a.header.version >= 5 { Some(item_a.body.alpha_header_gap_bits.len() as u32) } else { None },
         orig_bits: Some(item_a.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(item_b.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         ..Default::default()
@@ -233,6 +249,8 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String) -> ItemDiff {
                 &item_a.socketed_items[i],
                 &item_b.socketed_items[i],
                 format!("Child {}", i),
+                bytes_a,
+                bytes_b,
             ));
         } else {
             item_diff.is_match = false;
