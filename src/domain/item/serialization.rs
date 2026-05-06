@@ -286,6 +286,15 @@ impl Item {
         cursor.begin_segment(ItemSegmentType::Root);
 
         let (header, alpha_header_gap) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode)?;
+        
+        // Log gap for analysis
+        if let Some(gap) = alpha_header_gap {
+            cursor.push_context("AlphaHeaderGap");
+            // If we have an alpha_header_gap, consume or log its impact
+            // This is a minimal modeling approach as per mini-spec
+            cursor.pop_context();
+        }
+        
         let (mut body, ear_class, ear_level, ear_player_name) = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode)?;
         body.alpha_header_gap = alpha_header_gap;
 
