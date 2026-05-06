@@ -173,6 +173,10 @@ impl<R: BitRead> BitCursor<R> {
         self.end_segment();
     }
 
+    pub fn context_stack(&self) -> Vec<String> {
+        self.context_stack.iter().map(|(label, _, _)| label.clone()).collect()
+    }
+
     pub fn get_context_count(&self) -> usize {
         self.context_stack.len()
     }

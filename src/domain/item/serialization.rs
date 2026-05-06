@@ -492,6 +492,7 @@ pub struct PropertyReaderContext<'a> {
 pub struct BitEmitter {
     writer: BitWriter<Vec<u8>, LittleEndian>,
     written: u64,
+    bits: Vec<bool>,
 }
 
 impl BitEmitter {
@@ -499,6 +500,7 @@ impl BitEmitter {
         BitEmitter {
             writer: BitWriter::endian(Vec::new(), LittleEndian),
             written: 0,
+            bits: Vec::new(),
         }
     }
 
@@ -508,7 +510,12 @@ impl BitEmitter {
         }
         self.writer.write_bit(bit)?;
         self.written += 1;
+        self.bits.push(bit);
         Ok(())
+    }
+
+    pub fn into_bits(self) -> Vec<bool> {
+        self.bits
     }
 
     pub fn write_bits(&mut self, value: u32, count: u32) -> io::Result<()> {
@@ -587,14 +594,28 @@ pub fn write_property_list(
         emitter.write_bits(raw_id, id_bits)?;
         
         let mut handled = false;
-        if axiom.is_alpha() && (raw_id == 317 || axiom.map_alpha_id(raw_id) == 317) {
+        let is_nested_stat = (raw_id == 317 || axiom.map_alpha_id(raw_id) == 317) || (raw_id == 320 || axiom.map_alpha_id(raw_id) == 320);
+        if axiom.is_alpha() && is_nested_stat {
              if item_idx < nested_items.len() {
                  let child = &nested_items[item_idx];
-                 if crate::item::item_trace_enabled() {
-                     println!("[DEBUG] write_property_list Stat 317: Writing nested item {}, start_bits={}", item_idx, emitter.written_bits());
+                 let is_stat_320 = raw_id == 320 || axiom.map_alpha_id(raw_id) == 320;
+                 
+                 if is_stat_320 {
+                     // Fixed budget: 2871 bits
+                     let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
+                     let child_bits = child_bits_vec.len();
+                     let budget = 2871;
+                     
+                     emitter.extend_bits(child_bits_vec)?;
+                     if child_bits < budget {
+                         emitter.write_bits(0, (budget - child_bits) as u32)?;
+                     }
+                 } else {
+                     // Variable budget (Stat 317)
+                     let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
+                     emitter.extend_bits(child_bits_vec)?;
                  }
-                 let child_bytes = child.to_bytes(huffman, axiom.save_is_alpha)?;
-                 for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
+                 
                  item_idx += 1;
                  handled = true;
              }

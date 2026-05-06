@@ -296,8 +296,21 @@ impl Item {
     }
 
     pub fn to_bytes(&self, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {
-        use crate::domain::item::serialization::{BitEmitter, write_player_name};
+        use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
+        self.to_emitter(&mut emitter, huffman, alpha_mode)?;
+        Ok(emitter.into_bytes())
+    }
+
+    pub fn to_bits(&self, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<bool>> {
+        use crate::domain::item::serialization::BitEmitter;
+        let mut emitter = BitEmitter::new();
+        self.to_emitter(&mut emitter, huffman, alpha_mode)?;
+        Ok(emitter.into_bits())
+    }
+
+    pub fn to_emitter(&self, emitter: &mut crate::domain::item::serialization::BitEmitter, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<()> {
+        use crate::domain::item::serialization::write_player_name;
         emitter.write_bits(self.header.flags, 32)?;
         emitter.write_bits(self.header.version as u32, 3)?;
         emitter.write_bits(self.header.mode as u32, 3)?;
@@ -350,7 +363,7 @@ impl Item {
         if self.header.is_ear {
             emitter.write_bits(self.ear_class.unwrap_or(0) as u32, 3)?;
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
-            write_player_name(&mut emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.header.version == 5)?;
+            write_player_name(emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.header.version == 5)?;
             if alpha_mode && self.header.version == 5 { emitter.byte_align()?; }
         } else {
             let encoded_code = huffman.encode(&self.code)?;
@@ -410,7 +423,7 @@ impl Item {
                 }
                 if self.header.is_personalized {
                     if alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) { emitter.byte_align()?; }
-                    write_player_name(&mut emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1))?;
+                    write_player_name(emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1))?;
                 }
                 if self.code.trim() == "tbk" || self.code.trim() == "ibk" { emitter.write_bits(self.tbk_ibk_teleport.unwrap_or(0) as u32, 5)?; }
                 emitter.write_bit(self.timestamp_flag)?;
@@ -444,9 +457,9 @@ impl Item {
                             emitter.write_bits(0, gap_len)?;
                         }
                     }
-                    crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, quality_val, is_shadow, &s_axiom)?;
+                    crate::domain::item::serialization::write_property_list(emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, quality_val, is_shadow, &s_axiom)?;
                     for set_props in &self.set_attributes {
-                        crate::domain::item::serialization::write_property_list(&mut emitter, &self.code, set_props, &[], huffman, self.header.version, false, false, quality_val, false, &s_axiom)?;
+                        crate::domain::item::serialization::write_property_list(emitter, &self.code, set_props, &[], huffman, self.header.version, false, false, quality_val, false, &s_axiom)?;
                     }
                 }
             }
@@ -459,7 +472,7 @@ impl Item {
             if !self.body.alpha_alignment_padding.is_empty() { for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } }
             else { emitter.write_bits(0, padding_needed)?; }
         }
-        Ok(emitter.into_bytes())
+        Ok(())
     }
 
     pub fn serialize_section(items: &[Item], huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {

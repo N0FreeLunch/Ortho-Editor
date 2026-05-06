@@ -76,6 +76,10 @@ pub fn read_item_stats<R: BitRead>(
     Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits, nested_items))
 }
 
+thread_local! {
+    static NESTED_DEPTH: std::cell::Cell<u32> = std::cell::Cell::new(0);
+}
+
 pub fn read_property_list<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
     code: &str,
@@ -100,9 +104,14 @@ where
 
     let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
 
-    // Track nesting depth
-    let depth = recorder.get_context_count();
-    if depth > 5 { return Ok((props, saw_terminator, terminator_bit, nested_items)); }
+    // Track nesting depth via thread-local to handle independent cursors
+    let depth = NESTED_DEPTH.with(|d| d.get());
+    if depth > 10 {
+        if crate::item::item_trace_enabled() {
+             println!("[WARNING] SLICE 18: Max nesting depth (10) reached at bit {}. Aborting recursion.", recorder.pos());
+        }
+        return Ok((props, saw_terminator, terminator_bit, nested_items));
+    }
 
     loop {
         // Soft-Sync: If parsing stats block, check if current position is valid
@@ -256,68 +265,109 @@ where
         axiom.stat_bit_width(stat_id, default_width)
     };
 
-    // Slice 7: Force atomic skip for Stat 320 to prevent stream termination
-    if axiom.is_alpha() && (stat_id == 320 || axiom.map_alpha_id(stat_id) == 320) {
-        if crate::item::item_trace_enabled() {
-            println!("[DEBUG] SLICE 7: Forcing atomic skip for Stat 320 at pos {}", recorder.pos());
-        }
-        // Stat 320 in Alpha v105 is known to be a 2871-bit blob
-        let skip_bits = 2871; 
-        recorder.skip_and_record(skip_bits)?;
-        
-        return Ok(Some((
-            ItemProperty {
-                stat_id,
-                raw_value: 0,
-                param: 0,
-                name: "atomic_blob".to_string(),
-                value: 0,
-                range: ItemBitRange { start: entry_start, end: recorder.pos() },
-            },
-            false,
-            false,
-            Vec::new()
-        )));
-    }
+    // Slice 11/18: Stat 317/320 nested recovery seam
+    let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
+    let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;
+    let is_already_nested = recorder.context_stack().iter().any(|s| s == "nested");
+    let mut handled = false;
 
-    // Slice 7: Stat 317/320 nested recovery seam
-    // Prevent recursive triggering of Stat 320 recovery by checking for "nested" context
-    let is_already_nested = recorder.get_context_count() > 0;
-    // Log stat identification for diagnosis
-    if crate::item::item_trace_enabled() && (stat_id == 317 || axiom.map_alpha_id(stat_id) == 317) {
-        println!("[DEBUG] SLICE 11: Stat 317 found, pos: {}, width: {}, already_nested: {}", recorder.pos(), effective_width, is_already_nested);
-    }
-    if axiom.is_alpha() && (stat_id == 317 || axiom.map_alpha_id(stat_id) == 317) && effective_width > 32 && !is_already_nested {
-        if crate::item::item_trace_enabled() {
-            println!("[DEBUG] SLICE 11 TRIGGER: Stat 317 nested recovery at pos {}, axiom_alpha: {}", recorder.pos(), axiom.is_alpha());
-        }
-        recorder.push_context("nested");
-        if let Ok((child, end_pos)) = recovery_fn(
-            reader_ctx.bytes,
-            recorder.pos(),
-            huffman,
-            0,
-            axiom.save_is_alpha,
-        ) {
-            println!("[DEBUG] SLICE 11: Child item parsed, end_pos: {}, consumed: {}", end_pos, end_pos - recorder.pos());
-            if end_pos > recorder.pos() {
-                let consumed = (end_pos - recorder.pos()) as u32;
-                recorder.skip_and_record(consumed)?;
-                effective_width = consumed;
-                nested_items.push(child);
+    if axiom.is_alpha() && (is_stat_317 || is_stat_320) && !is_already_nested {
+        if is_stat_320 {
+            // Alpha v105 Larzuk items use a fixed-size envelope for nested items
+            // Ref: Discussion 0231 (9-bit ID + 2871-bit payload = 2880 bits / 360 bytes)
+            let skip_bits = 2871;
+            let search_start = recorder.pos();
+            
+            // We still want to parse the nested item for data extraction
+            recorder.push_context("nested");
+            
+            // Scan for the next item header within a small window to handle padding
+            let mut found_pos = search_start;
+            for offset in 0..64 {
+                let probe_pos = search_start + offset;
+                if let Some(header_info) = crate::item::peek_item_header_at(reader_ctx.bytes, probe_pos, huffman, axiom.save_is_alpha) {
+                    let (mode, loc, _x, code, flags, version, _is_compact, _header_bits, _nudge) = header_info;
+                    if crate::item::is_plausible_item_header(mode, loc, &code, flags, version, axiom.save_is_alpha) {
+                        found_pos = probe_pos;
+                        break;
+                    }
+                }
             }
+
+            let _ = NESTED_DEPTH.with(|d| {
+                let prev = d.get();
+                if prev > 10 { return Err(crate::error::ParsingFailure { 
+                    error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
+                    context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
+                }); }
+                d.set(prev + 1);
+                let res = recovery_fn(
+                    reader_ctx.bytes,
+                    found_pos,
+                    huffman,
+                    nested_items.len(),
+                    axiom.save_is_alpha,
+                );
+                d.set(prev);
+                res
+            }).map(|(child, _)| {
+                nested_items.push(child);
+            });
+            recorder.pop_context();
+
+            // But we MUST skip the fixed bit budget to maintain forensic alignment
+            recorder.skip_and_record(skip_bits)?;
+            handled = true;
         } else {
-            println!("[DEBUG] SLICE 11: Failed to parse child item at pos {}", recorder.pos());
+            // Stat 317 (variable width recursive parsing)
+            if crate::item::item_trace_enabled() {
+                println!("[DEBUG] SLICE 18 TRIGGER: Stat {} nested recovery at pos {}, axiom_alpha: {}, depth: {}", stat_id, recorder.pos(), axiom.is_alpha(), recorder.get_context_count());
+            }
+            recorder.push_context("nested");
+            
+            let result = NESTED_DEPTH.with(|d| {
+                let prev = d.get();
+                if prev > 10 { return Err(crate::error::ParsingFailure { 
+                    error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
+                    context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
+                }); }
+                d.set(prev + 1);
+                let res = recovery_fn(
+                    reader_ctx.bytes,
+                    recorder.pos(),
+                    huffman,
+                    nested_items.len(),
+                    axiom.save_is_alpha,
+                );
+                d.set(prev);
+                res
+            });
+
+            if let Ok((child, end_pos)) = result {
+                if crate::item::item_trace_enabled() {
+                    println!("[DEBUG] SLICE 18: Child item parsed for stat {}, end_pos: {}, consumed: {}", stat_id, end_pos, end_pos - recorder.pos());
+                }
+                nested_items.push(child);
+                if end_pos > recorder.pos() {
+                    let consumed = (end_pos - recorder.pos()) as u32;
+                    recorder.skip_and_record(consumed)?;
+                }
+                handled = true;
+            }
+            recorder.pop_context();
         }
-        recorder.pop_context();
     }
 
 
-    if effective_width > 32 {
-        recorder.skip_and_record(effective_width)?;
-        raw_value = 0; // Huge payload not preserved in raw_value
+    if !handled {
+        if effective_width > 32 {
+            recorder.skip_and_record(effective_width)?;
+            raw_value = 0; // Huge payload not preserved in raw_value
+        } else {
+            raw_value = recorder.read_bits::<u32>(effective_width)?;
+        }
     } else {
-        raw_value = recorder.read_bits::<u32>(effective_width)?;
+        raw_value = 0;
     }
 
     recorder.push_context(&format!("Stat({})", stat_id));
