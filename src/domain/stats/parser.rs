@@ -107,9 +107,6 @@ where
     // Track nesting depth via thread-local to handle independent cursors
     let depth = NESTED_DEPTH.with(|d| d.get());
     if depth > 10 {
-        if crate::item::item_trace_enabled() {
-             println!("[WARNING] SLICE 18: Max nesting depth (10) reached at bit {}. Aborting recursion.", recorder.pos());
-        }
         return Ok((props, saw_terminator, terminator_bit, nested_items));
     }
 
@@ -119,7 +116,7 @@ where
              let saved_pos = recorder.checkpoint();
              if let Ok(peek_id) = recorder.read_bits::<u16>(9) {
                  if peek_id > 511 {
-                     println!("[DEBUG] SLICE 12: Soft-Sync detected potential bit drift at pos {}, peek_id={}", recorder.pos(), peek_id);
+                     // Soft-Sync: bit drift detected
                  } else {
                      recorder.rollback(saved_pos);
                  }
@@ -141,7 +138,6 @@ where
 
         match result {
             Ok(Some((prop, is_term, term_bit, items))) => {
-                println!("[DEBUG] SLICE 16: Processed stat_id: {} at pos {}", prop.stat_id, recorder.pos());
                 props.push(prop);
                 nested_items.extend(items);
                 if is_term {
@@ -151,17 +147,13 @@ where
                 }
             }
             Ok(None) => break,
-            Err(e) => {
-                println!("[DEBUG] SLICE 16: Error at pos {} (last stat_id check might be invalid): {:?}. Attempting re-alignment.", recorder.pos(), e);
+            Err(_) => {
                 if recorder.read_bit().is_err() {
                     break;
                 }
             }
         }
     }
-
-
-    println!("[DEBUG] SLICE 12: Loop terminated, saw_terminator={}, terminator_bit={}, props.len={}", saw_terminator, terminator_bit, props.len());
 
     Ok((props, saw_terminator, terminator_bit, nested_items))
 }
@@ -204,7 +196,7 @@ where
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
     
     if crate::item::item_trace_enabled() {
-        println!("[DEBUG] SLICE 16: Peeked stat_id: {} at pos {}", stat_id, recorder.pos());
+        println!("[TRACE] parser: peeked stat_id: {} at pos {}", stat_id, recorder.pos());
     }
 
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
@@ -275,7 +267,7 @@ where
         if is_stat_320 {
             // Alpha v105 Larzuk items use a fixed-size envelope for nested items
             // Ref: Discussion 0231 (9-bit ID + 2871-bit payload = 2880 bits / 360 bytes)
-            let skip_bits = 2871;
+            let skip_bits = axiom.stat_bit_width(320, 2871);
             let search_start = recorder.pos();
             
             // We still want to parse the nested item for data extraction
@@ -321,7 +313,7 @@ where
         } else {
             // Stat 317 (variable width recursive parsing)
             if crate::item::item_trace_enabled() {
-                println!("[DEBUG] SLICE 18 TRIGGER: Stat {} nested recovery at pos {}, axiom_alpha: {}, depth: {}", stat_id, recorder.pos(), axiom.is_alpha(), recorder.get_context_count());
+                println!("[TRACE] parser: stat {} nested recovery at pos {}, depth: {}", stat_id, recorder.pos(), recorder.get_context_count());
             }
             recorder.push_context("nested");
             
@@ -345,7 +337,7 @@ where
 
             if let Ok((child, end_pos)) = result {
                 if crate::item::item_trace_enabled() {
-                    println!("[DEBUG] SLICE 18: Child item parsed for stat {}, end_pos: {}, consumed: {}", stat_id, end_pos, end_pos - recorder.pos());
+                    println!("[TRACE] parser: child item parsed for stat {}, end_pos: {}, consumed: {}", stat_id, end_pos, end_pos - recorder.pos());
                 }
                 nested_items.push(child);
                 if end_pos > recorder.pos() {

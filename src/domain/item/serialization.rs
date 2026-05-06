@@ -25,7 +25,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
 
         if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
              if crate::item::item_trace_enabled() {
-                println!("[DEBUG] SLICE 11: Probe at {} found plausible header: code={}, mode={}, loc={}", probe, code, mode, location);
+                // Probe success
              }
             // Code-based validation: Reject if code is not a known Alpha v105 item
             if !crate::domain::item::serialization::is_v105_summary_code(&code) && !is_compact {
@@ -251,14 +251,7 @@ impl Item {
                     final_item.total_bits = consumed_bits;
                     items.push(final_item);
                 }
-                Err(e) => {
-                    println!("[DEBUG] SLICE 13: Marker {} failed to parse: {:?}", i, e);
-                    // Dump bits for forensic analysis of the drift
-                    let mut dump_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                    let _ = dump_reader.skip(start as u32);
-                    let mut bits = Vec::new();
-                    for _ in 0..64 { if let Ok(b) = dump_reader.read_bit() { bits.push(if b { '1' } else { '0' }); } }
-                    println!("[DEBUG] SLICE 13: Bit-dump at failure {}: {}", start, bits.iter().collect::<String>());
+                Err(_) => {
                     // Marker was plausible but parsing failed. Skip.
                 }
             }
@@ -506,7 +499,7 @@ impl BitEmitter {
 
     pub fn write_bit(&mut self, bit: bool) -> io::Result<()> {
         if crate::item::item_trace_enabled() {
-            println!("[TRACE] BitEmitter: bit {} at pos {}", bit as u8, self.written);
+            // println!("[TRACE] BitEmitter: bit {} at pos {}", bit as u8, self.written);
         }
         self.writer.write_bit(bit)?;
         self.written += 1;
@@ -604,11 +597,11 @@ pub fn write_property_list(
                      // Fixed budget: 2871 bits
                      let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
                      let child_bits = child_bits_vec.len();
-                     let budget = 2871;
+                     let budget = axiom.stat_bit_width(320, 2871);
                      
                      emitter.extend_bits(child_bits_vec)?;
-                     if child_bits < budget {
-                         emitter.write_bits(0, (budget - child_bits) as u32)?;
+                     if child_bits < budget as usize {
+                         emitter.write_bits(0, (budget as usize - child_bits) as u32)?;
                      }
                  } else {
                      // Variable budget (Stat 317)
@@ -643,7 +636,6 @@ pub fn write_property_list(
     }
     
     if crate::item::item_trace_enabled() {
-        println!("[DEBUG] write_property_list code='{}': props={}, start_bits={}, end_bits={}", code.trim(), props.len(), start_bits, emitter.written_bits());
     }
     Ok(())
 }
