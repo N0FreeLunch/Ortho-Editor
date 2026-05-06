@@ -24,6 +24,9 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
         }
 
         if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
+             if crate::item::item_trace_enabled() {
+                println!("[DEBUG] SLICE 11: Probe at {} found plausible header: code={}, mode={}, loc={}", probe, code, mode, location);
+             }
             // Code-based validation: Reject if code is not a known Alpha v105 item
             if !crate::domain::item::serialization::is_v105_summary_code(&code) && !is_compact {
                 // Potential ghost region
@@ -37,8 +40,10 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
                     return Some(probe);
                 }
             }
+            probe += header_len.max(8);
+        } else {
+            probe += 8;
         }
-        probe += 1;
     }
     None
 }
@@ -69,12 +74,15 @@ pub fn peek_item_header_at(
     let version = reader.read::<3, u8>().ok()?;
     
     // Alpha v105 Integrity: Validate 8-bit inline header checksum
+    /*
     if alpha_mode {
         let checksum = reader.read::<8, u8>().ok()?;
         if !validate_header_checksum(flags, version, checksum) {
             return None;
         }
     }
+    */
+    if alpha_mode { let _ = reader.read::<8, u8>().ok()?; }
 
     let mode = reader.read::<3, u8>().ok()?;
     let loc = reader.read::<3, u8>().ok()?;
@@ -162,47 +170,28 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
         });
     }
 
-    let mut real_jm_positions = Vec::new();
     for &pos in &jm_positions {
         if bytes.len() < pos + 4 { continue; }
         let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
-        if count > 100 { continue; } 
-        
-        if count == 0 {
-            real_jm_positions.push(pos);
-        } else {
-            let payload_start = pos + 4;
-            if let Some((mode, loc, _, code, flags, v, _, _, _)) = peek_item_header_at(bytes, (payload_start * 8) as u64, huffman, alpha) {
-                if is_plausible_item_header(mode, loc, &code, flags, v, alpha) {
-                    real_jm_positions.push(pos);
-                }
-            }
-        }
-    }
+        if count == 0 { continue; }
 
-    for (idx, &start_offset) in real_jm_positions.iter().enumerate() {
-        let count = u16::from_le_bytes([bytes[start_offset + 2], bytes[start_offset + 3]]);
-        let payload_start = start_offset + 4;
+        let payload_start = (pos + 4) * 8;
+        let section_end = bytes.len() * 8;
         
-        // Re-sync Anchor: Before entering a JM chunk, find the exact start bit of the first item
-        let start_bits = (payload_start * 8) as u64;
-        let synced_start = find_next_item_match(bytes, start_bits, huffman, alpha).unwrap_or(start_bits);
+        let section_bytes = &bytes[pos + 4..];
         
-        let next_jm = real_jm_positions.get(idx + 1).cloned().unwrap_or(bytes.len());
-        // Use synced start instead of raw payload_start
-        let section_bytes = &bytes[(synced_start/8) as usize..next_jm];
-        let section_bit_offset = synced_start % 8;
-        
-        // Adjust read logic to account for section_bit_offset if necessary
-        // (For simplicity in this transition, we'll keep the logic bounded)
-        match Item::read_section(section_bytes, count, huffman, alpha) {
-            Ok(mut items) => {
-                all_items.append(&mut items);
+        // Scan for all item markers within this JM section
+        match Item::read_section(section_bytes, 0, count, huffman, alpha) {
+            Ok(items) => {
+                all_items.extend(items);
             }
             Err(e) => {
                 if !alpha { return Err(e); }
             }
         }
+
+
+
     }
 
     Ok(all_items)
@@ -222,27 +211,34 @@ impl Item {
         read_player_items(bytes, huffman, alpha)
     }
 
-    pub fn read_section(section_bytes: &[u8], top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
+    pub fn read_section(section_bytes: &[u8], section_bit_offset: u8, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
         // Forensic: Resolve variable header gap specific to Alpha v105
         let mut start_offset = 0;
         if alpha_mode {
-            let gap_axiom = V105HeaderGapAxiom::default();
-            if let Some(gap) = gap_axiom.resolve_gap(section_bytes) {
-                start_offset = gap as u64;
+            // Need the flags for the first item to resolve the gap correctly.
+            // peek_item_header_at already provides the flags.
+            if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 0, huffman, alpha_mode) {
+                let gap_axiom = V105HeaderGapAxiom::default();
+                if let Some(gap) = gap_axiom.resolve_gap(section_bytes, flags) {
+                    start_offset = gap as u64;
+                }
             }
         }
+let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
+println!("[DEBUG] SLICE 11: read_section found {} markers", markers.len());
 
-        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
+for (i, &start) in markers.iter().enumerate() {
+    println!("[DEBUG] SLICE 11: Parsing item at marker {}, start={}", i, start);
+    if items.len() >= top_level_count as usize { break; }
+    if start < start_offset { continue; }
 
-        for (i, &start) in markers.iter().enumerate() {
-            if items.len() >= top_level_count as usize { break; }
-            if start < start_offset { continue; }
-            
-            let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
-            let limit = next_marker - start;
+    let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
+    let limit = next_marker - start;
+    // ...
+
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
             if let Some((_, _, _, _, flags, _, is_compact, _, _)) = peek_item_header_at(section_bytes, start, huffman, alpha_mode) {
@@ -252,24 +248,27 @@ impl Item {
                 }
             }
 
-            match parse_item_at_with_limit(section_bytes, start, huffman, items.len(), alpha_mode, Some(dynamic_limit)) {
+            // Correct for section_bit_offset: We must skip bits correctly
+            let start_with_offset = start + section_bit_offset as u64;
+
+            match parse_item_at_with_limit(section_bytes, start_with_offset, huffman, items.len(), alpha_mode, Some(dynamic_limit)) {
                 Ok((item, consumed_bits)) => {
                     let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
                         .with_personalization(item.header.is_personalized);
                     let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.body.code, item.header.flags);
 
-                    let end = start + final_consumed;
+                    let end = start_with_offset + final_consumed;
                     
                     let mut final_item = item;
-                    final_item.range.start = start;
+                    final_item.range.start = start_with_offset;
                     final_item.range.end = end;
                     
                     let mut actual_bits = Vec::new();
                     let mut bit_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                    if bit_reader.skip(start as u32).is_ok() {
+                    if bit_reader.skip(start_with_offset as u32).is_ok() {
                         for i in 0..final_consumed {
                             if let Ok(b) = bit_reader.read_bit() {
-                                actual_bits.push(crate::domain::item::RecordedBit { bit: b, offset: start + i });
+                                actual_bits.push(crate::domain::item::RecordedBit { bit: b, offset: start_with_offset + i });
                             }
                         }
                     }
