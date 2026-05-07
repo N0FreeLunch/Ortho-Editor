@@ -335,3 +335,7 @@ path = "src/bin/verify/d2item_serialization_audit.rs"
 [[bin]]
 name = "d2item_global_audit"
 path = "src/bin/verify/d2item_global_audit.rs"
+
+[[bin]]
+name = "d2item_stat_fuzzer_v105"
+path = "src/bin/verify/d2item_stat_fuzzer_v105.rs"
