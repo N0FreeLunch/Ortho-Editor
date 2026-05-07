@@ -17,6 +17,11 @@ fn status_skills_parse_patch_roundtrip() -> io::Result<()> {
         "tests/fixtures/savegames/original/amazon_v105_act2_start.d2s",
         "tests/fixtures/savegames/original/amazon_v105_andariel_killed_no_talk.d2s",
         "tests/fixtures/savegames/original/amazon_v105_re_probe_zigzag_all_diff.d2s",
+        "tests/fixtures/savegames/original/amazon_10_scrolls.d2s",
+        "tests/fixtures/savegames/original/amazon_authority_runeword.d2s",
+        "tests/fixtures/savegames/original/amazon_initial.d2s",
+        "tests/fixtures/savegames/original/amazon_moved_diff_basis.d2s",
+        "tests/fixtures/savegames/original/amazon_moved_manual.d2s",
     ];
 
     for fixture_path in fixtures {
