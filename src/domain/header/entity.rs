@@ -331,3 +331,46 @@ pub fn parse_item_header<R: BitRead>(
 ) -> ParsingResult<(ItemHeader, Option<u32>)> {
     ItemHeader::read_from_cursor(cursor, alpha_mode)
 }
+
+/// Calculates the Alpha v105 item header checksum.
+/// Formula: XOR(flags[0..7], flags[8..15], flags[16..23], flags[24..31], version)
+pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
+    let v = (version & 0x07) as u32;
+    ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ v) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_alpha_v105_checksum_known_vector() {
+        // Flags: 0, Version: 0 -> Checksum: 0
+        assert_eq!(calculate_alpha_v105_checksum(0, 0), 0);
+        
+        // Flags: 0x01020304, Version: 5
+        // (1 ^ 2 ^ 3 ^ 4 ^ 5) = 1
+        assert_eq!(calculate_alpha_v105_checksum(0x01020304, 5), 1);
+        
+        // Flags: 0xFFFFFFFF, Version: 7
+        // (0xFF ^ 0xFF ^ 0xFF ^ 0xFF ^ 7) = 7
+        assert_eq!(calculate_alpha_v105_checksum(0xFFFFFFFF, 7), 7);
+    }
+
+    #[test]
+    fn test_alpha_v105_checksum_drift() {
+        let flags = 0x12345678;
+        let version = 2;
+        let original = calculate_alpha_v105_checksum(flags, version);
+        
+        // Single bit flip in flags should flip same bit in checksum
+        let flipped = calculate_alpha_v105_checksum(flags ^ 1, version);
+        assert_ne!(original, flipped);
+        assert_eq!(original ^ flipped, 1);
+        
+        // Bit flip in another byte
+        let flipped_high = calculate_alpha_v105_checksum(flags ^ 0x01000000, version);
+        assert_ne!(original, flipped_high);
+        assert_eq!(original ^ flipped_high, 1);
+    }
+}

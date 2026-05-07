@@ -5,7 +5,7 @@ use crate::domain::item::quality::ItemQuality;
 use crate::domain::stats::{ItemProperty, StatsAxiom, ItemStats};
 use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError, ParsingFailure};
-use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom};
+use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 
@@ -74,7 +74,7 @@ pub fn peek_item_header_at(
     let (version, mode, loc, x, base_header_len) = if alpha_mode {
         let checksum = reader.read::<8, u8>().ok()?;
         let v = reader.read::<3, u8>().ok()?;
-        let calculated = ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ (v as u32)) as u8;
+        let calculated = calculate_alpha_v105_checksum(flags, v);
         if calculated != checksum { return None; }
         let m = reader.read::<3, u8>().ok()?;
         let l = reader.read::<3, u8>().ok()?;
