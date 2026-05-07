@@ -39,6 +39,16 @@ impl FailureFamily {
 }
 
 #[derive(Serialize)]
+struct AuditResult {
+    status: String,
+    filename: String,
+    item_count: usize,
+    avg_fidelity: f32,
+    hint: String,
+    family: Option<FailureFamily>,
+}
+
+#[derive(Serialize)]
 struct GlobalAuditReport {
     target_dir: String,
     total_files: usize,
@@ -47,16 +57,7 @@ struct GlobalAuditReport {
     total_items: usize,
     global_avg_fidelity: f32,
     failure_breakdown: HashMap<String, usize>,
-    failures: Vec<FileFailure>,
-}
-
-#[derive(Serialize)]
-struct FileFailure {
-    filename: String,
-    item_count: usize,
-    avg_fidelity: f32,
-    hint: String,
-    family: FailureFamily,
+    results: Vec<AuditResult>,
 }
 
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
@@ -98,12 +99,51 @@ fn classify_failure(diff: &ItemDiff) -> FailureFamily {
     }
 }
 
+fn generate_markdown_report(report: &GlobalAuditReport) -> String {
+    let mut md = String::new();
+    md.push_str(&format!("# Global Item Symmetry Audit: {}\n\n", report.target_dir));
+    
+    md.push_str("## SUMMARY\n\n");
+    md.push_str("| Metric | Value |\n");
+    md.push_str("| :--- | :--- |\n");
+    md.push_str(&format!("| Total Files | {} |\n", report.total_files));
+    md.push_str(&format!("| Total Pass | {} |\n", report.total_pass));
+    md.push_str(&format!("| Total Fail | {} |\n", report.total_fail));
+    md.push_str(&format!("| Total Items | {} |\n", report.total_items));
+    md.push_str(&format!("| Global Fidelity | {:.2}% |\n\n", report.global_avg_fidelity));
+
+    if !report.failure_breakdown.is_empty() {
+        md.push_str("## FAILURE BREAKDOWN\n\n");
+        md.push_str("| Family | Count |\n");
+        md.push_str("| :--- | :--- |\n");
+        let mut families: Vec<_> = report.failure_breakdown.keys().collect();
+        families.sort();
+        for family in families {
+            md.push_str(&format!("| {} | {} |\n", family, report.failure_breakdown[family]));
+        }
+        md.push_str("\n");
+    }
+
+    md.push_str("## DETAILED RESULTS\n\n");
+    md.push_str("| Status | Filename | Items | Fidelity | Hint |\n");
+    md.push_str("| :--- | :--- | :--- | :--- | :--- |\n");
+    for res in &report.results {
+        md.push_str(&format!(
+            "| {} | {} | {} | {:.2}% | {} |\n",
+            res.status, res.filename, res.item_count, res.avg_fidelity, res.hint
+        ));
+    }
+    
+    md
+}
+
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
     parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
     parser.add_spec(ArgSpec::option("filter", None, Some("filter"), "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)"));
     parser.add_spec(ArgSpec::flag("summary-only", None, Some("summary-only"), "Show only the summary block"));
     parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+    parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Save execution output to a file"));
     
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -125,7 +165,8 @@ fn main() {
 
     let filter_family = parsed.get("filter").and_then(|s| FailureFamily::from_str(s));
     let summary_only = parsed.is_set("summary-only");
-    let output_json = parsed.is_json();
+    let output_json_flag = parsed.is_set("json");
+    let output_path = parsed.get("output");
 
     let path = Path::new(target_dir);
     if !path.is_dir() {
@@ -161,9 +202,9 @@ fn main() {
     let mut cumulative_fidelity = 0.0;
     let mut total_items = 0;
     let mut failure_breakdown: HashMap<FailureFamily, usize> = HashMap::new();
-    let mut failures_json: Vec<FileFailure> = Vec::new();
+    let mut results: Vec<AuditResult> = Vec::new();
 
-    if !output_json && !summary_only {
+    if output_path.is_none() && !output_json_flag && !summary_only {
         println!("Global Item Symmetry Audit: {}", target_dir);
         println!("{:-<100}", "");
         println!(
@@ -181,10 +222,21 @@ fn main() {
         let bytes = match fs::read(&file_path) {
             Ok(b) => b,
             Err(e) => {
-                println!(
-                    "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
-                    "[ERROR]", file_name, "-", "-", format!("Read error: {}", e)
-                );
+                let err_msg = format!("Read error: {}", e);
+                if output_path.is_none() && !output_json_flag {
+                    println!(
+                        "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
+                        "[ERROR]", file_name, "-", "-", err_msg
+                    );
+                }
+                results.push(AuditResult {
+                    status: "[ERROR]".to_string(),
+                    filename: file_name,
+                    item_count: 0,
+                    avg_fidelity: 0.0,
+                    hint: err_msg,
+                    family: Some(FailureFamily::Unknown),
+                });
                 total_fail += 1;
                 continue;
             }
@@ -237,17 +289,16 @@ fn main() {
                     }
                 }
 
-                if output_json {
-                    if !report.success {
-                        failures_json.push(FileFailure {
-                            filename: file_name.clone(),
-                            item_count,
-                            avg_fidelity,
-                            hint: hint.clone(),
-                            family: first_fail_family.unwrap_or(FailureFamily::Unknown),
-                        });
-                    }
-                } else if !summary_only {
+                results.push(AuditResult {
+                    status: status.to_string(),
+                    filename: file_name.clone(),
+                    item_count,
+                    avg_fidelity,
+                    hint: hint.clone(),
+                    family: first_fail_family,
+                });
+
+                if output_path.is_none() && !output_json_flag && !summary_only {
                     println!(
                         "{:<8} | {:<40} | {:>8} | {:>9.2}% | {:<20}",
                         status, file_name, item_count, avg_fidelity, hint
@@ -255,10 +306,21 @@ fn main() {
                 }
             }
             Err(e) => {
-                println!(
-                    "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
-                    "[FAIL]", file_name, "-", "-", format!("Audit error: {}", e)
-                );
+                let err_msg = format!("Audit error: {}", e);
+                if output_path.is_none() && !output_json_flag {
+                    println!(
+                        "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
+                        "[FAIL]", file_name, "-", "-", err_msg
+                    );
+                }
+                results.push(AuditResult {
+                    status: "[FAIL]".to_string(),
+                    filename: file_name,
+                    item_count: 0,
+                    avg_fidelity: 0.0,
+                    hint: err_msg,
+                    family: Some(FailureFamily::Unknown),
+                });
                 total_fail += 1;
                 *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
             }
@@ -271,22 +333,38 @@ fn main() {
         0.0
     };
 
-    if output_json {
-        let mut breakdown_str = HashMap::new();
-        for (f, count) in failure_breakdown {
-            breakdown_str.insert(format!("{:?}", f), count);
-        }
-        let report = GlobalAuditReport {
-            target_dir: target_dir.to_string(),
-            total_files,
-            total_pass,
-            total_fail,
-            total_items,
-            global_avg_fidelity,
-            failure_breakdown: breakdown_str,
-            failures: failures_json,
+    let mut breakdown_str = HashMap::new();
+    for (f, count) in failure_breakdown.iter() {
+        breakdown_str.insert(format!("{:?}", f), *count);
+    }
+
+    let global_report = GlobalAuditReport {
+        target_dir: target_dir.to_string(),
+        total_files,
+        total_pass,
+        total_fail,
+        total_items,
+        global_avg_fidelity,
+        failure_breakdown: breakdown_str,
+        results,
+    };
+
+    if let Some(out) = output_path {
+        let content = if out.ends_with(".json") || output_json_flag {
+            serde_json::to_string_pretty(&global_report).unwrap()
+        } else {
+            generate_markdown_report(&global_report)
         };
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        
+        if let Some(parent) = Path::new(out).parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                fs::create_dir_all(parent).expect("Failed to create output directory");
+            }
+        }
+        fs::write(out, content).expect("Failed to write output file");
+        println!("Report saved to: {}", out);
+    } else if output_json_flag {
+        println!("{}", serde_json::to_string_pretty(&global_report).unwrap());
     } else {
         println!("{:-<100}", "");
         println!("SUMMARY:");
