@@ -6,48 +6,108 @@ use d2r_core::domain::progression::axiom::{V105_QUEST_OFFSET, V105_QUEST_LEN, V1
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <fixture.d2s> [--semantic]", args[0]);
-        process::exit(1);
+    
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") || args.len() < 2 {
+        println!("D2R Alpha v105 Progression Parity Audit Tool");
+        println!("\nUsage: {} <fixture.d2s> [options]", args[0]);
+        println!("\nOptions:");
+        println!("  --semantic                    Print semantic status of quests and waypoints");
+        println!("  --mutate <domain:target=state> Apply a mutation before parity check");
+        println!("                                (e.g., quest:Sisters_to_the_Slaughter=completed)");
+        println!("                                (e.g., waypoint:Act_1_-_Town=active)");
+        println!("  --help, -h                    Print this help message");
+        println!("\nExit Codes:");
+        println!("  0  Audit Passed");
+        println!("  1  Audit Failed or CLI Error");
+        process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
     let file_path = &args[1];
     let semantic_mode = args.iter().any(|arg| arg == "--semantic");
+    
+    let mutate_opt = args.iter().position(|arg| arg == "--mutate").and_then(|i| {
+        let val = args.get(i + 1);
+        if val.is_none() {
+            eprintln!("[ERROR] --mutate requires a value in 'domain:target=state' format.");
+            process::exit(1);
+        }
+        val
+    });
 
     let original_bytes = match fs::read(file_path) {
         Ok(bytes) => bytes,
         Err(e) => {
-            eprintln!("Error reading file {}: {}", file_path, e);
+            eprintln!("[ERROR] Failed to read file {}: {}", file_path, e);
             process::exit(1);
         }
     };
 
     println!("--- Alpha v105 Progression Parity Audit ---");
-    println!("File: {}", file_path);
-    if semantic_mode {
-        println!("Mode: Semantic Report");
+    println!("Target Fixture: {}", file_path);
+    
+    if let Some(m) = mutate_opt {
+        println!("Operation Mode: Mutation Audit ({})", m);
+    } else {
+        println!("Operation Mode: Baseline Parity Audit");
     }
 
-    let mut buffer = original_bytes.clone();
-    
-    // We assume Alpha mode as this is for Alpha v105 verification
+    // Parse progression
     let result = Progression::from_bytes(&original_bytes, true);
-    let progression = match result.value {
+    let mut progression = match result.value {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("  [FAIL] Failed to parse progression: {}", e);
+            eprintln!("[FATAL] Failed to parse progression section: {}", e);
             process::exit(1);
         }
     };
 
+    // Apply mutation if requested
+    if let Some(target_str) = mutate_opt {
+        match parse_mutation_input(target_str) {
+            Ok((domain, name, state)) => {
+                let normalized_name = name.replace('_', " ");
+                match domain.as_str() {
+                    "quest" => {
+                        if let Some(q) = progression.quests.quests_mut().iter_mut().find(|q| q.name().eq_ignore_ascii_case(&normalized_name)) {
+                            let completed = state == "completed" || state == "true" || state == "1";
+                            println!("  [MUTATE] Quest '{}' -> {}", q.name(), if completed { "COMPLETED" } else { "PENDING" });
+                            q.set_completed(completed);
+                        } else {
+                            eprintln!("[ERROR] Quest '{}' not found in progression table.", name);
+                            process::exit(1);
+                        }
+                    },
+                    "waypoint" | "wp" => {
+                        if let Some(w) = progression.waypoints.waypoints_mut().iter_mut().find(|w| w.name().eq_ignore_ascii_case(&normalized_name)) {
+                            let active = state == "active" || state == "true" || state == "1";
+                            println!("  [MUTATE] Waypoint '{}' -> {}", w.name(), if active { "ACTIVE" } else { "LOCKED" });
+                            w.set_active(active);
+                        } else {
+                            eprintln!("[ERROR] Waypoint '{}' not found in progression table.", name);
+                            process::exit(1);
+                        }
+                    },
+                    _ => {
+                        eprintln!("[ERROR] Unknown domain '{}'. Use 'quest' or 'waypoint'.", domain);
+                        process::exit(1);
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!("[ERROR] Invalid mutation format: {}", e);
+                process::exit(1);
+            }
+        }
+    }
+
     if semantic_mode {
-        println!("\n[QUEST SEMANTIC STATUS]");
+        println!("\n[SEMANTIC REPORT: QUESTS]");
         for quest in progression.quests.quests() {
             let status = if quest.is_completed() { "COMPLETED" } else { "pending" };
             println!("  - {:<30} : {}", quest.name(), status);
         }
 
-        println!("\n[WAYPOINT SEMANTIC STATUS]");
+        println!("\n[SEMANTIC REPORT: WAYPOINTS]");
         for wp in progression.waypoints.waypoints() {
             let status = if wp.is_active() { "ACTIVE" } else { "locked" };
             println!("  - {:<30} : {}", wp.name(), status);
@@ -55,55 +115,76 @@ fn main() {
         println!("\n--- End of Semantic Report ---\n");
     }
 
+    let mut buffer = original_bytes.clone();
     progression.sync_to_bytes(&mut buffer, true);
+
+    // Parity Verification logic
+    let (expected_bytes, actual_bytes) = if mutate_opt.is_some() {
+        println!("\n[VERIFICATION: ROUND-TRIP PARITY]");
+        let mutated_baseline = buffer.clone();
+        let second_result = Progression::from_bytes(&mutated_baseline, true);
+        let second_progression = match second_result.value {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[FATAL] Round-trip re-parse failed: {}", e);
+                process::exit(1);
+            }
+        };
+        let mut second_buffer = mutated_baseline.clone();
+        second_progression.sync_to_bytes(&mut second_buffer, true);
+        (mutated_baseline, second_buffer)
+    } else {
+        println!("\n[VERIFICATION: BASELINE SYNC PARITY]");
+        (original_bytes, buffer)
+    };
 
     let mut failures = 0;
 
     // 1. Quest Parity
     let quest_range = V105_QUEST_OFFSET..(V105_QUEST_OFFSET + V105_QUEST_LEN);
-    if buffer.len() >= quest_range.end && original_bytes.len() >= quest_range.end {
-        let original_quest = &original_bytes[quest_range.clone()];
-        let synced_quest = &buffer[quest_range.clone()];
+    if actual_bytes.len() >= quest_range.end && expected_bytes.len() >= quest_range.end {
+        let expected_quest = &expected_bytes[quest_range.clone()];
+        let actual_quest = &actual_bytes[quest_range.clone()];
         
-        if original_quest == synced_quest {
+        if expected_quest == actual_quest {
             println!("  [PASS] Quest Section Parity");
         } else {
             println!("  [FAIL] Quest Section Parity Mismatch");
             for i in 0..V105_QUEST_LEN {
-                if original_quest[i] != synced_quest[i] {
+                if expected_quest[i] != actual_quest[i] {
                     println!("    First mismatch at offset 0x{:04X} (rel 0x{:X}): expected 0x{:02X}, got 0x{:02X}", 
-                        V105_QUEST_OFFSET + i, i, original_quest[i], synced_quest[i]);
+                        V105_QUEST_OFFSET + i, i, expected_quest[i], actual_quest[i]);
                     break;
                 }
             }
             failures += 1;
         }
     } else {
-        println!("  [FAIL] Quest Section: buffer too small (len={}, required={})", buffer.len(), quest_range.end);
+        println!("  [FAIL] Quest Section: buffer size mismatch (len={}, required={})", actual_bytes.len(), quest_range.end);
         failures += 1;
     }
 
     // 2. Waypoint Parity
     let wp_range = V105_WAYPOINT_OFFSET..(V105_WAYPOINT_OFFSET + V105_WAYPOINT_LEN);
-    if buffer.len() >= wp_range.end && original_bytes.len() >= wp_range.end {
-        let original_wp = &original_bytes[wp_range.clone()];
-        let synced_wp = &buffer[wp_range.clone()];
+    if actual_bytes.len() >= wp_range.end && expected_bytes.len() >= wp_range.end {
+        let expected_wp = &expected_bytes[wp_range.clone()];
+        let actual_wp = &actual_bytes[wp_range.clone()];
         
-        if original_wp == synced_wp {
+        if expected_wp == actual_wp {
             println!("  [PASS] Waypoint Section Parity");
         } else {
             println!("  [FAIL] Waypoint Section Parity Mismatch");
              for i in 0..V105_WAYPOINT_LEN {
-                if original_wp[i] != synced_wp[i] {
+                if expected_wp[i] != actual_wp[i] {
                     println!("    First mismatch at offset 0x{:04X} (rel 0x{:X}): expected 0x{:02X}, got 0x{:02X}", 
-                        V105_WAYPOINT_OFFSET + i, i, original_wp[i], synced_wp[i]);
+                        V105_WAYPOINT_OFFSET + i, i, expected_wp[i], actual_wp[i]);
                     break;
                 }
             }
             failures += 1;
         }
     } else {
-        println!("  [FAIL] Waypoint Section: buffer too small (len={}, required={})", buffer.len(), wp_range.end);
+        println!("  [FAIL] Waypoint Section: buffer size mismatch (len={}, required={})", actual_bytes.len(), wp_range.end);
         failures += 1;
     }
 
@@ -114,3 +195,19 @@ fn main() {
         println!("\nProgression Audit PASSED.");
     }
 }
+
+fn parse_mutation_input(input: &str) -> Result<(String, String, String), String> {
+    if let Some((domain_part, state)) = input.split_once('=') {
+        let (domain, name) = domain_part.split_once(':').unwrap_or(("quest", domain_part));
+        if name.is_empty() {
+            return Err("Target name cannot be empty".to_string());
+        }
+        if state.is_empty() {
+            return Err("Target state cannot be empty".to_string());
+        }
+        Ok((domain.to_lowercase(), name.to_string(), state.to_lowercase()))
+    } else {
+        Err("Expected format 'domain:name=state'".to_string())
+    }
+}
+
