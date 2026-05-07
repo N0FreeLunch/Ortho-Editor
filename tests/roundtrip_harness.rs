@@ -355,4 +355,31 @@ mod roundtrip_tests {
         assert_eq!(item.max_durability, Some(20));
         assert_eq!(item.quantity, Some(5));
     }
+
+    #[test]
+    fn test_socket_mutation() {
+        use d2r_core::item::Item;
+        let mut parent = Item::empty_for_tests();
+        parent.set_sockets(2);
+        assert_eq!(parent.sockets, Some(2));
+        assert!(parent.header.is_socketed);
+
+        let mut child = Item::empty_for_tests();
+        child.body.code = "r01 ".to_string(); // El Rune
+        child.code = "r01 ".to_string();
+
+        parent.add_socketed_item(child.clone());
+        assert_eq!(parent.socketed_items.len(), 1);
+        assert_eq!(parent.num_socketed_items, 1);
+        assert_eq!(parent.sockets, Some(2)); // Should stay 2
+        assert_eq!(parent.socketed_items[0].code, "r01 ");
+
+        // Adding more items than sockets should auto-bump sockets
+        parent.add_socketed_item(child.clone());
+        parent.add_socketed_item(child.clone());
+        assert_eq!(parent.socketed_items.len(), 3);
+        assert_eq!(parent.num_socketed_items, 3);
+        assert_eq!(parent.sockets, Some(3)); // Bumped to 3
+        assert!(parent.header.is_socketed);
+    }
 }

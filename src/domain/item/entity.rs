@@ -313,6 +313,44 @@ impl Item {
         self.bits.clear();
     }
 
+    /// Synchronizes the item's internal state with its socketed children.
+    /// This ensures that num_socketed_items, the socketed flag, and relevant property markers stay coherent.
+    pub fn sync_socket_payload(&mut self) {
+        self.num_socketed_items = self.socketed_items.len() as u8;
+        
+        // Ensure the total socket count is at least as large as the number of items currently in them.
+        if let Some(s) = self.sockets {
+            if s < self.num_socketed_items {
+                self.sockets = Some(self.num_socketed_items);
+            }
+        } else if self.num_socketed_items > 0 {
+            self.sockets = Some(self.num_socketed_items);
+        }
+        
+        // The is_socketed flag in the header should reflect whether the item HAS sockets,
+        // regardless of whether they are filled.
+        self.header.is_socketed = self.sockets.unwrap_or(0) > 0;
+
+        // In Alpha v105, nested items in properties (Stat 317/320) often require 
+        // a 1:1 mapping with the socketed_items collection during serialization.
+        // Clearing bits ensures that the re-serializer will rebuild the bitstream 
+        // from the current properties and child collection.
+        self.bits.clear();
+    }
+
+    /// Sets the maximum number of sockets for the item and updates the socketed flag.
+    pub fn set_sockets(&mut self, count: u8) {
+        self.sockets = Some(count);
+        self.header.is_socketed = count > 0;
+        self.bits.clear();
+    }
+
+    /// Adds a child item to the sockets and synchronizes the payload state.
+    pub fn add_socketed_item(&mut self, child: Item) {
+        self.socketed_items.push(child);
+        self.sync_socket_payload();
+    }
+
     pub fn prefixes(&self) -> Vec<&'static crate::data::item_specs::Affix> {
         let mut result = Vec::new();
         if let Some(id) = self.magic_prefix {
