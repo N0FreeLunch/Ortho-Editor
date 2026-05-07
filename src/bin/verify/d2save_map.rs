@@ -106,8 +106,20 @@ fn main() -> anyhow::Result<()> {
             if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
             if let Some(pos) = map.w4_pos { println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data", pos * 8); }
             if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
-            if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 1", pos * 8); }
-            if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 2", pos * 8); }
+            if let (Some(kf), Some(lf)) = (map.kf_pos, map.lf_pos) {
+                use d2r_core::domain::forensic::v105::MercenaryPayload;
+                // Safely extract payload data (kf: 3B, lf: 2B)
+                let kf_data = bytes.get(kf + 2..kf + 5).unwrap_or(&[]);
+                let lf_data = bytes.get(lf + 2..lf + 4).unwrap_or(&[]);
+                let payload = MercenaryPayload::from_raw(kf_data, lf_data);
+                
+                println!("  [kf  ] Offset {kf:>5} (bit {:>6}) | Mercenary Payload 1: {:02X?}", kf * 8, payload.kf_raw);
+                println!("  [lf  ] Offset {lf:>5} (bit {:>6}) | Mercenary Payload 2: {:02X?}", lf * 8, payload.lf_raw);
+                println!("  [MERC] Envelope: {:02X?}", payload.to_envelope());
+            } else {
+                if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 1", pos * 8); }
+                if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 2", pos * 8); }
+            }
         }
     }
 
