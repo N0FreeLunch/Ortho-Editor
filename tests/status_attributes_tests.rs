@@ -23,10 +23,10 @@ fn test_attribute_parse_progression_values() -> io::Result<()> {
         Some(1170),
         "Experience should be 1170"
     );
-    // ID 3: Vitality (base 20 + 5 invested = 25 total). actual_value = 25-32 = -7
+    // ID 3: Vitality (base 20 + 5 invested = 25 total). actual_value = 25-0 = 25 (Alpha v105)
     assert_eq!(
         section.actual_value(3, true),
-        Some(-7),
+        Some(25),
         "Vitality check failed"
     );
     assert_eq!(
@@ -43,7 +43,7 @@ fn test_attribute_write_roundtrip_empty() -> io::Result<()> {
     let map = map_core_sections(&bytes)?;
     let section = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)?;
 
-    let serialized = section.to_bytes(false)?;
+    let serialized = section.to_bytes(true)?;
     let original = &bytes[map.gf_pos..map.if_pos];
     assert_eq!(serialized, original);
     Ok(())
@@ -56,7 +56,7 @@ fn test_attribute_write_roundtrip_progression() -> io::Result<()> {
     let map = map_core_sections(&bytes)?;
     let section = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)?;
 
-    let serialized = section.to_bytes(false)?;
+    let serialized = section.to_bytes(true)?;
     let original = &bytes[map.gf_pos..map.if_pos];
     assert_eq!(serialized, original);
     Ok(())
