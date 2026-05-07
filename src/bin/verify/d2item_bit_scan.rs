@@ -34,7 +34,7 @@ fn main() {
     for bit_pos in 0..(bytes.len() as u64 * 8 - 100) {
         let b_start = (bit_pos / 8) as usize;
         let b_off = (bit_pos % 8) as u32;
-        
+
         let cursor = Cursor::new(&bytes[b_start..]);
         let reader = BitReader::endian(cursor, LittleEndian);
         let mut recorder = BitCursor::new(reader);
@@ -42,7 +42,13 @@ fn main() {
             let _ = recorder.skip_and_record(b_off).ok();
         }
 
-        if let Ok(item) = Item::from_reader_with_context(&mut recorder, &huffman, Some((&bytes, bit_pos)), is_alpha) {
+        if let Ok(item) = Item::from_reader_with_context(
+            &mut recorder,
+            &huffman,
+            Some((&bytes, bit_pos)),
+            is_alpha,
+            false,
+        ) {
             if recorder.pos() >= 32 {
                 starts.push((bit_pos, item.code.clone()));
             }

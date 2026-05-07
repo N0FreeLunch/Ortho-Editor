@@ -1,8 +1,8 @@
 use bitstream_io::{BitRead, BitReader as IoBitReader, LittleEndian};
 use d2r_core::data::bit_cursor::BitCursor;
-use d2r_core::item::{HuffmanTree, Item, BitSegment, find_next_item_match};
+use d2r_core::item::{BitSegment, HuffmanTree, Item, find_next_item_match};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -66,15 +66,21 @@ fn main() {
         .get("count_bits")
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(64);
-    
+
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) => {
             if is_json {
                 let metadata = ReportMetadata::new("d2item_bit_peek", path, "unknown");
                 let report = Report::<BitPeekJsonPayload>::new(metadata, ReportStatus::Fail)
-                    .with_issues(vec![ReportIssue { kind: "io".to_string(), message: format!("Failed to read file: {}", e), bit_offset: None }])
-                    .with_hints(vec!["Ensure the file path is correct and accessible.".to_string()]);
+                    .with_issues(vec![ReportIssue {
+                        kind: "io".to_string(),
+                        message: format!("Failed to read file: {}", e),
+                        bit_offset: None,
+                    }])
+                    .with_hints(vec![
+                        "Ensure the file path is correct and accessible.".to_string(),
+                    ]);
                 println!("{}", serde_json::to_string(&report).unwrap());
                 std::process::exit(1);
             } else {
@@ -100,7 +106,7 @@ fn main() {
         let _ = reader.skip((offset % 8) as u32);
         let mut cursor = BitCursor::new(reader);
         let val: u64 = cursor.read_bits::<u64>(count_bits).unwrap_or(0);
-        
+
         if is_json {
             payload.value_bin = Some(format!("{:0width$b}", val, width = count_bits as usize));
             let metadata = ReportMetadata::new("d2item_bit_peek", path, "unknown");
@@ -125,8 +131,14 @@ fn main() {
             if is_json {
                 let metadata = ReportMetadata::new("d2item_bit_peek", path, "unknown");
                 let report = Report::<BitPeekJsonPayload>::new(metadata, ReportStatus::Fail)
-                    .with_issues(vec![ReportIssue { kind: "format".to_string(), message: "No JM marker found".to_string(), bit_offset: None }])
-                    .with_hints(vec!["Not a valid D2 character save or severely truncated.".to_string()]);
+                    .with_issues(vec![ReportIssue {
+                        kind: "format".to_string(),
+                        message: "No JM marker found".to_string(),
+                        bit_offset: None,
+                    }])
+                    .with_hints(vec![
+                        "Not a valid D2 character save or severely truncated.".to_string(),
+                    ]);
                 println!("{}", serde_json::to_string(&report).unwrap());
                 std::process::exit(1);
             } else {
@@ -134,7 +146,7 @@ fn main() {
             }
         }
     };
-    
+
     let count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
     payload.jm_pos = Some(jm_pos);
     payload.item_count = Some(count);
@@ -158,6 +170,7 @@ fn main() {
             &huffman,
             Some((&bytes, ((jm_pos + 4) * 8) as u64)),
             is_alpha,
+            i == 0,
         ) {
             Ok(item) => {
                 if is_json {
@@ -165,7 +178,11 @@ fn main() {
                     if range_bits != item.bits.len() as u64 {
                         issues.push(ReportIssue {
                             kind: "desync".to_string(),
-                            message: format!("BitRange desync: Item reported {} bits, but bits.len() is {}", range_bits, item.bits.len()),
+                            message: format!(
+                                "BitRange desync: Item reported {} bits, but bits.len() is {}",
+                                range_bits,
+                                item.bits.len()
+                            ),
                             bit_offset: Some(bit_start as u64),
                         });
                     }
@@ -190,7 +207,11 @@ fn main() {
                     // Forensic BitRange Verification (Slice S2)
                     let range_bits = item.range.end - item.range.start;
                     if range_bits != item.bits.len() as u64 {
-                        println!("  [FATAL] BitRange desync: Item reported {} bits, but bits.len() is {}", range_bits, item.bits.len());
+                        println!(
+                            "  [FATAL] BitRange desync: Item reported {} bits, but bits.len() is {}",
+                            range_bits,
+                            item.bits.len()
+                        );
                     } else {
                         println!("  [PASS] BitRange consistent: {} bits", range_bits);
                     }
@@ -198,9 +219,7 @@ fn main() {
                     println!("  BSLV Layout Tree:");
                     let mut segments = recorder.segments().to_vec();
                     // Sort by start bit (asc) and then by length (desc) to keep parents outside children
-                    segments.sort_by(|a, b| {
-                        a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end))
-                    });
+                    segments.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
 
                     for seg in segments {
                         if seg.start == seg.end && seg.label == "Item Code" {
@@ -208,7 +227,10 @@ fn main() {
                         }
                         let indent = "    ".repeat(seg.depth);
                         let len = seg.end - seg.start;
-                        println!("  {}[{:>4}..{:>4}] (len={:>2}) {}", indent, seg.start, seg.end, len, seg.label);
+                        println!(
+                            "  {}[{:>4}..{:>4}] (len={:>2}) {}",
+                            indent, seg.start, seg.end, len, seg.label
+                        );
                     }
 
                     if i == 0 {
@@ -231,8 +253,11 @@ fn main() {
                 if is_alpha {
                     let current_bit_pos = recorder.pos();
                     let absolute_pos = ((jm_pos + 4) * 8) as u64 + current_bit_pos;
-                    println!("  [DEBUG] Recovery Mode triggered at bit {}. Scanning for next item candidate...", absolute_pos);
-                    
+                    println!(
+                        "  [DEBUG] Recovery Mode triggered at bit {}. Scanning for next item candidate...",
+                        absolute_pos
+                    );
+
                     let mut probe = absolute_pos + 1;
                     let limit = (bytes.len() * 8) as u64;
                     let mut found = false;
@@ -242,14 +267,28 @@ fn main() {
                             probe += 1;
                             continue;
                         }
-                        
-                        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = 
-                            d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true) 
+
+                        if let Some((
+                            mode,
+                            location,
+                            _x,
+                            code,
+                            flags,
+                            version,
+                            _is_compact,
+                            _header_bits,
+                            _nudge,
+                        )) = d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true)
                         {
-                            if d2r_core::item::is_plausible_item_header(mode, location, &code, flags, version, true) {
+                            if d2r_core::item::is_plausible_item_header(
+                                mode, location, &code, flags, version, true,
+                            ) {
                                 let gap_from_start = probe as i64 - bit_start as i64;
-                                println!("  [RECOVERY] Next item candidate '{}' found at bit {} (Gap from Item {} start: {} bits, version={})", code, probe, i, gap_from_start, version);
-                                
+                                println!(
+                                    "  [RECOVERY] Next item candidate '{}' found at bit {} (Gap from Item {} start: {} bits, version={})",
+                                    code, probe, i, gap_from_start, version
+                                );
+
                                 // Re-sync recorder to the next item
                                 let recorder_new_pos = probe - ((jm_pos + 4) * 8) as u64;
                                 let skip_bits = recorder_new_pos - current_bit_pos;
@@ -260,11 +299,13 @@ fn main() {
                         }
                         probe += 8;
                     }
-                    
+
                     if found {
-                         continue;
+                        continue;
                     } else {
-                         println!("  [DEBUG] No next item candidate found after scanning to end of file.");
+                        println!(
+                            "  [DEBUG] No next item candidate found after scanning to end of file."
+                        );
                     }
                 }
                 break;
@@ -276,9 +317,16 @@ fn main() {
         payload.items = Some(json_items);
         let version = if is_alpha { "105" } else { "unknown" };
         let metadata = ReportMetadata::new("d2item_bit_peek", path, version);
-        let report = Report::new(metadata, if issues.is_empty() { ReportStatus::Ok } else { ReportStatus::Fail })
-            .with_results(payload)
-            .with_issues(issues);
+        let report = Report::new(
+            metadata,
+            if issues.is_empty() {
+                ReportStatus::Ok
+            } else {
+                ReportStatus::Fail
+            },
+        )
+        .with_results(payload)
+        .with_issues(issues);
         println!("{}", serde_json::to_string(&report).unwrap());
     }
 }
