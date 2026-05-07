@@ -113,6 +113,37 @@ fn main() {
     }
 }
 
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_BOLD_RED: &str = "\x1b[31;1m";
+const ANSI_GREEN: &str = "\x1b[32m";
+const ANSI_YELLOW: &str = "\x1b[33m";
+const ANSI_BLUE: &str = "\x1b[34m";
+const ANSI_MAGENTA: &str = "\x1b[35m";
+const ANSI_CYAN: &str = "\x1b[36m";
+const ANSI_WHITE: &str = "\x1b[37m";
+
+fn get_segment_color(segment: Option<&str>) -> &'static str {
+    match segment {
+        Some(s) => {
+            let s = s.to_lowercase();
+            if s.contains("header") {
+                ANSI_GREEN
+            } else if s.contains("id") {
+                ANSI_YELLOW
+            } else if s.contains("value") {
+                ANSI_CYAN
+            } else if s.contains("padding") {
+                ANSI_MAGENTA
+            } else if s.contains("gap") {
+                ANSI_BLUE
+            } else {
+                ANSI_WHITE
+            }
+        }
+        None => ANSI_WHITE,
+    }
+}
+
 fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use_visual: bool) {
     let indent = "  ".repeat(indent_level);
     let prefix = if indent_level > 0 { "|-- " } else { "" };
@@ -145,11 +176,25 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
                 let start = (offset as usize).saturating_sub(10);
                 let end = (offset as usize + 20).min(orig.len()).min(target.len());
                 println!("{:indent$}      [BITS]  ...", "", indent = indent.len());
-                println!("{:indent$}      ORIG:   {}", "", &orig[start..end], indent = indent.len());
-                println!("{:indent$}      TARG:   {}", "", &target[start..end], indent = indent.len());
+                
+                let seg_color = get_segment_color(item.segment.as_deref());
+                let mut o_bits = String::new();
+                let mut t_bits = String::new();
+                
+                let o_chars: Vec<char> = orig.chars().collect();
+                let t_chars: Vec<char> = target.chars().collect();
+
+                for i in start..end {
+                    let color = if i == offset as usize { ANSI_BOLD_RED } else { seg_color };
+                    o_bits.push_str(&format!("{}{}{}", color, o_chars[i], ANSI_RESET));
+                    t_bits.push_str(&format!("{}{}{}", color, t_chars[i], ANSI_RESET));
+                }
+
+                println!("{:indent$}      ORIG:   {}", "", o_bits, indent = indent.len());
+                println!("{:indent$}      TARG:   {}", "", t_bits, indent = indent.len());
                 let mut markers = String::new();
                 for i in start..end {
-                    if i == offset as usize { markers.push('^'); }
+                    if i == offset as usize { markers.push_str(&format!("{}^{}", ANSI_BOLD_RED, ANSI_RESET)); }
                     else { markers.push(' '); }
                 }
                 println!("{:indent$}              {}", "", markers, indent = indent.len());
@@ -185,7 +230,7 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
         if use_visual {
             if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
                 println!("{:indent$}      [BITSTREAM ALIGNMENT]", "", indent = indent.len());
-                print_visual_diff(orig, target, indent_level);
+                print_visual_diff(orig, target, indent_level, item.segment.as_deref());
             }
         }
     }
@@ -195,22 +240,25 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
     }
 }
 
-fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
+fn print_visual_diff(orig: &str, target: &str, indent_level: usize, segment: Option<&str>) {
     let indent = "  ".repeat(indent_level);
     let mut i = 0;
     let mut j = 0;
-    let mut o_out = String::new();
-    let mut t_out = String::new();
-    let mut m_out = String::new();
+    
+    let mut o_out = Vec::new();
+    let mut t_out = Vec::new();
+    let mut m_out = Vec::new();
 
     let o_chars: Vec<char> = orig.chars().collect();
     let t_chars: Vec<char> = target.chars().collect();
 
+    let seg_color = get_segment_color(segment);
+
     while i < o_chars.len() || j < t_chars.len() {
         if i < o_chars.len() && j < t_chars.len() && o_chars[i] == t_chars[j] {
-            o_out.push(o_chars[i]);
-            t_out.push(t_chars[j]);
-            m_out.push(' ');
+            o_out.push(format!("{}{}{}", seg_color, o_chars[i], ANSI_RESET));
+            t_out.push(format!("{}{}{}", seg_color, t_chars[j], ANSI_RESET));
+            m_out.push(" ".to_string());
             i += 1;
             j += 1;
         } else if i < o_chars.len() && j < t_chars.len() {
@@ -218,9 +266,9 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
             for nudge in 1..17 {
                 if j + nudge < t_chars.len() && o_chars[i] == t_chars[j + nudge] {
                     for _ in 0..nudge {
-                        o_out.push('-');
-                        t_out.push(t_chars[j]);
-                        m_out.push('^');
+                        o_out.push(format!("{}{}{}", ANSI_BOLD_RED, "-", ANSI_RESET));
+                        t_out.push(format!("{}{}{}", ANSI_BOLD_RED, t_chars[j], ANSI_RESET));
+                        m_out.push(format!("{}{}{}", ANSI_BOLD_RED, "^", ANSI_RESET));
                         j += 1;
                     }
                     found_sync = true;
@@ -228,9 +276,9 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
                 }
                 if i + nudge < o_chars.len() && o_chars[i + nudge] == t_chars[j] {
                     for _ in 0..nudge {
-                        o_out.push(o_chars[i]);
-                        t_out.push('-');
-                        m_out.push('v');
+                        o_out.push(format!("{}{}{}", ANSI_BOLD_RED, o_chars[i], ANSI_RESET));
+                        t_out.push(format!("{}{}{}", ANSI_BOLD_RED, "-", ANSI_RESET));
+                        m_out.push(format!("{}{}{}", ANSI_BOLD_RED, "v", ANSI_RESET));
                         i += 1;
                     }
                     found_sync = true;
@@ -238,21 +286,21 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
                 }
             }
             if !found_sync {
-                o_out.push(o_chars[i]);
-                t_out.push(t_chars[j]);
-                m_out.push('X');
+                o_out.push(format!("{}{}{}", ANSI_BOLD_RED, o_chars[i], ANSI_RESET));
+                t_out.push(format!("{}{}{}", ANSI_BOLD_RED, t_chars[j], ANSI_RESET));
+                m_out.push(format!("{}{}{}", ANSI_BOLD_RED, "X", ANSI_RESET));
                 i += 1;
                 j += 1;
             }
         } else if i < o_chars.len() {
-            o_out.push(o_chars[i]);
-            t_out.push('-');
-            m_out.push('v');
+            o_out.push(format!("{}{}{}", ANSI_BOLD_RED, o_chars[i], ANSI_RESET));
+            t_out.push(format!("{}{}{}", ANSI_BOLD_RED, "-", ANSI_RESET));
+            m_out.push(format!("{}{}{}", ANSI_BOLD_RED, "v", ANSI_RESET));
             i += 1;
         } else {
-            o_out.push('-');
-            t_out.push(t_chars[j]);
-            m_out.push('^');
+            o_out.push(format!("{}{}{}", ANSI_BOLD_RED, "-", ANSI_RESET));
+            t_out.push(format!("{}{}{}", ANSI_BOLD_RED, t_chars[j], ANSI_RESET));
+            m_out.push(format!("{}{}{}", ANSI_BOLD_RED, "^", ANSI_RESET));
             j += 1;
         }
     }
@@ -260,9 +308,9 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize) {
     let chunk_size = 80usize.saturating_sub(indent_level.saturating_mul(2)).max(24);
     for k in (0..o_out.len()).step_by(chunk_size) {
         let end = (k + chunk_size).min(o_out.len());
-        println!("{:indent$}      Orig:   {}", "", &o_out[k..end], indent = indent.len());
-        println!("{:indent$}      Target: {}", "", &t_out[k..end], indent = indent.len());
-        println!("{:indent$}      Diff:   {}", "", &m_out[k..end], indent = indent.len());
+        println!("{:indent$}      Orig:   {}", "", o_out[k..end].join(""), indent = indent.len());
+        println!("{:indent$}      Target: {}", "", t_out[k..end].join(""), indent = indent.len());
+        println!("{:indent$}      Diff:   {}", "", m_out[k..end].join(""), indent = indent.len());
         println!();
     }
 }
