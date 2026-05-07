@@ -39,6 +39,15 @@ impl FailureFamily {
 }
 
 #[derive(Serialize)]
+struct MismatchRow {
+    item_label: String,
+    code: String,
+    mismatch_type: String,
+    segment: String,
+    first_mismatch_offset: Option<usize>,
+}
+
+#[derive(Serialize)]
 struct AuditResult {
     status: String,
     filename: String,
@@ -46,6 +55,8 @@ struct AuditResult {
     avg_fidelity: f32,
     hint: String,
     family: Option<FailureFamily>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    mismatch_rows: Vec<MismatchRow>,
 }
 
 #[derive(Serialize)]
@@ -142,6 +153,7 @@ fn main() {
     parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
     parser.add_spec(ArgSpec::option("filter", None, Some("filter"), "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)"));
     parser.add_spec(ArgSpec::flag("summary-only", None, Some("summary-only"), "Show only the summary block"));
+    parser.add_spec(ArgSpec::flag("detailed", Some('d'), Some("detailed"), "Report all mismatches in a file, not just the first one"));
     parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
     parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Save execution output to a file"));
     
@@ -165,6 +177,7 @@ fn main() {
 
     let filter_family = parsed.get("filter").and_then(|s| FailureFamily::from_str(s));
     let summary_only = parsed.is_set("summary-only");
+    let detailed = parsed.is_set("detailed");
     let output_json_flag = parsed.is_set("json");
     let output_path = parsed.get("output");
 
@@ -236,6 +249,7 @@ fn main() {
                     avg_fidelity: 0.0,
                     hint: err_msg,
                     family: Some(FailureFamily::Unknown),
+                    mismatch_rows: Vec::new(),
                 });
                 total_fail += 1;
                 continue;
@@ -245,7 +259,7 @@ fn main() {
         let options = SymmetryOptions {
             roundtrip: true,
             target_index: None,
-            fail_fast: false,
+            fail_fast: !detailed,
         };
 
         match calculate_symmetry_diff(&bytes, None, options) {
@@ -268,9 +282,29 @@ fn main() {
                 };
                 cumulative_fidelity += avg_fidelity;
 
+                let mut mismatch_rows = Vec::new();
                 let mut first_fail_family = None;
+
                 let hint = if !report.success {
-                    if let Some(first_fail) = report.items.iter().find(|it| !it.is_match) {
+                    if detailed {
+                        for (i, it) in report.items.iter().enumerate() {
+                            if !it.is_match {
+                                let family = classify_failure(it);
+                                if first_fail_family.is_none() {
+                                    first_fail_family = Some(family);
+                                }
+                                *failure_breakdown.entry(family).or_insert(0) += 1;
+                                mismatch_rows.push(MismatchRow {
+                                    item_label: format!("Item {}", i),
+                                    code: it.code.clone(),
+                                    mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
+                                    segment: it.segment.clone().unwrap_or_default(),
+                                    first_mismatch_offset: it.first_mismatch_offset.map(|o| o as usize),
+                                });
+                            }
+                        }
+                        format!("{} failures detected", mismatch_rows.len())
+                    } else if let Some(first_fail) = report.items.iter().find(|it| !it.is_match) {
                         let family = classify_failure(first_fail);
                         first_fail_family = Some(family);
                         *failure_breakdown.entry(family).or_insert(0) += 1;
@@ -296,6 +330,7 @@ fn main() {
                     avg_fidelity,
                     hint: hint.clone(),
                     family: first_fail_family,
+                    mismatch_rows,
                 });
 
                 if output_path.is_none() && !output_json_flag && !summary_only {
@@ -320,6 +355,7 @@ fn main() {
                     avg_fidelity: 0.0,
                     hint: err_msg,
                     family: Some(FailureFamily::Unknown),
+                    mismatch_rows: Vec::new(),
                 });
                 total_fail += 1;
                 *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
