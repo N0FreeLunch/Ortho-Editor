@@ -13,11 +13,12 @@ fn main() {
         println!("\nOptions:");
         println!("  --semantic                    Print semantic status of quests and waypoints");
         println!("  --mutate <domain:target=state> Apply a mutation before parity check");
+        println!("                                Domains: quest (default), waypoint/wp");
+        println!("                                States: completed/pending (quest), active/locked (waypoint)");
         println!("                                (e.g., quest:Sisters_to_the_Slaughter=completed)");
-        println!("                                (e.g., waypoint:Act_1_-_Town=active)");
         println!("  --help, -h                    Print this help message");
         println!("\nExit Codes:");
-        println!("  0  Audit Passed");
+        println!("  0  Audit Passed (100% Bit Parity)");
         println!("  1  Audit Failed or CLI Error");
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
@@ -104,13 +105,13 @@ fn main() {
         println!("\n[SEMANTIC REPORT: QUESTS]");
         for quest in progression.quests.quests() {
             let status = if quest.is_completed() { "COMPLETED" } else { "pending" };
-            println!("  - {:<30} : {}", quest.name(), status);
+            println!("  - {:<35} : {}", quest.name(), status);
         }
 
         println!("\n[SEMANTIC REPORT: WAYPOINTS]");
         for wp in progression.waypoints.waypoints() {
             let status = if wp.is_active() { "ACTIVE" } else { "locked" };
-            println!("  - {:<30} : {}", wp.name(), status);
+            println!("  - {:<35} : {}", wp.name(), status);
         }
         println!("\n--- End of Semantic Report ---\n");
     }
@@ -147,7 +148,7 @@ fn main() {
         let actual_quest = &actual_bytes[quest_range.clone()];
         
         if expected_quest == actual_quest {
-            println!("  [PASS] Quest Section Parity");
+            println!("  [PASS] Quest Section Parity (round-trip stable)");
         } else {
             println!("  [FAIL] Quest Section Parity Mismatch");
             for i in 0..V105_QUEST_LEN {
@@ -171,7 +172,7 @@ fn main() {
         let actual_wp = &actual_bytes[wp_range.clone()];
         
         if expected_wp == actual_wp {
-            println!("  [PASS] Waypoint Section Parity");
+            println!("  [PASS] Waypoint Section Parity (round-trip stable)");
         } else {
             println!("  [FAIL] Waypoint Section Parity Mismatch");
              for i in 0..V105_WAYPOINT_LEN {
@@ -192,22 +193,30 @@ fn main() {
         println!("\nProgression Audit FAILED with {} section mismatch(es).", failures);
         process::exit(1);
     } else {
-        println!("\nProgression Audit PASSED.");
+        println!("\nProgression Audit PASSED (100% bit-parity).");
     }
 }
 
 fn parse_mutation_input(input: &str) -> Result<(String, String, String), String> {
     if let Some((domain_part, state)) = input.split_once('=') {
-        let (domain, name) = domain_part.split_once(':').unwrap_or(("quest", domain_part));
-        if name.is_empty() {
-            return Err("Target name cannot be empty".to_string());
-        }
-        if state.is_empty() {
+        if state.trim().is_empty() {
             return Err("Target state cannot be empty".to_string());
         }
-        Ok((domain.to_lowercase(), name.to_string(), state.to_lowercase()))
+        
+        let (domain, name) = if let Some((d, n)) = domain_part.split_once(':') {
+            (d.to_lowercase(), n.to_string())
+        } else {
+            ("quest".to_string(), domain_part.to_string())
+        };
+
+        if name.trim().is_empty() {
+            return Err("Target name cannot be empty".to_string());
+        }
+        
+        Ok((domain, name, state.to_lowercase()))
     } else {
-        Err("Expected format 'domain:name=state'".to_string())
+        Err("Expected format 'domain:name=state' (e.g., quest:Sisters_to_the_Slaughter=completed)".to_string())
     }
 }
+
 
