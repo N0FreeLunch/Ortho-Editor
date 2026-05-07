@@ -6,7 +6,7 @@ use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::ForensicAudit;
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
-use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom};
+use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::forensic::v105::V105HeaderGapAxiom;
 use std::ops::{Deref, DerefMut};
 use std::io;
@@ -394,6 +394,10 @@ impl Item {
     pub fn to_emitter(&self, emitter: &mut crate::domain::item::serialization::BitEmitter, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<()> {
         use crate::domain::item::serialization::write_player_name;
         emitter.write_bits(self.header.flags, 32)?;
+        if alpha_mode {
+            let checksum = calculate_alpha_v105_checksum(self.header.flags, self.header.version);
+            emitter.write_bits(checksum as u32, 8)?;
+        }
         emitter.write_bits(self.header.version as u32, 3)?;
         emitter.write_bits(self.header.mode as u32, 3)?;
         emitter.write_bits(self.header.location as u32, 3)?;
@@ -408,26 +412,28 @@ impl Item {
 
         if geometry.has_header_gap {
             if h_axiom.is_alpha() {
+                let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
+                let is_rw = h_axiom.is_runeword(self.header.flags);
+
+                // Normal alpha items: write geometry bits separately
+                if !is_v105_shadow && !is_rw {
+                    if !self.header.is_compact {
+                        emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
+                        emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
+                        emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+                    }
+                }
+
                 if !self.body.alpha_header_gap_bits.is_empty() {
                     for &bit in &self.body.alpha_header_gap_bits {
                         emitter.write_bit(bit)?;
                     }
-                } else {
-                    let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
-                    let is_rw = h_axiom.is_runeword(self.header.flags);
-
+                } else if let Some(gap_val) = self.body.alpha_header_gap {
                     if is_v105_shadow || is_rw {
-                        let is_v105_shadow_local = (self.header.flags & (1 << 26)) != 0 || (self.header.flags & (1 << 27)) != 0;
-                        let gap_bits = if is_v105_shadow_local { 8 } else { 24 };
-                        let gap = self.body.alpha_header_gap.unwrap_or(0);
-                        emitter.write_bits(gap, gap_bits)?;
-                    } else {
-                        if !self.header.is_compact {
-                            emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
-                            emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-                            emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
-                        }
-                        emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), 8)?;
+                        let bits = if (self.header.flags & (1 << 26)) != 0 || (self.header.flags & (1 << 27)) != 0 { 8 } else { 24 };
+                        emitter.write_bits(gap_val, bits as u32)?;
+                    } else if gap_val > 0 {
+                        emitter.write_bits(gap_val, 8)?;
                     }
                 }
             } else {
@@ -588,7 +594,21 @@ pub fn parse_item_header<R: BitRead>(
     if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
-    let version = cursor.read_bits::<u8>(3)? as u8;
+    let version = if alpha_mode {
+        let checksum = cursor.read_bits::<u8>(8)?;
+        let v = cursor.read_bits::<u8>(3)? as u8;
+        let expected = calculate_alpha_v105_checksum(flags, v);
+        if checksum != expected {
+             return Err(cursor.fail(ParsingError::InvariantViolation { 
+                 field: "Alpha v105 Header Checksum".to_string(),
+                 expected: format!("{}", expected),
+                 actual: format!("{}", checksum),
+             }));
+        }
+        v
+    } else {
+        cursor.read_bits::<u8>(3)? as u8
+    };
     let mode = cursor.read_bits::<u8>(3)? as u8;
     let location = cursor.read_bits::<u8>(3)? as u8;
     let x = cursor.read_bits::<u8>(4)? as u8;
