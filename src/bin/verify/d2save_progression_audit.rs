@@ -7,11 +7,13 @@ use d2r_core::domain::progression::axiom::{V105_QUEST_OFFSET, V105_QUEST_LEN, V1
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: {} <fixture.d2s>", args[0]);
+        eprintln!("Usage: {} <fixture.d2s> [--semantic]", args[0]);
         process::exit(1);
     }
 
     let file_path = &args[1];
+    let semantic_mode = args.iter().any(|arg| arg == "--semantic");
+
     let original_bytes = match fs::read(file_path) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -22,6 +24,9 @@ fn main() {
 
     println!("--- Alpha v105 Progression Parity Audit ---");
     println!("File: {}", file_path);
+    if semantic_mode {
+        println!("Mode: Semantic Report");
+    }
 
     let mut buffer = original_bytes.clone();
     
@@ -34,6 +39,21 @@ fn main() {
             process::exit(1);
         }
     };
+
+    if semantic_mode {
+        println!("\n[QUEST SEMANTIC STATUS]");
+        for quest in progression.quests.quests() {
+            let status = if quest.is_completed() { "COMPLETED" } else { "pending" };
+            println!("  - {:<30} : {}", quest.name(), status);
+        }
+
+        println!("\n[WAYPOINT SEMANTIC STATUS]");
+        for wp in progression.waypoints.waypoints() {
+            let status = if wp.is_active() { "ACTIVE" } else { "locked" };
+            println!("  - {:<30} : {}", wp.name(), status);
+        }
+        println!("\n--- End of Semantic Report ---\n");
+    }
 
     progression.sync_to_bytes(&mut buffer, true);
 

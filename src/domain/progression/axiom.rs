@@ -51,7 +51,7 @@ crate::impl_forensic_axiom!(
 pub struct V105WaypointAxiom;
 
 impl V105WaypointAxiom {
-    pub fn start_offset() -> usize { 294 } // 0x126
+    pub fn start_offset() -> usize { 406 } // 0x196 relative to 0x127 = 0x2BD
 }
 
 crate::impl_forensic_axiom!(

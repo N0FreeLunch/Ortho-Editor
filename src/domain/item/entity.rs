@@ -329,7 +329,52 @@ impl Item {
         
         // The is_socketed flag in the header should reflect whether the item HAS sockets,
         // regardless of whether they are filled.
-        self.header.is_socketed = self.sockets.unwrap_or(0) > 0;
+        let has_sockets = self.sockets.unwrap_or(0) > 0;
+        self.header.is_socketed = has_sockets;
+        
+        // Alpha-aware flag synchronization
+        let is_alpha = self.header.version == 5 || self.header.version == 6 || self.header.version == 1;
+
+        // Synchronize flags bit
+        if has_sockets {
+            if is_alpha {
+                if self.header.version == 5 { self.header.flags |= 1 << 23; }
+                else { self.header.flags |= 1 << 21; }
+            } else {
+                self.header.flags |= 1 << 21;
+            }
+            self.header.flags |= 1; // Identified is often required for socketed items to be valid
+        } else {
+            if is_alpha && self.header.version == 5 { self.header.flags &= !(1 << 23); }
+            else { self.header.flags &= !(1 << 21); }
+        }
+
+        // Ensure we have enough Stat 317/320 properties to hold the socketed items.
+        // For simplicity, we'll use Stat 317 (recursive) as the default for added items.
+        let mut nested_prop_count = 0;
+        let axiom = crate::domain::stats::axiom::StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(crate::domain::item::ItemQuality::Normal), is_alpha);
+
+        for prop in &self.properties {
+            let effective_id = axiom.map_alpha_id(prop.stat_id);
+            if effective_id == 317 || effective_id == 320 {
+                nested_prop_count += 1;
+            }
+        }
+
+        while nested_prop_count < self.num_socketed_items {
+            self.properties.push(ItemProperty {
+                stat_id: if is_alpha { 317 } else { 317 }, // Use 317 for recursive
+                name: "item_socket_child".to_string(),
+                param: 0,
+                raw_value: 0,
+                value: 0,
+                range: ItemBitRange::default(),
+            });
+            nested_prop_count += 1;
+        }
+
+        // Sync with stats field
+        self.stats.properties = self.properties.clone();
 
         // In Alpha v105, nested items in properties (Stat 317/320) often require 
         // a 1:1 mapping with the socketed_items collection during serialization.
