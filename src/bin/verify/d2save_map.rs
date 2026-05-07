@@ -97,6 +97,20 @@ fn main() -> anyhow::Result<()> {
         println!("  [WARN] No JM markers found in file");
     }
 
+    if save.header.version == 105 {
+        use d2r_core::save::map_core_sections;
+        if let Ok(map) = map_core_sections(&bytes) {
+            println!();
+            println!("[FORENSIC MARKERS (Alpha v105)]");
+            if let Some(pos) = map.woo_pos { println!("  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)", pos * 8); }
+            if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
+            if let Some(pos) = map.w4_pos { println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data", pos * 8); }
+            if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
+            if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 1", pos * 8); }
+            if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 2", pos * 8); }
+        }
+    }
+
     println!();
     println!("[SUMMARY]");
     println!("  Total JM sections: {}", jm_positions.len());

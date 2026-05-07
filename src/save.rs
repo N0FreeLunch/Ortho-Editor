@@ -101,6 +101,10 @@ pub struct SaveSectionMap {
     pub woo_pos: Option<usize>,
     pub ws_pos: Option<usize>,
     pub w4_pos: Option<usize>,
+    // Alpha v105 mercenary markers
+    pub jf_pos: Option<usize>,
+    pub kf_pos: Option<usize>,
+    pub lf_pos: Option<usize>,
 }
 
 impl SaveSectionMap {
@@ -136,14 +140,17 @@ pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
         ));
     }
 
-    let (woo_pos, ws_pos, w4_pos) = if version == 105 {
+    let (woo_pos, ws_pos, w4_pos, jf_pos, kf_pos, lf_pos) = if version == 105 {
         (
             find_marker(bytes, b'W', b'o'), // 'Woo!'
             find_marker(bytes, b'W', b'S'), // 'WS'
             find_marker(bytes, b'w', b'4'), // 'w4'
+            find_marker(bytes, b'j', b'f'), // Mercenary marker
+            find_marker(bytes, b'k', b'f'), // Mercenary data marker 1
+            find_marker(bytes, b'l', b'f'), // Mercenary data marker 2
         )
     } else {
-        (None, None, None)
+        (None, None, None, None, None, None)
     };
 
     Ok(SaveSectionMap {
@@ -153,6 +160,9 @@ pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
         woo_pos,
         ws_pos,
         w4_pos,
+        jf_pos,
+        kf_pos,
+        lf_pos,
     })
 }
 
