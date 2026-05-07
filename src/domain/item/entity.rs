@@ -342,14 +342,14 @@ impl Item {
                     self.header.flags |= 1 << 11; 
                     self.header.flags &= !(1 << 23); // Ensure NOT compact
                 }
-                else { self.header.flags |= 1 << 21; }
+                else { self.header.flags |= 1 << 11; }
             } else {
-                self.header.flags |= 1 << 21;
+                self.header.flags |= 1 << 11;
             }
             self.header.flags |= 1 << 4; // Identified
         } else {
             if is_alpha && self.header.version == 5 { self.header.flags &= !(1 << 11); }
-            else { self.header.flags &= !(1 << 21); }
+            else { self.header.flags &= !(1 << 11); }
         }
 
         // Ensure we have enough Stat 317/320 properties to hold the socketed items.
@@ -366,7 +366,7 @@ impl Item {
 
         while nested_prop_count < self.num_socketed_items {
             self.properties.push(ItemProperty {
-                stat_id: if is_alpha { 317 } else { 317 }, // Use 317 for recursive
+                stat_id: 317, // Use 317 for recursive
                 name: "item_socket_child".to_string(),
                 param: 0,
                 raw_value: 0,

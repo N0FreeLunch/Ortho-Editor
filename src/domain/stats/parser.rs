@@ -40,7 +40,7 @@ pub fn read_item_stats<R: BitRead>(
     // Removed version 4 early exit to allow parsing items with stats/nested children (e.g. mxh).
 
     if is_alpha && version == 5 && !is_v105_shadow_final && 
-       (is_potion || is_scroll || quality_val < ItemQuality::Magic) {
+       (is_potion || is_scroll) {
           if trimmed_code == "7mgw" {
               let mut payload = Vec::new();
               for _ in 0..28 { payload.push(cursor.read_bit()?); }
