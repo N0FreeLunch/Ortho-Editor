@@ -18,12 +18,20 @@ pub struct MappingInfo {
     pub name: String,
     pub save_bits: Option<u32>,
     pub save_add: Option<i32>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub fidelity_hint: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StatInfo {
     pub name: String,
     pub width: u32,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub fidelity_hint: Option<String>,
 }
 
 static REGISTRY: OnceLock<AlphaForensics> = OnceLock::new();
@@ -32,6 +40,20 @@ pub fn get_registry() -> &'static AlphaForensics {
     REGISTRY.get_or_init(|| {
         load_registry().expect("Failed to load Alpha v105 forensic registry")
     })
+}
+
+/// Returns Err if any effective_id appears in both mappings and stats,
+/// or if duplicate effective_id exists within mappings.
+pub fn validate_registry(r: &AlphaForensics) -> Result<(), String> {
+    let mut effective_ids = std::collections::HashSet::new();
+
+    for (key, m) in &r.mappings {
+        if !effective_ids.insert(m.effective_id) {
+            return Err(format!("duplicate effective_id: {} in mapping key {}", m.effective_id, key));
+        }
+    }
+
+    Ok(())
 }
 
 fn load_registry() -> anyhow::Result<AlphaForensics> {
