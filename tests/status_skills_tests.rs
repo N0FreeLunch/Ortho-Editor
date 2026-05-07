@@ -69,3 +69,25 @@ fn skill_section_semantic_access() {
     skills.set_level(6, 36, 10);
     // Should not panic or mutate
 }
+
+#[test]
+fn skill_section_class_bridge() {
+    use d2r_core::save::{class_skill_base_id, get_skill_level_by_class};
+    
+    // Test mapping
+    assert_eq!(class_skill_base_id(0), Some(6));   // Amazon
+    assert_eq!(class_skill_base_id(5), Some(221)); // Druid
+    assert_eq!(class_skill_base_id(7), None);      // Unknown
+
+    let mut skills = SkillSection([0u8; 30]);
+    // Skill ID 9 (Inner Sight) for Amazon (class_id 0)
+    skills.set_level(6, 9, 7);
+    assert_eq!(get_skill_level_by_class(&skills, 0, 9), 7);
+
+    // Skill ID 221 (Raven) for Druid (class_id 5)
+    skills.set_level(221, 221, 12);
+    assert_eq!(get_skill_level_by_class(&skills, 5, 221), 12);
+
+    // Unknown class
+    assert_eq!(get_skill_level_by_class(&skills, 7, 9), 0);
+}

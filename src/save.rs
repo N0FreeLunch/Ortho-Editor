@@ -59,6 +59,29 @@ pub fn class_name(class_id: u8) -> &'static str {
     }
 }
 
+/// Returns the base skill ID for a given character class.
+pub fn class_skill_base_id(class_id: u8) -> Option<u32> {
+    match class_id {
+        0 => Some(6),   // Amazon
+        1 => Some(36),  // Sorceress
+        2 => Some(66),  // Necromancer
+        3 => Some(96),  // Paladin
+        4 => Some(126), // Barbarian
+        5 => Some(221), // Druid
+        6 => Some(251), // Assassin
+        _ => None,
+    }
+}
+
+/// A bridge helper to get skill level using class_id.
+pub fn get_skill_level_by_class(skills: &SkillSection, class_id: u8, skill_id: u32) -> u8 {
+    if let Some(base_id) = class_skill_base_id(class_id) {
+        skills.get_level(base_id, skill_id)
+    } else {
+        0
+    }
+}
+
 pub fn find_jm_markers(bytes: &[u8]) -> Vec<usize> {
     let mut jm_positions = Vec::new();
     for i in 0..bytes.len().saturating_sub(1) {
