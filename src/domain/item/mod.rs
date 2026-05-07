@@ -3,6 +3,7 @@ pub mod entity;
 pub mod serialization;
 pub mod axiom_meta;
 pub mod scanner;
+pub mod editor;
 
 pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;
@@ -13,3 +14,4 @@ pub use entity::{
 // Removed redundant re-exports: ItemProperty, ItemStats moved to domain::stats
 pub use serialization::{BitEmitter, HuffmanTree};
 pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata, ForensicAudit, ForensicResult};
+pub use editor::{ItemEditor, ItemEditorExt};
