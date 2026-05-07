@@ -1,7 +1,6 @@
-use d2r_core::save::{map_core_sections, parse_skill_section, patch_skill_section};
+use d2r_core::save::{map_core_sections, parse_skill_section, patch_skill_section, SkillSection};
 use std::fs;
 use std::io;
-use std::path::PathBuf;
 
 mod common;
 use common::repo_path;
@@ -27,4 +26,32 @@ fn status_skills_parse_patch_roundtrip() -> io::Result<()> {
     let patched_prog = patch_skill_section(&prog_bytes, &map_prog, &skills_prog)?;
     assert_eq!(patched_prog, prog_bytes);
     Ok(())
+}
+
+#[test]
+fn skill_section_semantic_access() {
+    let mut skills = SkillSection([0u8; 30]);
+
+    // Amazon example (base_id: 6)
+    // Skill ID 9 (Inner Sight) should be at index 3
+    skills.set_level(6, 9, 5);
+    assert_eq!(skills.as_slice()[3], 5);
+    assert_eq!(skills.get_level(6, 9), 5);
+
+    // Druid example (base_id: 221)
+    // Skill ID 221 (Raven) should be at index 0
+    skills.set_level(221, 221, 20);
+    assert_eq!(skills.as_slice()[0], 20);
+    assert_eq!(skills.get_level(221, 221), 20);
+
+    // Underflow guard (skill_id < base_id)
+    assert_eq!(skills.get_level(6, 5), 0);
+    skills.set_level(6, 5, 10);
+    // Should not have mutated any existing values (index 0 is Raven=20)
+    assert_eq!(skills.as_slice()[0], 20);
+
+    // Overflow guard (index >= 30)
+    assert_eq!(skills.get_level(6, 36), 0);
+    skills.set_level(6, 36, 10);
+    // Should not panic or mutate
 }
