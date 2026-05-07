@@ -348,3 +348,7 @@ path = "src/bin/verify/d2item_registry_sync.rs"
 [[bin]]
 name = "d2item_registry_recommender"
 path = "src/bin/verify/d2item_registry_recommender.rs"
+
+[[bin]]
+name = "d2item_registry_patcher"
+path = "src/bin/verify/d2item_registry_patcher.rs"
