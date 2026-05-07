@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
+use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 enum FailureFamily {
     Geometry,
     RWSet,
@@ -24,6 +25,38 @@ impl FailureFamily {
             Self::Unknown => "Unknown",
         })
     }
+
+    fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "geometry" => Some(Self::Geometry),
+            "rwset" | "rw" | "set" => Some(Self::RWSet),
+            "stat" => Some(Self::Stat),
+            "nudge" => Some(Self::Nudge),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct GlobalAuditReport {
+    target_dir: String,
+    total_files: usize,
+    total_pass: usize,
+    total_fail: usize,
+    total_items: usize,
+    global_avg_fidelity: f32,
+    failure_breakdown: HashMap<String, usize>,
+    failures: Vec<FileFailure>,
+}
+
+#[derive(Serialize)]
+struct FileFailure {
+    filename: String,
+    item_count: usize,
+    avg_fidelity: f32,
+    hint: String,
+    family: FailureFamily,
 }
 
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
@@ -68,6 +101,9 @@ fn classify_failure(diff: &ItemDiff) -> FailureFamily {
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
     parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
+    parser.add_spec(ArgSpec::option("filter", None, Some("filter"), "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)"));
+    parser.add_spec(ArgSpec::flag("summary-only", None, Some("summary-only"), "Show only the summary block"));
+    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
     
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -86,6 +122,10 @@ fn main() {
         .get("target_dir")
         .map(|s| s.as_str())
         .unwrap_or("tests/fixtures/savegames/original");
+
+    let filter_family = parsed.get("filter").and_then(|s| FailureFamily::from_str(s));
+    let summary_only = parsed.is_set("summary-only");
+    let output_json = parsed.is_json();
 
     let path = Path::new(target_dir);
     if !path.is_dir() {
@@ -115,20 +155,23 @@ fn main() {
         return;
     }
 
-    println!("Global Item Symmetry Audit: {}", target_dir);
-    println!("{:-<100}", "");
-    println!(
-        "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
-        "Status", "Filename", "Items", "Fidelity", "Hint"
-    );
-    println!("{:-<100}", "");
-
     let mut total_files = 0;
     let mut total_pass = 0;
     let mut total_fail = 0;
     let mut cumulative_fidelity = 0.0;
     let mut total_items = 0;
     let mut failure_breakdown: HashMap<FailureFamily, usize> = HashMap::new();
+    let mut failures_json: Vec<FileFailure> = Vec::new();
+
+    if !output_json && !summary_only {
+        println!("Global Item Symmetry Audit: {}", target_dir);
+        println!("{:-<100}", "");
+        println!(
+            "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
+            "Status", "Filename", "Items", "Fidelity", "Hint"
+        );
+        println!("{:-<100}", "");
+    }
 
     for entry in entries {
         let file_path = entry.path();
@@ -173,9 +216,11 @@ fn main() {
                 };
                 cumulative_fidelity += avg_fidelity;
 
+                let mut first_fail_family = None;
                 let hint = if !report.success {
                     if let Some(first_fail) = report.items.iter().find(|it| !it.is_match) {
                         let family = classify_failure(first_fail);
+                        first_fail_family = Some(family);
                         *failure_breakdown.entry(family).or_insert(0) += 1;
                         format!("{} {}", family.as_tag(), first_fail.mismatch_type.as_deref().unwrap_or("Mismatch"))
                     } else {
@@ -185,10 +230,29 @@ fn main() {
                     "".to_string()
                 };
 
-                println!(
-                    "{:<8} | {:<40} | {:>8} | {:>9.2}% | {:<20}",
-                    status, file_name, item_count, avg_fidelity, hint
-                );
+                // Filter logic
+                if let Some(f) = filter_family {
+                    if report.success || first_fail_family != Some(f) {
+                        continue;
+                    }
+                }
+
+                if output_json {
+                    if !report.success {
+                        failures_json.push(FileFailure {
+                            filename: file_name.clone(),
+                            item_count,
+                            avg_fidelity,
+                            hint: hint.clone(),
+                            family: first_fail_family.unwrap_or(FailureFamily::Unknown),
+                        });
+                    }
+                } else if !summary_only {
+                    println!(
+                        "{:<8} | {:<40} | {:>8} | {:>9.2}% | {:<20}",
+                        status, file_name, item_count, avg_fidelity, hint
+                    );
+                }
             }
             Err(e) => {
                 println!(
@@ -207,23 +271,41 @@ fn main() {
         0.0
     };
 
-    println!("{:-<100}", "");
-    println!("SUMMARY:");
-    println!("  Total Files:       {}", total_files);
-    println!("  Total Pass:        {}", total_pass);
-    println!("  Total Fail:        {}", total_fail);
-    println!("  Total Items:       {}", total_items);
-    println!("  Global Fidelity:   {:.2}%", global_avg_fidelity);
-    
-    if !failure_breakdown.is_empty() {
-        println!("\nFAILURE BREAKDOWN:");
-        let mut families: Vec<_> = failure_breakdown.keys().collect();
-        families.sort_by_key(|f| f.as_tag());
-        for family in families {
-            println!("  {:<12}: {}", family.as_tag(), failure_breakdown[family]);
+    if output_json {
+        let mut breakdown_str = HashMap::new();
+        for (f, count) in failure_breakdown {
+            breakdown_str.insert(format!("{:?}", f), count);
         }
+        let report = GlobalAuditReport {
+            target_dir: target_dir.to_string(),
+            total_files,
+            total_pass,
+            total_fail,
+            total_items,
+            global_avg_fidelity,
+            failure_breakdown: breakdown_str,
+            failures: failures_json,
+        };
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    } else {
+        println!("{:-<100}", "");
+        println!("SUMMARY:");
+        println!("  Total Files:       {}", total_files);
+        println!("  Total Pass:        {}", total_pass);
+        println!("  Total Fail:        {}", total_fail);
+        println!("  Total Items:       {}", total_items);
+        println!("  Global Fidelity:   {:.2}%", global_avg_fidelity);
+        
+        if !failure_breakdown.is_empty() {
+            println!("\nFAILURE BREAKDOWN:");
+            let mut families: Vec<_> = failure_breakdown.keys().collect();
+            families.sort_by_key(|f| f.as_tag());
+            for family in families {
+                println!("  {:<12}: {}", family.as_tag(), failure_breakdown[family]);
+            }
+        }
+        println!("{:-<100}", "");
     }
-    println!("{:-<100}", "");
 
     if total_fail > 0 {
         std::process::exit(1);
