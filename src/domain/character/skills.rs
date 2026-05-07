@@ -21,6 +21,30 @@ impl SkillSection {
     pub fn as_slice(&self) -> &[u8; SKILL_SECTION_LEN] {
         &self.0
     }
+
+    /// Gets the skill level for a specific skill ID, using the class base ID.
+    pub fn get_level(&self, base_id: u32, skill_id: u32) -> u8 {
+        if skill_id < base_id {
+            return 0;
+        }
+        let index = (skill_id - base_id) as usize;
+        if index < SKILL_SECTION_LEN {
+            self.0[index]
+        } else {
+            0
+        }
+    }
+
+    /// Sets the skill level for a specific skill ID, using the class base ID.
+    pub fn set_level(&mut self, base_id: u32, skill_id: u32, level: u8) {
+        if skill_id < base_id {
+            return;
+        }
+        let index = (skill_id - base_id) as usize;
+        if index < SKILL_SECTION_LEN {
+            self.0[index] = level;
+        }
+    }
 }
 
 pub fn parse_skill_section(bytes: &[u8], if_pos: usize) -> io::Result<SkillSection> {
