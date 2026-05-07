@@ -327,3 +327,7 @@ path = "src/bin/verify/d2r_forensic_audit.rs"
 [[bin]]
 name = "d2item_serialization_audit"
 path = "src/bin/verify/d2item_serialization_audit.rs"
+
+[[bin]]
+name = "d2item_global_audit"
+path = "src/bin/verify/d2item_global_audit.rs"
