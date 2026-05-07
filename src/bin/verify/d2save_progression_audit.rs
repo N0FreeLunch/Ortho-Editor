@@ -12,10 +12,10 @@ fn main() {
         println!("\nUsage: {} <fixture.d2s> [options]", args[0]);
         println!("\nOptions:");
         println!("  --semantic                    Print semantic status of quests and waypoints");
-        println!("  --mutate <domain:target=state> Apply a mutation before parity check");
+        println!("  --mutate <domain:target=state,...> Apply mutations before parity check (comma-separated)");
         println!("                                Domains: quest (default), waypoint/wp");
         println!("                                States: completed/pending (quest), active/locked (waypoint)");
-        println!("                                (e.g., quest:Sisters_to_the_Slaughter=completed)");
+        println!("                                (e.g., quest:Sisters_to_the_Slaughter=completed,wp:Act_1_-_Town=active)");
         println!("  --help, -h                    Print this help message");
         println!("\nExit Codes:");
         println!("  0  Audit Passed (100% Bit Parity)");
@@ -64,39 +64,41 @@ fn main() {
 
     // Apply mutation if requested
     if let Some(target_str) = mutate_opt {
-        match parse_mutation_input(target_str) {
-            Ok((domain, name, state)) => {
-                let normalized_name = name.replace('_', " ");
-                match domain.as_str() {
-                    "quest" => {
-                        if let Some(q) = progression.quests.quests_mut().iter_mut().find(|q| q.name().eq_ignore_ascii_case(&normalized_name)) {
-                            let completed = state == "completed" || state == "true" || state == "1";
-                            println!("  [MUTATE] Quest '{}' -> {}", q.name(), if completed { "COMPLETED" } else { "PENDING" });
-                            q.set_completed(completed);
-                        } else {
-                            eprintln!("[ERROR] Quest '{}' not found in progression table.", name);
+        for part in target_str.split(',') {
+            match parse_mutation_input(part) {
+                Ok((domain, name, state)) => {
+                    let normalized_name = name.replace('_', " ");
+                    match domain.as_str() {
+                        "quest" => {
+                            if let Some(q) = progression.quests.quests_mut().iter_mut().find(|q| q.name().eq_ignore_ascii_case(&normalized_name)) {
+                                let completed = state == "completed" || state == "true" || state == "1" || state == "active";
+                                println!("  [MUTATE] Quest '{}' -> {}", q.name(), if completed { "COMPLETED" } else { "PENDING" });
+                                q.set_completed(completed);
+                            } else {
+                                eprintln!("[ERROR] Quest '{}' not found in progression table.", name);
+                                process::exit(1);
+                            }
+                        },
+                        "waypoint" | "wp" => {
+                            if let Some(w) = progression.waypoints.waypoints_mut().iter_mut().find(|w| w.name().eq_ignore_ascii_case(&normalized_name)) {
+                                let active = state == "active" || state == "true" || state == "1" || state == "completed";
+                                println!("  [MUTATE] Waypoint '{}' -> {}", w.name(), if active { "ACTIVE" } else { "LOCKED" });
+                                w.set_active(active);
+                            } else {
+                                eprintln!("[ERROR] Waypoint '{}' not found in progression table.", name);
+                                process::exit(1);
+                            }
+                        },
+                        _ => {
+                            eprintln!("[ERROR] Unknown domain '{}'. Use 'quest' or 'waypoint'.", domain);
                             process::exit(1);
                         }
-                    },
-                    "waypoint" | "wp" => {
-                        if let Some(w) = progression.waypoints.waypoints_mut().iter_mut().find(|w| w.name().eq_ignore_ascii_case(&normalized_name)) {
-                            let active = state == "active" || state == "true" || state == "1";
-                            println!("  [MUTATE] Waypoint '{}' -> {}", w.name(), if active { "ACTIVE" } else { "LOCKED" });
-                            w.set_active(active);
-                        } else {
-                            eprintln!("[ERROR] Waypoint '{}' not found in progression table.", name);
-                            process::exit(1);
-                        }
-                    },
-                    _ => {
-                        eprintln!("[ERROR] Unknown domain '{}'. Use 'quest' or 'waypoint'.", domain);
-                        process::exit(1);
                     }
+                },
+                Err(e) => {
+                    eprintln!("[ERROR] Invalid mutation format in part '{}': {}", part, e);
+                    process::exit(1);
                 }
-            },
-            Err(e) => {
-                eprintln!("[ERROR] Invalid mutation format: {}", e);
-                process::exit(1);
             }
         }
     }
