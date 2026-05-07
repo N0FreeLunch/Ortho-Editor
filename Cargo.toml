@@ -29,6 +29,7 @@ rayon = "1.10"
 thiserror = "2.0.18"
 syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
 quote = "1.0"
+regex = "1.10"
 
 [[bin]]
 name = "d2save_status_inspect"
@@ -343,3 +344,7 @@ path = "src/bin/verify/d2item_stat_fuzzer_v105.rs"
 [[bin]]
 name = "d2item_registry_sync"
 path = "src/bin/verify/d2item_registry_sync.rs"
+
+[[bin]]
+name = "d2item_registry_recommender"
+path = "src/bin/verify/d2item_registry_recommender.rs"

@@ -655,7 +655,9 @@ pub fn write_property_list(
             }
         }
     }
-    emitter.write_bits(terminator, id_bits)?;
+    if !axiom.is_alpha() || version == 5 {
+        emitter.write_bits(terminator, id_bits)?;
+    }
     let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
     if rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;

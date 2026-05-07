@@ -40,7 +40,7 @@ fn main() {
     let huffman = HuffmanTree::new();
     let is_alpha = bytes[4..8] == [0x69, 0, 0, 0];
 
-    let start_bit = (jm_pos + 4) * 8;
+    let start_bit = (jm_pos + 4) as u64 * 8;
     let mut bit_pos = 0u64;
 
     for i in 0..count {
@@ -51,7 +51,7 @@ fn main() {
                 let mut reader = IoBitReader::endian(Cursor::new(&bytes[jm_pos + 4..]), LittleEndian);
                 let _ = reader.skip(bit_pos as u32);
                 let mut cursor = BitCursor::new(reader);
-                if let Ok(_) = Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, start_bit as u64)), is_alpha) {
+                if let Ok(_) = Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, start_bit + bit_pos)), is_alpha, current_idx == 0) {
                     bit_pos += cursor.pos();
                     continue;
                 } else {
@@ -60,7 +60,7 @@ fn main() {
             }
         }
 
-        println!("\nExploring Item {} at bit offset {}:", current_idx, start_bit as u64 + bit_pos);
+        println!("\nExploring Item {} at bit offset {}:", current_idx, start_bit + bit_pos);
 
         // Try nudges
         for nudge in -4i64..=4i64 {
@@ -71,7 +71,7 @@ fn main() {
             let _ = reader.skip(nudged_start as u32);
             let mut cursor = BitCursor::new(reader);
 
-            match Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, start_bit as u64)), is_alpha) {
+            match Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, start_bit + nudged_start)), is_alpha, current_idx == 0) {
                 Ok(item) => {
                     println!("  [Nudge {:+2}] SUCCESS: '{}' (len={} bits)", nudge, item.code, cursor.pos());    
                     if nudge == 0 || target_idx.is_some() {
@@ -93,7 +93,7 @@ fn main() {
         let mut reader = IoBitReader::endian(Cursor::new(&bytes[jm_pos + 4..]), LittleEndian);
         let _ = reader.skip(bit_pos as u32);
         let mut cursor = BitCursor::new(reader);
-        if let Ok(_) = Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, start_bit as u64)), is_alpha) {
+        if let Ok(_) = Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, start_bit + bit_pos)), is_alpha, current_idx == 0) {
             bit_pos += cursor.pos();
         } else {
             break;

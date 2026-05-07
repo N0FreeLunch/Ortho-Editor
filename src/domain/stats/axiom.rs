@@ -156,8 +156,8 @@ impl StatsAxiom {
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None, // use STAT_COSTS
-                has_terminal_bit: self.is_alpha(),
-                has_extra_terminal_bit: self.is_alpha(),
+                has_terminal_bit: false, // Alpha v105 forensic: No terminal bit
+                has_extra_terminal_bit: false,
             }
         }
     }
