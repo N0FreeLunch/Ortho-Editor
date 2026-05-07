@@ -4,36 +4,32 @@ use std::process;
 use d2r_core::domain::progression::Progression;
 use d2r_core::domain::progression::axiom::{V105_QUEST_OFFSET, V105_QUEST_LEN, V105_WAYPOINT_OFFSET, V105_WAYPOINT_LEN};
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") || args.len() < 2 {
-        println!("D2R Alpha v105 Progression Parity Audit Tool");
-        println!("\nUsage: {} <fixture.d2s> [options]", args[0]);
-        println!("\nOptions:");
-        println!("  --semantic                    Print semantic status of quests and waypoints");
-        println!("  --mutate <domain:target=state,...> Apply mutations before parity check (comma-separated)");
-        println!("                                Domains: quest (default), waypoint/wp");
-        println!("                                States: completed/pending (quest), active/locked (waypoint)");
-        println!("                                (e.g., quest:Sisters_to_the_Slaughter=completed,wp:Act_1_-_Town=active)");
-        println!("  --help, -h                    Print this help message");
-        println!("\nExit Codes:");
-        println!("  0  Audit Passed (100% Bit Parity)");
-        println!("  1  Audit Failed or CLI Error");
-        process::exit(if args.len() < 2 { 1 } else { 0 });
-    }
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 
-    let file_path = &args[1];
-    let semantic_mode = args.iter().any(|arg| arg == "--semantic");
-    
-    let mutate_opt = args.iter().position(|arg| arg == "--mutate").and_then(|i| {
-        let val = args.get(i + 1);
-        if val.is_none() {
-            eprintln!("[ERROR] --mutate requires a value in 'domain:target=state' format.");
-            process::exit(1);
+fn main() {
+    let mut parser = ArgParser::new("d2save_progression_audit");
+    parser.add_spec(ArgSpec::positional("fixture", "Path to save file"));
+    parser.add_spec(ArgSpec::flag("semantic", None, Some("semantic"), "Print semantic status of quests and waypoints"));
+    parser.add_spec(ArgSpec::option("mutate", None, Some("mutate"), "Apply mutations before parity check (comma-separated domain:target=state)"));
+    parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Output mutated file to path"));
+
+    let parsed = match parser.parse(env::args_os().skip(1).collect()) {
+        Ok(p) => p,
+        Err(ArgError::Help(h)) => {
+            println!("{}", h);
+            std::process::exit(0);
         }
-        val
-    });
+        Err(ArgError::Error(e)) => {
+            eprintln!("error: {}", e);
+            eprintln!("\n{}", parser.usage());
+            std::process::exit(1);
+        }
+    };
+
+    let file_path = parsed.get("fixture").unwrap();
+    let semantic_mode = parsed.is_set("semantic");
+    let mutate_opt = parsed.get("mutate");
+    let output_path = parsed.get("output");
 
     let original_bytes = match fs::read(file_path) {
         Ok(bytes) => bytes,
@@ -122,7 +118,7 @@ fn main() {
     progression.sync_to_bytes(&mut buffer, true);
 
     // Parity Verification logic
-    let (expected_bytes, actual_bytes) = if mutate_opt.is_some() {
+    let (expected_bytes, actual_bytes): (Vec<u8>, Vec<u8>) = if mutate_opt.is_some() {
         println!("\n[VERIFICATION: ROUND-TRIP PARITY]");
         let mutated_baseline = buffer.clone();
         let second_result = Progression::from_bytes(&mutated_baseline, true);
@@ -189,6 +185,14 @@ fn main() {
     } else {
         println!("  [FAIL] Waypoint Section: buffer size mismatch (len={}, required={})", actual_bytes.len(), wp_range.end);
         failures += 1;
+    }
+
+    // Export if requested
+    if let Some(out_path) = output_path {
+        match fs::write(out_path, &actual_bytes) {
+            Ok(_) => println!("\n[EXPORT] Successfully wrote mutated save to: {}", out_path),
+            Err(e) => eprintln!("\n[ERROR] Failed to write output file: {}", e),
+        }
     }
 
     if failures > 0 {
