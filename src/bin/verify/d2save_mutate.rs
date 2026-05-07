@@ -1,14 +1,24 @@
 use std::fs;
 use anyhow::{bail, Context};
-use d2r_core::save::map_core_sections;
+use d2r_core::save::{map_core_sections, rebuild_status_and_player_items};
+use d2r_core::item::{Item, HuffmanTree, ItemEditorExt};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_mutate");
     parser.add_spec(ArgSpec::positional("input", "Input save file (.d2s)"));
     parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Output save file (.d2s)").required());
+    
+    // Legacy marker mutations
     parser.add_spec(ArgSpec::option("shift-marker", None, Some("shift-marker"), "Shift marker <NAME> <OFFSET>").value_count(2));
     parser.add_spec(ArgSpec::option("delete-marker", None, Some("delete-marker"), "Delete marker <NAME>").value_count(1));
+    
+    // New item mutations
+    parser.add_spec(ArgSpec::option("item-index", None, Some("item-index"), "0-based index of the item to mutate"));
+    parser.add_spec(ArgSpec::option("stat", None, Some("stat"), "Stat ID to mutate"));
+    parser.add_spec(ArgSpec::option("value", None, Some("value"), "New value for the stat"));
+    parser.add_spec(ArgSpec::option("defense", None, Some("defense"), "Set defense value"));
+    parser.add_spec(ArgSpec::flag("force-fix", None, Some("force-fix"), "Force checksum and size finalization (required for v105 logic updates)"));
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -36,6 +46,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     let map = map_core_sections(&bytes).context("Failed to map core sections")?;
+    
+    let huffman = HuffmanTree::new();
+    let is_alpha = version == 105;
+    let force_fix = parsed.is_set("force-fix");
 
     if let Some(shift_args) = parsed.get_vec("shift-marker") {
         let name = &shift_args[0];
@@ -44,8 +58,48 @@ fn main() -> anyhow::Result<()> {
     } else if let Some(delete_args) = parsed.get_vec("delete-marker") {
         let name = &delete_args[0];
         mutate_marker(&mut bytes, &map, name, None)?;
+    } else if let Some(item_idx_str) = parsed.get("item-index") {
+        let idx: usize = item_idx_str.parse().context("Invalid item index")?;
+        let mut items = Item::read_player_items(&bytes, &huffman, is_alpha).context("Failed to read items")?;
+        
+        if idx >= items.len() {
+            bail!("Item index {} out of bounds (found {} items)", idx, items.len());
+        }
+        
+        {
+            let mut editor = items[idx].edit();
+            let mut modified = false;
+
+            if let Some(def_str) = parsed.get("defense") {
+                let def: u32 = def_str.parse().context("Invalid defense value")?;
+                editor.set_defense(def);
+                modified = true;
+            }
+
+            if let (Some(stat_str), Some(val_str)) = (parsed.get("stat"), parsed.get("value")) {
+                let stat_id: u32 = stat_str.parse().context("Invalid stat ID")?;
+                let val: i32 = val_str.parse().context("Invalid stat value")?;
+                editor.set_stat(stat_id, val);
+                modified = true;
+            }
+
+            if !modified {
+                bail!("Item index provided but no mutation operation specified (--stat/--value or --defense).");
+            }
+            editor.commit();
+        }
+
+        println!("Mutating item at index {} (code: {})", idx, items[idx].body.code);
+
+        let mut rebuilt = rebuild_status_and_player_items(
+            &bytes, None, None, None, None, None, &items, &huffman
+        ).context("Failed to rebuild save with mutated items")?;
+        
+        d2r_core::save::finalize_save_bytes(&mut rebuilt, force_fix).context("Failed to finalize save bytes")?;
+        bytes = rebuilt;
+        println!("Successfully rebuilt save with mutated item (force_fix={}).", force_fix);
     } else {
-        bail!("No mutation operation specified. Use --shift-marker or --delete-marker.");
+        bail!("No mutation operation specified. Use --shift-marker, --delete-marker, or --item-index.");
     }
 
     fs::write(output_path, &bytes).context("Failed to write output file")?;
