@@ -253,6 +253,10 @@ name = "d2save_audit_symmetry"
 path = "src/bin/verify/d2save_audit_symmetry.rs"
 
 [[bin]]
+name = "d2save_progression_audit"
+path = "src/bin/verify/d2save_progression_audit.rs"
+
+[[bin]]
 name = "d2save_mutate"
 path = "src/bin/verify/d2save_mutate.rs"
 [[bin]]
