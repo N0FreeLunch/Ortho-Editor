@@ -1,8 +1,69 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, SymmetryOptions};
+use d2r_core::verify::symmetry::{calculate_symmetry_diff, SymmetryOptions, ItemDiff};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum FailureFamily {
+    Geometry,
+    RWSet,
+    Stat,
+    Nudge,
+    Unknown,
+}
+
+impl FailureFamily {
+    fn as_tag(&self) -> String {
+        format!("[{}]", match self {
+            Self::Geometry => "Geometry",
+            Self::RWSet => "RW/Set",
+            Self::Stat => "Stat",
+            Self::Nudge => "Nudge",
+            Self::Unknown => "Unknown",
+        })
+    }
+}
+
+fn classify_failure(diff: &ItemDiff) -> FailureFamily {
+    let mismatch_type = diff.mismatch_type.as_deref().unwrap_or("");
+    let offset = diff.first_mismatch_offset.unwrap_or(0);
+    let version = diff.version;
+    let flags = diff.flags;
+
+    // Alpha v105 specific RW/Shadow check (approximation)
+    let is_rw_or_shadow = if version == 5 || version == 1 {
+        let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+        let is_rw = !is_shadow && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0);
+        is_rw || is_shadow
+    } else {
+        (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0
+    };
+
+    if mismatch_type == "Length" {
+        let diff_bits = (diff.original_len as i64 - diff.target_len as i64).abs();
+        if offset < 100 {
+            FailureFamily::Geometry
+        } else if diff_bits <= 7 {
+            FailureFamily::Nudge
+        } else {
+            FailureFamily::Geometry
+        }
+    } else if mismatch_type.contains("Gap") {
+        FailureFamily::Geometry
+    } else if mismatch_type == "Content" {
+        if is_rw_or_shadow {
+            FailureFamily::RWSet
+        } else if offset >= 100 {
+            FailureFamily::Stat
+        } else {
+            FailureFamily::Geometry
+        }
+    } else {
+        FailureFamily::Unknown
+    }
+}
 
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
@@ -67,6 +128,7 @@ fn main() {
     let mut total_fail = 0;
     let mut cumulative_fidelity = 0.0;
     let mut total_items = 0;
+    let mut failure_breakdown: HashMap<FailureFamily, usize> = HashMap::new();
 
     for entry in entries {
         let file_path = entry.path();
@@ -112,14 +174,15 @@ fn main() {
                 cumulative_fidelity += avg_fidelity;
 
                 let hint = if !report.success {
-                    report.items.iter()
-                        .find(|it| !it.is_match)
-                        .map(|it| {
-                            it.mismatch_type.as_deref().unwrap_or("Mismatch")
-                        })
-                        .unwrap_or("Unknown failure")
+                    if let Some(first_fail) = report.items.iter().find(|it| !it.is_match) {
+                        let family = classify_failure(first_fail);
+                        *failure_breakdown.entry(family).or_insert(0) += 1;
+                        format!("{} {}", family.as_tag(), first_fail.mismatch_type.as_deref().unwrap_or("Mismatch"))
+                    } else {
+                        "Unknown failure".to_string()
+                    }
                 } else {
-                    ""
+                    "".to_string()
                 };
 
                 println!(
@@ -133,6 +196,7 @@ fn main() {
                     "[FAIL]", file_name, "-", "-", format!("Audit error: {}", e)
                 );
                 total_fail += 1;
+                *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
             }
         }
     }
@@ -150,6 +214,15 @@ fn main() {
     println!("  Total Fail:        {}", total_fail);
     println!("  Total Items:       {}", total_items);
     println!("  Global Fidelity:   {:.2}%", global_avg_fidelity);
+    
+    if !failure_breakdown.is_empty() {
+        println!("\nFAILURE BREAKDOWN:");
+        let mut families: Vec<_> = failure_breakdown.keys().collect();
+        families.sort_by_key(|f| f.as_tag());
+        for family in families {
+            println!("  {:<12}: {}", family.as_tag(), failure_breakdown[family]);
+        }
+    }
     println!("{:-<100}", "");
 
     if total_fail > 0 {
