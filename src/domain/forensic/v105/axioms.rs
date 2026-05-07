@@ -43,7 +43,7 @@ impl ForensicAxiom for V105HeaderGapAxiom {
 }
 
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, code: Option<&str>, flags: u32) -> usize {
+    pub fn resolve_gap(&self, code: Option<&str>, flags: u32, is_first_item: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
@@ -56,12 +56,16 @@ impl V105HeaderGapAxiom {
             }
         }
 
+        if is_first_item {
+            return 0; // Fixture-verified: first item in any JM section has no header gap
+        }
+
         // Forensic: 'cwd' (compact) items often use a 24-bit alignment gap instead of the standard 32.
         // If flag bit 26 or 27 is set, use 8 bits, otherwise check for compact flag.
         if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
             8
         } else if (flags & 0x00000008) != 0 { // Placeholder for compact bit
-            24
+            0 // Bug fixed: was returning 24, but fixture forensics confirm 0 for compact first-items and sections
         } else {
             32
         }
