@@ -612,9 +612,6 @@ pub fn write_property_list(
     let mut item_idx = 0;
     for prop in props {
         let raw_id = prop.stat_id;
-        if crate::item::item_trace_enabled() || true {
-            println!("[DEBUG] writer: writing property {}, id_bits={}", raw_id, id_bits);
-        }
         emitter.write_bits(raw_id, id_bits)?;
         
         let mut handled = false;
