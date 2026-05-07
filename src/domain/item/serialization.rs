@@ -147,7 +147,7 @@ pub fn parse_item_at_with_limit(
     bytes: &[u8],
     bit: u64,
     huffman: &HuffmanTree,
-    _idx: usize,
+    idx: usize,
     alpha: bool,
     _limit: Option<u64>,
 ) -> ParsingResult<(Item, u64)> {
@@ -155,7 +155,7 @@ pub fn parse_item_at_with_limit(
     let _ = reader.skip(bit as u32);
     let mut cursor = BitCursor::new(reader);
     // Removed strict limit enforcement to allow variable padding to parse successfully
-    let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha)?;
+    let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx == 0)?;
     Ok((item, bit + cursor.pos()))
 }
 
@@ -213,13 +213,13 @@ impl Item {
         let section_bits = (section_bytes.len() * 8) as u64;
 
         // Forensic: Resolve variable header gap specific to Alpha v105
-        let mut start_offset = 32; // Skip JM marker (16) and count (16)
+        let mut start_offset = 0; // JM marker (16) and count (16) already skipped by caller
         if alpha_mode {
             // Need the flags for the first item to resolve the gap correctly.
             // peek_item_header_at already provides the flags.
-            if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 32, huffman, alpha_mode) {
+            if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 0, huffman, alpha_mode) {
                 let gap_axiom = V105HeaderGapAxiom::default();
-                let gap = gap_axiom.resolve_gap(None, flags);
+                let gap = gap_axiom.resolve_gap(None, flags, true);
                 start_offset += gap as u64;
             }
         }
@@ -278,7 +278,7 @@ impl Item {
         alpha: bool,
     ) -> ParsingResult<Item> {
         let mut cursor = BitCursor::new(reader);
-        Self::from_reader_with_context(&mut cursor, huffman, None, alpha)
+        Self::from_reader_with_context(&mut cursor, huffman, None, alpha, false)
     }
 
     pub fn from_reader_with_context<R: BitRead>(
@@ -286,6 +286,7 @@ impl Item {
         huff: &HuffmanTree,
         ctx: Option<(&[u8], u64)>,
         alpha_mode: bool,
+        is_first_item: bool,
     ) -> ParsingResult<Item> {
         cursor.set_trace(crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
@@ -298,7 +299,7 @@ impl Item {
         let code_peek = peek.as_ref().map(|p| p.3.as_str());
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
 
-        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override)?;
+        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item)?;
         
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {
@@ -611,6 +612,9 @@ pub fn write_property_list(
     let mut item_idx = 0;
     for prop in props {
         let raw_id = prop.stat_id;
+        if crate::item::item_trace_enabled() || true {
+            println!("[DEBUG] writer: writing property {}, id_bits={}", raw_id, id_bits);
+        }
         emitter.write_bits(raw_id, id_bits)?;
         
         let mut handled = false;

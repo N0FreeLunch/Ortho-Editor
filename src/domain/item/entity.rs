@@ -338,14 +338,17 @@ impl Item {
         // Synchronize flags bit
         if has_sockets {
             if is_alpha {
-                if self.header.version == 5 { self.header.flags |= 1 << 23; }
+                if self.header.version == 5 { 
+                    self.header.flags |= 1 << 11; 
+                    self.header.flags &= !(1 << 23); // Ensure NOT compact
+                }
                 else { self.header.flags |= 1 << 21; }
             } else {
                 self.header.flags |= 1 << 21;
             }
-            self.header.flags |= 1; // Identified is often required for socketed items to be valid
+            self.header.flags |= 1 << 4; // Identified
         } else {
-            if is_alpha && self.header.version == 5 { self.header.flags &= !(1 << 23); }
+            if is_alpha && self.header.version == 5 { self.header.flags &= !(1 << 11); }
             else { self.header.flags &= !(1 << 21); }
         }
 
@@ -632,6 +635,7 @@ pub fn parse_item_header<R: BitRead>(
     alpha_mode: bool,
     code_hint: Option<&str>,
     gap_override: Option<usize>,
+    is_first_item: bool,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
@@ -690,7 +694,7 @@ pub fn parse_item_header<R: BitRead>(
                 let gap_bits = if let Some(go) = gap_override {
                     if go >= geom_bits { go - geom_bits } else { 8 }
                 } else {
-                    V105HeaderGapAxiom::default().resolve_gap(code_hint, flags)
+                    V105HeaderGapAxiom::default().resolve_gap(code_hint, flags, is_first_item)
                 };
 
                 alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
