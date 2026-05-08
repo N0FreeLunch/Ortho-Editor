@@ -194,10 +194,8 @@ fn render_item_diff_html(html: &mut String, item: &ItemDiff, depth: usize) {
         html.push_str("                <div class=\"row-label\">Original</div>\n");
         html.push_str("                <div class=\"bits\">\n");
         
-        let max_len = o_chars.len().max(t_chars.len());
         let mut i = 0;
         let mut j = 0;
-        
         let mut o_html = String::new();
         let mut t_html = String::new();
         
@@ -421,12 +419,14 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize, segment: Opt
             let mut found_sync = false;
             // Range 1..49 to cover up to 3x 16-bit gaps
             for nudge in 1..49 {
-                let is_gap = nudge % 16 == 0;
-                let color = if is_gap { ANSI_BLUE } else { ANSI_BOLD_RED };
-                let marker = if is_gap { "G" } else { "^" };
-                let v_marker = if is_gap { "G" } else { "v" };
-
+                let is_gap_candidate = nudge % 16 == 0;
+                
                 if j + nudge < t_chars.len() && o_chars[i] == t_chars[j + nudge] {
+                    // Check if all skipped bits are '0' for a Gap
+                    let all_zeros = t_chars[j..j+nudge].iter().all(|&c| c == '0');
+                    let color = if is_gap_candidate && all_zeros { ANSI_BLUE } else { ANSI_BOLD_RED };
+                    let marker = if is_gap_candidate && all_zeros { "G" } else { "^" };
+
                     for _ in 0..nudge {
                         o_out.push(format!("{}{}{}", color, "-", ANSI_RESET));
                         t_out.push(format!("{}{}{}", color, t_chars[j], ANSI_RESET));
@@ -437,6 +437,11 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize, segment: Opt
                     break;
                 }
                 if i + nudge < o_chars.len() && o_chars[i + nudge] == t_chars[j] {
+                    // Check if all skipped bits are '0' for a Gap
+                    let all_zeros = o_chars[i..i+nudge].iter().all(|&c| c == '0');
+                    let color = if is_gap_candidate && all_zeros { ANSI_BLUE } else { ANSI_BOLD_RED };
+                    let v_marker = if is_gap_candidate && all_zeros { "G" } else { "v" };
+
                     for _ in 0..nudge {
                         o_out.push(format!("{}{}{}", color, o_chars[i], ANSI_RESET));
                         t_out.push(format!("{}{}{}", color, "-", ANSI_RESET));
