@@ -155,6 +155,7 @@ struct Args {
     detailed: bool,
     output_json: bool,
     output_path: Option<String>,
+    output_html: Option<String>,
 }
 
 fn process_file(
@@ -256,6 +257,156 @@ fn process_file(
     }
 }
 
+#[derive(Serialize, Default)]
+struct DashboardGroup {
+    total: usize,
+    pass: usize,
+    fidelity_sum: f32,
+}
+
+#[derive(Serialize, Default)]
+struct StabilityDashboard {
+    target_dir: String,
+    by_act: HashMap<String, DashboardGroup>,
+    by_class: HashMap<String, DashboardGroup>,
+    global: DashboardGroup,
+}
+
+fn extract_metadata(path: &Path) -> (String, String) {
+    let path_str = path.to_string_lossy().to_lowercase();
+    
+    let act = if path_str.contains("act1") {
+        "Act 1"
+    } else if path_str.contains("act2") {
+        "Act 2"
+    } else if path_str.contains("act3") {
+        "Act 3"
+    } else if path_str.contains("act4") {
+        "Act 4"
+    } else if path_str.contains("act5") {
+        "Act 5"
+    } else {
+        "Unknown"
+    };
+
+    let class = if path_str.contains("amazon") || path_str.contains("ama") {
+        "Amazon"
+    } else if path_str.contains("sorceress") || path_str.contains("sor") {
+        "Sorceress"
+    } else if path_str.contains("necromancer") || path_str.contains("nec") {
+        "Necromancer"
+    } else if path_str.contains("paladin") || path_str.contains("pal") {
+        "Paladin"
+    } else if path_str.contains("barbarian") || path_str.contains("bar") {
+        "Barbarian"
+    } else if path_str.contains("druid") || path_str.contains("dru") {
+        "Druid"
+    } else if path_str.contains("assassin") || path_str.contains("asn") {
+        "Assassin"
+    } else {
+        "Unknown"
+    };
+
+    (act.to_string(), class.to_string())
+}
+
+fn generate_html_report(dashboard: &StabilityDashboard) -> String {
+    let mut html = String::new();
+    html.push_str("<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>Alpha v105 Forensic Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a1a; color: #e0e0e0; margin: 20px; }
+        h1, h2 { color: #4fc3f7; }
+        .container { max-width: 1000px; margin: auto; }
+        .summary-card { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        table { width: 100%; border-collapse: collapse; background: #2d2d2d; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #444; }
+        th { background-color: #333; color: #4fc3f7; }
+        tr:hover { background-color: #383838; }
+        .progress-bar { background: #444; border-radius: 4px; height: 10px; width: 100%; margin-top: 4px; }
+        .progress-fill { height: 100%; border-radius: 4px; }
+        .high { background-color: #4caf50; }
+        .medium { background-color: #ffc107; }
+        .low { background-color: #f44336; }
+        .stats { font-size: 0.9em; color: #aaa; }
+    </style>
+</head>
+<body>
+<div class=\"container\">
+    <h1>Alpha v105 Forensic Dashboard</h1>
+");
+
+    html.push_str(&format!("
+    <div class=\"summary-card\">
+        <h2>Global Stability</h2>
+        <p>Target Directory: <code>{}</code></p>
+        <div class=\"stats\">Total Files: {} | Pass: {} | Success Rate: {:.1}% | Avg Fidelity: {:.2}%</div>
+    </div>
+", 
+        dashboard.target_dir, 
+        dashboard.global.total, 
+        dashboard.global.pass,
+        if dashboard.global.total > 0 { dashboard.global.pass as f32 / dashboard.global.total as f32 * 100.0 } else { 0.0 },
+        if dashboard.global.total > 0 { dashboard.global.fidelity_sum / dashboard.global.total as f32 } else { 0.0 }
+    ));
+
+    html.push_str("<div class=\"grid\">");
+
+    // Act Stability
+    html.push_str("<div><h2>By Act</h2><table><thead><tr><th>Act</th><th>Stability</th><th>Rate</th></tr></thead><tbody>");
+    let mut acts: Vec<_> = dashboard.by_act.keys().collect();
+    acts.sort();
+    for act in acts {
+        let group = &dashboard.by_act[act];
+        let rate = if group.total > 0 { group.pass as f32 / group.total as f32 * 100.0 } else { 0.0 };
+        let fidelity = if group.total > 0 { group.fidelity_sum / group.total as f32 } else { 0.0 };
+        let color_class = if fidelity >= 95.0 { "high" } else if fidelity >= 80.0 { "medium" } else { "low" };
+        
+        html.push_str(&format!("<tr><td>{}</td><td><div class=\"progress-bar\"><div class=\"progress-fill {}\" style=\"width: {:.1}%\"></div></div><div class=\"stats\">Fidelity: {:.1}%</div></td><td>{:.1}%</td></tr>", 
+            act, color_class, fidelity, fidelity, rate));
+    }
+    html.push_str("</tbody></table></div>");
+
+    // Class Stability
+    html.push_str("<div><h2>By Class</h2><table><thead><tr><th>Class</th><th>Stability</th><th>Rate</th></tr></thead><tbody>");
+    let mut classes: Vec<_> = dashboard.by_class.keys().collect();
+    classes.sort();
+    for class in classes {
+        let group = &dashboard.by_class[class];
+        let rate = if group.total > 0 { group.pass as f32 / group.total as f32 * 100.0 } else { 0.0 };
+        let fidelity = if group.total > 0 { group.fidelity_sum / group.total as f32 } else { 0.0 };
+        let color_class = if fidelity >= 95.0 { "high" } else if fidelity >= 80.0 { "medium" } else { "low" };
+        
+        html.push_str(&format!("<tr><td>{}</td><td><div class=\"progress-bar\"><div class=\"progress-fill {}\" style=\"width: {:.1}%\"></div></div><div class=\"stats\">Fidelity: {:.1}%</div></td><td>{:.1}%</td></tr>", 
+            class, color_class, fidelity, fidelity, rate));
+    }
+    html.push_str("</tbody></table></div>");
+
+    html.push_str("</div>
+</div>
+</body>
+</html>");
+    html
+}
+
+fn find_d2s_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
+    if let Ok(read_dir) = fs::read_dir(dir) {
+        for entry in read_dir.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                find_d2s_files(&path, files);
+            } else if path.is_file() && path.extension().map_or(false, |ext| ext == "d2s") {
+                files.push(path);
+            }
+        }
+    }
+}
+
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
     parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
@@ -264,6 +415,7 @@ fn main() {
     parser.add_spec(ArgSpec::flag("detailed", Some('d'), Some("detailed"), "Report all mismatches in a file, not just the first one"));
     parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
     parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Save execution output to a file"));
+    parser.add_spec(ArgSpec::option("html", None, Some("html"), "Save HTML dashboard report to a file"));
     
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -289,6 +441,7 @@ fn main() {
         detailed: parsed.is_set("detailed"),
         output_json: parsed.is_set("json"),
         output_path: parsed.get("output").cloned(),
+        output_html: parsed.get("html").cloned(),
     };
 
     let path = Path::new(&args.target_dir);
@@ -297,24 +450,13 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut entries: Vec<_> = match fs::read_dir(path) {
-        Ok(read_dir) => read_dir
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().is_file() 
-                && e.path().extension().map_or(false, |ext| ext == "d2s")
-            })
-            .collect(),
-        Err(e) => {
-            eprintln!("Failed to read directory {}: {}", args.target_dir, e);
-            std::process::exit(1);
-        }
-    };
+    let mut file_paths = Vec::new();
+    find_d2s_files(path, &mut file_paths);
 
     // Deterministic sort by filename
-    entries.sort_by_key(|e| e.file_name());
+    file_paths.sort();
 
-    if entries.is_empty() {
+    if file_paths.is_empty() {
         println!("No .d2s files found in {}", args.target_dir);
         return;
     }
@@ -326,6 +468,10 @@ fn main() {
     let mut total_items = 0;
     let mut failure_breakdown: HashMap<FailureFamily, usize> = HashMap::new();
     let mut results: Vec<AuditResult> = Vec::new();
+    let mut dashboard = StabilityDashboard {
+        target_dir: args.target_dir.clone(),
+        ..Default::default()
+    };
 
     if args.output_path.is_none() && !args.output_json && !args.summary_only {
         println!("Global Item Symmetry Audit: {}", args.target_dir);
@@ -337,9 +483,28 @@ fn main() {
         println!("{:-<100}", "");
     }
 
-    for entry in entries {
+    for path in file_paths {
         total_files += 1;
-        let res = process_file(&args, &entry.path(), &mut failure_breakdown);
+        let res = process_file(&args, &path, &mut failure_breakdown);
+        let (act, class) = extract_metadata(&path);
+
+        // Update dashboard
+        {
+            let is_pass = res.status == "[PASS]";
+            let act_group = dashboard.by_act.entry(act).or_default();
+            act_group.total += 1;
+            if is_pass { act_group.pass += 1; }
+            act_group.fidelity_sum += res.avg_fidelity;
+
+            let class_group = dashboard.by_class.entry(class).or_default();
+            class_group.total += 1;
+            if is_pass { class_group.pass += 1; }
+            class_group.fidelity_sum += res.avg_fidelity;
+
+            dashboard.global.total += 1;
+            if is_pass { dashboard.global.pass += 1; }
+            dashboard.global.fidelity_sum += res.avg_fidelity;
+        }
 
         // Filter logic
         if let Some(f) = args.filter_family {
@@ -388,6 +553,17 @@ fn main() {
         results,
     };
 
+    if let Some(out) = &args.output_html {
+        let content = generate_html_report(&dashboard);
+        if let Some(parent) = Path::new(out).parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                fs::create_dir_all(parent).expect("Failed to create output directory");
+            }
+        }
+        fs::write(out, content).expect("Failed to write HTML report");
+        println!("Dashboard HTML written to: {}", out);
+    }
+
     if let Some(out) = &args.output_path {
         let content = if out.ends_with(".json") || args.output_json {
             serde_json::to_string_pretty(&global_report).unwrap()
@@ -428,3 +604,4 @@ fn main() {
         std::process::exit(1);
     }
 }
+
