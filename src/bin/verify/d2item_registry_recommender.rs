@@ -9,7 +9,8 @@ use regex::Regex;
 #[derive(Debug, Deserialize)]
 struct MismatchRow {
     item_label: String,
-    code: String,
+    #[serde(rename = "code")]
+    _code: String,
     mismatch_type: String,
     segment: String,
     first_mismatch_offset: Option<usize>,
