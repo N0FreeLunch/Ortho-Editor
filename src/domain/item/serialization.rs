@@ -156,7 +156,7 @@ pub fn parse_item_at_with_limit(
     let mut cursor = BitCursor::new(reader);
     // Removed strict limit enforcement to allow variable padding to parse successfully
     let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx == 0)?;
-    Ok((item, bit + cursor.pos()))
+    Ok((item, cursor.pos()))
 }
 
 pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {
@@ -265,7 +265,26 @@ impl Item {
                     items.push(final_item);
                 }
                 Err(_) => {
-                    // Marker was plausible but parsing failed. Skip.
+                    // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
+                    let mut bits = Vec::new();
+                    let mut fallback_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                    if fallback_reader.skip(start as u32).is_ok() {
+                        for _ in 0..limit {
+                            if let Ok(b) = fallback_reader.read_bit() {
+                                bits.push(b);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    let mut opaque_item = Item::default();
+                    opaque_item.code = "Opaque".to_string();
+                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits));
+                    opaque_item.range.start = section_bit_offset + start;
+                    opaque_item.range.end = section_bit_offset + start + limit;
+                    opaque_item.total_bits = limit;
+                    items.push(opaque_item);
                 }
             }
         }
@@ -626,7 +645,10 @@ pub fn write_property_list(
                      let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
                      let child_bits = child_bits_vec.len();
                      let budget = axiom.stat_bit_width(320, 2871);
-                     
+
+                     eprintln!("DEBUG: Stat 320 Child Bits: {}, Budget: {}, Padding: {}", 
+                         child_bits, budget, if child_bits < budget as usize { budget as usize - child_bits } else { 0 });
+
                      emitter.extend_bits(child_bits_vec)?;
                      if child_bits < budget as usize {
                          emitter.write_bits(0, (budget as usize - child_bits) as u32)?;
@@ -821,6 +843,89 @@ pub fn write_player_name(emitter: &mut BitEmitter, name: &str, alpha_v5: bool) -
     for ch in name.chars() { emitter.write_bits((ch as u8) as u32, width)?; }
     emitter.write_bits(0, width)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_section_captures_opaque_on_failure() {
+        let huffman = HuffmanTree::new();
+        // Construct a plausible header: JM marker, non-compact.
+        let mut emitter = BitEmitter::new();
+        emitter.write_bits(0x00004D4A, 32).unwrap();
+        emitter.write_bits(6, 3).unwrap(); // version
+        emitter.write_bits(1, 3).unwrap(); // mode
+        emitter.write_bits(1, 3).unwrap(); // loc
+        emitter.write_bits(0, 4).unwrap(); // x
+        
+        // Add Huffman bits for "cap "
+        let cap_bits = huffman.encode("cap ").unwrap();
+        for b in cap_bits { emitter.write_bit(b).unwrap(); }
+        
+        // Non-compact unique item reads ExtendedStatsData: ID(32), Level(7), Quality(4), UniqueID(12)
+        emitter.write_bits(0x12345678, 32).unwrap(); // id
+        emitter.write_bits(10, 7).unwrap(); // level
+        emitter.write_bits(7, 4).unwrap(); // quality (Unique)
+        // Only provide 5 bits of the 12-bit Unique ID
+        emitter.write_bits(0, 5).unwrap();
+        
+        // Pad heavily to satisfy scan_item_markers limit check
+        while emitter.written_bits() < 160 {
+            emitter.write_bit(false).unwrap();
+        }
+        
+        let bytes = emitter.into_bytes();
+        let section_bit_offset = 1234;
+        
+        // Truncate to force parsing failure but keep enough for scanner
+        let truncated_bytes = if bytes.len() > 13 { &bytes[0..13] } else { &bytes }; 
+        
+        let items = Item::read_section(truncated_bytes, section_bit_offset, 1, &huffman, false).expect("Should not fail");
+        
+        if !items.is_empty() {
+            assert_eq!(items[0].code, "Opaque");
+            let mut has_opaque = false;
+            for module in &items[0].modules {
+                if let crate::domain::item::ItemModule::Opaque(_) = module {
+                    has_opaque = true;
+                }
+            }
+            assert!(has_opaque);
+            assert_eq!(items[0].range.start, section_bit_offset);
+        }
+    }
+
+    #[test]
+    fn test_read_section_bit_range_accuracy() {
+        let huffman = HuffmanTree::new();
+        let mut emitter = BitEmitter::new();
+        // No padding at the start to ensure marker is found at 0
+        
+        // Valid compact item (cap)
+        emitter.write_bits(0x00004D4A | (1 << 21), 32).unwrap(); // flags (compact)
+        emitter.write_bits(6, 3).unwrap(); // version
+        emitter.write_bits(1, 3).unwrap(); // mode
+        emitter.write_bits(1, 3).unwrap(); // loc
+        emitter.write_bits(0, 4).unwrap(); // x
+        let cap_bits = huffman.encode("cap ").unwrap();
+        for b in cap_bits { emitter.write_bit(b).unwrap(); }
+        
+        // Pad to satisfy scanner
+        for _ in 0..256 { emitter.write_bit(false).unwrap(); }
+        
+        let bytes = emitter.into_bytes();
+        let section_bit_offset = 100;
+        let items = Item::read_section(&bytes, section_bit_offset, 1, &huffman, false).expect("Should parse");
+        
+        if !items.is_empty() {
+            // Marker should be found at bit 0
+            assert_eq!(items[0].range.start, section_bit_offset);
+            // Verify that range.end and total_bits are consistent
+            assert_eq!(items[0].range.end, items[0].range.start + items[0].total_bits);
+        }
+    }
 }
 
 

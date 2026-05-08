@@ -303,6 +303,7 @@ where
                 d.set(prev);
                 res
             }).map(|(child, _)| {
+                eprintln!("DEBUG: Pushed nested child: {}", child.code);
                 nested_items.push(child);
             });
             recorder.pop_context();
