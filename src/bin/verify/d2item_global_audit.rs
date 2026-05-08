@@ -148,6 +148,114 @@ fn generate_markdown_report(report: &GlobalAuditReport) -> String {
     md
 }
 
+struct Args {
+    target_dir: String,
+    filter_family: Option<FailureFamily>,
+    summary_only: bool,
+    detailed: bool,
+    output_json: bool,
+    output_path: Option<String>,
+}
+
+fn process_file(
+    args: &Args,
+    file_path: &Path,
+    failure_breakdown: &mut HashMap<FailureFamily, usize>,
+) -> AuditResult {
+    let file_name = file_path.file_name().unwrap().to_string_lossy().into_owned();
+
+    let bytes = match fs::read(file_path) {
+        Ok(b) => b,
+        Err(e) => {
+            return AuditResult {
+                status: "[ERROR]".to_string(),
+                filename: file_name,
+                item_count: 0,
+                avg_fidelity: 0.0,
+                hint: format!("Read error: {}", e),
+                family: Some(FailureFamily::Unknown),
+                mismatch_rows: Vec::new(),
+            };
+        }
+    };
+
+    let options = SymmetryOptions {
+        roundtrip: true,
+        target_index: None,
+        fail_fast: !args.detailed,
+    };
+
+    match calculate_symmetry_diff(&bytes, None, options) {
+        Ok(report) => {
+            let status = if report.success { "[PASS]" } else { "[FAIL]" };
+            let item_count = report.items.len();
+            
+            let avg_fidelity = if item_count > 0 {
+                let sum: f32 = report.items.iter().map(|it| it.fidelity_score).sum();
+                sum / item_count as f32
+            } else {
+                100.0
+            };
+
+            let mut mismatch_rows = Vec::new();
+            let mut first_fail_family = None;
+
+            let hint = if !report.success {
+                if args.detailed {
+                    for (i, it) in report.items.iter().enumerate() {
+                        if !it.is_match {
+                            let family = classify_failure(it);
+                            if first_fail_family.is_none() {
+                                first_fail_family = Some(family);
+                            }
+                            *failure_breakdown.entry(family).or_insert(0) += 1;
+                            mismatch_rows.push(MismatchRow {
+                                item_label: format!("Item {}", i),
+                                code: it.code.clone(),
+                                mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
+                                segment: it.segment.clone().unwrap_or_default(),
+                                first_mismatch_offset: it.first_mismatch_offset.map(|o| o as usize),
+                            });
+                        }
+                    }
+                    format!("{} failures detected", mismatch_rows.len())
+                } else if let Some(first_fail) = report.items.iter().find(|it| !it.is_match) {
+                    let family = classify_failure(first_fail);
+                    first_fail_family = Some(family);
+                    *failure_breakdown.entry(family).or_insert(0) += 1;
+                    format!("{} {}", family.as_tag(), first_fail.mismatch_type.as_deref().unwrap_or("Mismatch"))
+                } else {
+                    "Unknown failure".to_string()
+                }
+            } else {
+                "".to_string()
+            };
+
+            AuditResult {
+                status: status.to_string(),
+                filename: file_name,
+                item_count,
+                avg_fidelity,
+                hint,
+                family: first_fail_family,
+                mismatch_rows,
+            }
+        }
+        Err(e) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            AuditResult {
+                status: "[FAIL]".to_string(),
+                filename: file_name,
+                item_count: 0,
+                avg_fidelity: 0.0,
+                hint: format!("Audit error: {}", e),
+                family: Some(FailureFamily::Unknown),
+                mismatch_rows: Vec::new(),
+            }
+        }
+    }
+}
+
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
     parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
@@ -170,20 +278,22 @@ fn main() {
         }
     };
 
-    let target_dir = parsed
-        .get("target_dir")
-        .map(|s| s.as_str())
-        .unwrap_or("tests/fixtures/savegames/original");
+    let args = Args {
+        target_dir: parsed
+            .get("target_dir")
+            .map(|s| s.as_str())
+            .unwrap_or("tests/fixtures/savegames/original")
+            .to_string(),
+        filter_family: parsed.get("filter").and_then(|s| FailureFamily::from_str(s)),
+        summary_only: parsed.is_set("summary-only"),
+        detailed: parsed.is_set("detailed"),
+        output_json: parsed.is_set("json"),
+        output_path: parsed.get("output").cloned(),
+    };
 
-    let filter_family = parsed.get("filter").and_then(|s| FailureFamily::from_str(s));
-    let summary_only = parsed.is_set("summary-only");
-    let detailed = parsed.is_set("detailed");
-    let output_json_flag = parsed.is_set("json");
-    let output_path = parsed.get("output");
-
-    let path = Path::new(target_dir);
+    let path = Path::new(&args.target_dir);
     if !path.is_dir() {
-        eprintln!("Error: target path '{}' is not a directory.", target_dir);
+        eprintln!("Error: target path '{}' is not a directory.", args.target_dir);
         std::process::exit(1);
     }
 
@@ -196,7 +306,7 @@ fn main() {
             })
             .collect(),
         Err(e) => {
-            eprintln!("Failed to read directory {}: {}", target_dir, e);
+            eprintln!("Failed to read directory {}: {}", args.target_dir, e);
             std::process::exit(1);
         }
     };
@@ -205,7 +315,7 @@ fn main() {
     entries.sort_by_key(|e| e.file_name());
 
     if entries.is_empty() {
-        println!("No .d2s files found in {}", target_dir);
+        println!("No .d2s files found in {}", args.target_dir);
         return;
     }
 
@@ -217,8 +327,8 @@ fn main() {
     let mut failure_breakdown: HashMap<FailureFamily, usize> = HashMap::new();
     let mut results: Vec<AuditResult> = Vec::new();
 
-    if output_path.is_none() && !output_json_flag && !summary_only {
-        println!("Global Item Symmetry Audit: {}", target_dir);
+    if args.output_path.is_none() && !args.output_json && !args.summary_only {
+        println!("Global Item Symmetry Audit: {}", args.target_dir);
         println!("{:-<100}", "");
         println!(
             "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
@@ -228,139 +338,32 @@ fn main() {
     }
 
     for entry in entries {
-        let file_path = entry.path();
-        let file_name = entry.file_name().to_string_lossy().into_owned();
         total_files += 1;
+        let res = process_file(&args, &entry.path(), &mut failure_breakdown);
 
-        let bytes = match fs::read(&file_path) {
-            Ok(b) => b,
-            Err(e) => {
-                let err_msg = format!("Read error: {}", e);
-                if output_path.is_none() && !output_json_flag {
-                    println!(
-                        "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
-                        "[ERROR]", file_name, "-", "-", err_msg
-                    );
-                }
-                results.push(AuditResult {
-                    status: "[ERROR]".to_string(),
-                    filename: file_name,
-                    item_count: 0,
-                    avg_fidelity: 0.0,
-                    hint: err_msg,
-                    family: Some(FailureFamily::Unknown),
-                    mismatch_rows: Vec::new(),
-                });
-                total_fail += 1;
+        // Filter logic
+        if let Some(f) = args.filter_family {
+            if res.status == "[PASS]" || res.family != Some(f) {
                 continue;
             }
-        };
-
-        let options = SymmetryOptions {
-            roundtrip: true,
-            target_index: None,
-            fail_fast: !detailed,
-        };
-
-        match calculate_symmetry_diff(&bytes, None, options) {
-            Ok(report) => {
-                let status = if report.success { "[PASS]" } else { "[FAIL]" };
-                if report.success {
-                    total_pass += 1;
-                } else {
-                    total_fail += 1;
-                }
-
-                let item_count = report.items.len();
-                total_items += item_count;
-                
-                let avg_fidelity = if item_count > 0 {
-                    let sum: f32 = report.items.iter().map(|it| it.fidelity_score).sum();
-                    sum / item_count as f32
-                } else {
-                    100.0
-                };
-                cumulative_fidelity += avg_fidelity;
-
-                let mut mismatch_rows = Vec::new();
-                let mut first_fail_family = None;
-
-                let hint = if !report.success {
-                    if detailed {
-                        for (i, it) in report.items.iter().enumerate() {
-                            if !it.is_match {
-                                let family = classify_failure(it);
-                                if first_fail_family.is_none() {
-                                    first_fail_family = Some(family);
-                                }
-                                *failure_breakdown.entry(family).or_insert(0) += 1;
-                                mismatch_rows.push(MismatchRow {
-                                    item_label: format!("Item {}", i),
-                                    code: it.code.clone(),
-                                    mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
-                                    segment: it.segment.clone().unwrap_or_default(),
-                                    first_mismatch_offset: it.first_mismatch_offset.map(|o| o as usize),
-                                });
-                            }
-                        }
-                        format!("{} failures detected", mismatch_rows.len())
-                    } else if let Some(first_fail) = report.items.iter().find(|it| !it.is_match) {
-                        let family = classify_failure(first_fail);
-                        first_fail_family = Some(family);
-                        *failure_breakdown.entry(family).or_insert(0) += 1;
-                        format!("{} {}", family.as_tag(), first_fail.mismatch_type.as_deref().unwrap_or("Mismatch"))
-                    } else {
-                        "Unknown failure".to_string()
-                    }
-                } else {
-                    "".to_string()
-                };
-
-                // Filter logic
-                if let Some(f) = filter_family {
-                    if report.success || first_fail_family != Some(f) {
-                        continue;
-                    }
-                }
-
-                results.push(AuditResult {
-                    status: status.to_string(),
-                    filename: file_name.clone(),
-                    item_count,
-                    avg_fidelity,
-                    hint: hint.clone(),
-                    family: first_fail_family,
-                    mismatch_rows,
-                });
-
-                if output_path.is_none() && !output_json_flag && !summary_only {
-                    println!(
-                        "{:<8} | {:<40} | {:>8} | {:>9.2}% | {:<20}",
-                        status, file_name, item_count, avg_fidelity, hint
-                    );
-                }
-            }
-            Err(e) => {
-                let err_msg = format!("Audit error: {}", e);
-                if output_path.is_none() && !output_json_flag {
-                    println!(
-                        "{:<8} | {:<40} | {:>8} | {:>10} | {:<20}",
-                        "[FAIL]", file_name, "-", "-", err_msg
-                    );
-                }
-                results.push(AuditResult {
-                    status: "[FAIL]".to_string(),
-                    filename: file_name,
-                    item_count: 0,
-                    avg_fidelity: 0.0,
-                    hint: err_msg,
-                    family: Some(FailureFamily::Unknown),
-                    mismatch_rows: Vec::new(),
-                });
-                total_fail += 1;
-                *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
-            }
         }
+
+        if res.status == "[PASS]" {
+            total_pass += 1;
+        } else {
+            total_fail += 1;
+        }
+
+        total_items += res.item_count;
+        cumulative_fidelity += res.avg_fidelity;
+
+        if args.output_path.is_none() && !args.output_json && !args.summary_only {
+            println!(
+                "{:<8} | {:<40} | {:>8} | {:>9.2}% | {:<20}",
+                res.status, res.filename, res.item_count, res.avg_fidelity, res.hint
+            );
+        }
+        results.push(res);
     }
 
     let global_avg_fidelity = if total_files > 0 {
@@ -375,7 +378,7 @@ fn main() {
     }
 
     let global_report = GlobalAuditReport {
-        target_dir: target_dir.to_string(),
+        target_dir: args.target_dir.clone(),
         total_files,
         total_pass,
         total_fail,
@@ -385,8 +388,8 @@ fn main() {
         results,
     };
 
-    if let Some(out) = output_path {
-        let content = if out.ends_with(".json") || output_json_flag {
+    if let Some(out) = &args.output_path {
+        let content = if out.ends_with(".json") || args.output_json {
             serde_json::to_string_pretty(&global_report).unwrap()
         } else {
             generate_markdown_report(&global_report)
@@ -399,7 +402,7 @@ fn main() {
         }
         fs::write(out, content).expect("Failed to write output file");
         println!("Report saved to: {}", out);
-    } else if output_json_flag {
+    } else if args.output_json {
         println!("{}", serde_json::to_string_pretty(&global_report).unwrap());
     } else {
         println!("{:-<100}", "");
