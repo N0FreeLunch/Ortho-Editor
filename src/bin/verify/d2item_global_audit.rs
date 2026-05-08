@@ -409,7 +409,7 @@ fn find_d2s_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
 
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
-    parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
+    parser.add_arg("target_dir").description("Directory containing .d2s files").optional();
     parser.add_spec(ArgSpec::option("filter", None, Some("filter"), "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)"));
     parser.add_spec(ArgSpec::flag("summary-only", None, Some("summary-only"), "Show only the summary block"));
     parser.add_spec(ArgSpec::flag("detailed", Some('d'), Some("detailed"), "Report all mismatches in a file, not just the first one"));
