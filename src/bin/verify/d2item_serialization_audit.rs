@@ -19,16 +19,16 @@ fn main() {
         "Show visual bitstream alignment for mismatches",
     ));
     parser.add_spec(ArgSpec::option(
+        "visual",
+        None,
+        Some("visual"),
+        "Generate a high-resolution SVG/HTML bit-diff report",
+    ));
+    parser.add_spec(ArgSpec::option(
         "target",
         Some('t'),
         Some("target"),
         "Only audit a specific item index",
-    ));
-    parser.add_spec(ArgSpec::flag(
-        "fail-fast",
-        Some('f'),
-        Some("fail-fast"),
-        "Stop at first mismatch",
     ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -47,6 +47,7 @@ fn main() {
     let path = parsed.get("save_file").unwrap();
     let use_json = parsed.is_set("json");
     let use_visual = parsed.is_set("diff-visual");
+    let visual_out = parsed.get("visual").cloned();
     let target_idx = parsed
         .get("target")
         .and_then(|s| s.parse::<usize>().ok());
@@ -70,6 +71,8 @@ fn main() {
         Ok(report) => {
             if use_json {
                 println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            } else if let Some(out_path) = visual_out {
+                generate_html_visual_report(&report, path, &out_path);
             } else {
                 println!("Serialization Audit for: {}", path);
                 if let Some(target) = target_idx {
@@ -111,6 +114,159 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+fn generate_html_visual_report(report: &d2r_core::verify::symmetry::DiffReport, file_path: &str, out_path: &str) {
+    let mut html = String::new();
+    html.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
+    html.push_str("    <meta charset=\"UTF-8\">\n    <title>Bitstream Visual Diff</title>\n");
+    html.push_str("    <style>\n");
+    html.push_str("        body { font-family: monospace; background-color: #1e1e1e; color: #d4d4d4; margin: 20px; }\n");
+    html.push_str("        h1, h2 { color: #569cd6; }\n");
+    html.push_str("        .legend { margin-bottom: 20px; padding: 10px; background: #252526; border-radius: 5px; }\n");
+    html.push_str("        .legend-item { display: inline-block; margin-right: 15px; }\n");
+    html.push_str("        .box { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: middle; }\n");
+    html.push_str("        .match { background-color: #4CAF50; }\n");
+    html.push_str("        .mismatch { background-color: #F44336; }\n");
+    html.push_str("        .nudge { background-color: #FFC107; }\n");
+    html.push_str("        .empty { background-color: #333; }\n");
+    html.push_str("        .item-container { background: #252526; padding: 15px; margin-bottom: 20px; border-radius: 5px; }\n");
+    html.push_str("        .grid { display: flex; flex-direction: column; gap: 2px; font-size: 10px; }\n");
+    html.push_str("        .row { display: flex; }\n");
+    html.push_str("        .row-label { width: 60px; color: #9cdcfe; }\n");
+    html.push_str("        .bits { display: flex; gap: 1px; flex-wrap: wrap; }\n");
+    html.push_str("        .bit { width: 10px; height: 12px; display: inline-flex; align-items: center; justify-content: center; }\n");
+    html.push_str("        .byte-gap { margin-right: 4px; }\n");
+    html.push_str("    </style>\n</head>\n<body>\n");
+
+    html.push_str(&format!("    <h1>Visual Diff: {}</h1>\n", file_path));
+    html.push_str("    <div class=\"legend\">\n");
+    html.push_str("        <div class=\"legend-item\"><div class=\"box match\"></div> Match</div>\n");
+    html.push_str("        <div class=\"legend-item\"><div class=\"box mismatch\"></div> Mismatch (Red)</div>\n");
+    html.push_str("        <div class=\"legend-item\"><div class=\"box nudge\"></div> Nudge / Shift (Yellow)</div>\n");
+    html.push_str("    </div>\n");
+
+    let mut found_issues = false;
+    for item in &report.items {
+        if !item.is_match || item.fidelity_score < 1.0 {
+            found_issues = true;
+            render_item_diff_html(&mut html, item, 0);
+        }
+    }
+
+    if !found_issues {
+        html.push_str("    <h2>All items match perfectly! No diffs to show.</h2>\n");
+    }
+
+    html.push_str("</body>\n</html>");
+
+    if let Some(parent) = std::path::Path::new(out_path).parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            let _ = fs::create_dir_all(parent);
+        }
+    }
+
+    if let Err(e) = fs::write(out_path, html) {
+        eprintln!("Failed to write HTML report: {}", e);
+    } else {
+        println!("Visual diff report generated at {}", out_path);
+    }
+}
+
+fn render_item_diff_html(html: &mut String, item: &ItemDiff, depth: usize) {
+    let margin = depth * 20;
+    html.push_str(&format!("    <div class=\"item-container\" style=\"margin-left: {}px;\">\n", margin));
+    html.push_str(&format!("        <h2>{} (Code: {}) - Fidelity: {:.2}%</h2>\n", item.label, item.code, item.fidelity_score));
+    
+    if let Some(m_type) = &item.mismatch_type {
+        html.push_str(&format!("        <p><strong>Reason:</strong> {}</p>\n", m_type));
+    }
+    if let Some(offset) = item.first_mismatch_offset {
+        html.push_str(&format!("        <p><strong>First Mismatch Offset:</strong> {}</p>\n", offset));
+    }
+
+    if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
+        let o_chars: Vec<char> = orig.chars().collect();
+        let t_chars: Vec<char> = target.chars().collect();
+        
+        html.push_str("        <div class=\"grid\">\n");
+        html.push_str("            <div class=\"row\">\n");
+        html.push_str("                <div class=\"row-label\">Original</div>\n");
+        html.push_str("                <div class=\"bits\">\n");
+        
+        let max_len = o_chars.len().max(t_chars.len());
+        let mut i = 0;
+        let mut j = 0;
+        
+        let mut o_html = String::new();
+        let mut t_html = String::new();
+        
+        while i < o_chars.len() || j < t_chars.len() {
+            let is_byte_end = (i.max(j) + 1) % 8 == 0;
+            let gap_class = if is_byte_end { " byte-gap" } else { "" };
+            
+            if i < o_chars.len() && j < t_chars.len() && o_chars[i] == t_chars[j] {
+                o_html.push_str(&format!("<div class=\"bit match{}\">{}</div>", gap_class, o_chars[i]));
+                t_html.push_str(&format!("<div class=\"bit match{}\">{}</div>", gap_class, t_chars[j]));
+                i += 1;
+                j += 1;
+            } else if i < o_chars.len() && j < t_chars.len() {
+                // Lookahead for nudge
+                let mut found_sync = false;
+                for nudge in 1..49 {
+                    if j + nudge < t_chars.len() && o_chars[i] == t_chars[j + nudge] {
+                        for _ in 0..nudge {
+                            let g_class = if (j + 1) % 8 == 0 { " byte-gap" } else { "" };
+                            o_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", g_class));
+                            t_html.push_str(&format!("<div class=\"bit nudge{}\">{}</div>", g_class, t_chars[j]));
+                            j += 1;
+                        }
+                        found_sync = true;
+                        break;
+                    }
+                    if i + nudge < o_chars.len() && o_chars[i + nudge] == t_chars[j] {
+                        for _ in 0..nudge {
+                            let g_class = if (i + 1) % 8 == 0 { " byte-gap" } else { "" };
+                            o_html.push_str(&format!("<div class=\"bit nudge{}\">{}</div>", g_class, o_chars[i]));
+                            t_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", g_class));
+                            i += 1;
+                        }
+                        found_sync = true;
+                        break;
+                    }
+                }
+                
+                if !found_sync {
+                    o_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, o_chars[i]));
+                    t_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, t_chars[j]));
+                    i += 1;
+                    j += 1;
+                }
+            } else if i < o_chars.len() {
+                o_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, o_chars[i]));
+                t_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", gap_class));
+                i += 1;
+            } else {
+                o_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", gap_class));
+                t_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, t_chars[j]));
+                j += 1;
+            }
+        }
+        
+        html.push_str(&o_html);
+        html.push_str("\n                </div>\n            </div>\n");
+        html.push_str("            <div class=\"row\">\n");
+        html.push_str("                <div class=\"row-label\">Target</div>\n");
+        html.push_str("                <div class=\"bits\">\n");
+        html.push_str(&t_html);
+        html.push_str("\n                </div>\n            </div>\n        </div>\n");
+    }
+
+    for child in &item.children {
+        render_item_diff_html(html, child, depth + 1);
+    }
+
+    html.push_str("    </div>\n");
 }
 
 const ANSI_RESET: &str = "\x1b[0m";
