@@ -162,6 +162,7 @@ pub fn parse_item_at_with_limit(
 pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {
     let mut all_items = Vec::new();
     let jm_positions = crate::save::find_jm_markers(bytes);
+    eprintln!("DEBUG: Found {} JM markers", jm_positions.len());
 
     if jm_positions.is_empty() {
         return Err(ParsingFailure {
