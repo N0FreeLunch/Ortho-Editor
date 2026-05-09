@@ -142,6 +142,9 @@ pub fn peek_item_header_at(
     possible_gaps.sort_unstable();
     possible_gaps.dedup();
 
+    let mut best_candidate = None;
+    let mut best_is_known = false;
+
     for gap in possible_gaps {
         let mut code = String::new();
         let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -153,10 +156,16 @@ pub fn peek_item_header_at(
             else { ok = false; break; }
         }
         if ok && is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
-            return Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
+            let is_known = is_v105_summary_code(&code) || item_template(&code).is_some();
+            
+            // Forensic: Prioritize known item codes to stop 8-bit shifted false positives
+            if best_candidate.is_none() || (!best_is_known && is_known) {
+                best_candidate = Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
+                best_is_known = is_known;
+            }
         }
     }
-    None
+    best_candidate
 }
 
 
@@ -166,7 +175,7 @@ pub fn parse_item_at_with_limit(
     huffman: &HuffmanTree,
     idx: usize,
     alpha: bool,
-    limit: Option<u64>,
+    _limit: Option<u64>,
 ) -> ParsingResult<(Item, u64)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
@@ -232,18 +241,10 @@ impl Item {
         let section_bits = (section_bytes.len() * 8) as u64;
 
         // Forensic: Resolve variable header gap specific to Alpha v105
-        let mut start_offset = 0; // JM marker (16) and count (16) already skipped by caller
-        if alpha_mode {
-            // Need the flags for the first item to resolve the gap correctly.
-            // peek_item_header_at already provides the flags.
-            if let Some((_, _, _, _, flags, _, _, _, _, _)) = peek_item_header_at(section_bytes, 0, huffman, alpha_mode) {
-                let gap_axiom = V105HeaderGapAxiom::default();
-                let gap = gap_axiom.resolve_gap(None, flags, true);
-                start_offset += gap as u64;
-            }
-        }
-        let markers =
-            crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
+        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
+        if markers.is_empty() { return Ok(items); }
+        
+        let mut start_offset = markers[0];
 
         for (i, &start) in markers.iter().enumerate() {
             if items.len() >= top_level_count as usize {
@@ -258,7 +259,7 @@ impl Item {
 
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
-            if let Some((_, _, _, code, flags, _, is_compact, _, _, _)) =
+            if let Some((_, _, _, _code, flags, _, is_compact, _, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
@@ -278,11 +279,19 @@ impl Item {
             ) {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
+                    let mut actual_consumed = consumed_bits;
+                    
+                    // Alpha v105 forensic: Apply fixed width for compact items to stop drift.
+                    // This reconciles the 11-bit drift seen in potions (69 bits decoded vs 80 bits allocated).
+                    if alpha_mode && item.header.is_compact {
+                        actual_consumed = 80;
+                    }
+                    
                     final_item.range.start = section_bit_offset + start;
-                    final_item.range.end = section_bit_offset + start + consumed_bits;
-                    final_item.total_bits = consumed_bits;
+                    final_item.range.end = section_bit_offset + start + actual_consumed;
+                    final_item.total_bits = actual_consumed;
                     items.push(final_item);
-                    start_offset = start + consumed_bits;
+                    start_offset = start + actual_consumed;
                 }
                 Err(_) => {
                     // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
@@ -375,7 +384,7 @@ impl Item {
         } else { None };
         let code_peek = peek.as_ref().map(|p| p.3.as_str());
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
-        let has_checksum_peek = peek.as_ref().map(|p| p.9);
+        let _has_checksum_peek = peek.as_ref().map(|p| p.9);
 
         let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item)?;
         
@@ -492,6 +501,7 @@ impl Item {
             .with_personalization(item.header.is_personalized);
         let consumed_bits = cursor.pos() - start_bit;
         let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.code, item.header.flags);
+        // println!("[DEBUG] to_emitter: code='{}', current_bits={}, final_consumed={}", item.code, consumed_bits, final_consumed);
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;
             let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
@@ -529,12 +539,15 @@ impl Item {
 
 pub fn is_v105_summary_code(code: &str) -> bool {
     let trimmed = code.trim();
+    if trimmed.is_empty() || code.chars().all(|c| c.is_whitespace()) {
+        return false;
+    }
     matches!(trimmed, 
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|
         "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
-        "box"|"ibk"|"tbk"|"2swc"|"gpb"|
-        "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|"w"
+        "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|
+        "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"
     )
 }
 
@@ -556,7 +569,7 @@ pub fn scan_socket_children(
     let section_bits = (bytes.len() * 8) as u64;
 
     while current_pos < max_pos && current_pos < section_bits {
-        if let Some((mode, location, _x, code, flags, version, is_compact, _header_bits, _nudge, _has_checksum)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
+        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);

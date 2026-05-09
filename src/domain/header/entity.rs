@@ -76,7 +76,7 @@ impl HeaderAxiom {
         self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
     }
 
-    pub fn is_plausible(&self, mode: u8, location: u8, code: &str, flags: u32) -> bool {
+    pub fn is_plausible(&self, mode: u8, location: u8, code: &str, _flags: u32) -> bool {
         let trimmed = code.trim();
         if trimmed.is_empty() { return false; }
         
@@ -84,9 +84,14 @@ impl HeaderAxiom {
             return false;
         }
 
+        // Strictly reject non-alphanumeric codes to avoid bit-shifted ghost items
+        if trimmed.chars().any(|c| !c.is_alphanumeric() && c != ' ') {
+            return false;
+        }
+
         if self.alpha_mode {
-            // High leniency for other fields in Alpha forensics
-            return mode <= 7 && location <= 15;
+            // Forensic: Alpha v105 follows standard mode/location boundaries
+            return mode <= 6 && location <= 5;
         } else {
             if mode > 6 || location > 15 { return false; }
             true
@@ -98,12 +103,12 @@ impl HeaderAxiom {
             return false;
         }
         if self.alpha_mode {
-            let identified = (flags & 1) != 0;
-            let runeword_bit = (flags & (1 << 26)) != 0;
+            let identified = self.is_identified(flags);
             if self.version == 5 {
-                (flags & (1 << 23)) != 0 && !runeword_bit && identified
+                let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+                (flags & (1 << 23)) != 0 && !is_fragment && identified
             } else if self.version == 6 || self.version == 7 {
-                (flags & (1 << 21)) != 0 && !runeword_bit && identified
+                (flags & (1 << 21)) != 0 && identified
             } else {
                 // Fallback to bit 21 for other Alpha versions (Retail-like)
                 (flags & (1 << 21)) != 0
