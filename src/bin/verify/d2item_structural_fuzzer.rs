@@ -166,7 +166,7 @@ fn main() -> io::Result<()> {
         let scan_end = start_bit + 128;
         
         for bit in scan_start..scan_end {
-            if let Some((mode, loc, _x, code, flags, ver, _compact, header_bits, _nudge)) =
+            if let Some((mode, loc, _x, code, flags, ver, _compact, header_bits, _nudge, _has_checksum)) =
                 peek_item_header_at(&bytes, bit, &huffman, true)
             {
                 if is_plausible_item_header(mode, loc, &code, flags, ver, true) {
@@ -213,7 +213,7 @@ fn main() -> io::Result<()> {
                     stop_reason = "Invalid item header".to_string();
                     break;
                 }
-                let (mode, loc, _, code, flags, ver, _, header_bits, _) = header.unwrap();
+                let (mode, loc, _, code, flags, ver, _, header_bits, _, _has_checksum) = header.unwrap();
                 if !is_plausible_item_header(mode, loc, &code, flags, ver, true) {
                     stop_reason = format!("Implausible header at {}", current_bit);
                     break;

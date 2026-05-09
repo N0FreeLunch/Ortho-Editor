@@ -125,6 +125,7 @@ impl AttributeSection {
         buf.push(b'f');
 
         let mut writer = BitWriter::endian(&mut buf, LittleEndian);
+        let mut written_bits: u64 = 0;
 
         for entry in &self.entries {
             // Allow Stat ID 5 for Alpha v105 to match discovered fixtures (Alkor reward)
@@ -134,8 +135,10 @@ impl AttributeSection {
 
             if let Some(ref bits) = entry.opaque_bits {
                 write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
+                written_bits += 9;
                 for &bit in bits {
                     writer.write_bit(bit)?;
+                    written_bits += 1;
                 }
                 continue;
             }
@@ -146,10 +149,22 @@ impl AttributeSection {
             }
             write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
             write_bits_dynamic(&mut writer, bits, entry.raw_value)?;
+            written_bits += 9 + bits as u64;
         }
         // 0x1FF terminator
         write_bits_dynamic(&mut writer, 9, 0x1FFu32)?;
-        writer.byte_align()?;
+        written_bits += 9;
+
+        if is_alpha {
+            let bits_to_align = (8 - (written_bits % 8)) % 8;
+            if bits_to_align == 7 {
+                write_bits_dynamic(&mut writer, 7, 0x01)?;
+            } else if bits_to_align > 0 {
+                write_bits_dynamic(&mut writer, bits_to_align as u32, 0)?;
+            }
+        } else {
+            writer.byte_align()?;
+        }
         Ok(buf)
     }
 
