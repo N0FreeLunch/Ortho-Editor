@@ -267,7 +267,7 @@ where
         if is_stat_320 {
             // Alpha v105 Larzuk items use a fixed-size envelope for nested items
             // Ref: Discussion 0231 (9-bit ID + 2871-bit payload = 2880 bits / 360 bytes)
-            let skip_bits = axiom.stat_bit_width(320, 2871);
+            let skip_bits = axiom.stat_bit_width(320, 2871) + 2;
             let search_start = recorder.pos();
             
             // We still want to parse the nested item for data extraction

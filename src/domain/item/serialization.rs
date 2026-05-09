@@ -684,8 +684,7 @@ pub fn write_property_list(
                      // Fixed budget: 2871 bits
                      let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
                      let child_bits = child_bits_vec.len();
-                     let budget = axiom.stat_bit_width(320, 2871);
-
+                     let budget = axiom.stat_bit_width(320, 2871) + 2;
                      eprintln!("DEBUG: Stat 320 Child Bits: {}, Budget: {}, Padding: {}", 
                          child_bits, budget, if child_bits < budget as usize { budget as usize - child_bits } else { 0 });
 
