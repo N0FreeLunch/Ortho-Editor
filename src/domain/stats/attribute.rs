@@ -1,4 +1,4 @@
-use std::io::{self, Cursor};
+use std::io::{self, Cursor, Write};
 use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
 use crate::data::stat_costs::{StatCost, STAT_COSTS};
 
@@ -119,16 +119,17 @@ impl AttributeSection {
     }
 
     pub fn to_bytes_from_entries(&self, is_alpha: bool) -> io::Result<Vec<u8>> {
-        let mut buf = Vec::new();
-        // The 'gf' marker must be RAW bytes, not bit-packed.
-        buf.push(b'g');
-        buf.push(b'f');
+        let mut buf = vec![b'g', b'f'];
+        let mut rest = Self::to_bytes_bits(&self.entries, is_alpha)?;
+        buf.append(&mut rest);
+        Ok(buf)
+    }
 
-        let mut writer = BitWriter::endian(&mut buf, LittleEndian);
+    fn to_bytes_bits(entries: &[AttributeEntry], is_alpha: bool) -> Result<Vec<u8>, std::io::Error> {
+        let mut writer = BitWriter::endian(Vec::new(), LittleEndian);
         let mut written_bits: u64 = 0;
 
-        for entry in &self.entries {
-            // Allow Stat ID 5 for Alpha v105 to match discovered fixtures (Alkor reward)
+        for entry in entries {
             if entry.stat_id == 5 && !is_alpha {
                 continue;
             }
@@ -144,27 +145,33 @@ impl AttributeSection {
             }
 
             let bits = char_stat_save_bits(entry.stat_id, is_alpha);
-            if bits == 0 {
-                continue;
-            }
+            let cost = stat_cost(entry.stat_id);
+            let param_bits = cost.map(|c| c.save_param_bits as u32).unwrap_or(0);
+
             write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
+            if param_bits > 0 {
+                write_bits_dynamic(&mut writer, param_bits, entry.param)?;
+            }
             write_bits_dynamic(&mut writer, bits, entry.raw_value)?;
-            written_bits += 9 + bits as u64;
+            written_bits += 9 + param_bits as u64 + bits as u64;
         }
-        // 0x1FF terminator
+
+        // Terminator 0x1FF
         write_bits_dynamic(&mut writer, 9, 0x1FFu32)?;
         written_bits += 9;
 
+        // Alpha v105 alignment anomaly (Axiom 0337)
         if is_alpha {
             let bits_to_align = (8 - (written_bits % 8)) % 8;
-            if bits_to_align == 7 {
-                write_bits_dynamic(&mut writer, 7, 0x01)?;
-            } else if bits_to_align > 0 {
+            if bits_to_align > 0 {
                 write_bits_dynamic(&mut writer, bits_to_align as u32, 0)?;
             }
         } else {
             writer.byte_align()?;
         }
+
+        let mut buf = writer.into_writer();
+        buf.flush()?;
         Ok(buf)
     }
 
