@@ -800,7 +800,34 @@ pub fn parse_item_body<R: BitRead>(
     } else {
         cursor.begin_segment(ItemSegmentType::Code);
         let mut code = String::new();
-        for _ in 0..4 { code.push(huff.decode_recorded(cursor)?); }
+        for i in 0..4 {
+            match huff.decode_recorded(cursor) {
+                Ok(ch) => code.push(ch),
+                Err(e) => {
+                    if alpha_mode && i >= 1 {
+                        // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
+                        let saved_pos = cursor.pos();
+                        // Try 1-bit nudge
+                        if let Ok(_) = cursor.read_bit() {
+                            if let Ok(ch) = huff.decode_recorded(cursor) {
+                                code.push(ch);
+                                continue;
+                            }
+                        }
+                        // Try 2-bit nudge
+                        cursor.rollback(saved_pos);
+                        if let Ok(_) = cursor.read_bits::<u8>(2) {
+                            if let Ok(ch) = huff.decode_recorded(cursor) {
+                                code.push(ch);
+                                continue;
+                            }
+                        }
+                        cursor.rollback(saved_pos);
+                    }
+                    return Err(e);
+                }
+            }
+        }
         let mut nudge = None;
         if h_axiom.is_alpha() && (header.version == 5 || header.version == 0 || header.version == 1) { 
             nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 

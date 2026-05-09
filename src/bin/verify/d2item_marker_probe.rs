@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use anyhow::{Result, Context};
-use d2r_core::item::{HuffmanTree, peek_item_header_at, is_plausible_item_header};
+use d2r_core::item::{HuffmanTree, peek_item_header_at, peek_item_header_at_specific_gap, is_plausible_item_header};
 use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn main() -> Result<()> {
@@ -40,29 +40,26 @@ fn main() -> Result<()> {
     println!("Alpha mode: {}", alpha_mode);
     println!("{:-<40}", "");
 
-    if let Some((mode, location, x, code, flags, version, is_compact, header_bits, _nudge, _has_checksum)) =
-        peek_item_header_at(&bytes, offset, &huffman, alpha_mode)
-    {
-        println!("Header found at bit {}:", offset);
-        println!("  Flags:    0x{:08X}", flags);
-        println!("  Version:  {}", version);
-        println!("  Mode:     {} (0x{:X})", mode_name(mode), mode);
-        println!("  Location: {} (0x{:X})", location_name(location), location);
-        println!("  X Coord:  {}", x);
-        println!("  Code:     '{}'", code);
-        println!("  Compact:  {}", is_compact);
-        println!("  Hdr bits: {}", header_bits);
-        println!("  Nudge:    {}", _nudge);
-        println!("  Checksum: {}", _has_checksum);
-
-        let plausible = is_plausible_item_header(mode, location, &code, flags, version, alpha_mode);
-        if plausible {
-            println!("\nVerdict: [REAL CANDIDATE]");
-        } else {
-            println!("\nVerdict: [IMPLAUSIBLE BUT DECODABLE]");
+    let mut found = false;
+    // Iterate through some reasonable gaps to see multiple candidates
+    for gap in 0..64 {
+        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, nudge_val, _has_checksum)) =
+            peek_item_header_at_specific_gap(&bytes, offset, &huffman, alpha_mode, gap as u64)
+        {
+            if is_plausible_item_header(mode, location, &code, flags, version, alpha_mode) {
+                println!("Candidate at bit {} (Gap {}):", offset, gap);
+                println!("  Flags:    0x{:08X}", flags);
+                println!("  Version:  {}", version);
+                println!("  Code:     '{}'", &code);
+                println!("  Nudge:    {}", nudge_val);
+                println!("{:-<20}", "");
+                found = true;
+            }
         }
-    } else {
-        println!("Verdict: [EXTRACTION FAILURE / NO ITEM AT OFFSET]");
+    }
+    
+    if !found {
+        println!("Verdict: [EXTRACTION FAILURE / NO PLAUSIBLE ITEM AT OFFSET]");
     }
 
     Ok(())

@@ -97,9 +97,21 @@ pub fn peek_item_header_at(
     let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     if n_reader.skip(start_bit as u32 + base_header_len as u32).is_err() { return None; }
     let mut n_cursor = BitCursor::new(n_reader);
-    for _ in 0..4 {
-        if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) { code.push(ch); }
-        else { return None; }
+    for i in 0..4 {
+        match huffman.decode_recorded(&mut n_cursor) {
+            Ok(ch) => code.push(ch),
+            Err(_) => {
+                if alpha_mode && i >= 2 {
+                    if n_cursor.read_bit().is_ok() {
+                        if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
+                            code.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                return None;
+            }
+        }
     }
 
     let axiom = HeaderAxiom::new(version, alpha_mode);
@@ -129,6 +141,13 @@ pub fn peek_item_header_at(
         possible_gaps.push(geom_bits + 16);
         possible_gaps.push(geom_bits + 24);
         possible_gaps.push(geom_bits + 32);
+
+        // Alpha v105 forensic: Try 1-bit and 2-bit nudges (Axiom 0340)
+        // These handle the bitstream drift seen in Act 5 items like potions.
+        possible_gaps.push(geom_bits + 1);
+        possible_gaps.push(geom_bits + 2);
+        possible_gaps.push(geom_bits + 9);
+        possible_gaps.push(geom_bits + 10);
     } else {
         if geometry.has_header_gap {
             possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64 + 8);
@@ -139,33 +158,106 @@ pub fn peek_item_header_at(
         }
     }
 
-    possible_gaps.sort_unstable();
-    possible_gaps.dedup();
+    // Do NOT sort or dedup here for Alpha v105 to maintain prioritization of byte-aligned gaps.
+    // (Axiom 0340)
 
-    let mut best_candidate = None;
+    let mut best_candidate: Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> = None;
     let mut best_is_known = false;
 
     for gap in possible_gaps {
-        let mut code = String::new();
-        let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-        if n_reader.skip(start_bit as u32 + base_header_len + gap as u32).is_err() { continue; }
-        let mut n_cursor = BitCursor::new(n_reader);
-        let mut ok = true;
-        for _ in 0..4 {
-            if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) { code.push(ch); }
-            else { ok = false; break; }
-        }
-        if ok && is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
-            let is_known = is_v105_summary_code(&code) || item_template(&code).is_some();
+        if let Some(candidate) = peek_item_header_at_specific_gap(
+            section_bytes, start_bit, huffman, alpha_mode, gap
+        ) {
+            let code = &candidate.3;
+            let is_known = is_v105_summary_code(code) || item_template(code).is_some();
             
-            // Forensic: Prioritize known item codes to stop 8-bit shifted false positives
-            if best_candidate.is_none() || (!best_is_known && is_known) {
-                best_candidate = Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
+            // Forensic: Prioritize checksums and known item codes to stop false positives (Axiom 0340)
+            let best_has_checksum = if let Some(c) = &best_candidate { c.9 } else { false };
+            let has_checksum = candidate.9;
+
+            if best_candidate.is_none() 
+                || (!best_has_checksum && has_checksum)
+                || (!best_is_known && is_known && (!best_has_checksum || has_checksum)) 
+            {
+                /*
+                if alpha_mode && gap > 0 {
+                    eprintln!("[DEBUG] peek_item_header_at: code='{}', nudge={}, has_checksum={}", code, gap, has_checksum);
+                }
+                */
+                best_candidate = Some(candidate);
                 best_is_known = is_known;
             }
         }
     }
     best_candidate
+}
+
+pub fn peek_item_header_at_specific_gap(
+    section_bytes: &[u8],
+    start_bit: u64,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    gap: u64,
+) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
+    let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    if reader.skip(start_bit as u32).is_err() { return None; }
+
+    // Read header structure
+    let flags = reader.read::<32, u32>().ok()?;
+    
+    let mut alpha_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    alpha_reader.skip(start_bit as u32 + 32).ok()?;
+    let checksum = alpha_reader.read::<8, u8>().ok()?;
+    let v = alpha_reader.read::<3, u8>().ok()?;
+    let calculated = calculate_alpha_v105_checksum(flags, v);
+    
+    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum {
+        let m = alpha_reader.read::<3, u8>().ok()?;
+        let l = alpha_reader.read::<3, u8>().ok()?;
+        let x = alpha_reader.read::<4, u8>().ok()?;
+        (v, m, l, x, 32 + 8 + 3 + 3 + 3 + 4, true)
+    } else {
+        let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+        retail_reader.skip(start_bit as u32 + 32).ok()?;
+        let v = retail_reader.read::<3, u8>().ok()?;
+        let m = retail_reader.read::<3, u8>().ok()?;
+        let l = retail_reader.read::<3, u8>().ok()?;
+        let x = retail_reader.read::<4, u8>().ok()?;
+        (v, m, l, x, 32 + 3 + 3 + 3 + 4, false)
+    };
+
+    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+    let is_compact = s_axiom.is_compact(flags);
+
+    let mut code = String::new();
+    let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    if n_reader.skip(start_bit as u32 + base_header_len as u32 + gap as u32).is_err() { return None; }
+    let mut n_cursor = BitCursor::new(n_reader);
+    let mut ok = true;
+    for i in 0..4 {
+        match huffman.decode_recorded(&mut n_cursor) {
+            Ok(ch) => code.push(ch),
+            Err(_) => {
+                if alpha_mode && i >= 1 {
+                    if n_cursor.read_bit().is_ok() {
+                        if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
+                            code.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                ok = false; break;
+            }
+        }
+    }
+    
+    if ok {
+        // eprintln!("[DEBUG] specific_gap: gap={}, code='{}', plausible={}", gap, code, is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode));
+        if is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
+            return Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
+        }
+    }
+    None
 }
 
 
@@ -293,12 +385,23 @@ impl Item {
                     items.push(final_item);
                     start_offset = start + actual_consumed;
                 }
-                Err(_) => {
+                Err(e) => {
                     // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
+                    let (peek_code, peek_limit) = if let Some((_, _, _, code, _, _, is_compact, _, _, _)) =
+                        peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                    {
+                        let l = if alpha_mode && is_compact { 80 } else { limit };
+                        (code, l)
+                    } else {
+                        ("Opaque".to_string(), limit)
+                    };
+
+                    eprintln!("[WARN] Item parsing failed at bit {}. Capturing {} bits as Opaque (Code Hint: '{}'). Error: {:?}", section_bit_offset + start, peek_limit, peek_code, e);
+
                     let mut bits = Vec::new();
                     let mut fallback_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
                     if fallback_reader.skip(start as u32).is_ok() {
-                        for _ in 0..limit {
+                        for _ in 0..peek_limit {
                             if let Ok(b) = fallback_reader.read_bit() {
                                 bits.push(b);
                             } else {
@@ -308,12 +411,19 @@ impl Item {
                     }
 
                     let mut opaque_item = Item::default();
-                    opaque_item.code = "Opaque".to_string();
-                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits));
+                    opaque_item.code = peek_code;
+                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                    for (idx, b) in bits.iter().enumerate() {
+                        opaque_item.bits.push(crate::domain::item::RecordedBit {
+                            bit: *b,
+                            offset: section_bit_offset + start + idx as u64,
+                        });
+                    }
                     opaque_item.range.start = section_bit_offset + start;
-                    opaque_item.range.end = section_bit_offset + start + limit;
-                    opaque_item.total_bits = limit;
+                    opaque_item.range.end = section_bit_offset + start + peek_limit;
+                    opaque_item.total_bits = peek_limit;
                     items.push(opaque_item);
+                    start_offset = start + peek_limit;
                 }
             }
         }
@@ -346,7 +456,13 @@ impl Item {
 
                     let mut opaque_item = Item::default();
                     opaque_item.code = "Opaque".to_string();
-                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits));
+                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                    for (idx, b) in bits.iter().enumerate() {
+                        opaque_item.bits.push(crate::domain::item::RecordedBit {
+                            bit: *b,
+                            offset: section_bit_offset + start + idx as u64,
+                        });
+                    }
                     opaque_item.range.start = section_bit_offset + start;
                     opaque_item.range.end = section_bit_offset + end;
                     opaque_item.total_bits = len;
