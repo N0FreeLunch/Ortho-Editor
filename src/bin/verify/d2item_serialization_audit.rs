@@ -118,33 +118,70 @@ fn main() {
 
 fn generate_html_visual_report(report: &d2r_core::verify::symmetry::DiffReport, file_path: &str, out_path: &str) {
     let mut html = String::new();
-    html.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
-    html.push_str("    <meta charset=\"UTF-8\">\n    <title>Bitstream Visual Diff</title>\n");
-    html.push_str("    <style>\n");
-    html.push_str("        body { font-family: monospace; background-color: #1e1e1e; color: #d4d4d4; margin: 20px; }\n");
-    html.push_str("        h1, h2 { color: #569cd6; }\n");
-    html.push_str("        .legend { margin-bottom: 20px; padding: 10px; background: #252526; border-radius: 5px; }\n");
-    html.push_str("        .legend-item { display: inline-block; margin-right: 15px; }\n");
-    html.push_str("        .box { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: middle; }\n");
-    html.push_str("        .match { background-color: #4CAF50; }\n");
-    html.push_str("        .mismatch { background-color: #F44336; }\n");
-    html.push_str("        .nudge { background-color: #FFC107; }\n");
-    html.push_str("        .empty { background-color: #333; }\n");
-    html.push_str("        .item-container { background: #252526; padding: 15px; margin-bottom: 20px; border-radius: 5px; }\n");
-    html.push_str("        .grid { display: flex; flex-direction: column; gap: 2px; font-size: 10px; }\n");
-    html.push_str("        .row { display: flex; }\n");
-    html.push_str("        .row-label { width: 60px; color: #9cdcfe; }\n");
-    html.push_str("        .bits { display: flex; gap: 1px; flex-wrap: wrap; }\n");
-    html.push_str("        .bit { width: 10px; height: 12px; display: inline-flex; align-items: center; justify-content: center; }\n");
-    html.push_str("        .byte-gap { margin-right: 4px; }\n");
-    html.push_str("    </style>\n</head>\n<body>\n");
+    html.push_str(&"<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>Alpha v105 Bit-Diff Visualizer</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #38bdf8;
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --border: #334155;
+            --bit-match: #15803d;
+            --bit-mismatch: #b91c1c;
+            --bit-nudge: #a16207;
+            --bit-empty: #334155;
+        }
+        body { font-family: 'Inter', -apple-system, sans-serif; background-color: var(--bg-color); color: var(--text-primary); margin: 0; padding: 40px 20px; line-height: 1.5; }
+        .container { max-width: 1200px; margin: auto; }
+        header { margin-bottom: 40px; text-align: center; }
+        h1 { font-size: 2rem; font-weight: 800; margin-bottom: 8px; color: var(--accent); }
+        .subtitle { color: var(--text-secondary); font-size: 0.9rem; }
+        .legend { display: flex; gap: 24px; margin-bottom: 32px; padding: 16px 24px; background: var(--card-bg); border-radius: 12px; border: 1px solid var(--border); justify-content: center; }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; font-weight: 500; }
+        .box { width: 14px; height: 14px; border-radius: 3px; }
+        .match { background-color: var(--bit-match); }
+        .mismatch { background-color: var(--bit-mismatch); }
+        .nudge { background-color: var(--bit-nudge); }
+        .empty { background-color: var(--bit-empty); }
+        .item-card { background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border); overflow: hidden; margin-bottom: 32px; }
+        .item-header { padding: 20px 24px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+        .item-header h2 { margin: 0; font-size: 1.25rem; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+        .fidelity-badge { font-size: 0.75rem; font-weight: 700; padding: 4px 12px; border-radius: 9999px; background: rgba(56, 189, 248, 0.1); color: var(--accent); }
+        .item-meta { padding: 16px 24px; font-size: 0.875rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+        .grid-container { padding: 24px; overflow-x: auto; }
+        .diff-grid { display: flex; flex-direction: column; gap: 12px; font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+        .bit-row { display: flex; align-items: center; }
+        .row-label { width: 100px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); flex-shrink: 0; }
+        .bits-wrapper { display: flex; gap: 1px; flex-wrap: wrap; }
+        .bit { width: 12px; height: 18px; font-size: 9px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.7); }
+        .bit.byte-gap { margin-right: 4px; }
+        .perfect-msg { text-align: center; padding: 60px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+<div class=\"container\">
+    <header>
+        <h1>Bitstream Visual Diff</h1>
+        <p class=\"subtitle\">File: <code>{file_path}</code></p>
+    </header>
 
-    html.push_str(&format!("    <h1>Visual Diff: {}</h1>\n", file_path));
-    html.push_str("    <div class=\"legend\">\n");
-    html.push_str("        <div class=\"legend-item\"><div class=\"box match\"></div> Match</div>\n");
-    html.push_str("        <div class=\"legend-item\"><div class=\"box mismatch\"></div> Mismatch (Red)</div>\n");
-    html.push_str("        <div class=\"legend-item\"><div class=\"box nudge\"></div> Nudge / Shift (Yellow)</div>\n");
-    html.push_str("    </div>\n");
+    <div class=\"legend\">
+        <div class=\"legend-item\"><div class=\"box match\"></div> Match</div>
+        <div class=\"legend-item\"><div class=\"box mismatch\"></div> Mismatch</div>
+        <div class=\"legend-item\"><div class=\"box nudge\"></div> Nudge (Shift)</div>
+        <div class=\"legend-item\"><div class=\"box empty\"></div> Gap / Empty</div>
+    </div>"
+    .replace("{file_path}", file_path));
+
 
     let mut found_issues = false;
     for item in &report.items {
@@ -155,10 +192,10 @@ fn generate_html_visual_report(report: &d2r_core::verify::symmetry::DiffReport, 
     }
 
     if !found_issues {
-        html.push_str("    <h2>All items match perfectly! No diffs to show.</h2>\n");
+        html.push_str("<div class=\"perfect-msg\"><h2>All items match perfectly! No differences detected in this save file.</h2></div>");
     }
 
-    html.push_str("</body>\n</html>");
+    html.push_str("</div>\n</body>\n</html>");
 
     if let Some(parent) = std::path::Path::new(out_path).parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
@@ -173,39 +210,47 @@ fn generate_html_visual_report(report: &d2r_core::verify::symmetry::DiffReport, 
     }
 }
 
-fn render_item_diff_html(html: &mut String, item: &ItemDiff, depth: usize) {
-    let margin = depth * 20;
-    html.push_str(&format!("    <div class=\"item-container\" style=\"margin-left: {}px;\">\n", margin));
-    html.push_str(&format!("        <h2>{} (Code: {}) - Fidelity: {:.2}%</h2>\n", item.label, item.code, item.fidelity_score));
+fn render_item_diff_html(html: &mut String, item: &d2r_core::verify::symmetry::ItemDiff, depth: usize) {
+    let margin = depth * 24;
+    html.push_str(&format!("<div class=\"item-card\" style=\"margin-left: {}px;\">
+        <div class=\"item-header\">
+            <h2>
+                <span>{} (Code: {})</span>
+                <span class=\"fidelity-badge\">Fidelity: {:.2}%</span>
+            </h2>
+        </div>
+        <div class=\"item-meta\">", 
+        margin, item.label, item.code, item.fidelity_score * 100.0));
     
     if let Some(m_type) = &item.mismatch_type {
-        html.push_str(&format!("        <p><strong>Reason:</strong> {}</p>\n", m_type));
+        html.push_str(&format!("<div><strong>Reason:</strong> {}</div>", m_type));
     }
     if let Some(offset) = item.first_mismatch_offset {
-        html.push_str(&format!("        <p><strong>First Mismatch Offset:</strong> {}</p>\n", offset));
+        html.push_str(&format!("<div><strong>First Mismatch:</strong> Bit {}</div>", offset));
     }
+    if let Some(seg) = &item.segment {
+        html.push_str(&format!("<div><strong>Segment:</strong> {}</div>", seg));
+    }
+    html.push_str("</div>");
 
     if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
         let o_chars: Vec<char> = orig.chars().collect();
         let t_chars: Vec<char> = target.chars().collect();
         
-        html.push_str("        <div class=\"grid\">\n");
-        html.push_str("            <div class=\"row\">\n");
-        html.push_str("                <div class=\"row-label\">Original</div>\n");
-        html.push_str("                <div class=\"bits\">\n");
+        html.push_str("<div class=\"grid-container\"><div class=\"diff-grid\">");
         
         let mut i = 0;
         let mut j = 0;
-        let mut o_html = String::new();
-        let mut t_html = String::new();
+        let mut o_row = String::new();
+        let mut t_row = String::new();
         
         while i < o_chars.len() || j < t_chars.len() {
             let is_byte_end = (i.max(j) + 1) % 8 == 0;
             let gap_class = if is_byte_end { " byte-gap" } else { "" };
             
             if i < o_chars.len() && j < t_chars.len() && o_chars[i] == t_chars[j] {
-                o_html.push_str(&format!("<div class=\"bit match{}\">{}</div>", gap_class, o_chars[i]));
-                t_html.push_str(&format!("<div class=\"bit match{}\">{}</div>", gap_class, t_chars[j]));
+                o_row.push_str(&format!("<div class=\"bit match{}\">{}</div>", gap_class, o_chars[i]));
+                t_row.push_str(&format!("<div class=\"bit match{}\">{}</div>", gap_class, t_chars[j]));
                 i += 1;
                 j += 1;
             } else if i < o_chars.len() && j < t_chars.len() {
@@ -215,8 +260,8 @@ fn render_item_diff_html(html: &mut String, item: &ItemDiff, depth: usize) {
                     if j + nudge < t_chars.len() && o_chars[i] == t_chars[j + nudge] {
                         for _ in 0..nudge {
                             let g_class = if (j + 1) % 8 == 0 { " byte-gap" } else { "" };
-                            o_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", g_class));
-                            t_html.push_str(&format!("<div class=\"bit nudge{}\">{}</div>", g_class, t_chars[j]));
+                            o_row.push_str(&format!("<div class=\"bit empty{}\">-</div>", g_class));
+                            t_row.push_str(&format!("<div class=\"bit nudge{}\">{}</div>", g_class, t_chars[j]));
                             j += 1;
                         }
                         found_sync = true;
@@ -225,8 +270,8 @@ fn render_item_diff_html(html: &mut String, item: &ItemDiff, depth: usize) {
                     if i + nudge < o_chars.len() && o_chars[i + nudge] == t_chars[j] {
                         for _ in 0..nudge {
                             let g_class = if (i + 1) % 8 == 0 { " byte-gap" } else { "" };
-                            o_html.push_str(&format!("<div class=\"bit nudge{}\">{}</div>", g_class, o_chars[i]));
-                            t_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", g_class));
+                            o_row.push_str(&format!("<div class=\"bit nudge{}\">{}</div>", g_class, o_chars[i]));
+                            t_row.push_str(&format!("<div class=\"bit empty{}\">-</div>", g_class));
                             i += 1;
                         }
                         found_sync = true;
@@ -235,36 +280,38 @@ fn render_item_diff_html(html: &mut String, item: &ItemDiff, depth: usize) {
                 }
                 
                 if !found_sync {
-                    o_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, o_chars[i]));
-                    t_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, t_chars[j]));
+                    o_row.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, o_chars[i]));
+                    t_row.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, t_chars[j]));
                     i += 1;
                     j += 1;
                 }
             } else if i < o_chars.len() {
-                o_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, o_chars[i]));
-                t_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", gap_class));
+                o_row.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, o_chars[i]));
+                t_row.push_str(&format!("<div class=\"bit empty{}\">-</div>", gap_class));
                 i += 1;
             } else {
-                o_html.push_str(&format!("<div class=\"bit empty{}\">-</div>", gap_class));
-                t_html.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, t_chars[j]));
+                o_row.push_str(&format!("<div class=\"bit empty{}\">-</div>", gap_class));
+                t_row.push_str(&format!("<div class=\"bit mismatch{}\">{}</div>", gap_class, t_chars[j]));
                 j += 1;
             }
         }
         
-        html.push_str(&o_html);
-        html.push_str("\n                </div>\n            </div>\n");
-        html.push_str("            <div class=\"row\">\n");
-        html.push_str("                <div class=\"row-label\">Target</div>\n");
-        html.push_str("                <div class=\"bits\">\n");
-        html.push_str(&t_html);
-        html.push_str("\n                </div>\n            </div>\n        </div>\n");
+        html.push_str("<div class=\"bit-row\"><div class=\"row-label\">Original</div><div class=\"bits-wrapper\">");
+        html.push_str(&o_row);
+        html.push_str("</div></div>");
+        
+        html.push_str("<div class=\"bit-row\"><div class=\"row-label\">Target</div><div class=\"bits-wrapper\">");
+        html.push_str(&t_row);
+        html.push_str("</div></div>");
+        
+        html.push_str("</div></div>");
     }
 
     for child in &item.children {
         render_item_diff_html(html, child, depth + 1);
     }
 
-    html.push_str("    </div>\n");
+    html.push_str("</div>");
 }
 
 const ANSI_RESET: &str = "\x1b[0m";
