@@ -1,4 +1,4 @@
-use std::io::{self, Cursor, Write};
+use std::io::{self, Cursor};
 use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
 use crate::data::stat_costs::{StatCost, STAT_COSTS};
 

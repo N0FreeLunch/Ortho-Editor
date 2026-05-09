@@ -54,7 +54,7 @@ pub fn recalculate_checksum(bytes: &[u8]) -> io::Result<u32> {
 
 /// Finalizes the save bytes by updating the file size and fixing the checksum.
 /// If `force_fix` is true, it will fix the checksum regardless of version.
-pub fn finalize_save_bytes(bytes: &mut Vec<u8>, force_fix: bool) -> io::Result<()> {
+pub fn finalize_save_bytes(bytes: &mut Vec<u8>, _force_fix: bool) -> io::Result<()> {
     if bytes.len() < 16 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

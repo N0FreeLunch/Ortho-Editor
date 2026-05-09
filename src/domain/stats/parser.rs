@@ -1,10 +1,10 @@
 use bitstream_io::BitRead;
-use crate::domain::item::{Item, ItemBitRange, ItemQuality};
+use crate::domain::item::{ItemBitRange, ItemQuality};
 use crate::domain::stats::{
-    ItemProperty, StatsAxiom, ItemStats,
+    ItemProperty, StatsAxiom,
 };
 use crate::data::bit_cursor::BitCursor;
-use crate::item::{self, HuffmanTree, ParsingResult, PropertyReaderContext, ItemHeader};
+use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext};
 use crate::domain::header::entity::ItemSegmentType;
 
 pub fn read_item_stats<R: BitRead>(
