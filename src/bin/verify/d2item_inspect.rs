@@ -190,14 +190,8 @@ fn main() {
         );
         for (i, item) in items.iter().enumerate() {
             println!(
-                "Item {:2}: '{:4}' mode={} loc={} flags=0x{:08X} name={:?} children={}",
-                i,
-                item.code,
-                item.header.mode,
-                item.header.location,
-                item.flags,
-                item.personalized_player_name,
-                item.socketed_items.len()
+                "Item {:2}: '{:4}' mode={} loc={} flags=0x{:08X} name={:?} children={} range={}-{}", 
+                i, item.code, item.header.mode, item.header.location, item.flags, item.personalized_player_name, item.socketed_items.len(), item.range.start, item.range.end
             );
             for prop in &item.properties {
                 println!("  Prop: id={} value={} param={} bits {}-{}", 

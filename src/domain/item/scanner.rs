@@ -15,7 +15,11 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
             
             if let Some((mode, location, _x, code, flags, version, _is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
                 if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                    let mut confidence = if crate::domain::item::serialization::is_v105_summary_code(&code) { 100 } else { 50 };
+                    let is_known = crate::domain::item::serialization::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
+                    if alpha && !is_known {
+                        continue;
+                    }
+                    let mut confidence = if is_known { 100 } else { 50 };
                     if alpha && has_checksum {
                         confidence += 100;
                     }
