@@ -64,9 +64,11 @@ pub fn parse_header<R: BitRead>(
         is_runeword,
         is_ethereal,
         is_ear,
+        has_checksum: false,
         alpha_quality_raw: None,
         alpha_v5_runeword_extra: None,
         alpha_unique_id_raw: None,
+        save_is_alpha: axiom.alpha_mode,
     })
 }
 
@@ -80,16 +82,14 @@ fn alpha_sync<R: BitRead>(
         return Err(cursor.fail(ParsingError::Generic("Alpha v105 requires context for heuristic sync".to_string())));
     };
 
-    let Some((peek_m, peek_l, peek_x, _code, flags, version, is_compact, header_bits, _nudge)) = 
-        crate::item::peek_item_header_at(section_bytes, start_bit, huffman, axiom.alpha_mode)
-    else {
-        return Err(cursor.fail(ParsingError::Generic("Alpha heuristic probe failed".to_string())));
-    };
+    let header_info = crate::item::peek_item_header_at(section_bytes, start_bit, huffman, axiom.alpha_mode)
+        .ok_or_else(|| cursor.fail(ParsingError::Generic("Alpha heuristic probe failed".to_string())))?;
+    let (peek_m, peek_l, peek_x, _code, flags, version, is_compact, header_bits, _nudge, has_checksum) = header_info;
 
     let current_total = cursor.pos();
     let target_header_bits = header_bits; 
     let skip_amount = (target_header_bits as i64) - (current_total as i64);
-    
+
     if skip_amount > 0 {
         cursor.skip_and_record(skip_amount as u32)?;
     }
@@ -121,8 +121,10 @@ fn alpha_sync<R: BitRead>(
         is_runeword,
         is_ethereal,
         is_ear: false,
+        has_checksum,
         alpha_quality_raw: None,
         alpha_v5_runeword_extra: None,
         alpha_unique_id_raw: None,
+        save_is_alpha: axiom.alpha_mode,
     })
 }

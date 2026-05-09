@@ -45,9 +45,11 @@ pub struct ItemHeader {
     pub is_ear: bool,
 
     // Alpha Forensic Preservation Fields
+    pub has_checksum: bool,
     pub alpha_quality_raw: Option<u8>,
     pub alpha_v5_runeword_extra: Option<u8>,
     pub alpha_unique_id_raw: Option<u16>,
+    pub save_is_alpha: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,7 +105,8 @@ impl HeaderAxiom {
             } else if self.version == 6 || self.version == 7 {
                 (flags & (1 << 21)) != 0 && !runeword_bit && identified
             } else {
-                false
+                // Fallback to bit 21 for other Alpha versions (Retail-like)
+                (flags & (1 << 21)) != 0
             }
         } else {
             (flags & (1 << 21)) != 0
@@ -244,7 +247,22 @@ impl ItemHeader {
              return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
         }
 
-        let version = cursor.read_bits::<u8>(3)? as u8;
+        let (version, has_checksum) = if alpha_mode {
+            let saved_pos = cursor.checkpoint();
+            let checksum = cursor.read_bits::<u8>(8)?;
+            let v = cursor.read_bits::<u8>(3)? as u8;
+            let expected = calculate_alpha_v105_checksum(flags, v);
+            
+            if checksum == expected {
+                (v, true)
+            } else {
+                // Checksum mismatch or not present: backtrack and read version directly
+                cursor.rollback(saved_pos);
+                (cursor.read_bits::<u8>(3)? as u8, false)
+            }
+        } else {
+            (cursor.read_bits::<u8>(3)? as u8, false)
+        };
         let mode = cursor.read_bits::<u8>(3)? as u8;
         let location = cursor.read_bits::<u8>(3)? as u8;
         let x = cursor.read_bits::<u8>(4)? as u8;
@@ -318,9 +336,11 @@ impl ItemHeader {
             is_runeword: s_axiom.is_runeword(flags),
             is_ethereal: s_axiom.is_ethereal(flags),
             is_ear: (flags & (1 << 24)) != 0,
+            has_checksum,
             alpha_quality_raw: None,
             alpha_v5_runeword_extra: None,
             alpha_unique_id_raw: None,
+            save_is_alpha: alpha_mode,
         }, alpha_header_gap))
     }
 }

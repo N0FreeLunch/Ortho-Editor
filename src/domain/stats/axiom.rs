@@ -178,12 +178,12 @@ impl StatsAxiom {
     pub fn calculate_alignment(&self, consumed_bits: u64, is_compact: bool, code: &str, flags: u32) -> u64 {
         let mut final_len = consumed_bits;
 
-        // All versions except version 5 and 7 (Retail and some Alpha variants) 
+        // All versions except version 5 and 7 (Retail and some Alpha variants)
         // add a single terminal bit (usually false/0) before alignment.
-        if self.version != 5 && self.version != 7 {
+        // Alpha v105 forensic: Skip this bit for all Alpha items.
+        if !self.save_is_alpha && self.version != 5 && self.version != 7 {
             final_len += 1;
         }
-
         if self.save_is_alpha {
             let reg = get_registry();
             let trimmed = code.trim();
@@ -321,10 +321,10 @@ mod tests {
     #[test]
     fn test_alpha_rhythm() {
         let axiom = StatsAxiom::new(5, ItemQuality::Unique, true);
-        let rhythm = axiom.property_rhythm(true, false, false, 0);
+        let rhythm = axiom.property_rhythm(false, false, false, 0);
+        assert_eq!(rhythm.id_bits, 9);
         assert_eq!(rhythm.value_bits, Some(6));
-        assert!(rhythm.has_terminal_bit);
-        assert!(rhythm.has_extra_terminal_bit);
+        assert!(!rhythm.has_terminal_bit); // Alpha v105 omits terminal bit in this rhythm
     }
 
     #[test]

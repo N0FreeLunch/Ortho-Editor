@@ -40,20 +40,20 @@ fn main() -> Result<()> {
     println!("Alpha mode: {}", alpha_mode);
     println!("{:-<40}", "");
 
-    if let Some((mode, loc, x, code, flags, version, is_compact, header_bits, _)) = 
-        peek_item_header_at(&bytes, offset, &huffman, alpha_mode) 
+    if let Some((mode, location, x, code, flags, version, is_compact, header_bits, _nudge, _has_checksum)) =
+        peek_item_header_at(&bytes, offset, &huffman, alpha_mode)
     {
         println!("Header found at bit {}:", offset);
         println!("  Flags:    0x{:08X}", flags);
         println!("  Version:  {}", version);
         println!("  Mode:     {} (0x{:X})", mode_name(mode), mode);
-        println!("  Location: {} (0x{:X})", location_name(loc), loc);
+        println!("  Location: {} (0x{:X})", location_name(location), location);
         println!("  X Coord:  {}", x);
         println!("  Code:     '{}'", code);
         println!("  Compact:  {}", is_compact);
         println!("  Hdr bits: {}", header_bits);
 
-        let plausible = is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode);
+        let plausible = is_plausible_item_header(mode, location, &code, flags, version, alpha_mode);
         if plausible {
             println!("\nVerdict: [REAL CANDIDATE]");
         } else {

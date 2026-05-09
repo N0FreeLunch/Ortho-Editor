@@ -241,7 +241,7 @@ where
     let mut param = 0;
     let mut nested_items = Vec::new();
 
-    let mut effective_width = if let Some(width) = rhythm.value_bits {
+    let effective_width = if let Some(width) = rhythm.value_bits {
         axiom.stat_bit_width(stat_id, width)
     } else {
         let mapped_id = axiom.map_alpha_id(stat_id);
@@ -264,91 +264,59 @@ where
     let mut handled = false;
 
     if axiom.is_alpha() && (is_stat_317 || is_stat_320) && !is_already_nested {
+        let entry_pos = recorder.pos();
+        if crate::item::item_trace_enabled() {
+            println!("[TRACE] parser: stat {} nested recovery at pos {}, depth: {}", stat_id, entry_pos, recorder.context_stack().len());
+        }
+        recorder.push_context("nested");
+        
+        // Scan for the next item header within a small window to handle potential padding/nudges
+        let mut found_pos = entry_pos;
         if is_stat_320 {
-            // Alpha v105 Larzuk items use a fixed-size envelope for nested items
-            // Ref: Discussion 0231 (9-bit ID + 2871-bit payload = 2880 bits / 360 bytes)
-            let skip_bits = axiom.stat_bit_width(320, 2871) + 2;
-            let search_start = recorder.pos();
-            
-            // We still want to parse the nested item for data extraction
-            recorder.push_context("nested");
-            
-            // Scan for the next item header within a small window to handle padding
-            let mut found_pos = search_start;
             for offset in 0..64 {
-                let probe_pos = search_start + offset;
+                let probe_pos = entry_pos + offset;
                 if let Some(header_info) = crate::item::peek_item_header_at(reader_ctx.bytes, probe_pos, huffman, axiom.save_is_alpha) {
-                    let (mode, loc, _x, code, flags, version, _is_compact, _header_bits, _nudge) = header_info;
+                    let (mode, loc, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
                     if crate::item::is_plausible_item_header(mode, loc, &code, flags, version, axiom.save_is_alpha) {
                         found_pos = probe_pos;
                         break;
                     }
                 }
             }
-
-            let _ = NESTED_DEPTH.with(|d| {
-                let prev = d.get();
-                if prev > 10 { return Err(crate::error::ParsingFailure { 
-                    error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
-                    context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
-                }); }
-                d.set(prev + 1);
-                let res = recovery_fn(
-                    reader_ctx.bytes,
-                    found_pos,
-                    huffman,
-                    nested_items.len(),
-                    axiom.save_is_alpha,
-                );
-                d.set(prev);
-                res
-            }).map(|(child, _)| {
-                eprintln!("DEBUG: Pushed nested child: {}", child.code);
-                nested_items.push(child);
-            });
-            recorder.pop_context();
-
-            // But we MUST skip the fixed bit budget to maintain forensic alignment
-            recorder.skip_and_record(skip_bits)?;
-            handled = true;
-        } else {
-            // Stat 317 (variable width recursive parsing)
-            if crate::item::item_trace_enabled() {
-                println!("[TRACE] parser: stat {} nested recovery at pos {}, depth: {}", stat_id, recorder.pos(), recorder.get_context_count());
-            }
-            recorder.push_context("nested");
-            
-            let result = NESTED_DEPTH.with(|d| {
-                let prev = d.get();
-                if prev > 10 { return Err(crate::error::ParsingFailure { 
-                    error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
-                    context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
-                }); }
-                d.set(prev + 1);
-                let res = recovery_fn(
-                    reader_ctx.bytes,
-                    recorder.pos(),
-                    huffman,
-                    nested_items.len(),
-                    axiom.save_is_alpha,
-                );
-                d.set(prev);
-                res
-            });
-
-            if let Ok((child, end_pos)) = result {
-                if crate::item::item_trace_enabled() {
-                    println!("[TRACE] parser: child item parsed for stat {}, end_pos: {}, consumed: {}", stat_id, end_pos, end_pos - recorder.pos());
-                }
-                nested_items.push(child);
-                if end_pos > recorder.pos() {
-                    let consumed = (end_pos - recorder.pos()) as u32;
-                    recorder.skip_and_record(consumed)?;
-                }
-                handled = true;
-            }
-            recorder.pop_context();
         }
+
+        let result = NESTED_DEPTH.with(|d| {
+            let prev = d.get();
+            if prev > 10 { return Err(crate::error::ParsingFailure { 
+                error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
+                context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
+            }); }
+            d.set(prev + 1);
+            let res = recovery_fn(
+                reader_ctx.bytes,
+                found_pos,
+                huffman,
+                nested_items.len(),
+                axiom.save_is_alpha,
+            );
+            d.set(prev);
+            res
+        });
+
+        if let Ok((child, end_pos)) = result {
+            if crate::item::item_trace_enabled() {
+                println!("[TRACE] parser: child item parsed for stat {}, relative_end: {}, absolute_end: {}", stat_id, end_pos, found_pos + end_pos);
+            }
+            nested_items.push(child);
+            
+            let absolute_end = found_pos + end_pos;
+            if absolute_end > recorder.pos() {
+                let consumed = (absolute_end - recorder.pos()) as u32;
+                recorder.skip_and_record(consumed)?;
+            }
+            handled = true;
+        }
+        recorder.pop_context();
     }
 
 

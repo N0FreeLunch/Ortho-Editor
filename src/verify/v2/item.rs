@@ -32,18 +32,18 @@ impl DomainVerifier for ItemVerifier {
         // 2. Round-trip validation
         for item in &items {
             forensic_audit.extend(item.forensic_audit.clone());
-            let item_bits = match item.to_bytes(&huffman, alpha_mode) {
+            let item_bits_vec = match item.to_bits(&huffman, alpha_mode) {
                 Ok(b) => b,
                 Err(e) => {
                     issues.push(ReportIssue {
                         kind: "item_parse".to_string(),
-                        message: format!("Item to_bytes ({}): {}", item.code, e),
+                        message: format!("Item to_bits ({}): {}", item.code, e),
                         bit_offset: None,
                     });
                     continue;
                 }
             };
-            if let Err(e) = Item::from_bytes(&item_bits, &huffman, alpha_mode) {
+            if let Err(e) = Item::from_bytes(&item.to_bytes(&huffman, alpha_mode).unwrap(), &huffman, alpha_mode) {
                 issues.push(ReportIssue {
                     kind: "item_parse".to_string(),
                     message: format!("Item round-trip parse failure ({}): {}", item.code, e),
@@ -51,33 +51,30 @@ impl DomainVerifier for ItemVerifier {
                 });
             }
 
-            // Slice 7: Additive Item Parity Comparison
             let original_bits: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
-            let mut emitted_bits = Vec::new();
-            for &byte in &item_bits {
-                for i in 0..8 {
-                    emitted_bits.push((byte >> i) & 1 != 0);
-                }
-            }
+            let emitted_bits = item_bits_vec;
             
-            let mut mismatch = false;
-            if emitted_bits.len() < original_bits.len() {
-                mismatch = true;
-            } else {
-                for i in 0..original_bits.len() {
-                    if emitted_bits[i] != original_bits[i] {
-                        mismatch = true;
-                        break;
-                    }
+            let mut mismatch_idx = None;
+            let len = original_bits.len().min(emitted_bits.len());
+            for i in 0..len {
+                if original_bits[i] != emitted_bits[i] {
+                    mismatch_idx = Some(i);
+                    break;
                 }
             }
 
-            if mismatch {
+            if mismatch_idx.is_some() || original_bits.len() != emitted_bits.len() {
+                let idx = mismatch_idx.unwrap_or(len);
                 issues.push(ReportIssue {
                     kind: "item_parity".to_string(),
                     message: format!(
-                        "Item parity mismatch ({}): bits do not match source",
-                        item.code.trim()
+                        "Item parity mismatch ({}): mismatch at bit {} (Orig Len: {}, Emit Len: {}). Bits near mismatch: Original: {}, Emitted: {}",
+                        item.code.trim(),
+                        idx,
+                        original_bits.len(),
+                        emitted_bits.len(),
+                        format_bits_at(&original_bits, idx, 32),
+                        format_bits_at(&emitted_bits, idx, 32)
                     ),
                     bit_offset: Some(item.range.start),
                 });
@@ -115,6 +112,18 @@ impl DomainVerifier for ItemVerifier {
             fidelity_score,
         }
     }
+}
+
+fn format_bits_at(bits: &[bool], start: usize, count: usize) -> String {
+    let mut s = String::new();
+    let display_start = if start > 8 { start - 8 } else { 0 };
+    for i in display_start..(start + count).min(bits.len()) {
+        if i == start { s.push('['); }
+        s.push(if bits[i] { '1' } else { '0' });
+        if i == start { s.push(']'); }
+        if (i + 1) % 8 == 0 { s.push(' '); }
+    }
+    s
 }
 
 fn parsing_error_offset(error: &ParsingError) -> Option<u64> {

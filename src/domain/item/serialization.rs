@@ -1,4 +1,4 @@
-use bitstream_io::{BitRead, BitWrite, BitWriter, LittleEndian};
+use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
 use std::io::{self, Cursor};
 use crate::domain::item::Item;
 use crate::domain::item::quality::ItemQuality;
@@ -23,7 +23,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
             continue;
         }
 
-        if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge)) = peek_item_header_at(bytes, probe, huffman, alpha) {
+        if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge, _has_checksum)) = peek_item_header_at(bytes, probe, huffman, alpha) {
              if crate::item::item_trace_enabled() {
                 // Probe success
              }
@@ -65,30 +65,48 @@ pub fn peek_item_header_at(
     start_bit: u64,
     huffman: &HuffmanTree,
     alpha_mode: bool,
-) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8)> {
+) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     if reader.skip(start_bit as u32).is_err() { return None; }
 
     // Read header structure
     let flags = reader.read::<32, u32>().ok()?;
-    let (version, mode, loc, x, base_header_len) = if alpha_mode {
-        let checksum = reader.read::<8, u8>().ok()?;
-        let v = reader.read::<3, u8>().ok()?;
-        let calculated = calculate_alpha_v105_checksum(flags, v);
-        if calculated != checksum { return None; }
-        let m = reader.read::<3, u8>().ok()?;
-        let l = reader.read::<3, u8>().ok()?;
-        let x_val = reader.read::<4, u8>().ok()?;
-        (v, m, l, x_val, 32 + 8 + 3 + 3 + 3 + 4)
+    
+    let mut alpha_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    alpha_reader.skip(start_bit as u32 + 32).ok()?;
+    let checksum = alpha_reader.read::<8, u8>().ok()?;
+    let v = alpha_reader.read::<3, u8>().ok()?;
+    let calculated = calculate_alpha_v105_checksum(flags, v);
+    
+    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum {
+        let m = alpha_reader.read::<3, u8>().ok()?;
+        let l = alpha_reader.read::<3, u8>().ok()?;
+        let x = alpha_reader.read::<4, u8>().ok()?;
+        (v, m, l, x, 32 + 8 + 3 + 3 + 3 + 4, true)
     } else {
-        let v = reader.read::<3, u8>().ok()?;
-        let m = reader.read::<3, u8>().ok()?;
-        let l = reader.read::<3, u8>().ok()?;
-        let x_val = reader.read::<4, u8>().ok()?;
-        (v, m, l, x_val, 32 + 3 + 3 + 3 + 4)
+        let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+        retail_reader.skip(start_bit as u32 + 32).ok()?;
+        let v = retail_reader.read::<3, u8>().ok()?;
+        let m = retail_reader.read::<3, u8>().ok()?;
+        let l = retail_reader.read::<3, u8>().ok()?;
+        let x = retail_reader.read::<4, u8>().ok()?;
+        (v, m, l, x, 32 + 3 + 3 + 3 + 4, false)
     };
 
+    let mut code = String::new();
+    let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    if n_reader.skip(start_bit as u32 + base_header_len as u32).is_err() { return None; }
+    let mut n_cursor = BitCursor::new(n_reader);
+    for _ in 0..4 {
+        if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) { code.push(ch); }
+        else { return None; }
+    }
+
     let axiom = HeaderAxiom::new(version, alpha_mode);
+    if !axiom.is_plausible(mode, loc, &code, flags) {
+        return None;
+    }
+
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = s_axiom.is_compact(flags);
     let is_personalized = s_axiom.is_personalized(flags);
@@ -96,7 +114,6 @@ pub fn peek_item_header_at(
 
     let mut possible_gaps = Vec::new();
     if alpha_mode {
-        // Alpha v105 forensic: Try registry-driven gaps first
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(overrides) = &reg.item_overrides {
             for item_map in overrides.values() {
@@ -136,7 +153,7 @@ pub fn peek_item_header_at(
             else { ok = false; break; }
         }
         if ok && is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
-            return Some((mode, loc, x, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8));
+            return Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
         }
     }
     None
@@ -219,7 +236,7 @@ impl Item {
         if alpha_mode {
             // Need the flags for the first item to resolve the gap correctly.
             // peek_item_header_at already provides the flags.
-            if let Some((_, _, _, _, flags, _, _, _, _)) = peek_item_header_at(section_bytes, 0, huffman, alpha_mode) {
+            if let Some((_, _, _, _, flags, _, _, _, _, _)) = peek_item_header_at(section_bytes, 0, huffman, alpha_mode) {
                 let gap_axiom = V105HeaderGapAxiom::default();
                 let gap = gap_axiom.resolve_gap(None, flags, true);
                 start_offset += gap as u64;
@@ -241,7 +258,7 @@ impl Item {
 
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
-            if let Some((_, _, _, code, flags, _, is_compact, _, _)) =
+            if let Some((_, _, _, code, flags, _, is_compact, _, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
@@ -265,6 +282,7 @@ impl Item {
                     final_item.range.end = section_bit_offset + start + consumed_bits;
                     final_item.total_bits = consumed_bits;
                     items.push(final_item);
+                    start_offset = start + consumed_bits;
                 }
                 Err(_) => {
                     // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
@@ -357,6 +375,7 @@ impl Item {
         } else { None };
         let code_peek = peek.as_ref().map(|p| p.3.as_str());
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
+        let has_checksum_peek = peek.as_ref().map(|p| p.9);
 
         let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item)?;
         
@@ -537,7 +556,7 @@ pub fn scan_socket_children(
     let section_bits = (bytes.len() * 8) as u64;
 
     while current_pos < max_pos && current_pos < section_bits {
-        if let Some((mode, location, _x, code, flags, version, is_compact, _header_bits, _nudge)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
+        if let Some((mode, location, _x, code, flags, version, is_compact, _header_bits, _nudge, _has_checksum)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);
@@ -659,11 +678,12 @@ pub fn write_property_list(
     version: u8,
     alpha_runeword: bool,
     terminator_bit: bool,
+    properties_complete: bool,
     _quality: ItemQuality,
     is_v105_shadow: bool,
     axiom: &StatsAxiom,
 ) -> io::Result<()> {
-    let start_bits = emitter.written_bits();
+    let _start_bits = emitter.written_bits();
     let is_compact = code.trim().is_empty() || code.len() < 3;
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, 0);
     let id_bits = rhythm.id_bits;
@@ -672,32 +692,33 @@ pub fn write_property_list(
     for prop in props {
         let raw_id = prop.stat_id;
         emitter.write_bits(raw_id, id_bits)?;
-        
+
         let mut handled = false;
         let is_nested_stat = (raw_id == 317 || axiom.map_alpha_id(raw_id) == 317) || (raw_id == 320 || axiom.map_alpha_id(raw_id) == 320);
         if axiom.is_alpha() && is_nested_stat {
              if item_idx < nested_items.len() {
                  let child = &nested_items[item_idx];
                  let is_stat_320 = raw_id == 320 || axiom.map_alpha_id(raw_id) == 320;
-                 
+
                  if is_stat_320 {
-                     // Fixed budget: 2871 bits
                      let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
                      let child_bits = child_bits_vec.len();
-                     let budget = axiom.stat_bit_width(320, 2871) + 2;
-                     eprintln!("DEBUG: Stat 320 Child Bits: {}, Budget: {}, Padding: {}", 
-                         child_bits, budget, if child_bits < budget as usize { budget as usize - child_bits } else { 0 });
+                     let registry_width = axiom.stat_bit_width(320, 0);
 
                      emitter.extend_bits(child_bits_vec)?;
-                     if child_bits < budget as usize {
-                         emitter.write_bits(0, (budget as usize - child_bits) as u32)?;
+
+                     if registry_width > 0 {
+                         let budget = registry_width + 2;
+                         if child_bits < budget as usize {
+                             emitter.write_bits(0, (budget as usize - child_bits) as u32)?;
+                         }
                      }
                  } else {
                      // Variable budget (Stat 317)
                      let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
                      emitter.extend_bits(child_bits_vec)?;
                  }
-                 
+
                  item_idx += 1;
                  handled = true;
              }
@@ -711,26 +732,24 @@ pub fn write_property_list(
                  let mapped_id = axiom.map_alpha_id(raw_id);
                  if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
                      if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }
-                     emitter.write_bits(prop.raw_value as u32, stat.save_bits as u32)?;
+                     let effective_width = axiom.stat_bit_width(raw_id, stat.save_bits as u32);
+                     emitter.write_bits(prop.raw_value as u32, effective_width)?;
                  } else { emitter.write_bits(prop.raw_value as u32, 9)?; }
             }
         }
     }
-    if !axiom.is_alpha() || version == 5 {
+    if properties_complete && (!axiom.is_alpha() || version == 5) {
         emitter.write_bits(terminator, id_bits)?;
     }
     let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
-    if rhythm.has_terminal_bit {
+    if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }
         if !preserve_trailing_align { emitter.byte_align()?; }
     }
-    
-    if crate::item::item_trace_enabled() {
-    }
+
     Ok(())
 }
-
 pub struct HuffmanTree {
     root: Box<HuffmanNode>,
     encoding_table: std::collections::HashMap<char, Vec<bool>>,

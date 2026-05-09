@@ -183,10 +183,46 @@ impl DerefMut for Item {
 
 impl Item {
     pub fn code(&self) -> &str { &self.body.code }
-    pub fn defense(&self) -> Option<u32> { self.body.defense }
-    pub fn max_durability(&self) -> Option<u32> { self.body.max_durability }
-    pub fn current_durability(&self) -> Option<u32> { self.body.current_durability }
-    pub fn quantity(&self) -> Option<u32> { self.body.quantity }
+    pub fn defense(&self) -> Option<u32> { 
+        if let Some(d) = self.body.defense { return Some(d); }
+        if self.header.save_is_alpha {
+            let axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), true);
+            return self.properties.iter()
+                .find(|p| axiom.map_alpha_id(p.stat_id) == 31)
+                .map(|p| p.value as u32);
+        }
+        None
+    }
+    pub fn max_durability(&self) -> Option<u32> { 
+        if let Some(d) = self.body.max_durability { return Some(d); }
+        if self.header.save_is_alpha {
+            let axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), true);
+            return self.properties.iter()
+                .find(|p| axiom.map_alpha_id(p.stat_id) == 73)
+                .map(|p| p.value as u32);
+        }
+        None
+    }
+    pub fn current_durability(&self) -> Option<u32> { 
+        if let Some(d) = self.body.current_durability { return Some(d); }
+        if self.header.save_is_alpha {
+            let axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), true);
+            return self.properties.iter()
+                .find(|p| axiom.map_alpha_id(p.stat_id) == 72)
+                .map(|p| p.value as u32);
+        }
+        None
+    }
+    pub fn quantity(&self) -> Option<u32> { 
+        if let Some(d) = self.body.quantity { return Some(d); }
+        if self.header.save_is_alpha {
+            let axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), true);
+            return self.properties.iter()
+                .find(|p| axiom.map_alpha_id(p.stat_id) == 70)
+                .map(|p| p.value as u32);
+        }
+        None
+    }
 
     pub fn query_bit(&self, offset: u64) -> Option<BitSemantic> {
         for prop in &self.properties {
@@ -450,7 +486,7 @@ impl Item {
 
         use crate::domain::item::serialization::write_player_name;
         emitter.write_bits(self.header.flags, 32)?;
-        if alpha_mode {
+        if alpha_mode && self.header.has_checksum {
             let checksum = calculate_alpha_v105_checksum(self.header.flags, self.header.version);
             emitter.write_bits(checksum as u32, 8)?;
         }
@@ -603,14 +639,14 @@ impl Item {
                             emitter.write_bits(0, gap_len)?;
                         }
                     }
-                    crate::domain::item::serialization::write_property_list(emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, quality_val, is_shadow, &s_axiom)?;
+                    crate::domain::item::serialization::write_property_list(emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, self.properties_complete, quality_val, is_shadow, &s_axiom)?;
                     for set_props in &self.set_attributes {
-                        crate::domain::item::serialization::write_property_list(emitter, &self.code, set_props, &[], huffman, self.header.version, false, false, quality_val, false, &s_axiom)?;
+                        crate::domain::item::serialization::write_property_list(emitter, &self.code, set_props, &[], huffman, self.header.version, false, false, true, quality_val, false, &s_axiom)?;
                     }
                 }
             }
         }
-        if self.header.version != 5 && self.header.version != 7 { emitter.write_bit(false)?; }
+        if !alpha_mode && self.header.version != 5 && self.header.version != 7 { emitter.write_bit(false)?; }
         let current_bits = emitter.written_bits();
         let final_bits = s_axiom.calculate_alignment(current_bits, self.header.is_compact, &self.code, self.header.flags);
         if final_bits > current_bits {
@@ -628,7 +664,13 @@ impl Item {
             emitter.extend_bits(item.gap_bits.iter().cloned())?;
             let item_bytes = item.to_bytes(huffman, alpha_mode)?;
             for byte in item_bytes { emitter.write_bits(byte as u32, 8)?; }
+            let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode);
             for child in &item.socketed_items {
+                if alpha_mode && axiom.is_alpha() {
+                    // Alpha v105 socketed items (Runewords) are embedded in properties (Stat 317/320).
+                    // Avoid double-writing here.
+                    continue;
+                }
                 if alpha_mode { emitter.write_bits(2, 2)?; }
                 let child_bytes = child.to_bytes(huffman, alpha_mode)?;
                 for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
@@ -651,20 +693,21 @@ pub fn parse_item_header<R: BitRead>(
     if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
-    let version = if alpha_mode {
+    let (version, has_checksum) = if alpha_mode {
+        let saved_pos = cursor.checkpoint();
         let checksum = cursor.read_bits::<u8>(8)?;
         let v = cursor.read_bits::<u8>(3)? as u8;
         let expected = calculate_alpha_v105_checksum(flags, v);
-        if checksum != expected {
-             return Err(cursor.fail(ParsingError::InvariantViolation { 
-                 field: "Alpha v105 Header Checksum".to_string(),
-                 expected: format!("{}", expected),
-                 actual: format!("{}", checksum),
-             }));
+        
+        if checksum == expected {
+            (v, true)
+        } else {
+            // Checksum mismatch or not present: backtrack and read version directly
+            cursor.rollback(saved_pos);
+            (cursor.read_bits::<u8>(3)? as u8, false)
         }
-        v
     } else {
-        cursor.read_bits::<u8>(3)? as u8
+        (cursor.read_bits::<u8>(3)? as u8, false)
     };
     let mode = cursor.read_bits::<u8>(3)? as u8;
     let location = cursor.read_bits::<u8>(3)? as u8;
@@ -728,7 +771,9 @@ pub fn parse_item_header<R: BitRead>(
         flags, version, mode, location, x, y, page, socket_hint, id: None, level: None, quality: None, is_compact,
         is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact), is_personalized,
         is_runeword: s_axiom.is_runeword(flags), is_ethereal: s_axiom.is_ethereal(flags), is_ear: (flags & (1 << 24)) != 0,
+        has_checksum,
         alpha_quality_raw: None, alpha_v5_runeword_extra: None, alpha_unique_id_raw: None,
+        save_is_alpha: alpha_mode,
     }, alpha_header_gap, alpha_header_gap_bits))
 }
 
