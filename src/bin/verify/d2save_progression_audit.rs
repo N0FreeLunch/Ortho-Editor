@@ -187,19 +187,28 @@ fn main() {
         failures += 1;
     }
 
-    // Export if requested
-    if let Some(out_path) = output_path {
-        match fs::write(out_path, &actual_bytes) {
-            Ok(_) => println!("\n[EXPORT] Successfully wrote mutated save to: {}", out_path),
-            Err(e) => eprintln!("\n[ERROR] Failed to write output file: {}", e),
-        }
-    }
-
     if failures > 0 {
         println!("\nProgression Audit FAILED with {} section mismatch(es).", failures);
         process::exit(1);
     } else {
         println!("\nProgression Audit PASSED (100% bit-parity).");
+        
+        // Export if requested - Only after parity success
+        if let Some(out_path) = output_path {
+            let path = std::path::Path::new(out_path);
+            if path.exists() {
+                eprintln!("\n[ERROR] Output file already exists: {}", out_path);
+                process::exit(1);
+            }
+
+            match fs::write(out_path, &actual_bytes) {
+                Ok(_) => println!("\n[EXPORT] Successfully wrote mutated save to: {}", out_path),
+                Err(e) => {
+                    eprintln!("\n[ERROR] Failed to write output file: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
     }
 }
 
