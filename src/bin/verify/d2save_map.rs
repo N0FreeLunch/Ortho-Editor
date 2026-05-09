@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_map")
         .description("Maps and summarizes the major sections and JM markers of a D2R save file");
 
-    parser.add_arg("save_file", "path to the save file (.d2s)");
+    parser.add_arg("save_file").description("path to the save file (.d2s)");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -104,21 +104,30 @@ fn main() -> anyhow::Result<()> {
             println!("[FORENSIC MARKERS (Alpha v105)]");
             if let Some(pos) = map.woo_pos { println!("  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)", pos * 8); }
             if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
-            if let Some(pos) = map.w4_pos { println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data", pos * 8); }
+            if let Some(pos) = map.w4_pos { 
+                use d2r_core::domain::forensic::v105::MercenaryState;
+                let w4_end = map.jf_pos.unwrap_or(bytes.len().min(pos + 40)); // Tentative end
+                let w4_data = bytes.get(pos + 2..w4_end).unwrap_or(&[]);
+                let merc = MercenaryState::from_w4(w4_data);
+                
+                println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data / Mercenary State", pos * 8);
+                println!("    -> Hireling ID: {} (XP: {})", merc.hireling_id, merc.experience);
+                if merc.name_id > 0 {
+                    println!("    -> Name ID:     {}", merc.name_id);
+                }
+            }
             if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
             if let (Some(kf), Some(lf)) = (map.kf_pos, map.lf_pos) {
-                use d2r_core::domain::forensic::v105::MercenaryPayload;
-                // Safely extract payload data (kf: 3B, lf: 2B)
-                let kf_data = bytes.get(kf + 2..kf + 5).unwrap_or(&[]);
-                let lf_data = bytes.get(lf + 2..lf + 4).unwrap_or(&[]);
-                let payload = MercenaryPayload::from_raw(kf_data, lf_data);
+                use d2r_core::domain::forensic::v105::MercenaryFooter;
+                let footer_bytes = bytes.get(kf..lf + 2).unwrap_or(&[]);
+                let footer = MercenaryFooter::from_bytes(footer_bytes);
                 
-                println!("  [kf  ] Offset {kf:>5} (bit {:>6}) | Mercenary Payload 1: {:02X?}", kf * 8, payload.kf_raw);
-                println!("  [lf  ] Offset {lf:>5} (bit {:>6}) | Mercenary Payload 2: {:02X?}", lf * 8, payload.lf_raw);
-                println!("  [MERC] Envelope: {:02X?}", payload.to_envelope());
+                println!("  [kf  ] Offset {kf:>5} (bit {:>6}) | Mercenary Footer Start", kf * 8);
+                println!("  [lf  ] Offset {lf:>5} (bit {:>6}) | Mercenary Footer End", lf * 8);
+                println!("  [MERC] Footer Payload: {:02X?} (Standard: {})", footer.raw, footer.is_standard());
             } else {
-                if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 1", pos * 8); }
-                if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Payload 2", pos * 8); }
+                if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer Start", pos * 8); }
+                if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer End", pos * 8); }
             }
         }
     }

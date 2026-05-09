@@ -1,43 +1,67 @@
-// This software is licensed under the PolyForm Noncommercial License 1.0.0.
-// Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
-
-/// Alpha v105 Mercenary Payload structure.
+/// Alpha v105 Mercenary State (decoded from 'w4' NPC data section).
 ///
-/// Forensic evidence shows a 9-byte envelope composed of 'kf' and 'lf' markers
-/// followed by specific bit-fields (level, xp, aura/skills).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MercenaryPayload {
-    /// 3 bytes of raw data following the 'kf' marker.
-    pub kf_raw: [u8; 3],
-    /// 2 bytes of raw data following the 'lf' marker.
-    pub lf_raw: [u8; 2],
+/// Forensic evidence shows that mercenary attributes (Level, XP, Type) are stored
+/// within the 'w4' section (Offset 782) rather than the 'kf/lf' footer.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MercenaryState {
+    /// Hireling ID from Hireling.txt (at w4 + 4).
+    /// Rogue: 0, Desert: 140, Barbarian: 174.
+    pub hireling_id: u8,
+    
+    /// Mercenary Experience (at w4 + 6, 32-bit LE).
+    pub experience: u32,
+    
+    /// Mercenary Name ID (at w4 + 27, tentative).
+    pub name_id: u16,
+
+    /// Raw w4 bytes for forensic preservation.
+    pub raw_w4: Vec<u8>,
 }
 
-impl MercenaryPayload {
-    /// Creates a new payload from raw byte slices.
-    /// Expects kf_data to be 3 bytes and lf_data to be 2 bytes.
-    pub fn from_raw(kf_data: &[u8], lf_data: &[u8]) -> Self {
-        let mut k = [0u8; 3];
-        let mut l = [0u8; 2];
-        let k_len = kf_data.len().min(3);
-        let l_len = lf_data.len().min(2);
-        k[..k_len].copy_from_slice(&kf_data[..k_len]);
-        l[..l_len].copy_from_slice(&lf_data[..l_len]);
+impl MercenaryState {
+    /// Creates a new state from the raw 'w4' section bytes.
+    pub fn from_w4(bytes: &[u8]) -> Self {
+        let hireling_id = bytes.get(4).copied().unwrap_or(0);
+        let experience = if bytes.len() >= 10 {
+            u32::from_le_bytes(bytes[6..10].try_into().unwrap_or([0; 4]))
+        } else {
+            0
+        };
+        let name_id = if bytes.len() >= 29 {
+            u16::from_le_bytes(bytes[27..29].try_into().unwrap_or([0; 2]))
+        } else {
+            0
+        };
+
         Self {
-            kf_raw: k,
-            lf_raw: l,
+            hireling_id,
+            experience,
+            name_id,
+            raw_w4: bytes.to_vec(),
         }
     }
+}
 
-    /// Returns the full 9-byte envelope (markers + data).
-    pub fn to_envelope(&self) -> [u8; 9] {
-        let mut out = [0u8; 9];
-        out[0] = b'k';
-        out[1] = b'f';
-        out[2..5].copy_from_slice(&self.kf_raw);
-        out[5] = b'l';
-        out[6] = b'f';
-        out[7..9].copy_from_slice(&self.lf_raw);
-        out
+/// Alpha v105 Mercenary Footer (kf/lf envelope).
+///
+/// This 9-byte sequence is a static structural anchor found at the end of JM #2.
+/// Value: [b'k', b'f', 0x00, 0x01, 0x00, b'l', b'f', 0x00, 0x00]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MercenaryFooter {
+    pub raw: [u8; 9],
+}
+
+impl MercenaryFooter {
+    pub const STATIC_PAYLOAD: [u8; 9] = [b'k', b'f', 0x00, 0x01, 0x00, b'l', b'f', 0x00, 0x00];
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut raw = [0u8; 9];
+        let len = bytes.len().min(9);
+        raw[..len].copy_from_slice(&bytes[..len]);
+        Self { raw }
+    }
+
+    pub fn is_standard(&self) -> bool {
+        self.raw == Self::STATIC_PAYLOAD
     }
 }
