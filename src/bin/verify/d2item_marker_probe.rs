@@ -52,6 +52,8 @@ fn main() -> Result<()> {
         println!("  Code:     '{}'", code);
         println!("  Compact:  {}", is_compact);
         println!("  Hdr bits: {}", header_bits);
+        println!("  Nudge:    {}", _nudge);
+        println!("  Checksum: {}", _has_checksum);
 
         let plausible = is_plausible_item_header(mode, location, &code, flags, version, alpha_mode);
         if plausible {
