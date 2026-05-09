@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgParser, ArgError};
 
 use d2r_core::save::{
     ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET, CHAR_NAME_OFFSET,
@@ -105,18 +105,35 @@ fn main() -> anyhow::Result<()> {
             if let Some(pos) = map.woo_pos { println!("  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)", pos * 8); }
             if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
             if let Some(pos) = map.w4_pos { 
-                use d2r_core::domain::forensic::v105::MercenaryState;
-                let w4_end = map.jf_pos.unwrap_or(bytes.len().min(pos + 40)); // Tentative end
-                let w4_data = bytes.get(pos + 2..w4_end).unwrap_or(&[]);
-                let merc = MercenaryState::from_w4(w4_data);
-                
-                println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data / Mercenary State", pos * 8);
-                println!("    -> Hireling ID: {} (XP: {})", merc.hireling_id, merc.experience);
-                if merc.name_id > 0 {
-                    println!("    -> Name ID:     {}", merc.name_id);
-                }
+                println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data (Section Start)", pos * 8);
             }
             if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
+
+            // Slice 10: Hybrid Mercenary Decoding (Axiom 0328)
+            use d2r_core::domain::forensic::v105::MercenaryState;
+            let w4_data_option = map.w4_pos.map(|pos| {
+                let w4_end = map.jf_pos.unwrap_or(bytes.len().min(pos + 40));
+                bytes.get(pos + 2..w4_end).unwrap_or(&[])
+            });
+            let merc = MercenaryState::from_hybrid(&bytes, w4_data_option);
+            
+            println!();
+            println!("[MERCENARY (Hybrid Decoded)]");
+            println!("  Hireling ID: {} (XP: {})", merc.hireling_id, merc.experience);
+            if merc.name_id > 0 {
+                println!("  Name ID:     {}", merc.name_id);
+            }
+
+            println!();
+            println!("[HEADER (Mercenary Raw Anchors)]");
+            println!("  Offset 169 | Hireling ID:   {}", bytes.get(169).copied().unwrap_or(0));
+            println!("  Offset 171 | Experience:    {} (0x{:08X})", 
+                u32::from_le_bytes(bytes.get(171..175).and_then(|b| b.try_into().ok()).unwrap_or([0; 4])),
+                u32::from_le_bytes(bytes.get(171..175).and_then(|b| b.try_into().ok()).unwrap_or([0; 4]))
+            );
+            println!("  Offset 175 | Level (?):     Not found (plain byte search failed)");
+            println!("  Offset 176..185: {:02X?}", bytes.get(176..185).unwrap_or(&[]));
+
             if let (Some(kf), Some(lf)) = (map.kf_pos, map.lf_pos) {
                 use d2r_core::domain::forensic::v105::MercenaryFooter;
                 let footer_bytes = bytes.get(kf..lf + 2).unwrap_or(&[]);

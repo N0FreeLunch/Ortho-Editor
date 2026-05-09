@@ -1,7 +1,8 @@
-/// Alpha v105 Mercenary State (decoded from 'w4' NPC data section).
+/// Alpha v105 Mercenary State (Hybrid priority decoding).
 ///
-/// Forensic evidence shows that mercenary attributes (Level, XP, Type) are stored
-/// within the 'w4' section (Offset 782) rather than the 'kf/lf' footer.
+/// Forensic evidence (Axiom 0328) shows that mercenary data is dual-localized:
+/// - Experience: Always at Header Offset 171 (4B LE).
+/// - Hireling ID: Priority to 'w4' NPC section (Offset 782+4), fallback to Header Offset 169.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MercenaryState {
     /// Hireling ID from Hireling.txt (at w4 + 4).
@@ -19,26 +20,52 @@ pub struct MercenaryState {
 }
 
 impl MercenaryState {
-    /// Creates a new state from the raw 'w4' section bytes.
-    pub fn from_w4(bytes: &[u8]) -> Self {
-        let hireling_id = bytes.get(4).copied().unwrap_or(0);
-        let experience = if bytes.len() >= 10 {
-            u32::from_le_bytes(bytes[6..10].try_into().unwrap_or([0; 4]))
+    /// Creates a new state using a hybrid priority localization logic (Axiom 0328).
+    ///
+    /// Mode A (Header): Experience is always at header[171..175]. ID at header[169] if w4 missing.
+    /// Mode B (w4): If w4 exists and Hireling ID (w4[4]) is non-zero, it takes priority for ID.
+    pub fn from_hybrid(header: &[u8], w4: Option<&[u8]>) -> Self {
+        // 1. Experience: Always from fixed header Offset 171 (4B LE)
+        let experience = if header.len() >= 175 {
+            u32::from_le_bytes(header[171..175].try_into().unwrap_or([0; 4]))
         } else {
             0
         };
-        let name_id = if bytes.len() >= 29 {
-            u16::from_le_bytes(bytes[27..29].try_into().unwrap_or([0; 2]))
-        } else {
-            0
-        };
+
+        // 2. Hireling ID: Priority to w4[4] if non-zero, otherwise Header[169]
+        let mut hireling_id = 0;
+        let mut raw_w4 = Vec::new();
+        let mut name_id = 0;
+
+        if let Some(w4_bytes) = w4 {
+            raw_w4 = w4_bytes.to_vec();
+            let w4_id = w4_bytes.get(4).copied().unwrap_or(0);
+            if w4_id != 0 {
+                hireling_id = w4_id;
+            }
+            
+            if w4_bytes.len() >= 29 {
+                name_id = u16::from_le_bytes(w4_bytes[27..29].try_into().unwrap_or([0; 2]));
+            }
+        }
+
+        // Fallback to Header ID if still 0
+        if hireling_id == 0 && header.len() >= 170 {
+            hireling_id = header[169];
+        }
 
         Self {
             hireling_id,
             experience,
             name_id,
-            raw_w4: bytes.to_vec(),
+            raw_w4,
         }
+    }
+
+    /// Legacy decoder (w4-only). Prefer `from_hybrid`.
+    pub fn from_w4(bytes: &[u8]) -> Self {
+        let header = [0u8; 175]; // Dummy header for legacy compat if needed, but better use hybrid.
+        Self::from_hybrid(&header, Some(bytes))
     }
 }
 
