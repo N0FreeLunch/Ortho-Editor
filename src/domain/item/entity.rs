@@ -440,6 +440,14 @@ impl Item {
     }
 
     pub fn to_emitter(&self, emitter: &mut crate::domain::item::serialization::BitEmitter, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<()> {
+        // Slice 2: Opaque pass-through
+        for module in &self.modules {
+            if let ItemModule::Opaque(bits) = module {
+                emitter.extend_bits(bits.iter().cloned())?;
+                return Ok(());
+            }
+        }
+
         use crate::domain::item::serialization::write_player_name;
         emitter.write_bits(self.header.flags, 32)?;
         if alpha_mode {

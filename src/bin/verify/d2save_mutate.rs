@@ -6,19 +6,19 @@ use d2r_core::verify::args::{ArgParser, ArgSpec};
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_mutate");
-    parser.add_spec(ArgSpec::positional("input", "Input save file (.d2s)"));
-    parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Output save file (.d2s)").required());
+    parser.add_arg("input").description("Input save file (.d2s)");
+    parser.add_opt("output").short('o').long("output").description("Output save file (.d2s)").required();
     
     // Legacy marker mutations
-    parser.add_spec(ArgSpec::option("shift-marker", None, Some("shift-marker"), "Shift marker <NAME> <OFFSET>").value_count(2));
-    parser.add_spec(ArgSpec::option("delete-marker", None, Some("delete-marker"), "Delete marker <NAME>").value_count(1));
+    parser.add_opt("shift-marker").long("shift-marker").description("Shift marker <NAME> <OFFSET>").value_count(2);
+    parser.add_opt("delete-marker").long("delete-marker").description("Delete marker <NAME>").value_count(1);
     
     // New item mutations
-    parser.add_spec(ArgSpec::option("item-index", None, Some("item-index"), "0-based index of the item to mutate"));
-    parser.add_spec(ArgSpec::option("stat", None, Some("stat"), "Stat ID to mutate"));
-    parser.add_spec(ArgSpec::option("value", None, Some("value"), "New value for the stat"));
-    parser.add_spec(ArgSpec::option("defense", None, Some("defense"), "Set defense value"));
-    parser.add_spec(ArgSpec::flag("force-fix", None, Some("force-fix"), "Force checksum and size finalization (required for v105 logic updates)"));
+    parser.add_opt("item-index").long("item-index").description("0-based index of the item to mutate");
+    parser.add_opt("stat").long("stat").description("Stat ID to mutate");
+    parser.add_opt("value").long("value").description("New value for the stat");
+    parser.add_opt("defense").long("defense").description("Set defense value");
+    parser.add_flag("force-fix").long("force-fix").description("Force checksum and size finalization (required for v105 logic updates)");
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -67,6 +67,11 @@ fn main() -> anyhow::Result<()> {
         }
         
         {
+            // Slice 2: Prevent mutating Opaque items
+            if items[idx].modules.iter().any(|m| matches!(m, d2r_core::item::ItemModule::Opaque(_))) {
+                bail!("Cannot mutate an Opaque (unparsable) item at index {}.", idx);
+            }
+
             let mut editor = items[idx].edit();
             let mut modified = false;
 

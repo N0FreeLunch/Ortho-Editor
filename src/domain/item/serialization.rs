@@ -149,7 +149,7 @@ pub fn parse_item_at_with_limit(
     huffman: &HuffmanTree,
     idx: usize,
     alpha: bool,
-    _limit: Option<u64>,
+    limit: Option<u64>,
 ) -> ParsingResult<(Item, u64)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
@@ -162,7 +162,6 @@ pub fn parse_item_at_with_limit(
 pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {
     let mut all_items = Vec::new();
     let jm_positions = crate::save::find_jm_markers(bytes);
-    eprintln!("DEBUG: Found {} JM markers", jm_positions.len());
 
     if jm_positions.is_empty() {
         return Err(ParsingFailure {
@@ -174,12 +173,14 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
         });
     }
 
-    for &pos in &jm_positions {
+    for i in 0..jm_positions.len() {
+        let pos = jm_positions[i];
         if bytes.len() < pos + 4 { continue; }
         let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
         if count == 0 { continue; }
 
-        let section_bytes = &bytes[pos + 4..];
+        let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
+        let section_bytes = &bytes[pos + 4..next_pos];
 
         match Item::read_section(section_bytes, (pos as u64 + 4) * 8, count, huffman, alpha) {
             Ok(items) => {
@@ -289,6 +290,44 @@ impl Item {
                 }
             }
         }
+
+        // Slice 2: Residue capture to ensure item count parity and bit preservation
+        if items.len() < top_level_count as usize {
+            let last_end = items.last().map(|it| it.range.end - section_bit_offset).unwrap_or(start_offset);
+            if last_end < section_bits {
+                let missing = top_level_count as usize - items.len();
+                let remaining_bits = section_bits - last_end;
+                // ... rest of the code
+                let bits_per_item = remaining_bits / missing as u64;
+
+                for i in 0..missing {
+                    let mut bits = Vec::new();
+                    let start = last_end + (i as u64 * bits_per_item);
+                    let end = if i == missing - 1 { section_bits } else { start + bits_per_item };
+                    let len = end - start;
+
+                    let mut fallback_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                    if fallback_reader.skip(start as u32).is_ok() {
+                        for _ in 0..len {
+                            if let Ok(b) = fallback_reader.read_bit() {
+                                bits.push(b);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    let mut opaque_item = Item::default();
+                    opaque_item.code = "Opaque".to_string();
+                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits));
+                    opaque_item.range.start = section_bit_offset + start;
+                    opaque_item.range.end = section_bit_offset + end;
+                    opaque_item.total_bits = len;
+                    items.push(opaque_item);
+                }
+            }
+        }
+
         Ok(items)
     }
 

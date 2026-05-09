@@ -6,12 +6,13 @@ use std::{env, fs, io::Cursor, process};
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_verify");
-    parser.add_spec(
-        ArgSpec::option("dump-bits", None, Some("dump-bits"), "Dump raw bits from start <bit> and count <bits>")
-            .value_count(2),
-    );
-    parser.add_spec(ArgSpec::flag("fix", Some('f'), Some("fix"), "Automatically fix checksums if mismatch is detected"));
-    parser.add_spec(ArgSpec::repeated_positional("files", "Save files to verify"));
+    parser.add_opt("dump-bits", "Dump raw bits from start <bit> and count <bits>")
+        .value_count(2);
+    parser.add_flag("fix", "Automatically fix checksums if mismatch is detected")
+        .short('f')
+        .long("fix");
+    parser.add_arg("files", "Save files to verify")
+        .repeated();
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,

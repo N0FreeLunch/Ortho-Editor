@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_map")
         .description("Maps and summarizes the major sections and JM markers of a D2R save file");
 
-    parser.add_spec(ArgSpec::positional("save_file", "path to the save file (.d2s)"));
+    parser.add_arg("save_file", "path to the save file (.d2s)");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {

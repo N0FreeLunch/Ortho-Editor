@@ -21,11 +21,11 @@ fn main() {
     let mut parser = ArgParser::new("d2item_find_fixed")
         .description("Exploratory tool to sweep start_bit and id_bits for fixed-width properties (Total 24bits)");
 
-    parser.add_spec(ArgSpec::positional("save_file", "path to the save file to inspect"));
-    parser.add_spec(ArgSpec::positional("start_bit_min", "inclusive lower bound for the sweep"));
-    parser.add_spec(ArgSpec::positional("start_bit_max", "inclusive upper bound for the sweep"));
-    parser.add_spec(ArgSpec::positional("id_bits_min", "optional lower bound for stat-id width (default: 7)").optional());
-    parser.add_spec(ArgSpec::positional("id_bits_max", "optional upper bound for stat-id width (default: 11)").optional());
+    parser.add_arg("save_file", "path to the save file to inspect");
+    parser.add_arg("start_bit_min", "inclusive lower bound for the sweep");
+    parser.add_arg("start_bit_max", "inclusive upper bound for the sweep");
+    parser.add_opt("id_bits_min", "optional lower bound for stat-id width (default: 7)");
+    parser.add_opt("id_bits_max", "optional upper bound for stat-id width (default: 11)");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
