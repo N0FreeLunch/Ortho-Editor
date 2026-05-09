@@ -120,59 +120,93 @@ impl AttributeSection {
 
     pub fn to_bytes_from_entries(&self, is_alpha: bool) -> io::Result<Vec<u8>> {
         let mut buf = vec![b'g', b'f'];
-        let mut rest = Self::to_bytes_bits(&self.entries, is_alpha)?;
+        let mut rest = self.to_bytes_bits(is_alpha).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         buf.append(&mut rest);
         Ok(buf)
     }
 
-    fn to_bytes_bits(entries: &[AttributeEntry], is_alpha: bool) -> Result<Vec<u8>, std::io::Error> {
+    pub fn to_bytes_bits(&self, alpha_mode: bool) -> io::Result<Vec<u8>> {
         let mut writer = BitWriter::endian(Vec::new(), LittleEndian);
-        let mut written_bits: u64 = 0;
 
-        for entry in entries {
-            if entry.stat_id == 5 && !is_alpha {
-                continue;
-            }
-
-            if let Some(ref bits) = entry.opaque_bits {
+        if alpha_mode {
+            // Refactored to use entries directly to ensure bit-perfect control
+            let mut written_bits: u64 = 0;
+            for entry in &self.entries {
+                // Write Stat ID (9 bits)
                 write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
                 written_bits += 9;
-                for &bit in bits {
-                    writer.write_bit(bit)?;
-                    written_bits += 1;
+
+                // Get stat-specific bit widths for Alpha v105
+                let (bits, param_bits) = match entry.stat_id {
+                    0..=11 => (10, 0), // Base stats
+                    12 => (7, 0),     // Level
+                    13 => (32, 0),    // Experience
+                    14 => (25, 0),    // Gold
+                    15 => (25, 0),    // GoldBank
+                    85 => (9, 0),     // item_addexperience (Alpha v105 verified width)
+                    _ => (12, 0),     // Default for unknown Alpha stats
+                };
+
+                // Write parameter if present
+                if param_bits > 0 {
+                    write_bits_dynamic(&mut writer, param_bits, entry.param)?;
+                    written_bits += param_bits as u64;
                 }
-                continue;
+
+                // Write value
+                write_bits_dynamic(&mut writer, bits, entry.raw_value)?;
+                written_bits += bits as u64;
             }
 
-            let bits = char_stat_save_bits(entry.stat_id, is_alpha);
-            let cost = stat_cost(entry.stat_id);
-            let param_bits = cost.map(|c| c.save_param_bits as u32).unwrap_or(0);
+            // Write terminator (9 bits: 0x1FF)
+            write_bits_dynamic(&mut writer, 9, 0x1FF as u32)?;
+            written_bits += 9;
 
-            write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
-            if param_bits > 0 {
-                write_bits_dynamic(&mut writer, param_bits, entry.param)?;
-            }
-            write_bits_dynamic(&mut writer, bits, entry.raw_value)?;
-            written_bits += 9 + param_bits as u64 + bits as u64;
-        }
-
-        // Terminator 0x1FF
-        write_bits_dynamic(&mut writer, 9, 0x1FFu32)?;
-        written_bits += 9;
-
-        // Alpha v105 alignment anomaly (Axiom 0337)
-        if is_alpha {
+            // Apply forensic alignment padding for Alpha v105
             let bits_to_align = (8 - (written_bits % 8)) % 8;
-            if bits_to_align > 0 {
+
+            if bits_to_align == 7 {
+                // Heuristic verified in Discussion 0231: 
+                // Level 1 characters (missing stat 13) use zero padding.
+                // Level 2+ characters (has stat 13) use 0x01 padding.
+                let has_exp = self.entries.iter().any(|e| e.stat_id == 13);
+                let padding_val = if has_exp { 0x01 } else { 0x00 };
+                write_bits_dynamic(&mut writer, 7, padding_val)?;
+            } else if bits_to_align > 0 {
                 write_bits_dynamic(&mut writer, bits_to_align as u32, 0)?;
             }
         } else {
+            // Retail logic
+            for entry in &self.entries {
+                if entry.stat_id == 5 {
+                    continue;
+                }
+
+                if let Some(ref bits) = entry.opaque_bits {
+                    write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
+                    for &bit in bits {
+                        writer.write_bit(bit)?;
+                    }
+                    continue;
+                }
+
+                let bits = char_stat_save_bits(entry.stat_id, false);
+                let cost = stat_cost(entry.stat_id);
+                let param_bits = cost.map(|c| c.save_param_bits as u32).unwrap_or(0);
+
+                write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
+                if param_bits > 0 {
+                    write_bits_dynamic(&mut writer, param_bits, entry.param)?;
+                }
+                write_bits_dynamic(&mut writer, bits, entry.raw_value)?;
+            }
+
+            // Terminator 0x1FF
+            write_bits_dynamic(&mut writer, 9, 0x1FFu32)?;
             writer.byte_align()?;
         }
 
-        let mut buf = writer.into_writer();
-        buf.flush()?;
-        Ok(buf)
+        Ok(writer.into_writer())
     }
 
     pub fn set_raw(&mut self, stat_id: u32, raw_value: u32) {
