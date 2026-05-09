@@ -58,3 +58,11 @@ pub fn parse_skill_section(bytes: &[u8], if_pos: usize) -> io::Result<SkillSecti
     }
     SkillSection::from_slice(&bytes[start..end])
 }
+
+/// Finds the base skill ID for a given character class.
+pub fn find_base_skill_id(class_code: &str) -> Option<u32> {
+    crate::data::skills::SKILLS
+        .iter()
+        .find(|s| s.charclass == class_code)
+        .map(|s| s.id)
+}

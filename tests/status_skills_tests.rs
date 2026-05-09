@@ -77,7 +77,7 @@ fn skill_section_class_bridge() {
     // Test mapping
     assert_eq!(class_skill_base_id(0), Some(6));   // Amazon
     assert_eq!(class_skill_base_id(5), Some(221)); // Druid
-    assert_eq!(class_skill_base_id(7), None);      // Unknown
+    assert_eq!(class_skill_base_id(7), Some(373)); // Warlock
 
     let mut skills = SkillSection([0u8; 30]);
     // Skill ID 9 (Inner Sight) for Amazon (class_id 0)

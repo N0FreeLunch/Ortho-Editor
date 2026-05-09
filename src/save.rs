@@ -55,24 +55,26 @@ pub fn class_name(class_id: u8) -> &'static str {
         4 => "Barbarian",
         5 => "Druid",
         6 => "Assassin",
+        7 => "Warlock",
         _ => "Unknown",
     }
 }
 
 /// Returns the base skill ID for a given character class.
 pub fn class_skill_base_id(class_id: u8) -> Option<u32> {
-    match class_id {
-        0 => Some(6),   // Amazon
-        1 => Some(36),  // Sorceress
-        2 => Some(66),  // Necromancer
-        3 => Some(96),  // Paladin
-        4 => Some(126), // Barbarian
-        5 => Some(221), // Druid
-        6 => Some(251), // Assassin
-        _ => None,
-    }
+    let code = match class_id {
+        0 => "ama",
+        1 => "sor",
+        2 => "nec",
+        3 => "pal",
+        4 => "bar",
+        5 => "dru",
+        6 => "ass",
+        7 => "war",
+        _ => return None,
+    };
+    crate::domain::character::skills::find_base_skill_id(code)
 }
-
 /// A bridge helper to get skill level using class_id.
 pub fn get_skill_level_by_class(skills: &SkillSection, class_id: u8, skill_id: u32) -> u8 {
     if let Some(base_id) = class_skill_base_id(class_id) {
