@@ -272,18 +272,26 @@ struct StabilityDashboard {
     global: DashboardGroup,
 }
 
-fn extract_metadata(path: &Path) -> (String, String) {
+fn extract_metadata(path: &Path) -> (String, String, String) {
     let path_str = path.to_string_lossy().to_lowercase();
     
-    let act = if path_str.contains("act1") {
+    let diff = if path_str.contains("hell") {
+        "Hell"
+    } else if path_str.contains("nightmare") || path_str.contains("nm") {
+        "Nightmare"
+    } else {
+        "Normal"
+    };
+
+    let act = if path_str.contains("act1") || path_str.contains("andariel") || path_str.contains("akara") || path_str.contains("cain") {
         "Act 1"
-    } else if path_str.contains("act2") {
+    } else if path_str.contains("act2") || path_str.contains("duriel") || path_str.contains("radament") || path_str.contains("jerhyn") {
         "Act 2"
-    } else if path_str.contains("act3") {
+    } else if path_str.contains("act3") || path_str.contains("mephisto") || path_str.contains("travincal") || path_str.contains("ormus") {
         "Act 3"
-    } else if path_str.contains("act4") {
+    } else if path_str.contains("act4") || path_str.contains("diablo") || path_str.contains("izual") {
         "Act 4"
-    } else if path_str.contains("act5") {
+    } else if path_str.contains("act5") || path_str.contains("baal") || path_str.contains("anya") || path_str.contains("larzuk") {
         "Act 5"
     } else {
         "Unknown"
@@ -307,58 +315,139 @@ fn extract_metadata(path: &Path) -> (String, String) {
         "Unknown"
     };
 
-    (act.to_string(), class.to_string())
+    (diff.to_string(), act.to_string(), class.to_string())
 }
 
 fn generate_html_report(dashboard: &StabilityDashboard) -> String {
     let mut html = String::new();
-    html.push_str("<!DOCTYPE html>
+    let template = "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
     <meta charset=\"UTF-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
     <title>Alpha v105 Forensic Dashboard</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a1a; color: #e0e0e0; margin: 20px; }
-        h1, h2 { color: #4fc3f7; }
-        .container { max-width: 1000px; margin: auto; }
-        .summary-card { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        table { width: 100%; border-collapse: collapse; background: #2d2d2d; border-radius: 8px; overflow: hidden; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #444; }
-        th { background-color: #333; color: #4fc3f7; }
-        tr:hover { background-color: #383838; }
-        .progress-bar { background: #444; border-radius: 4px; height: 10px; width: 100%; margin-top: 4px; }
-        .progress-fill { height: 100%; border-radius: 4px; }
-        .high { background-color: #4caf50; }
-        .medium { background-color: #ffc107; }
-        .low { background-color: #f44336; }
-        .stats { font-size: 0.9em; color: #aaa; }
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #38bdf8;
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --border: #334155;
+        }
+        body { font-family: 'Inter', -apple-system, sans-serif; background-color: var(--bg-color); color: var(--text-primary); margin: 0; padding: 40px 20px; line-height: 1.5; }
+        .container { max-width: 1100px; margin: auto; }
+        header { margin-bottom: 40px; text-align: center; }
+        h1 { font-size: 2.5rem; font-weight: 800; margin-bottom: 8px; background: linear-gradient(to right, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { color: var(--text-secondary); font-size: 1.1rem; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
+        .stat-card { background: var(--card-bg); padding: 24px; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .stat-label { color: var(--text-secondary); font-size: 0.875rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat-value { font-size: 1.875rem; font-weight: 700; margin-top: 4px; color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 32px; }
+        .section-card { background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border); overflow: hidden; }
+        .section-header { padding: 20px 24px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+        .section-header h2 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; }
+        th { padding: 12px 24px; text-align: left; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+        td { padding: 16px 24px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        .label-cell { font-weight: 500; }
+        .progress-wrapper { display: flex; align-items: center; gap: 12px; }
+        .progress-container { flex-grow: 1; background: #334155; border-radius: 9999px; height: 8px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 9999px; transition: width 0.5s ease-out; }
+        .fidelity-text { font-size: 0.875rem; font-weight: 600; min-width: 45px; text-align: right; }
+        .rate-badge { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; background: rgba(56, 189, 248, 0.1); color: var(--accent); }
+        .high { background-color: var(--success); }
+        .medium { background-color: var(--warning); }
+        .low { background-color: var(--danger); }
+        footer { margin-top: 60px; text-align: center; color: var(--text-secondary); font-size: 0.875rem; }
     </style>
 </head>
 <body>
 <div class=\"container\">
-    <h1>Alpha v105 Forensic Dashboard</h1>
-");
+    <header>
+        <h1>Alpha v105 Forensic Dashboard</h1>
+        <p class=\"subtitle\">Aggregate Stability & Fidelity Metrics for Serialization Audit</p>
+    </header>
 
-    html.push_str(&format!("
-    <div class=\"summary-card\">
-        <h2>Global Stability</h2>
-        <p>Target Directory: <code>{}</code></p>
-        <div class=\"stats\">Total Files: {} | Pass: {} | Success Rate: {:.1}% | Avg Fidelity: {:.2}%</div>
+    <div class=\"summary-grid\">
+        <div class=\"stat-card\">
+            <div class=\"stat-label\">Total Files</div>
+            <div class=\"stat-value\">{total_files}</div>
+        </div>
+        <div class=\"stat-card\">
+            <div class=\"stat-label\">Success Rate</div>
+            <div class=\"stat-value\">{success_rate}%</div>
+        </div>
+        <div class=\"stat-card\">
+            <div class=\"stat-label\">Avg Fidelity</div>
+            <div class=\"stat-value\">{avg_fidelity}%</div>
+        </div>
+        <div class=\"stat-card\">
+            <div class=\"stat-label\">Total Items</div>
+            <div class=\"stat-value\">{total_items}</div>
+        </div>
     </div>
-", 
-        dashboard.target_dir, 
-        dashboard.global.total, 
-        dashboard.global.pass,
-        if dashboard.global.total > 0 { dashboard.global.pass as f32 / dashboard.global.total as f32 * 100.0 } else { 0.0 },
-        if dashboard.global.total > 0 { dashboard.global.fidelity_sum / dashboard.global.total as f32 } else { 0.0 }
-    ));
 
-    html.push_str("<div class=\"grid\">");
+    <div class=\"grid\">
+        <div class=\"section-card\">
+            <div class=\"section-header\">
+                <h2>Stability by Difficulty & Act</h2>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Region</th>
+                        <th>Fidelity</th>
+                        <th>Rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {act_rows}
+                </tbody>
+            </table>
+        </div>
 
-    // Act Stability
-    html.push_str("<div><h2>By Act</h2><table><thead><tr><th>Act</th><th>Stability</th><th>Rate</th></tr></thead><tbody>");
+        <div class=\"section-card\">
+            <div class=\"section-header\">
+                <h2>Stability by Character Class</h2>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Class</th>
+                        <th>Fidelity</th>
+                        <th>Rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {class_rows}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer>
+        Generated from <code>{target_dir}</code>
+    </footer>
+</div>
+</body>
+</html>";
+
+    html.push_str(&template
+        .replace("{total_files}", &dashboard.global.total.to_string())
+        .replace("{success_rate}", &format!("{:.1}", if dashboard.global.total > 0 { dashboard.global.pass as f32 / dashboard.global.total as f32 * 100.0 } else { 0.0 }))
+        .replace("{avg_fidelity}", &format!("{:.2}", if dashboard.global.total > 0 { dashboard.global.fidelity_sum / dashboard.global.total as f32 } else { 0.0 }))
+        .replace("{total_items}", &dashboard.global.total.to_string()) 
+        .replace("{target_dir}", &dashboard.target_dir)
+    );
+
+
+    let mut act_rows = String::new();
     let mut acts: Vec<_> = dashboard.by_act.keys().collect();
     acts.sort();
     for act in acts {
@@ -367,13 +456,24 @@ fn generate_html_report(dashboard: &StabilityDashboard) -> String {
         let fidelity = if group.total > 0 { group.fidelity_sum / group.total as f32 } else { 0.0 };
         let color_class = if fidelity >= 95.0 { "high" } else if fidelity >= 80.0 { "medium" } else { "low" };
         
-        html.push_str(&format!("<tr><td>{}</td><td><div class=\"progress-bar\"><div class=\"progress-fill {}\" style=\"width: {:.1}%\"></div></div><div class=\"stats\">Fidelity: {:.1}%</div></td><td>{:.1}%</td></tr>", 
+        act_rows.push_str(&format!(
+            "<tr>
+                <td class=\"label-cell\">{}</td>
+                <td>
+                    <div class=\"progress-wrapper\">
+                        <div class=\"progress-container\">
+                            <div class=\"progress-fill {}\" style=\"width: {:.1}%\"></div>
+                        </div>
+                        <div class=\"fidelity-text\">{:.1}%</div>
+                    </div>
+                </td>
+                <td><span class=\"rate-badge\">{:.1}%</span></td>
+            </tr>", 
             act, color_class, fidelity, fidelity, rate));
     }
-    html.push_str("</tbody></table></div>");
+    html = html.replace("{act_rows}", &act_rows);
 
-    // Class Stability
-    html.push_str("<div><h2>By Class</h2><table><thead><tr><th>Class</th><th>Stability</th><th>Rate</th></tr></thead><tbody>");
+    let mut class_rows = String::new();
     let mut classes: Vec<_> = dashboard.by_class.keys().collect();
     classes.sort();
     for class in classes {
@@ -382,15 +482,23 @@ fn generate_html_report(dashboard: &StabilityDashboard) -> String {
         let fidelity = if group.total > 0 { group.fidelity_sum / group.total as f32 } else { 0.0 };
         let color_class = if fidelity >= 95.0 { "high" } else if fidelity >= 80.0 { "medium" } else { "low" };
         
-        html.push_str(&format!("<tr><td>{}</td><td><div class=\"progress-bar\"><div class=\"progress-fill {}\" style=\"width: {:.1}%\"></div></div><div class=\"stats\">Fidelity: {:.1}%</div></td><td>{:.1}%</td></tr>", 
+        class_rows.push_str(&format!(
+            "<tr>
+                <td class=\"label-cell\">{}</td>
+                <td>
+                    <div class=\"progress-wrapper\">
+                        <div class=\"progress-container\">
+                            <div class=\"progress-fill {}\" style=\"width: {:.1}%\"></div>
+                        </div>
+                        <div class=\"fidelity-text\">{:.1}%</div>
+                    </div>
+                </td>
+                <td><span class=\"rate-badge\">{:.1}%</span></td>
+            </tr>", 
             class, color_class, fidelity, fidelity, rate));
     }
-    html.push_str("</tbody></table></div>");
+    html = html.replace("{class_rows}", &class_rows);
 
-    html.push_str("</div>
-</div>
-</body>
-</html>");
     html
 }
 
@@ -409,7 +517,7 @@ fn find_d2s_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
 
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
-    parser.add_arg("target_dir").description("Directory containing .d2s files").optional();
+    parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
     parser.add_spec(ArgSpec::option("filter", None, Some("filter"), "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)"));
     parser.add_spec(ArgSpec::flag("summary-only", None, Some("summary-only"), "Show only the summary block"));
     parser.add_spec(ArgSpec::flag("detailed", Some('d'), Some("detailed"), "Report all mismatches in a file, not just the first one"));
@@ -486,12 +594,13 @@ fn main() {
     for path in file_paths {
         total_files += 1;
         let res = process_file(&args, &path, &mut failure_breakdown);
-        let (act, class) = extract_metadata(&path);
+        let (diff, act, class) = extract_metadata(&path);
+        let act_key = if act == "Unknown" { "Unknown".to_string() } else { format!("{} {}", diff, act) };
 
         // Update dashboard
         {
             let is_pass = res.status == "[PASS]";
-            let act_group = dashboard.by_act.entry(act).or_default();
+            let act_group = dashboard.by_act.entry(act_key).or_default();
             act_group.total += 1;
             if is_pass { act_group.pass += 1; }
             act_group.fidelity_sum += res.avg_fidelity;
