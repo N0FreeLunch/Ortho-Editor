@@ -695,14 +695,18 @@ pub fn parse_item_header<R: BitRead>(
     }
     let (version, has_checksum) = if alpha_mode {
         let saved_pos = cursor.checkpoint();
-        let checksum = cursor.read_bits::<u8>(8)?;
-        let v = cursor.read_bits::<u8>(3)? as u8;
-        let expected = calculate_alpha_v105_checksum(flags, v);
+        let checksum_res = cursor.read_bits::<u8>(8);
+        let v_res = cursor.read_bits::<u8>(3);
         
-        if checksum == expected {
-            (v, true)
+        if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
+            let expected = calculate_alpha_v105_checksum(flags, v);
+            if checksum == expected {
+                (v, true)
+            } else {
+                cursor.rollback(saved_pos);
+                (cursor.read_bits::<u8>(3)? as u8, false)
+            }
         } else {
-            // Checksum mismatch or not present: backtrack and read version directly
             cursor.rollback(saved_pos);
             (cursor.read_bits::<u8>(3)? as u8, false)
         }

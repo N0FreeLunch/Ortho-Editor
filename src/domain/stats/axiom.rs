@@ -153,11 +153,22 @@ impl StatsAxiom {
             }
         } else {
             // Retail and other Alpha hybrids (version 0, 1, 2, 4, 6, 7)
-            PropertyRhythm {
-                id_bits: 9,
-                value_bits: None, // use STAT_COSTS
-                has_terminal_bit: false, // Alpha v105 forensic: No terminal bit
-                has_extra_terminal_bit: false,
+            if self.is_alpha() && (self.version == 1 || self.version == 0) {
+                // Forensic: Version 1/0 hybrids in Alpha v105 (e.g. Authority items) 
+                // use a fixed 18-bit rhythm (9 ID + 9 Val) to maintain alignment.
+                PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: Some(9),
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                }
+            } else {
+                PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: None, // use STAT_COSTS
+                    has_terminal_bit: false, // Alpha v105 forensic: No terminal bit
+                    has_extra_terminal_bit: false,
+                }
             }
         }
     }
@@ -219,18 +230,23 @@ impl StatsAxiom {
                     final_len = min_bits;
                 }
                 
-                // Apply dynamic flag-based padding for non-compact items
-                final_len += self.resolve_flag_padding(flags, is_socketed);
+                // Apply dynamic flag-based padding for non-compact items (Version 5 only)
+                if self.version == 5 {
+                    final_len += self.resolve_flag_padding(flags, is_socketed);
+                }
 
                 // Alpha v105 32-bit Alignment Axiom
-                if (self.version == 5 || self.version == 1 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6) && !self.is_personalized(flags) {
+                if (self.version == 5 || self.version == 7 || self.version == 4 || self.version == 6) && !self.is_personalized(flags) {
                     if final_len % 32 != 0 {
                         final_len += 32 - (final_len % 32);
                     }
                 }
             }
 
-            if final_len % 8 != 0 {
+            // Alpha v105 Forensic: Version 1/0 items can be bit-packed without byte alignment
+            if self.is_alpha() && (self.version == 1 || self.version == 0) {
+                // No mandatory 8-bit alignment for bit-packed hybrids
+            } else if final_len % 8 != 0 {
                 final_len += 8 - (final_len % 8);
             }
         } else if final_len % 8 != 0 {

@@ -45,8 +45,8 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
     
     let mut found_count = 0;
     while bit_idx < total_bits.saturating_sub(100) && found_count < count as usize {
-        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge)) = 
-            peek_item_header_at(bytes, bit_idx, huffman, is_alpha) 
+        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) =
+            peek_item_header_at(bytes, bit_idx, huffman, is_alpha)
         {
             if is_plausible_item_header(mode, location, &code, flags, version, is_alpha) {
                 if !is_alpha || version == 5 {

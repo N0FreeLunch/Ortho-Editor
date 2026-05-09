@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_map")
         .description("Maps and summarizes the major sections and JM markers of a D2R save file");
 
-    parser.add_arg("save_file").description("path to the save file (.d2s)");
+    parser.add_arg("save_file", "path to the save file (.d2s)");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -91,6 +91,41 @@ fn main() -> anyhow::Result<()> {
             "  [JM #{idx}] Offset {pos:>5} (bit {:>6}) | {label:<20} | count={item_count}, section_bytes={section_size}",
             pos * 8
         );
+
+        if item_count > 0 {
+            use d2r_core::item::{Item, HuffmanTree};
+            let huffman = HuffmanTree::new();
+            let is_alpha = save.header.version == 105;
+            let section_data = &bytes[pos + 4..next_pos];
+            match Item::read_section(section_data, (pos as u64 + 4) * 8, item_count, &huffman, is_alpha) {
+                Ok(items) => {
+                    println!("    Parsed {} items:", items.len());
+                    for (item_idx, item) in items.iter().enumerate() {
+                        let quality_str = match item.header.quality {
+                            Some(q) => format!("{:?}", q),
+                            None => "None".to_string(),
+                        };
+                        println!("      [{}] {} (v={}, quality={}, mode={}, loc={}) at bit {}", 
+                            item_idx, item.code.trim(), item.header.version, quality_str, item.mode, item.location, item.range.start);
+                        if item.code == "Opaque" {
+                            println!("        [Opaque] {} bits", item.total_bits);
+                        }
+                        for prop in &item.properties {
+                            println!("        Prop: ID={} (raw={})", prop.stat_id, prop.raw_value);
+                        }
+                        if !item.socketed_items.is_empty() {
+                            println!("        Socketed Items ({}):", item.socketed_items.len());
+                            for child in &item.socketed_items {
+                                println!("          Child: {}", child.code.trim());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("    [ERROR] Failed to parse items: {}", e);
+                }
+            }
+        }
     }
 
     if jm_positions.is_empty() {

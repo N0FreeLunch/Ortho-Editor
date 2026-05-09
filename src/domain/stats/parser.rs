@@ -111,6 +111,13 @@ where
     }
 
     loop {
+        // Safe-guard: Stop if we hit the bit limit (e.g. next item marker)
+        if let Some(limit) = recorder.limit() {
+            if recorder.pos() >= limit {
+                break;
+            }
+        }
+
         // Soft-Sync: If parsing stats block, check if current position is valid
         if !axiom.is_alpha() {
              let saved_pos = recorder.checkpoint();

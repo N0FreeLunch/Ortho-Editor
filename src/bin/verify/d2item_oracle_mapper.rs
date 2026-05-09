@@ -66,17 +66,17 @@ fn main() -> io::Result<()> {
         let section_end = (bytes.len() * 8) as u64;
 
         while bit_cursor < section_end {
-            if let Some((mode, loc, _x, code, flags, ver, _compact, header_bits, _nudge)) =
-                peek_item_header_at(&bytes, bit_cursor, &huffman, true)
-            {
-                if is_plausible_item_header(mode, loc, &code, flags, ver, true) {
+            if let Some((mode, location, _, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) =
+                            peek_item_header_at(&bytes, bit_cursor, &huffman, true)
+                        {
+                if is_plausible_item_header(mode, location, &code, flags, version, true) {
                     let mut record = ScanAnchor {
                         bit_offset: bit_cursor,
                         code: code.trim().to_string(),
                         flags,
-                        version: ver,
+                        version,
                         mode,
-                        location: loc,
+                        location,
                         best_width: None,
                         score: None,
                     };

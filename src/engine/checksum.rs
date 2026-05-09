@@ -74,9 +74,6 @@ pub fn finalize_save_bytes(bytes: &mut Vec<u8>, force_fix: bool) -> io::Result<(
     bytes[FILE_SIZE_OFFSET..FILE_SIZE_OFFSET + 4].copy_from_slice(&(len as u32).to_le_bytes());
     
     // Fix checksum
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-    if version != 105 || force_fix {
-        Checksum::fix(bytes);
-    }
+    Checksum::fix(bytes);
     Ok(())
 }

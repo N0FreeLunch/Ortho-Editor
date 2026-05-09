@@ -6,19 +6,19 @@ use d2r_core::verify::args::{ArgParser, ArgSpec};
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_mutate");
-    parser.add_arg("input").description("Input save file (.d2s)");
-    parser.add_opt("output").short('o').long("output").description("Output save file (.d2s)").required();
+    parser.add_arg("input", "Input save file (.d2s)");
+    parser.add_opt("output", "Output save file (.d2s)").short('o').long("output").required();
     
     // Legacy marker mutations
-    parser.add_opt("shift-marker").long("shift-marker").description("Shift marker <NAME> <OFFSET>").value_count(2);
-    parser.add_opt("delete-marker").long("delete-marker").description("Delete marker <NAME>").value_count(1);
+    parser.add_opt("shift-marker", "Shift marker <NAME> <OFFSET>").long("shift-marker").value_count(2);
+    parser.add_opt("delete-marker", "Delete marker <NAME>").long("delete-marker").value_count(1);
     
     // New item mutations
-    parser.add_opt("item-index").long("item-index").description("0-based index of the item to mutate");
-    parser.add_opt("stat").long("stat").description("Stat ID to mutate");
-    parser.add_opt("value").long("value").description("New value for the stat");
-    parser.add_opt("defense").long("defense").description("Set defense value");
-    parser.add_flag("force-fix").long("force-fix").description("Force checksum and size finalization (required for v105 logic updates)");
+    parser.add_opt("item-index", "0-based index of the item to mutate").long("item-index");
+    parser.add_opt("stat", "Stat ID to mutate").long("stat");
+    parser.add_opt("value", "New value for the stat").long("value");
+    parser.add_opt("defense", "Set defense value").long("defense");
+    parser.add_flag("force-fix", "Force checksum and size finalization (required for v105 logic updates)").long("force-fix");
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,

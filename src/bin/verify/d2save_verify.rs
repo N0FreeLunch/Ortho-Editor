@@ -7,6 +7,7 @@ use std::{env, fs, io::Cursor, process};
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_verify");
     parser.add_opt("dump-bits", "Dump raw bits from start <bit> and count <bits>")
+        .long("dump-bits")
         .value_count(2);
     parser.add_flag("fix", "Automatically fix checksums if mismatch is detected")
         .short('f')

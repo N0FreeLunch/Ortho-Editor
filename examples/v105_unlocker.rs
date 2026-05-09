@@ -29,10 +29,10 @@ fn main() {
     println!("Unlocking all quests and Act 3 Durance gate...");
     if let Some(ref mut quests) = save.header.quests {
         for quest in V105_QUESTS.iter() {
-            quests.set_v105_completed_by_name(quest.name, true);
+            quests.set_v105_completed_by_name(quest.name, true, 0, 0x90);
         }
         // Semantic Goal: Unlock Act 3 Portal
-        quests.unlock_durance_gate();
+        quests.unlock_durance_gate(0, 0x90);
     } else {
         println!("  (No Quest section found in header)");
     }
@@ -42,7 +42,7 @@ fn main() {
     if let Some(ref mut wp) = save.header.waypoints {
         for diff in 0..=2 {
             for entry in WAYPOINTS.iter() {
-                wp.set_activated_by_name(entry.name, diff, true);
+                wp.set_activated_by_name(entry.name, diff, true, 294);
             }
         }
     } else {

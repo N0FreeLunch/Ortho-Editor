@@ -134,6 +134,18 @@ impl ArgSpec {
         self.value_count = count;
         self
     }
+
+    pub fn repeated(&mut self) -> &mut Self {
+        self.arg_type = ArgType::RepeatedPositional;
+        self.required = false;
+        self
+    }
+}
+
+impl<'a> From<&'a mut ArgSpec> for ArgSpec {
+    fn from(spec: &'a mut ArgSpec) -> Self {
+        spec.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -170,27 +182,26 @@ impl ArgParser {
         self
     }
 
-    pub fn add_spec(&mut self, spec: ArgSpec) {
-        self.specs.push(spec);
+    pub fn add_spec<S: Into<ArgSpec>>(&mut self, spec: S) {
+        self.specs.push(spec.into());
     }
 
     /// Adds a positional argument and returns a mutable reference for further configuration.
-    pub fn add_arg(&mut self, name: &str) -> &mut ArgSpec {
-        let spec = ArgSpec::positional(name, "");
+    pub fn add_arg(&mut self, name: &str, description: &str) -> &mut ArgSpec {
+        let spec = ArgSpec::positional(name, description);
+        self.specs.push(spec);
+        self.specs.last_mut().unwrap()
+    }
+
+    pub fn add_opt(&mut self, name: &str, description: &str) -> &mut ArgSpec {
+        let spec = ArgSpec::option(name, None, None, description);
         self.specs.push(spec);
         self.specs.last_mut().unwrap()
     }
 
     /// Adds a flag argument and returns a mutable reference for further configuration.
-    pub fn add_flag(&mut self, name: &str) -> &mut ArgSpec {
-        let spec = ArgSpec::flag(name, None, None, "");
-        self.specs.push(spec);
-        self.specs.last_mut().unwrap()
-    }
-
-    /// Adds an option argument and returns a mutable reference for further configuration.
-    pub fn add_opt(&mut self, name: &str) -> &mut ArgSpec {
-        let spec = ArgSpec::option(name, None, None, "");
+    pub fn add_flag(&mut self, name: &str, description: &str) -> &mut ArgSpec {
+        let spec = ArgSpec::flag(name, None, None, description);
         self.specs.push(spec);
         self.specs.last_mut().unwrap()
     }
@@ -411,9 +422,9 @@ mod tests {
     #[test]
     fn test_basic_parsing() {
         let mut parser = ArgParser::new("test");
-        parser.add_arg("input").description("input file");
-        parser.add_flag("verbose").short('v').long("verbose").description("verbose output");
-        parser.add_opt("output").short('o').long("output").description("output file");
+        parser.add_arg("input", "input file");
+        parser.add_flag("verbose", "verbose output").short('v').long("verbose");
+        parser.add_opt("output", "output file").short('o').long("output");
 
         let args = vec![
             OsString::from("in.bin"),
@@ -431,7 +442,7 @@ mod tests {
     #[test]
     fn test_multi_value_option() {
         let mut parser = ArgParser::new("test");
-        parser.add_opt("bits").long("bits").description("start and count").value_count(2);
+        parser.add_opt("bits", "start and count").long("bits").value_count(2);
 
         let args = vec![
             OsString::from("--bits"),
@@ -449,7 +460,7 @@ mod tests {
     #[test]
     fn test_repeated_positional() {
         let mut parser = ArgParser::new("test");
-        parser.add_arg("main").description("main file");
+        parser.add_arg("main", "main file");
         // We still need a way to set repeated positional via add_arg if we want it to be ergonomic
         // For now, let's update ArgSpec manually for this specific case if needed, 
         // or add add_repeated_arg
@@ -473,7 +484,7 @@ mod tests {
     #[test]
     fn test_missing_required() {
         let mut parser = ArgParser::new("test");
-        parser.add_arg("input").description("input file");
+        parser.add_arg("input", "input file");
         
         let args = vec![];
         let result = parser.parse(args);
@@ -487,9 +498,9 @@ mod tests {
     #[test]
     fn test_new_dsl() {
         let mut parser = ArgParser::new("test");
-        parser.add_arg("name").description("your name").optional().default("world");
-        parser.add_flag("verbose").short('v').long("verbose");
-        parser.add_opt("level").short('l').default("1");
+        parser.add_arg("name", "your name").optional().default("world");
+        parser.add_flag("verbose", "verbose output").short('v').long("verbose");
+        parser.add_opt("level", "log level").short('l').default("1");
 
         // Case 1: Missing optional with default
         let args = vec![];
@@ -514,8 +525,8 @@ mod tests {
     #[test]
     fn test_defaults_and_env() {
         let mut parser = ArgParser::new("test");
-        parser.add_opt("port").long("port").description("port number").with_default("8080");
-        parser.add_opt("host").long("host").description("host name").with_env("TEST_HOST");
+        parser.add_opt("port", "port number").long("port").with_default("8080");
+        parser.add_opt("host", "host name").long("host").with_env("TEST_HOST");
 
         unsafe {
             env::set_var("TEST_HOST", "localhost");

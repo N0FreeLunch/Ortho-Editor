@@ -13,9 +13,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
             let scan_pos = probe + offset;
             if scan_pos + 128 > limit { continue; }
             
-            if let Some((mode, location, _x, code, flags, version, _is_compact, _header_len, _nudge)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
+            if let Some((mode, location, _x, code, flags, version, _is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
                 if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                    let confidence = if crate::domain::item::serialization::is_v105_summary_code(&code) { 100 } else { 50 };
+                    let mut confidence = if crate::domain::item::serialization::is_v105_summary_code(&code) { 100 } else { 50 };
+                    if alpha && has_checksum {
+                        confidence += 100;
+                    }
                     if confidence > max_confidence {
                         max_confidence = confidence;
                         best_offset = scan_pos;

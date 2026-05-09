@@ -66,6 +66,10 @@ impl<R: BitRead> BitCursor<R> {
         self.bit_pos
     }
 
+    pub fn limit(&self) -> Option<u64> {
+        self.limit
+    }
+
     /// Alias for pos() to match BitRecorder's total_read
     pub fn total_read(&self) -> u64 {
         self.bit_pos

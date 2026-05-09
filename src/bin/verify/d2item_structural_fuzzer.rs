@@ -279,7 +279,7 @@ fn main() -> io::Result<()> {
                 // Try 80/160/etc bit slots first
                 for slots in 1..=2 {
                     let slot_candidate = current_bit + (slots * 80);
-                    if let Some((m, l, _, c, f, v, _, _, _)) = peek_item_header_at(&bytes, slot_candidate, &huffman, true) {
+                    if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, slot_candidate, &huffman, true) {
                         if is_plausible_item_header(m, l, &c, f, v, true) {
                             next_header_bit = slot_candidate;
                             found_next = true;
@@ -291,7 +291,7 @@ fn main() -> io::Result<()> {
                 if !found_next {
                     let item_end = best_step_term + best_step_width as u64;
                     for bit in item_end..(item_end + 128) {
-                        if let Some((m, l, _, c, f, v, _, _, _)) = peek_item_header_at(&bytes, bit, &huffman, true) {
+                        if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, bit, &huffman, true) {
                             if is_plausible_item_header(m, l, &c, f, v, true) {
                                 next_header_bit = bit;
                                 found_next = true;
