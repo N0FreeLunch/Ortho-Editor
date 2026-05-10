@@ -574,7 +574,7 @@ impl Item {
                 emitter.write_bits(quality_val as u32, 4)?;
             }
 
-            if !(is_item_alpha && (self.header.version == 2)) {
+            if !(is_item_alpha && (self.header.version == 4 || self.header.version == 6 || self.header.version == 7)) {
                 if self.has_multiple_graphics { emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?; }
                 if self.has_class_specific_data { emitter.write_bits(self.class_specific_bits.unwrap_or(0) as u16 as u32, 11)?; }
                 match quality_val {
@@ -664,8 +664,14 @@ impl Item {
         let mut emitter = BitEmitter::new();
         for item in items {
             emitter.extend_bits(item.gap_bits.iter().cloned())?;
-            let item_bytes = item.to_bytes(huffman, alpha_mode)?;
-            for byte in item_bytes { emitter.write_bits(byte as u32, 8)?; }
+            if alpha_mode {
+                // Alpha v105 Forensic: Items are bit-packed without byte alignment between them.
+                let item_bits = item.to_bits(huffman, alpha_mode)?;
+                emitter.extend_bits(item_bits)?;
+            } else {
+                let item_bytes = item.to_bytes(huffman, alpha_mode)?;
+                for byte in item_bytes { emitter.write_bits(byte as u32, 8)?; }
+            }
             let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode);
             for child in &item.socketed_items {
                 if alpha_mode && axiom.is_alpha() {
@@ -673,9 +679,14 @@ impl Item {
                     // Avoid double-writing here.
                     continue;
                 }
-                if alpha_mode { emitter.write_bits(2, 2)?; }
-                let child_bytes = child.to_bytes(huffman, alpha_mode)?;
-                for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
+                if alpha_mode { 
+                    emitter.write_bits(2, 2)?; 
+                    let child_bits = child.to_bits(huffman, alpha_mode)?;
+                    emitter.extend_bits(child_bits)?;
+                } else {
+                    let child_bytes = child.to_bytes(huffman, alpha_mode)?;
+                    for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
+                }
             }
         }
         Ok(emitter.into_bytes())
@@ -864,7 +875,7 @@ impl ExtendedStatsData {
         let is_personalized = header.is_personalized;
         let h_axiom = HeaderAxiom::new(version, alpha_mode);
         let is_fragment = h_axiom.is_alpha() && (version == 5 || version == 2 || version == 1) && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0) ;
-        let is_alpha_early_exit = h_axiom.is_alpha() && (version == 2);
+        let is_alpha_early_exit = h_axiom.is_alpha() && (version == 4 || version == 6 || version == 7);
         if axiom.is_alpha() {
             if !is_compact {
                 let quality_raw = cursor.read_bits::<u8>(3)?;

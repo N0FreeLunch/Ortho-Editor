@@ -372,8 +372,8 @@ impl Item {
                 }
             }
             
-            if !(alpha_mode && is_compact_final) {
-                dynamic_limit += 128; // Safety buffer
+            if !alpha_mode && !is_compact_final {
+                dynamic_limit += 128; // Safety buffer (Retail only)
             }
 
             match parse_item_at_with_limit(
@@ -692,7 +692,7 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|
         "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
-        "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|
+        "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
         "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"
     )
 }
@@ -895,10 +895,22 @@ pub fn write_property_list(
         }
     }
     if properties_complete && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) {
+        if crate::item::item_trace_enabled() {
+            eprintln!("[DEBUG Write] Writing terminator (0x{:X}) for code={}, id_bits={}", terminator, code, id_bits);
+        }
         emitter.write_bits(terminator, id_bits)?;
+        if axiom.is_alpha() && rhythm.value_bits.is_some() {
+             if let Some(val_bits) = rhythm.value_bits {
+                 // Alpha v105 18-bit rhythm (9+9) consumes a trailing 9-bit value slot for terminator.
+                 emitter.write_bits(0, val_bits)?;
+             }
+        }
     }
     let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1 || version == 2);
     if properties_complete && rhythm.has_terminal_bit {
+        if crate::item::item_trace_enabled() {
+            eprintln!("[DEBUG Write] Writing terminal bit ({}) for code={}", terminator_bit, code);
+        }
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }
         if !preserve_trailing_align { emitter.byte_align()?; }
