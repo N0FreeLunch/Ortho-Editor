@@ -1,4 +1,6 @@
-use d2r_core::save::{map_core_sections, parse_skill_section, patch_skill_section, SkillSection};
+use d2r_core::save::{
+    class_skill_base_id, map_core_sections, parse_skill_section, patch_skill_section, SkillSection,
+};
 use std::fs;
 use std::io;
 
@@ -17,27 +19,80 @@ fn status_skills_parse_patch_roundtrip() -> io::Result<()> {
         "tests/fixtures/savegames/original/amazon_v105_act2_start.d2s",
         "tests/fixtures/savegames/original/amazon_v105_andariel_killed_no_talk.d2s",
         "tests/fixtures/savegames/original/amazon_v105_re_probe_zigzag_all_diff.d2s",
+        "tests/fixtures/savegames/re_probes/amazon_v105_re_probe_wps.d2s",
         "tests/fixtures/savegames/original/amazon_10_scrolls.d2s",
         "tests/fixtures/savegames/original/amazon_authority_runeword.d2s",
         "tests/fixtures/savegames/original/amazon_initial.d2s",
         "tests/fixtures/savegames/original/amazon_moved_diff_basis.d2s",
         "tests/fixtures/savegames/original/amazon_moved_manual.d2s",
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest1_AkaraRingObtained.d2s",
+        "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest6_BaalIncomplete.d2s",
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
     ];
 
     for fixture_path in fixtures {
         let bytes = load_fixture(fixture_path)?;
         let map = map_core_sections(&bytes)?;
         let skills = parse_skill_section(&bytes, &map)?;
-        
+
         let patched = patch_skill_section(&bytes, &map, &skills)?;
-        assert_eq!(patched, bytes, "Roundtrip failed for fixture: {}", fixture_path);
+        assert_eq!(
+            patched, bytes,
+            "Roundtrip failed for fixture: {}",
+            fixture_path
+        );
     }
 
     // Specific check for known value in progression fixture
-    let prog_bytes = load_fixture("tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s")?;
+    let prog_bytes =
+        load_fixture("tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s")?;
     let map_prog = map_core_sections(&prog_bytes)?;
     let skills_prog = parse_skill_section(&prog_bytes, &map_prog)?;
     assert_eq!(skills_prog.as_slice()[3], 1);
+
+    Ok(())
+}
+
+#[test]
+fn status_skills_semantic_roundtrip() -> io::Result<()> {
+    let fixtures = [
+        ("tests/fixtures/savegames/original/amazon_empty.d2s", 0), // class_id 0
+        (
+            "tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s",
+            0,
+        ),
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest1_AkaraRingObtained.d2s",
+            5,
+        ), // class_id 5
+        (
+            "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest6_BaalIncomplete.d2s",
+            5,
+        ),
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
+            6,
+        ), // class_id 6
+    ];
+
+    for (fixture_path, class_id) in fixtures {
+        let bytes = load_fixture(fixture_path)?;
+        let map = map_core_sections(&bytes)?;
+        let skills = parse_skill_section(&bytes, &map)?;
+        let base_id = class_skill_base_id(class_id).expect("valid base_id");
+
+        let mut reconstructed = SkillSection([0u8; 30]);
+        for skill_info in skills.iter_skills(base_id) {
+            reconstructed.set_level(base_id, skill_info.skill_id, skill_info.level);
+        }
+
+        assert_eq!(
+            reconstructed.as_slice(),
+            skills.as_slice(),
+            "Semantic roundtrip failed for fixture: {}",
+            fixture_path
+        );
+    }
 
     Ok(())
 }
