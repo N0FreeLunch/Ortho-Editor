@@ -73,9 +73,28 @@ fn status_skills_semantic_roundtrip() -> io::Result<()> {
             "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
             6,
         ), // class_id 6
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTPALADIN_Act1_FreshStart.d2s",
+            3,
+        ), // class_id 3
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTNECRO_Act1_FreshStart.d2s",
+            2,
+        ), // class_id 2
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTBARB_Act1_FreshStart.d2s",
+            4,
+        ), // class_id 4
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTSORC_Act1_FreshStart.d2s",
+            1,
+        ), // class_id 1
     ];
 
     for (fixture_path, class_id) in fixtures {
+        if !std::path::Path::new(&repo_path(fixture_path)).exists() {
+            continue;
+        }
         let bytes = load_fixture(fixture_path)?;
         let map = map_core_sections(&bytes)?;
         let skills = parse_skill_section(&bytes, &map)?;
@@ -163,3 +182,65 @@ fn skill_section_iterator() {
     assert_eq!(all_skills[29].skill_id, 35);
     assert_eq!(all_skills[29].level, 3);
 }
+
+#[test]
+fn status_skills_integrated_save_test() -> io::Result<()> {
+    use d2r_core::save::rebuild_status_and_player_items;
+    use d2r_core::save::AttributeSection;
+    use d2r_core::item::{HuffmanTree, Item};
+
+    let fixtures = [
+        "tests/fixtures/savegames/original/amazon_empty.d2s",
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest1_AkaraRingObtained.d2s",
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
+    ];
+
+    let huffman = HuffmanTree::new();
+
+    for fixture_path in fixtures {
+        if !std::path::Path::new(&repo_path(fixture_path)).exists() {
+            continue;
+        }
+        let bytes = load_fixture(fixture_path)?;
+        let map = map_core_sections(&bytes)?;
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+        let is_alpha = version == 105;
+
+        // Parse sections
+        let attrs = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)?;
+        let skills = parse_skill_section(&bytes, &map)?;
+        let items = Item::read_player_items(&bytes, &huffman, is_alpha)?;
+
+        // Rebuild via integrated method
+        let rebuilt = rebuild_status_and_player_items(
+            &bytes,
+            Some(&attrs),
+            Some(&skills),
+            None, // Quests/Waypoints handled via gap in rebuild if None
+            None,
+            None,
+            &items,
+            &huffman,
+        )?;
+
+        let rebuilt_map = map_core_sections(&rebuilt)?;
+        println!("Fixture: {}", fixture_path);
+        println!("Original - gf: {}, if: {}, jm0: {}", map.gf_pos, map.if_pos, map.jm_positions[0]);
+        println!("Rebuilt  - gf: {}, if: {}, jm0: {}", rebuilt_map.gf_pos, rebuilt_map.if_pos, rebuilt_map.jm_positions[0]);
+
+        // The skill section (if + 30 bytes) should be identical
+        let start = map.if_pos;
+        let end = start + 2 + 30;
+        let rebuilt_start = rebuilt_map.if_pos;
+        let rebuilt_end = rebuilt_start + 2 + 30;
+        assert_eq!(
+            &rebuilt[rebuilt_start..rebuilt_end],
+            &bytes[start..end],
+            "Integrated rebuild skill section mismatch for fixture: {}",
+            fixture_path
+        );
+    }
+
+    Ok(())
+}
+
