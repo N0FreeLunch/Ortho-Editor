@@ -5,7 +5,7 @@ use d2r_core::verify::symmetry::{calculate_symmetry_diff, SymmetryOptions};
 use serde::Serialize;
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
 struct FuzzResult {
@@ -240,9 +240,13 @@ fn main() {
     }
 
     if let Some(json_path) = output_json {
+        let json_path = resolve_output_json_path(&json_path);
         let json_str = serde_json::to_string_pretty(&results).unwrap();
+        if let Some(parent) = json_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
         fs::write(&json_path, json_str).unwrap();
-        println!("Results exported to {}", json_path);
+        println!("Results exported to {}", json_path.display());
     }
 
     println!("Fuzzing complete. Results in tmp/fuzz_outputs/");
@@ -263,6 +267,22 @@ fn parse_range(s: &str) -> Option<(usize, usize)> {
     } else {
         None
     }
+}
+
+fn resolve_output_json_path(raw: &str) -> PathBuf {
+    let p = Path::new(raw);
+    if p.is_absolute() || p.parent().is_some_and(|parent| parent != Path::new("")) {
+        return p.to_path_buf();
+    }
+
+    if let Ok(spec_root) = env::var("D2R_SPEC_PATH") {
+        return Path::new(&spec_root)
+            .join("research")
+            .join("forensics")
+            .join(raw);
+    }
+
+    p.to_path_buf()
 }
 
 fn read_u32_at_bit(bytes: &[u8], bit_offset: usize) -> u32 {

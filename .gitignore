@@ -41,3 +41,6 @@ d2r-data/
 
 # AI Forensic Cache
 antigravity/
+
+# Forensic dataset outputs must live under d2r-spec/research/forensics.
+audit_results_v105_rupture.json
