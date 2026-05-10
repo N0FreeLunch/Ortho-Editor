@@ -53,6 +53,8 @@ pub enum ParsingError {
     /// Alignment requirement not met (e.g., not byte-aligned when expected).
     #[error("Alignment error at bit {bit_offset}: {reason}")]
     AlignmentError { bit_offset: u64, reason: String },
+    #[error("Bit budget exceeded at bit {bit_offset}")]
+    BitBudgetExceeded { bit_offset: u64 },
     #[error("IO error: {0}")]
     Io(String), 
     #[error("Parsing error: {0}")]

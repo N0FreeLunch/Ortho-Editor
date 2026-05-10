@@ -7,6 +7,8 @@ use crate::data::bit_cursor::BitCursor;
 use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext};
 use crate::domain::header::entity::ItemSegmentType;
 
+pub const MAX_ALPHA_V105_ITEM_BITS: u64 = 1500;
+
 pub fn read_item_stats<R: BitRead>(
     cursor: &mut BitCursor<R>,
     code: &str,
@@ -99,6 +101,8 @@ where
     let mut terminator_bit = false;
     let mut saw_terminator = false;
 
+    let start_pos = recorder.pos();
+
     // Heuristic for compact items in Alpha
     let is_compact = code.trim().is_empty() || code.len() < 3;
 
@@ -111,6 +115,11 @@ where
     }
 
     loop {
+        // BitBudget Guardrail: Prevent "swallowing" items in Alpha v105
+        if axiom.is_alpha() && (recorder.pos() - start_pos) > MAX_ALPHA_V105_ITEM_BITS {
+            return Err(recorder.fail(crate::error::ParsingError::BitBudgetExceeded { bit_offset: recorder.pos() }));
+        }
+
         // Safe-guard: Stop if we hit the bit limit (e.g. next item marker)
         if let Some(limit) = recorder.limit() {
             if recorder.pos() >= limit {

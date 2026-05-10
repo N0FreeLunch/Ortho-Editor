@@ -1124,6 +1124,51 @@ mod tests {
     }
 
     #[test]
+    fn test_bit_budget_protection() {
+        let huffman = HuffmanTree::new();
+        let mut emitter = BitEmitter::new();
+
+        // Alpha v105 header (Version 5)
+        let flags = 0u32;
+        let v = 5u8;
+        let checksum = crate::domain::header::entity::calculate_alpha_v105_checksum(flags, v);
+
+        emitter.write_bits(flags, 32).unwrap();
+        emitter.write_bits(checksum as u32, 8).unwrap();
+        emitter.write_bits(v as u32, 3).unwrap();
+        emitter.write_bits(1, 3).unwrap(); // mode
+        emitter.write_bits(1, 3).unwrap(); // loc
+        emitter.write_bits(0, 4).unwrap(); // x
+
+        // Item code "rin "
+        let code_bits = huffman.encode("rin ").unwrap();
+        for b in code_bits { emitter.write_bit(b).unwrap(); }
+
+        // Properties: write many non-terminator stats.
+        // stat_id 0 (9 bits) + value (6 bits) = 15 bits per property for Version 5 non-runeword.
+        // 1500 / 15 = 100 properties.
+        for _ in 0..110 {
+            emitter.write_bits(0, 9).unwrap();
+            emitter.write_bits(0, 6).unwrap();
+        }
+
+        let bytes = emitter.into_bytes();
+        let result = Item::from_bytes(&bytes, &huffman, true);
+
+        match result {
+            Err(failure) => {
+                match failure.error {
+                    ParsingError::BitBudgetExceeded { bit_offset } => {
+                        assert!(bit_offset >= 1500);
+                    }
+                    _ => panic!("Expected BitBudgetExceeded, got {:?}", failure.error),
+                }
+            }
+            Ok(_) => panic!("Should have failed with BitBudgetExceeded"),
+        }
+    }
+
+    #[test]
     fn test_read_section_bit_range_accuracy() {
         let huffman = HuffmanTree::new();
         let mut emitter = BitEmitter::new();
