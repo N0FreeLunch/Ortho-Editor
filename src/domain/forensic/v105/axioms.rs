@@ -64,8 +64,8 @@ impl V105HeaderGapAxiom {
         // If flag bit 26 or 27 is set, use 8 bits, otherwise check for compact flag.
         if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
             8
-        } else if (flags & 0x00000008) != 0 { // Placeholder for compact bit
-            0 // Bug fixed: was returning 24, but fixture forensics confirm 0 for compact first-items and sections
+        } else if (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
+            8 // Compact items (potions) in Alpha v105 use an 8-bit header gap when not the first item (Axiom 0340)
         } else {
             32
         }

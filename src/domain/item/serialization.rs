@@ -239,12 +239,25 @@ pub fn peek_item_header_at_specific_gap(
             Ok(ch) => code.push(ch),
             Err(_) => {
                 if alpha_mode && i >= 1 {
+                    let saved_pos = n_cursor.pos();
+                    // Try 1-bit nudge
                     if n_cursor.read_bit().is_ok() {
                         if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
                             code.push(ch);
                             continue;
                         }
                     }
+                    // Try 2-bit nudge
+                    n_cursor.rollback(saved_pos);
+                    if let Ok(bits) = n_cursor.read_bits_as_vec(2) {
+                        if bits.len() == 2 {
+                            if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
+                                code.push(ch);
+                                continue;
+                            }
+                        }
+                    }
+                    n_cursor.rollback(saved_pos);
                 }
                 ok = false; break;
             }
