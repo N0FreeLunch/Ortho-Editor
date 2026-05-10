@@ -19,7 +19,6 @@ pub fn read_item_stats<R: BitRead>(
     is_v105_shadow: bool,
     is_personalized: bool,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>, Vec<crate::domain::item::Item>)> {
-    println!("[DEBUG] read_item_stats: code='{}', version={}, is_shadow={}", code, version, is_v105_shadow);
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
@@ -103,7 +102,7 @@ where
     // Heuristic for compact items in Alpha
     let is_compact = code.trim().is_empty() || code.len() < 3;
 
-    let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
+    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1);
 
     // Track nesting depth via thread-local to handle independent cursors
     let depth = NESTED_DEPTH.with(|d| d.get());
@@ -270,9 +269,6 @@ where
 
     if axiom.is_alpha() && (is_stat_317 || is_stat_320) && !is_already_nested {
         let entry_pos = recorder.pos();
-        if crate::item::item_trace_enabled() {
-            println!("[TRACE] parser: stat {} nested recovery at pos {}, depth: {}", stat_id, entry_pos, recorder.context_stack().len());
-        }
         recorder.push_context("nested");
         
         // Scan for the next item header within a small window to handle potential padding/nudges
@@ -309,9 +305,6 @@ where
         });
 
         if let Ok((child, end_pos)) = result {
-            if crate::item::item_trace_enabled() {
-                println!("[TRACE] parser: child item parsed for stat {}, relative_end: {}, absolute_end: {}", stat_id, end_pos, found_pos + end_pos);
-            }
             nested_items.push(child);
             
             let absolute_end = found_pos + end_pos;
@@ -336,10 +329,6 @@ where
         raw_value = 0;
     }
     
-    if crate::item::item_trace_enabled() {
-        println!("[TRACE] parser: peeked stat_id: {} value: {} at pos {}", stat_id, raw_value, entry_start);
-    }
-
     recorder.push_context(&format!("Stat({})", stat_id));
     let entry_end = recorder.pos();
     recorder.pop_context();

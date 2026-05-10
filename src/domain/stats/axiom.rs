@@ -168,7 +168,7 @@ impl StatsAxiom {
                 PropertyRhythm {
                     id_bits: 9,
                     value_bits: Some(9),
-                    has_terminal_bit: false,
+                    has_terminal_bit: true,
                     has_extra_terminal_bit: false,
                 }
             } else {

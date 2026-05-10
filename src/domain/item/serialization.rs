@@ -179,11 +179,6 @@ pub fn peek_item_header_at(
                 || (!best_has_checksum && has_checksum)
                 || (!best_is_known && is_known && (!best_has_checksum || has_checksum)) 
             {
-                /*
-                if alpha_mode && gap > 0 {
-                    eprintln!("[DEBUG] peek_item_header_at: code='{}', nudge={}, has_checksum={}", code, gap, has_checksum);
-                }
-                */
                 best_candidate = Some(candidate);
                 best_is_known = is_known;
             }
@@ -280,12 +275,14 @@ pub fn parse_item_at_with_limit(
     huffman: &HuffmanTree,
     idx: usize,
     alpha: bool,
-    _limit: Option<u64>,
+    limit: Option<u64>,
 ) -> ParsingResult<(Item, u64)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
     let mut cursor = BitCursor::new(reader);
-    // Removed strict limit enforcement to allow variable padding to parse successfully
+    if let Some(l) = limit {
+        cursor.set_limit(l);
+    }
     let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx == 0)?;
     Ok((item, cursor.pos()))
 }
@@ -364,15 +361,20 @@ impl Item {
 
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
+            let mut is_compact_final = false;
             if let Some((_, _, _, _code, flags, _, is_compact, _, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
+                is_compact_final = is_compact;
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
                 if !is_compact && (flags & 0x00000008) != 0 {
                     dynamic_limit += 8;
                 }
             }
-            dynamic_limit += 128; // Safety buffer
+            
+            if !(alpha_mode && is_compact_final) {
+                dynamic_limit += 128; // Safety buffer
+            }
 
             match parse_item_at_with_limit(
                 section_bytes,
@@ -398,7 +400,7 @@ impl Item {
                     items.push(final_item);
                     start_offset = start + actual_consumed;
                 }
-                Err(e) => {
+                Err(_e) => {
                     // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
                     let (peek_code, peek_limit) = if let Some((_, _, _, code, _, _, is_compact, _, _, _)) =
                         peek_item_header_at(section_bytes, start, huffman, alpha_mode)
@@ -408,8 +410,6 @@ impl Item {
                     } else {
                         ("Opaque".to_string(), limit)
                     };
-
-                    eprintln!("[WARN] Item parsing failed at bit {}. Capturing {} bits as Opaque (Code Hint: '{}'). Error: {:?}", section_bit_offset + start, peek_limit, peek_code, e);
 
                     let mut bits = Vec::new();
                     let mut fallback_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -506,9 +506,6 @@ impl Item {
         cursor.set_trace(crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Root);
-        if alpha_mode && crate::item::item_trace_enabled() {
-            println!("[DEBUG] from_reader_with_context: start_bit={}", start_bit);
-        }
 
         let peek = if alpha_mode && ctx.is_some() {
             let (bytes, start_bit) = ctx.unwrap();
@@ -612,9 +609,6 @@ impl Item {
         if item.body.alpha_header_gap.is_some() { item.forensic_audit.record(V105HeaderGapAxiom.metadata()); }
         if item.body.alpha_shadow_skip_bits.is_some() { item.forensic_audit.record(V105ShadowAxiom.metadata()); }
         if rhythm_recovery { item.forensic_audit.record(V105PropertyRhythmAxiom.metadata()); }
-        if alpha_mode && crate::item::item_trace_enabled() {
-            println!("[DEBUG] item: code='{}', is_compact={}, flags=0x{:08X}, version={}", item.code, item.header.is_compact, item.header.flags, item.header.version);
-        }
 
         // Slice 1: Force stats reading for Alpha v105 items even if compact, 
         // to detect residue Defense/Durability as per mini-spec.
@@ -654,7 +648,6 @@ impl Item {
             .with_personalization(item.header.is_personalized);
         let consumed_bits = cursor.pos() - start_bit;
         let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.code, item.header.flags);
-        // println!("[DEBUG] to_emitter: code='{}', current_bits={}, final_consumed={}", item.code, consumed_bits, final_consumed);
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;
             let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
@@ -770,9 +763,6 @@ impl BitEmitter {
     }
 
     pub fn write_bit(&mut self, bit: bool) -> io::Result<()> {
-        if crate::item::item_trace_enabled() {
-            // println!("[TRACE] BitEmitter: bit {} at pos {}", bit as u8, self.written);
-        }
         self.writer.write_bit(bit)?;
         self.written += 1;
         self.bits.push(bit);
@@ -904,10 +894,10 @@ pub fn write_property_list(
             }
         }
     }
-    if properties_complete && (!axiom.is_alpha() || version == 5) {
+    if properties_complete && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1) {
         emitter.write_bits(terminator, id_bits)?;
     }
-    let preserve_trailing_align = axiom.is_alpha() && version == 0 && code.trim().is_empty();
+    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1);
     if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }

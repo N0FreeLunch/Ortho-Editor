@@ -556,11 +556,11 @@ impl Item {
             }
         }
 
-        if !self.header.is_compact {
+        if !self.header.is_compact || (alpha_mode && (self.header.version == 0 || self.header.version == 1)) {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
 
-            if is_item_alpha {
+            if is_item_alpha && !self.header.is_compact {
                 let quality_to_write = self.alpha_quality_raw.unwrap_or(quality_val as u8);
                 emitter.write_bits(quality_to_write as u32, 3)?;
                 if (self.header.version == 5 || self.header.version == 6 || self.header.version == 7) && (s_axiom.is_runeword(self.header.flags) || h_axiom.is_v105_shadow(self.header.flags)) {
@@ -607,8 +607,10 @@ impl Item {
                     if alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) { emitter.byte_align()?; }
                     write_player_name(emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1))?;
                 }
-                if self.code.trim() == "tbk" || self.code.trim() == "ibk" { emitter.write_bits(self.tbk_ibk_teleport.unwrap_or(0) as u32, 5)?; }
-                emitter.write_bit(self.timestamp_flag)?;
+                if !self.header.is_compact {
+                    if self.code.trim() == "tbk" || self.code.trim() == "ibk" { emitter.write_bits(self.tbk_ibk_teleport.unwrap_or(0) as u32, 5)?; }
+                    emitter.write_bit(self.timestamp_flag)?;
+                }
                 let template = crate::domain::item::serialization::item_template(&self.code);
                 let (reads_def, reads_dur, reads_qty) = if let Some(t) = template { (t.is_armor, t.has_durability, t.is_stackable) } else { (false, false, false) };
                 if reads_def && s_axiom.reads_defense() { emitter.write_bits(self.defense.unwrap_or(0), 11)?; }
