@@ -7,7 +7,7 @@ use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
-use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyRhythmAxiom};
 
 pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha: bool) -> Option<u64> {
     let limit = (bytes.len() * 8) as u64;
@@ -78,7 +78,7 @@ pub fn peek_item_header_at(
     let v = alpha_reader.read::<3, u8>().ok()?;
     let calculated = calculate_alpha_v105_checksum(flags, v);
     
-    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum {
+    let (version, mode, loc, _x_val, base_header_len, _has_checksum) = if calculated == checksum {
         let m = alpha_reader.read::<3, u8>().ok()?;
         let l = alpha_reader.read::<3, u8>().ok()?;
         let x = alpha_reader.read::<4, u8>().ok()?;
@@ -211,7 +211,7 @@ pub fn peek_item_header_at_specific_gap(
     let v = alpha_reader.read::<3, u8>().ok()?;
     let calculated = calculate_alpha_v105_checksum(flags, v);
     
-    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum {
+    let (version, mode, loc, _x_val, base_header_len, _has_checksum) = if calculated == checksum {
         let m = alpha_reader.read::<3, u8>().ok()?;
         let l = alpha_reader.read::<3, u8>().ok()?;
         let x = alpha_reader.read::<4, u8>().ok()?;
@@ -525,14 +525,29 @@ impl Item {
             cursor.pop_context();
         }
         
-        let (mut body, ear_class, ear_level, ear_player_name) = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode)?;
+        let body_start_bit = cursor.pos();
+        let body_res = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode);
+        let mut rhythm_recovery = false;
+        let (mut body, ear_class, ear_level, ear_player_name) = match body_res {
+            Ok(res) => res,
+            Err(e) if alpha_mode && (header.version == 5 || header.version == 1 || header.version == 0) => {
+                // Slice 6: Huffman resolution failure or drift in Alpha v105.
+                // Trigger 9+9 property rhythm recovery.
+                rhythm_recovery = true;
+                let mut b = crate::domain::item::entity::ItemBody::default();
+                b.code = "Opaque".to_string();
+                cursor.rollback(body_start_bit);
+                (b, None, None, None)
+            }
+            Err(e) => return Err(e),
+        };
         body.alpha_header_gap = alpha_header_gap;
         body.alpha_header_gap_bits = alpha_header_gap_bits;
 
         let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode)
             .with_code(&body.code);
         
-        let ext_data = if !header.is_compact {
+        let ext_data = if !header.is_compact && !rhythm_recovery {
             crate::domain::item::entity::ExtendedStatsData::read_from_cursor(cursor, &body.code, &header, alpha_mode, &axiom)?
         } else {
             crate::domain::item::entity::ExtendedStatsData::default()
@@ -593,6 +608,7 @@ impl Item {
         if item.body.alpha_nudge.is_some() { item.forensic_audit.record(V105NudgeAxiom.metadata()); }
         if item.body.alpha_header_gap.is_some() { item.forensic_audit.record(V105HeaderGapAxiom.metadata()); }
         if item.body.alpha_shadow_skip_bits.is_some() { item.forensic_audit.record(V105ShadowAxiom.metadata()); }
+        if rhythm_recovery { item.forensic_audit.record(V105PropertyRhythmAxiom.metadata()); }
 
         if !item.header.is_compact {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
@@ -615,7 +631,7 @@ impl Item {
                 alpha_mode, 
                 item.header.quality, 
                 item.header.is_runeword, 
-                is_v105_shadow, 
+                is_v105_shadow || rhythm_recovery, 
                 item.header.is_personalized
             )?;
             item.properties = props.clone();

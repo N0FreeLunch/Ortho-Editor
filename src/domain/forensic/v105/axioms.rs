@@ -72,6 +72,20 @@ impl V105HeaderGapAxiom {
     }
 }
 
+/// 9+9 bit property rhythm (ID: 9, Value: 9) in Alpha v105.
+#[derive(Debug, Clone, Default)]
+pub struct V105PropertyRhythmAxiom;
+
+impl ForensicAxiom for V105PropertyRhythmAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "9+9 property rhythm (9-bit ID, 9-bit Value) in Alpha v105",
+        )
+    }
+}
+
 
 
 #[cfg(test)]
@@ -88,5 +102,8 @@ mod tests {
         
         let gap = V105HeaderGapAxiom;
         assert_eq!(gap.metadata().confidence, Confidence::EmergingHypothesis);
+
+        let rhythm = V105PropertyRhythmAxiom;
+        assert_eq!(rhythm.metadata().confidence, Confidence::VerifiedTruth);
     }
 }

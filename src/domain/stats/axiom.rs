@@ -142,6 +142,15 @@ impl StatsAxiom {
             };
         }
 
+        if self.is_alpha() && self.code == "Opaque" {
+             return PropertyRhythm {
+                id_bits: 9,
+                value_bits: Some(9),
+                has_terminal_bit: false,
+                has_extra_terminal_bit: false,
+            };
+        }
+
         if self.is_alpha() && self.version == 5 {
             // Only Version 5 (Alpha v105 native) items use 9-bit ID, 6-bit Value (fixture-verified)
             // Terminator is 9-bits (111111111), no extra terminal bits like Retail.
