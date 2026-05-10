@@ -45,6 +45,20 @@ impl SkillSection {
             self.0[index] = level;
         }
     }
+
+    /// Returns an iterator over all skills in this section with their levels.
+    pub fn iter_skills(&self, base_id: u32) -> impl Iterator<Item = SkillLevel> + '_ {
+        self.0.iter().enumerate().map(move |(i, &level)| SkillLevel {
+            skill_id: base_id + i as u32,
+            level,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SkillLevel {
+    pub skill_id: u32,
+    pub level: u8,
 }
 
 pub fn parse_skill_section(bytes: &[u8], if_pos: usize) -> io::Result<SkillSection> {

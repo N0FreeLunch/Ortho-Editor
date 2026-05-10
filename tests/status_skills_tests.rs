@@ -91,3 +91,20 @@ fn skill_section_class_bridge() {
     // Unknown class
     assert_eq!(get_skill_level_by_class(&skills, 7, 9), 0);
 }
+
+#[test]
+fn skill_section_iterator() {
+    let mut skills = SkillSection([0u8; 30]);
+    skills.set_level(6, 6, 1);  // Index 0
+    skills.set_level(6, 10, 5); // Index 4
+    skills.set_level(6, 35, 3); // Index 29
+
+    let all_skills: Vec<_> = skills.iter_skills(6).collect();
+    assert_eq!(all_skills.len(), 30);
+    assert_eq!(all_skills[0].skill_id, 6);
+    assert_eq!(all_skills[0].level, 1);
+    assert_eq!(all_skills[4].skill_id, 10);
+    assert_eq!(all_skills[4].level, 5);
+    assert_eq!(all_skills[29].skill_id, 35);
+    assert_eq!(all_skills[29].level, 3);
+}
