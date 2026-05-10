@@ -530,7 +530,7 @@ impl Item {
         let mut rhythm_recovery = false;
         let (mut body, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,
-            Err(_e) if alpha_mode && (header.version == 5 || header.version == 1 || header.version == 0) => {
+            Err(_e) if alpha_mode && (header.version == 5 || header.version == 1 || header.version == 0 || header.version == 2) => {
                 // Slice 6: Huffman resolution failure or drift in Alpha v105.
                 // Trigger 9+9 property rhythm recovery.
                 rhythm_recovery = true;
@@ -612,7 +612,7 @@ impl Item {
 
         // Slice 1: Force stats reading for Alpha v105 items even if compact, 
         // to detect residue Defense/Durability as per mini-spec.
-        if !item.header.is_compact || (alpha_mode && (item.header.version == 0 || item.header.version == 1)) {
+        if !item.header.is_compact || (alpha_mode && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2)) {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
 
             // Slice 11: Handle JM-to-Body alignment gap
@@ -894,10 +894,10 @@ pub fn write_property_list(
             }
         }
     }
-    if properties_complete && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1) {
+    if properties_complete && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) {
         emitter.write_bits(terminator, id_bits)?;
     }
-    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1);
+    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1 || version == 2);
     if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }
