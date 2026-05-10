@@ -13,9 +13,35 @@ struct FuzzResult {
     fidelity: f32,
     is_match: bool,
     mismatch_offset: Option<u64>,
-    drift: i64,
-    swallowed: usize,
+    drift_bits: Option<i64>,
+    is_swallowed: bool,
     error: Option<String>,
+}
+
+fn get_all_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Vec<u64> {
+    let mut all_markers = Vec::new();
+    let jm_positions = d2r_core::save::find_jm_markers(bytes);
+    for &pos in &jm_positions {
+        if bytes.len() < pos + 4 {
+            continue;
+        }
+        let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        if count == 0 {
+            continue;
+        }
+        let next_pos = jm_positions
+            .iter()
+            .find(|&&p| p > pos)
+            .cloned()
+            .unwrap_or(bytes.len());
+        let section_bytes = &bytes[pos + 4..next_pos];
+        let markers = d2r_core::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha);
+        for m in markers {
+            all_markers.push((pos as u64 + 4) * 8 + m);
+        }
+    }
+    all_markers.sort();
+    all_markers
 }
 
 fn main() {
@@ -122,6 +148,7 @@ fn main() {
         fs::create_dir_all(out_dir).unwrap();
     }
 
+    let original_markers = get_all_item_markers(&original_bytes, &huffman, is_alpha_mode);
     let mut results = Vec::new();
 
     for bit_offset in bit_start..bit_end {
@@ -149,9 +176,9 @@ fn main() {
         let mut drift_info = String::new();
         let mut is_match = false;
         let mut mismatch_offset = None;
-        let mut drift_bits = 0;
-        let mut swallowed_count = 0;
-        let mut error_msg = None;
+        let mut drift_bits = None;
+        let mut is_swallowed = false;
+        let error_msg = None;
 
         if parse_verify {
             let options = SymmetryOptions {
@@ -173,23 +200,17 @@ fn main() {
         }
 
         if detect_drift {
-            match Item::read_player_items(&mutated, &huffman, is_alpha_mode) {
-                Ok(mutated_items) => {
-                    if mutated_items.len() < original_items.len() {
-                        swallowed_count = original_items.len() - mutated_items.len();
-                        drift_info = format!(" | SWALLOWED={}", swallowed_count);
-                    } else if target_idx + 1 < original_items.len() && target_idx + 1 < mutated_items.len() {
-                        let orig_next = original_items[target_idx + 1].range.start;
-                        let mut_next = mutated_items[target_idx + 1].range.start;
-                        if orig_next != mut_next {
-                            drift_bits = (mut_next as i64) - (orig_next as i64);
-                            drift_info = format!(" | DRIFT={}", drift_bits);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error_msg = Some(e.to_string());
-                    drift_info = format!(" | DRIFT_ERR: {}", e);
+            let mutated_markers = get_all_item_markers(&mutated, &huffman, is_alpha_mode);
+            if mutated_markers.len() < original_markers.len() {
+                is_swallowed = true;
+                drift_info = format!(" | SWALLOWED={}", original_markers.len() - mutated_markers.len());
+            } else if target_idx + 1 < original_markers.len() && target_idx + 1 < mutated_markers.len() {
+                let orig_next = original_markers[target_idx + 1];
+                let mut_next = mutated_markers[target_idx + 1];
+                if orig_next != mut_next {
+                    let diff = (mut_next as i64) - (orig_next as i64);
+                    drift_bits = Some(diff);
+                    drift_info = format!(" | DRIFT={}", diff);
                 }
             }
         }
@@ -207,8 +228,8 @@ fn main() {
             fidelity,
             is_match,
             mismatch_offset,
-            drift: drift_bits,
-            swallowed: swallowed_count,
+            drift_bits,
+            is_swallowed,
             error: error_msg,
         });
 
