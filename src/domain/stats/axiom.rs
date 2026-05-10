@@ -133,51 +133,51 @@ impl StatsAxiom {
 
 
     pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool, stat_id: u32) -> PropertyRhythm {
-        if self.is_alpha() && (stat_id == 320 || self.map_alpha_id(stat_id) == 320) {
-            return PropertyRhythm {
-                id_bits: 9,
-                value_bits: None,
-                has_terminal_bit: false,
-                has_extra_terminal_bit: false,
-            };
-        }
+        if self.is_alpha() {
+            if stat_id == 320 || self.map_alpha_id(stat_id) == 320 {
+                return PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: None,
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                };
+            }
+            
+            // Alpha v105 18-bit rhythm (9+9) is the dominant pattern for most items
+            // including Act 5 hybrids and Runewords.
+            if self.version == 1 || self.version == 0 || self.version == 2 || _is_runeword || self.code == "Opaque" {
+                 return PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: Some(9),
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                };
+            }
 
-        if self.is_alpha() && self.code == "Opaque" {
-             return PropertyRhythm {
-                id_bits: 9,
-                value_bits: Some(9),
-                has_terminal_bit: false,
-                has_extra_terminal_bit: false,
-            };
-        }
-
-        if self.is_alpha() && self.version == 5 {
-            // Only Version 5 (Alpha v105 native) items use 9-bit ID, 6-bit Value (fixture-verified)
-            // Terminator is 9-bits (111111111), no extra terminal bits like Retail.
+            if self.version == 5 {
+                // Only native Version 5 (non-runeword) items use 9+6 rhythm.
+                return PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: Some(6),
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                };
+            }
+            
+            // Fallback for other Alpha versions
             PropertyRhythm {
                 id_bits: 9,
-                value_bits: Some(6),
+                value_bits: None, // use STAT_COSTS
                 has_terminal_bit: false,
                 has_extra_terminal_bit: false,
             }
         } else {
-            // Retail and other Alpha hybrids (version 0, 1, 2, 4, 6, 7)
-            if self.is_alpha() && (self.version == 1 || self.version == 0) {
-                // Forensic: Version 1/0 hybrids in Alpha v105 (e.g. Authority items) 
-                // use a fixed 18-bit rhythm (9 ID + 9 Val) to maintain alignment.
-                PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: Some(9),
-                    has_terminal_bit: true,
-                    has_extra_terminal_bit: false,
-                }
-            } else {
-                PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: None, // use STAT_COSTS
-                    has_terminal_bit: false, // Alpha v105 forensic: No terminal bit
-                    has_extra_terminal_bit: false,
-                }
+            // Retail rhythm
+            PropertyRhythm {
+                id_bits: 9,
+                value_bits: None,
+                has_terminal_bit: true,
+                has_extra_terminal_bit: false,
             }
         }
     }
@@ -295,8 +295,11 @@ impl StatsAxiom {
     /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
         if self.is_alpha() {
-            // Alpha v105 Stat-specific overrides
-            
+            // Force 9-bit width if explicitly requested by the rhythm.
+            if default_width == 9 {
+                return 9;
+            }
+
             let reg = get_registry();
             let trimmed = self.code.trim();
 
@@ -349,7 +352,7 @@ mod tests {
         let rhythm = axiom.property_rhythm(false, false, false, 0);
         assert_eq!(rhythm.id_bits, 9);
         assert_eq!(rhythm.value_bits, Some(6));
-        assert!(!rhythm.has_terminal_bit); // Alpha v105 omits terminal bit in this rhythm
+        assert!(!rhythm.has_terminal_bit); 
     }
 
     #[test]

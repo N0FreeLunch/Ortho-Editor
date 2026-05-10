@@ -114,6 +114,13 @@ where
         // Safe-guard: Stop if we hit the bit limit (e.g. next item marker)
         if let Some(limit) = recorder.limit() {
             if recorder.pos() >= limit {
+                if axiom.is_alpha() && !saw_terminator {
+                    // Axiom 339.1: Forced Terminator at sectional boundary
+                    // If we hit the limit without a terminator, we must forcefully stop
+                    // to prevent "swallowing" subsequent items.
+                    saw_terminator = true;
+                    terminator_bit = false; 
+                }
                 break;
             }
         }
