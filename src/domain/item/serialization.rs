@@ -211,7 +211,7 @@ pub fn peek_item_header_at_specific_gap(
     let v = alpha_reader.read::<3, u8>().ok()?;
     let calculated = calculate_alpha_v105_checksum(flags, v);
     
-    let (version, mode, loc, _x_val, base_header_len, _has_checksum) = if calculated == checksum {
+    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum {
         let m = alpha_reader.read::<3, u8>().ok()?;
         let l = alpha_reader.read::<3, u8>().ok()?;
         let x = alpha_reader.read::<4, u8>().ok()?;
@@ -506,6 +506,9 @@ impl Item {
         cursor.set_trace(crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Root);
+        if alpha_mode && crate::item::item_trace_enabled() {
+            println!("[DEBUG] from_reader_with_context: start_bit={}", start_bit);
+        }
 
         let peek = if alpha_mode && ctx.is_some() {
             let (bytes, start_bit) = ctx.unwrap();
@@ -530,7 +533,7 @@ impl Item {
         let mut rhythm_recovery = false;
         let (mut body, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,
-            Err(e) if alpha_mode && (header.version == 5 || header.version == 1 || header.version == 0) => {
+            Err(_e) if alpha_mode && (header.version == 5 || header.version == 1 || header.version == 0) => {
                 // Slice 6: Huffman resolution failure or drift in Alpha v105.
                 // Trigger 9+9 property rhythm recovery.
                 rhythm_recovery = true;
@@ -609,8 +612,13 @@ impl Item {
         if item.body.alpha_header_gap.is_some() { item.forensic_audit.record(V105HeaderGapAxiom.metadata()); }
         if item.body.alpha_shadow_skip_bits.is_some() { item.forensic_audit.record(V105ShadowAxiom.metadata()); }
         if rhythm_recovery { item.forensic_audit.record(V105PropertyRhythmAxiom.metadata()); }
+        if alpha_mode && crate::item::item_trace_enabled() {
+            println!("[DEBUG] item: code='{}', is_compact={}, flags=0x{:08X}, version={}", item.code, item.header.is_compact, item.header.flags, item.header.version);
+        }
 
-        if !item.header.is_compact {
+        // Slice 1: Force stats reading for Alpha v105 items even if compact, 
+        // to detect residue Defense/Durability as per mini-spec.
+        if !item.header.is_compact || (alpha_mode && (item.header.version == 0 || item.header.version == 1)) {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
 
             // Slice 11: Handle JM-to-Body alignment gap

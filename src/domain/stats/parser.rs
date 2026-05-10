@@ -19,6 +19,7 @@ pub fn read_item_stats<R: BitRead>(
     is_v105_shadow: bool,
     is_personalized: bool,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>, Vec<crate::domain::item::Item>)> {
+    println!("[DEBUG] read_item_stats: code='{}', version={}, is_shadow={}", code, version, is_v105_shadow);
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
@@ -202,9 +203,6 @@ where
     let id_bits = 9; // Placeholder for initial reading
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
     
-    if crate::item::item_trace_enabled() {
-        println!("[TRACE] parser: peeked stat_id: {} at pos {}", stat_id, recorder.pos());
-    }
 
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
     
@@ -336,6 +334,10 @@ where
         }
     } else {
         raw_value = 0;
+    }
+    
+    if crate::item::item_trace_enabled() {
+        println!("[TRACE] parser: peeked stat_id: {} value: {} at pos {}", stat_id, raw_value, entry_start);
     }
 
     recorder.push_context(&format!("Stat({})", stat_id));
