@@ -61,16 +61,33 @@ pub struct SkillLevel {
     pub level: u8,
 }
 
-pub fn parse_skill_section(bytes: &[u8], if_pos: usize) -> io::Result<SkillSection> {
+pub fn parse_skill_section(bytes: &[u8], if_pos: usize, jm0: Option<usize>) -> io::Result<SkillSection> {
     let start = if_pos + 2;
-    let end = start + SKILL_SECTION_LEN;
+    let mut end = start + SKILL_SECTION_LEN;
+    
+    // For Alpha v105, the skill section might be shorter if JM follows immediately.
+    if let Some(jm_pos) = jm0 {
+        if jm_pos < end {
+            end = jm_pos;
+        }
+    }
+
     if end > bytes.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "skill section truncated",
         ));
     }
-    SkillSection::from_slice(&bytes[start..end])
+    
+    // If shorter than 30 bytes, pad with zeros for the internal model
+    if end - start < SKILL_SECTION_LEN {
+        let mut data = [0u8; SKILL_SECTION_LEN];
+        let len = end - start;
+        data[..len].copy_from_slice(&bytes[start..end]);
+        Ok(SkillSection(data))
+    } else {
+        SkillSection::from_slice(&bytes[start..end])
+    }
 }
 
 /// Finds the base skill ID for a given character class.

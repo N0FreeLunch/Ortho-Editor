@@ -301,18 +301,26 @@ pub fn rebuild_status_and_player_items(
         result.extend_from_slice(&bytes[map.gf_pos..map.if_pos]);
     }
 
-    // 3. IF Section (Marker + 30 bytes skills)
+    // 3. IF Section (Marker + skills)
     if let Some(skills) = skills {
         result.extend_from_slice(b"if");
         result.extend_from_slice(skills.as_slice());
     } else {
-        let skill_end = map.if_pos + 2 + SKILL_SECTION_LEN;
+        let skill_end = if version == 105 {
+            map.jm_positions[0].min(map.if_pos + 2 + SKILL_SECTION_LEN)
+        } else {
+            map.if_pos + 2 + SKILL_SECTION_LEN
+        };
         result.extend_from_slice(&bytes[map.if_pos..skill_end]);
     }
 
     // 4. Quest/Progression Section (Gap between IF end and first JM)
     let jm0 = map.jm_positions[0];
-    let skill_end_original = map.if_pos + 2 + SKILL_SECTION_LEN;
+    let skill_end_original = if version == 105 {
+        jm0.min(map.if_pos + 2 + SKILL_SECTION_LEN)
+    } else {
+        map.if_pos + 2 + SKILL_SECTION_LEN
+    };
 
     if let Some(q) = quests {
         if version != 105 {
@@ -361,7 +369,7 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
 
 
 pub fn parse_skill_section(bytes: &[u8], map: &SaveSectionMap) -> io::Result<SkillSection> {
-    crate::domain::character::skills::parse_skill_section(bytes, map.if_pos)
+    crate::domain::character::skills::parse_skill_section(bytes, map.if_pos, map.jm_positions.first().cloned())
 }
 
 pub fn patch_skill_section(
@@ -760,9 +768,21 @@ pub fn rebuild_item_section(
     let mut rebuilt =
         Vec::with_capacity(bytes.len() - original_section_len + final_section_len);
     rebuilt.extend_from_slice(&bytes[..jm1]);
-    rebuilt.extend_from_slice(b"JM");
-    rebuilt.extend_from_slice(&count_u16.to_le_bytes());
-    rebuilt.extend_from_slice(&serialized_section);
+    
+    let mut item_header_emitter = crate::domain::item::serialization::BitEmitter::new();
+    // Write "JM" marker (16 bits)
+    item_header_emitter.write_bits(0x4D4A, 16).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    
+    // Both Alpha v105 and Retail use 16-bit item count in these fixtures.
+    item_header_emitter.write_bits(count_u16 as u32, 16).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    
+    // Write serialized items. Since Item::serialize_section now returns bit-perfect data,
+    // we just need to append it bit-by-bit or byte-by-byte if it's already aligned.
+    for byte in serialized_section {
+        item_header_emitter.write_bits(byte as u32, 8).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    }
+    
+    rebuilt.extend_from_slice(&item_header_emitter.into_bytes());
     rebuilt.extend_from_slice(&bytes[section_end..]);
 
     finalize_save_bytes(&mut rebuilt, false)?;
