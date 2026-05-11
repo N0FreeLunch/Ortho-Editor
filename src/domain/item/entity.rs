@@ -476,6 +476,7 @@ impl Item {
     }
 
     pub fn to_emitter(&self, emitter: &mut crate::domain::item::serialization::BitEmitter, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<()> {
+        let start_bit = emitter.written_bits();
         // Slice 2: Opaque pass-through
         for module in &self.modules {
             if let ItemModule::Opaque(bits) = module {
@@ -495,12 +496,19 @@ impl Item {
         emitter.write_bits(self.header.location as u32, 3)?;
         emitter.write_bits(self.header.x as u32, 4)?;
         
-        let s_axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+        let mut s_axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
             .with_personalization(self.header.is_personalized)
+            .with_compact(self.header.is_compact)
             .with_code(&self.code);
+            
+        // Slice 6: Forced compact-flag propagation for known structurally compact types 
+        // to close the 23-bit drift for blank/opaque items.
+        if alpha_mode && (self.code.trim().is_empty() || self.code.trim() == "tsc" || self.code.trim() == "isc") {
+            s_axiom.is_compact = true;
+        }
         
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
-        let geometry = h_axiom.header_geometry(self.header.flags, self.header.is_compact, self.header.is_personalized);
+        let geometry = h_axiom.header_geometry(self.header.flags, s_axiom.is_compact, self.header.is_personalized);
 
         if geometry.has_header_gap {
             if h_axiom.is_alpha() {
@@ -509,7 +517,7 @@ impl Item {
 
                 // Normal alpha items: write geometry bits separately
                 if !is_v105_shadow && !is_rw {
-                    if !self.header.is_compact {
+                    if !s_axiom.is_compact {
                         emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
                         emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
                         emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
@@ -529,7 +537,7 @@ impl Item {
                     }
                 }
             } else {
-                if !self.header.is_compact {
+                if !s_axiom.is_compact {
                     emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
                     emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
                     emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
@@ -540,6 +548,11 @@ impl Item {
             emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
             emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
             emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+        }
+
+        // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
+        if s_axiom.is_header_only(self.header.flags, &self.code) {
+            return Ok(());
         }
 
         if self.header.is_ear {
@@ -556,11 +569,11 @@ impl Item {
             }
         }
 
-        if !self.header.is_compact || (alpha_mode && (self.header.version == 0 || self.header.version == 1)) {
+        if !s_axiom.is_compact || (alpha_mode && (self.header.version == 0 || self.header.version == 1)) {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
 
-            if is_item_alpha && !self.header.is_compact {
+            if is_item_alpha && !s_axiom.is_compact {
                 let quality_to_write = self.alpha_quality_raw.unwrap_or(quality_val as u8);
                 emitter.write_bits(quality_to_write as u32, 3)?;
                 if (self.header.version == 5 || self.header.version == 6 || self.header.version == 7) && (s_axiom.is_runeword(self.header.flags) || h_axiom.is_v105_shadow(self.header.flags)) {
@@ -607,7 +620,7 @@ impl Item {
                     if alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) { emitter.byte_align()?; }
                     write_player_name(emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1))?;
                 }
-                if !self.header.is_compact {
+                if !s_axiom.is_compact {
                     if self.code.trim() == "tbk" || self.code.trim() == "ibk" { emitter.write_bits(self.tbk_ibk_teleport.unwrap_or(0) as u32, 5)?; }
                     emitter.write_bit(self.timestamp_flag)?;
                 }
@@ -629,7 +642,7 @@ impl Item {
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
-                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && self.header.is_compact) || !self.properties.is_empty() {
+                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
                     if gap_len > 0 {
@@ -650,9 +663,13 @@ impl Item {
         }
         if !alpha_mode && self.header.version != 5 && self.header.version != 7 { emitter.write_bit(false)?; }
         let current_bits = emitter.written_bits();
-        let final_bits = s_axiom.calculate_alignment(current_bits, self.header.is_compact, &self.code, self.header.flags);
-        if final_bits > current_bits {
-            let padding_needed = (final_bits - current_bits) as u32;
+        let final_bits = s_axiom.calculate_alignment(
+            current_bits - start_bit,
+            &self.code,
+            self.header.flags,
+        );
+        if final_bits > (current_bits - start_bit) {
+            let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
             if !self.body.alpha_alignment_padding.is_empty() { for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } }
             else { emitter.write_bits(0, padding_needed)?; }
         }
@@ -762,7 +779,7 @@ pub fn parse_item_header<R: BitRead>(
                 let gap_bits = if let Some(go) = gap_override {
                     if go >= geom_bits { go - geom_bits } else { 8 }
                 } else {
-                    V105HeaderGapAxiom::default().resolve_gap(code_hint, flags, is_first_item)
+                    V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item)
                 };
 
                 alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;

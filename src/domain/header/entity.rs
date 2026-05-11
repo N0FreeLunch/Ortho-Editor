@@ -106,9 +106,9 @@ impl HeaderAxiom {
             let identified = self.is_identified(flags);
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                (flags & (1 << 23)) != 0 && !is_fragment && identified
-            } else if self.version == 6 || self.version == 7 {
-                (flags & (1 << 21)) != 0 && identified
+                (flags & (1 << 23)) != 0 && !is_fragment
+            } else if self.version == 0 || self.version == 1 || self.version == 4 || self.version == 6 || self.version == 7 {
+                (flags & (1 << 21)) != 0
             } else {
                 // Fallback to bit 21 for other Alpha versions (Retail-like)
                 (flags & (1 << 21)) != 0
@@ -150,11 +150,8 @@ impl HeaderAxiom {
 
     pub fn is_personalized(&self, flags: u32) -> bool {
         if self.alpha_mode {
-            if self.version == 4 {
-                (flags & (1 << 28)) != 0
-            } else {
-                (flags & (1 << 29)) != 0
-            }
+            // Forensic (Axiom 0337): Personalization bit is 28 across most Alpha v105 variants.
+            (flags & (1 << 28)) != 0
         } else {
             (flags & (1 << 28)) != 0
         }

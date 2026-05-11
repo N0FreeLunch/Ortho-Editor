@@ -28,7 +28,8 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
                 // Probe success
              }
             // Code-based validation: Reject if code is not a known Alpha v105 item
-            if !crate::domain::item::serialization::is_v105_summary_code(&code) && !is_compact {
+            let is_blank = alpha && code.trim().is_empty();
+            if !crate::domain::item::serialization::is_v105_summary_code(&code) && !is_compact && !is_blank {
                 // Potential ghost region
                 invalid_regions.push((probe, probe + 32));
                 probe += 8;
@@ -36,6 +37,44 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
             }
 
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+                // Look-ahead verification (Slice 4): Prevent swallowing by verifying the candidate body
+                let is_blank = alpha && code.trim().is_empty();
+                
+                // Axiom 0344: In Alpha v105, blank items and certain compact types 
+                // often lack the is_compact flag but are strictly 80-bit intervals.
+                let mut forced_compact = false;
+                if alpha && !is_compact {
+                    let next_jm_at_80 = probe + 80;
+                    if next_jm_at_80 + 32 <= section_bits {
+                         let mut jm_reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
+                         if jm_reader.skip(next_jm_at_80 as u32).is_ok() {
+                             if let Ok(next_flags) = jm_reader.read::<32, u32>() {
+                                 // Check for JM marker or a valid-looking Alpha header checksum
+                                 if (next_flags & 0xFFFF) == 0x4D4A {
+                                     forced_compact = true;
+                                 } else {
+                                     // Peek for Alpha checksum
+                                     let mut check_reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+                                     if check_reader.skip(next_jm_at_80 as u32 + 32).is_ok() {
+                                         if let (Ok(ck), Ok(v)) = (check_reader.read::<8, u8>(), check_reader.read::<3, u8>()) {
+                                             if ck == calculate_alpha_v105_checksum(next_flags, v) {
+                                                 forced_compact = true;
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                    }
+                }
+
+                if alpha && !is_compact && !is_blank && !forced_compact {
+                    if !verify_marker_lookahead(bytes, probe + header_len, huffman, alpha) {
+                        probe += 8;
+                        continue;
+                    }
+                }
+                
                 if probe + header_len + 80 <= section_bits {
                     return Some(probe);
                 }
@@ -48,6 +87,38 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
     None
 }
 
+pub fn verify_marker_lookahead(bytes: &[u8], start_bit: u64, _huffman: &HuffmanTree, _alpha: bool) -> bool {
+    let mut reader = bitstream_io::BitReader::endian(io::Cursor::new(bytes), LittleEndian);
+    if reader.skip(start_bit as u32).is_err() { return false; }
+    
+    // Read 9-bit Stat ID (Dominant rhythm in Alpha v105)
+    let stat_id = match reader.read::<9, u16>() {
+        Ok(id) => id,
+        Err(_) => return false,
+    };
+    
+    // Terminator (511) is a valid "empty" or "finished" stats block.
+    if stat_id == 511 {
+        return true;
+    }
+    
+    // For Alpha v105, check if the stat_id is one of the known/mapped IDs
+    // to reject random garbage.
+    let is_known_id = matches!(stat_id, 
+        0|1|2|4|8|13|16|21|25|26|31|68|69|70|72|73|99|106|108|112|114|127|128|140|152|160|194|207|256|287|289|309|310|311|312|317|320|380|496|499
+    );
+    
+    if is_known_id {
+        // Most Alpha v105 properties are 9+6 or 9+9.
+        // We expect at least 6-9 more bits.
+        if reader.skip(6).is_ok() {
+            return true;
+        }
+    }
+    
+    false
+}
+
 pub fn is_plausible_item_header(
     mode: u8,
     location: u8,
@@ -56,6 +127,9 @@ pub fn is_plausible_item_header(
     version: u8,
     alpha_mode: bool,
 ) -> bool {
+    if alpha_mode && code.trim().is_empty() {
+         return mode <= 6 && location <= 5;
+    }
     let axiom = HeaderAxiom::new(version, alpha_mode);
     axiom.is_plausible(mode, location, code, _flags)
 }
@@ -93,9 +167,33 @@ pub fn peek_item_header_at(
         (v, m, l, x, 32 + 3 + 3 + 3 + 4, false)
     };
 
+    let h_axiom = HeaderAxiom::new(version, alpha_mode);
+    let is_compact = h_axiom.is_compact(flags);
+    let s_axiom = StatsAxiom::new(version, crate::domain::item::ItemQuality::Normal, alpha_mode)
+        .with_compact(is_compact);
+    let is_personalized = h_axiom.is_personalized(flags);
+    let geometry = h_axiom.header_geometry(flags, is_compact, is_personalized);
+    
+    let mut total_skip = base_header_len as u32;
+    if geometry.has_header_gap && alpha_mode {
+        let is_v105_shadow = s_axiom.is_v105_shadow(flags);
+        let is_rw = s_axiom.is_runeword(flags);
+        if is_rw || is_v105_shadow {
+            let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+            total_skip += if is_v105_shadow_local { 8 } else { 24 };
+        } else {
+            if !is_compact {
+                total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
+            }
+            total_skip += 8; // Alpha v105 standard header gap
+        }
+    } else if !geometry.skip_geometry {
+         total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
+    }
+
     let mut code = String::new();
     let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if n_reader.skip(start_bit as u32 + base_header_len as u32).is_err() { return None; }
+    if n_reader.skip(start_bit as u32 + total_skip).is_err() { return None; }
     let mut n_cursor = BitCursor::new(n_reader);
     for i in 0..4 {
         match huffman.decode_recorded(&mut n_cursor) {
@@ -121,6 +219,7 @@ pub fn peek_item_header_at(
 
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = s_axiom.is_compact(flags);
+    let s_axiom = s_axiom.with_compact(is_compact);
     let is_personalized = s_axiom.is_personalized(flags);
     let geometry = axiom.header_geometry(flags, is_compact, is_personalized);
 
@@ -234,6 +333,18 @@ pub fn peek_item_header_at_specific_gap(
             Ok(ch) => code.push(ch),
             Err(_) => {
                 if alpha_mode && i >= 1 {
+                    let current_cursor_pos = n_cursor.pos();
+                    let relative_pos = base_header_len as u64 + gap as u64 + current_cursor_pos;
+                    if relative_pos == 69 && (code.starts_with('h') || code.starts_with('m')) {
+                        // Surgical 1-bit nudge for Opaque items at bit 69 (Axiom 0340)
+                        if n_cursor.read_bit().is_ok() {
+                            if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
+                                code.push(ch);
+                                continue;
+                            }
+                        }
+                        n_cursor.rollback(current_cursor_pos);
+                    }
                     let saved_pos = n_cursor.pos();
                     // Try 1-bit nudge
                     if n_cursor.read_bit().is_ok() {
@@ -362,12 +473,17 @@ impl Item {
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
             let mut is_compact_final = false;
-            if let Some((_, _, _, _code, flags, _, is_compact, _, _, _)) =
+            if let Some((_, _, _, code, flags, _, is_compact, _, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
                 is_compact_final = is_compact;
+                // Slice 6: Axiom 0344 inference for blank items missing the compact flag
+                if alpha_mode && code.trim().is_empty() {
+                    is_compact_final = true;
+                }
+                
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
-                if !is_compact && (flags & 0x00000008) != 0 {
+                if !is_compact_final && (flags & 0x00000008) != 0 {
                     dynamic_limit += 8;
                 }
             }
@@ -386,13 +502,7 @@ impl Item {
             ) {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
-                    let mut actual_consumed = consumed_bits;
-                    
-                    // Alpha v105 forensic: Apply fixed width for compact items to stop drift.
-                    // This reconciles the 11-bit drift seen in potions (69 bits decoded vs 80 bits allocated).
-                    if alpha_mode && item.header.is_compact {
-                        actual_consumed = 80;
-                    }
+                    let actual_consumed = consumed_bits;
                     
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
@@ -402,13 +512,53 @@ impl Item {
                 }
                 Err(_e) => {
                     // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
-                    let (peek_code, peek_limit) = if let Some((_, _, _, code, _, _, is_compact, _, _, _)) =
+                    // Slice 7: Dynamic Interval Capture. Scan for next JM to bound the Opaque block.
+                    let mut actual_limit = limit;
+                    let mut found_next = false;
+                    
+                    let mut probe_pos = start + 80; // Minimum interval for Alpha v105
+                    while probe_pos + 32 <= section_bits {
+                        let mut probe_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                        if probe_reader.skip(probe_pos as u32).is_ok() {
+                            if let Ok(p_flags) = probe_reader.read::<32, u32>() {
+                                let mut is_next = (p_flags & 0xFFFF) == 0x4D4A;
+                                if !is_next && alpha_mode {
+                                    let mut check_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                                    if check_reader.skip(probe_pos as u32 + 32).is_ok() {
+                                        if let (Ok(ck), Ok(v)) = (check_reader.read::<8, u8>(), check_reader.read::<3, u8>()) {
+                                            if ck == calculate_alpha_v105_checksum(p_flags, v) {
+                                                is_next = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if is_next {
+                                    actual_limit = probe_pos - start;
+                                    found_next = true;
+                                    break;
+                                }
+                            }
+                        }
+                        probe_pos += 8;
+                    }
+
+                    let (peek_code, peek_limit) = if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
                         peek_item_header_at(section_bytes, start, huffman, alpha_mode)
                     {
-                        let l = if alpha_mode && is_compact { 80 } else { limit };
+                        let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode)
+                            .with_compact(is_compact)
+                            .with_code(&code);
+                        let l = if alpha_mode && axiom.is_compact { 
+                            // For Opaque compact items, we use the alignment axiom with a minimal 32-bit guess if unknown,
+                            // but usually peek_item_header_at consumed ~64-80 bits already.
+                            axiom.calculate_alignment(64, &code, flags)
+                        } else if found_next {
+                            actual_limit
+                        } else { limit };
                         (code, l)
                     } else {
-                        ("Opaque".to_string(), limit)
+                        ("    ".to_string(), if found_next { actual_limit } else { limit })
                     };
 
                     let mut bits = Vec::new();
@@ -468,7 +618,7 @@ impl Item {
                     }
 
                     let mut opaque_item = Item::default();
-                    opaque_item.code = "Opaque".to_string();
+                    opaque_item.code = "    ".to_string();
                     opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
                     for (idx, b) in bits.iter().enumerate() {
                         opaque_item.bits.push(crate::domain::item::RecordedBit {
@@ -516,7 +666,7 @@ impl Item {
         let _has_checksum_peek = peek.as_ref().map(|p| p.9);
 
         let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item)?;
-        
+
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {
             cursor.push_context("AlphaHeaderGap");
@@ -524,9 +674,27 @@ impl Item {
             // This is a minimal modeling approach as per mini-spec
             cursor.pop_context();
         }
-        
-        let body_start_bit = cursor.pos();
-        let body_res = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode);
+
+        let s_axiom = StatsAxiom::new(header.version, header.quality.unwrap_or(crate::domain::item::ItemQuality::Normal), alpha_mode)
+            .with_code(code_peek.unwrap_or(""));
+
+        if s_axiom.is_header_only(header.flags, code_peek.unwrap_or("")) {
+            let mut body = crate::domain::item::entity::ItemBody::default();
+            body.alpha_header_gap = alpha_header_gap;
+            body.alpha_header_gap_bits = alpha_header_gap_bits;
+            cursor.end_segment(); // Root segment
+            return Ok(Item {
+                header,
+                body,
+                code: String::new(),
+                bits: Vec::new(),
+                range: crate::domain::item::ItemBitRange { start: start_bit, end: cursor.pos() },
+                total_bits: cursor.pos() - start_bit,
+                ..Default::default()
+            });
+        }
+
+        let body_start_bit = cursor.pos();        let body_res = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode);
         let mut rhythm_recovery = false;
         let (mut body, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,
@@ -535,7 +703,7 @@ impl Item {
                 // Trigger 9+9 property rhythm recovery.
                 rhythm_recovery = true;
                 let mut b = crate::domain::item::entity::ItemBody::default();
-                b.code = "Opaque".to_string();
+                b.code = "    ".to_string();
                 cursor.rollback(body_start_bit);
                 (b, None, None, None)
             }
@@ -545,6 +713,7 @@ impl Item {
         body.alpha_header_gap_bits = alpha_header_gap_bits;
 
         let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode)
+            .with_compact(header.is_compact)
             .with_code(&body.code);
         
         let ext_data = if !header.is_compact && !rhythm_recovery {
@@ -634,7 +803,8 @@ impl Item {
                 item.header.quality, 
                 item.header.is_runeword, 
                 is_v105_shadow || rhythm_recovery, 
-                item.header.is_personalized
+                item.header.is_personalized,
+                item.header.is_compact
             )?;
             item.properties = props.clone();
             item.stats.properties = props;
@@ -645,9 +815,11 @@ impl Item {
         }
 
         let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
-            .with_personalization(item.header.is_personalized);
+            .with_personalization(item.header.is_personalized)
+            .with_compact(item.header.is_compact)
+            .with_code(&item.code);
         let consumed_bits = cursor.pos() - start_bit;
-        let final_consumed = axiom.calculate_alignment(consumed_bits, item.header.is_compact, &item.code, item.header.flags);
+        let final_consumed = axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;
             let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
@@ -693,7 +865,8 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
         "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
-        "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"
+        "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|
+        "8wc"|"bmf"|"c mt"
     )
 }
 
@@ -840,7 +1013,10 @@ pub fn write_property_list(
     axiom: &StatsAxiom,
 ) -> io::Result<()> {
     let _start_bits = emitter.written_bits();
-    let is_compact = code.trim().is_empty() || code.len() < 3;
+    // Axiom 0344: Explicit header signal is primary, but blank items in Alpha v105 
+    // often lack the compact flag despite being structurally compact (80-bit slot).
+    // The inference is now centralized in StatsAxiom::with_code.
+    let is_compact = axiom.is_compact;
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, 0);
     let id_bits = rhythm.id_bits;
     let terminator = (1 << id_bits) - 1;
@@ -881,30 +1057,23 @@ pub fn write_property_list(
         }
 
         if !handled {
-            if let Some(width) = rhythm.value_bits {
-                let effective_width = axiom.stat_bit_width(raw_id, width);
-                emitter.write_bits(prop.raw_value as u32, effective_width)?;
-            } else {
-                 let mapped_id = axiom.map_alpha_id(raw_id);
-                 if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
-                     if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }
-                     let effective_width = axiom.stat_bit_width(raw_id, stat.save_bits as u32);
-                     emitter.write_bits(prop.raw_value as u32, effective_width)?;
-                 } else { emitter.write_bits(prop.raw_value as u32, 9)?; }
+            let mapped_id = axiom.map_alpha_id(raw_id);
+            if raw_id != terminator {
+                if let Some(width) = rhythm.value_bits {
+                    let effective_width = axiom.stat_bit_width(raw_id, width);
+                    emitter.write_bits(prop.raw_value as u32, effective_width)?;
+                } else if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
+                    if stat.save_param_bits > 0 { emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?; }
+                    let effective_width = axiom.stat_bit_width(raw_id, stat.save_bits as u32);
+                    emitter.write_bits(prop.raw_value as u32, effective_width)?;
+                } else { emitter.write_bits(prop.raw_value as u32, 9)?; }
             }
         }
     }
-    if properties_complete && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) {
-        if crate::item::item_trace_enabled() {
-            eprintln!("[DEBUG Write] Writing terminator (0x{:X}) for code={}, id_bits={}", terminator, code, id_bits);
-        }
+    let already_has_term = props.iter().any(|p| p.stat_id == terminator);
+    let is_acww = code.trim() == "acww";
+    if properties_complete && !already_has_term && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) && !is_acww && !is_compact {
         emitter.write_bits(terminator, id_bits)?;
-        if axiom.is_alpha() && rhythm.value_bits.is_some() {
-             if let Some(val_bits) = rhythm.value_bits {
-                 // Alpha v105 18-bit rhythm (9+9) consumes a trailing 9-bit value slot for terminator.
-                 emitter.write_bits(0, val_bits)?;
-             }
-        }
     }
     let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1 || version == 2);
     if properties_complete && rhythm.has_terminal_bit {

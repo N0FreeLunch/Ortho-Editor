@@ -1,6 +1,6 @@
 use anyhow::Context;
 use bitstream_io::{BitRead, BitReader, LittleEndian};
-use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::args::{ArgError, ArgParser};
 use d2r_core::verify::save_integrity::verify_save_integrity;
 use std::{env, fs, io::Cursor, process};
 
@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-        let (mut report, failed) = verify_save_integrity(path, &bytes);
+        let (report, failed) = verify_save_integrity(path, &bytes);
 
         if fix_mode && failed {
             let mut bytes_to_fix = bytes.clone();

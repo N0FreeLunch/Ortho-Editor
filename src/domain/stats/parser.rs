@@ -20,6 +20,7 @@ pub fn read_item_stats<R: BitRead>(
     is_runeword: bool,
     is_v105_shadow: bool,
     is_personalized: bool,
+    is_compact: bool,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>, Vec<crate::domain::item::Item>)> {
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
@@ -28,6 +29,7 @@ pub fn read_item_stats<R: BitRead>(
     let quality_val = quality.unwrap_or(ItemQuality::Normal);
     let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
         .with_personalization(is_personalized)
+        .with_compact(is_compact)
         .with_code(trimmed_code);
     let is_alpha = axiom.is_alpha();
 
@@ -103,8 +105,9 @@ where
 
     let start_pos = recorder.pos();
 
-    // Heuristic for compact items in Alpha
-    let is_compact = code.trim().is_empty() || code.len() < 3;
+    // Axiom 0344: Explicit header signal is primary, but blank items in Alpha v105 
+    // often lack the compact flag despite being structurally compact (80-bit slot).
+    let is_compact = axiom.is_compact || code.trim().is_empty();
 
     let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1);
 

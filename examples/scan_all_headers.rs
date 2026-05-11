@@ -15,7 +15,7 @@ fn main() {
     
     println!("Scanning for item headers in section 0 (1-bit granular)...");
     for bit_offset in 0..limit {
-        if let Some((mode, location, x, code, flags, version, is_compact, header_bits, nudge)) = 
+        if let Some((mode, location, x, code, flags, version, is_compact, header_bits, nudge, _has_checksum)) = 
             d2r_core::item::peek_item_header_at(section_bytes, bit_offset, &huffman, true) {
             if d2r_core::item::is_plausible_item_header(mode, location, &code, flags, version, true) {
                 if version == 0 || version == 1 || version == 4 || version == 5 || version == 6 || version == 7 {
