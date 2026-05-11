@@ -43,7 +43,7 @@ impl ForensicAxiom for V105HeaderGapAxiom {
 }
 
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, code: Option<&str>, flags: u32, is_first_item: bool) -> usize {
+    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
@@ -57,7 +57,13 @@ impl V105HeaderGapAxiom {
         }
 
         if is_first_item {
-            return 0; // Fixture-verified: first item in any JM section has no header gap
+            // Forensic (Axiom 0340): Alpha v105 standard items do not use a gap before the first item in a section.
+            return 0;
+        }
+
+        // Forensic (Axiom 0340): Early Alpha versions (0, 1, 4, 6) often use tightly packed items without gaps.
+        if version == 0 || version == 1 || version == 4 || version == 6 {
+            return 0;
         }
 
         // Forensic: 'cwd' (compact) items often use a 24-bit alignment gap instead of the standard 32.
@@ -67,6 +73,14 @@ impl V105HeaderGapAxiom {
         } else if (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
             8 // Compact items (potions) in Alpha v105 use an 8-bit header gap when not the first item (Axiom 0340)
         } else {
+            // Forensic: Amulets (umsw) and Rings often use a 24-bit gap in certain Alpha variants.
+            // If the code is known to be one of these, or if we are in a 'shifted' state, use 24.
+            if let Some(c) = code {
+                let t = c.trim();
+                if t == "umsw" || t == "rin" || t == "ics" {
+                    return 24;
+                }
+            }
             32
         }
     }

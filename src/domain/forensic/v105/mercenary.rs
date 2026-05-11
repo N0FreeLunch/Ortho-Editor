@@ -1,18 +1,28 @@
 /// Alpha v105 Mercenary State (Hybrid priority decoding).
 ///
-/// Forensic evidence (Axiom 0328) shows that mercenary data is dual-localized:
+/// Forensic evidence (Axiom 0328, 0366) shows that mercenary data is dual-localized:
 /// - Experience: Always at Header Offset 171 (4B LE).
 /// - Hireling ID: Priority to 'w4' NPC section (Offset 782+4), fallback to Header Offset 169.
+/// - Act 3 Divergence: w4[4] contains Class ID (9), Header[169] contains Subtype (15, 16, 17).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MercenaryState {
-    /// Hireling ID from Hireling.txt (at w4 + 4).
-    /// Rogue: 0, Desert: 140, Barbarian: 174.
+    /// Generic Hireling ID. 
+    /// Legacy: Equal to subtype_id or w4_id.
     pub hireling_id: u8,
+
+    /// Hireling Class ID from w4[4].
+    /// Iron Wolf: 9.
+    pub class_id: u8,
+
+    /// Persistent Subtype/Element ID from Header[169].
+    /// Fire: 15, Cold: 16, Lightning: 17.
+    pub subtype_id: u8,
     
-    /// Mercenary Experience (at w4 + 6, 32-bit LE).
+    /// Mercenary Experience (at Header Offset 171, 32-bit LE).
     pub experience: u32,
     
-    /// Mercenary Name ID (at w4 + 27, tentative).
+    /// Mercenary Name ID (tentative).
+    /// Note: w4[27] often contains HP data (e.g. 248) in Alpha v105.
     pub name_id: u16,
 
     /// Raw w4 bytes for forensic preservation.
@@ -20,10 +30,10 @@ pub struct MercenaryState {
 }
 
 impl MercenaryState {
-    /// Creates a new state using a hybrid priority localization logic (Axiom 0328).
+    /// Creates a new state using a hybrid priority localization logic (Axiom 0328, 0366).
     ///
-    /// Mode A (Header): Experience is always at header[171..175]. ID at header[169] if w4 missing.
-    /// Mode B (w4): If w4 exists and Hireling ID (w4[4]) is non-zero, it takes priority for ID.
+    /// Mode A (Header): Experience is at [171..175]. Subtype is at [169].
+    /// Mode B (w4): If w4 exists and Hireling ID (w4[4]) is non-zero, it defines the class.
     pub fn from_hybrid(header: &[u8], w4: Option<&[u8]>) -> Self {
         // 1. Experience: Always from fixed header Offset 171 (4B LE)
         let experience = if header.len() >= 175 {
@@ -32,30 +42,36 @@ impl MercenaryState {
             0
         };
 
-        // 2. Hireling ID: Priority to w4[4] if non-zero, otherwise Header[169]
-        let mut hireling_id = 0;
+        // 2. Subtype: Always from fixed header Offset 169
+        let subtype_id = if header.len() >= 170 {
+            header[169]
+        } else {
+            0
+        };
+
+        // 3. Hireling IDs: Priority to w4[4] if non-zero
+        let mut class_id = 0;
         let mut raw_w4 = Vec::new();
         let mut name_id = 0;
 
         if let Some(w4_bytes) = w4 {
             raw_w4 = w4_bytes.to_vec();
-            let w4_id = w4_bytes.get(4).copied().unwrap_or(0);
-            if w4_id != 0 {
-                hireling_id = w4_id;
-            }
+            class_id = w4_bytes.get(4).copied().unwrap_or(0);
             
             if w4_bytes.len() >= 29 {
                 name_id = u16::from_le_bytes(w4_bytes[27..29].try_into().unwrap_or([0; 2]));
             }
         }
 
-        // Fallback to Header ID if still 0
-        if hireling_id == 0 && header.len() >= 170 {
-            hireling_id = header[169];
-        }
+        // Hireling ID logic: 
+        // In Alpha v105, Header[169] is the most reliable persistent ID.
+        // w4 sectional ID (class_id) is kept for forensic classification.
+        let hireling_id = subtype_id;
 
         Self {
             hireling_id,
+            class_id,
+            subtype_id,
             experience,
             name_id,
             raw_w4,
