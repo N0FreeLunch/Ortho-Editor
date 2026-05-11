@@ -16,6 +16,8 @@ Thumbs.db
 
 # Temporary files
 *.txt
+tmp_*.md
+*_report.md
 tmp/
 !tmp/.gitkeep
 
