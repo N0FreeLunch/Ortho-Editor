@@ -168,7 +168,7 @@ pub fn peek_item_header_at(
     };
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
-    let mut is_compact = h_axiom.is_compact(flags);
+    let mut is_compact = h_axiom.is_compact(flags, None);
     
     // Axiom 0344: In Alpha v105, blank items and certain compact types 
     // often lack the is_compact flag but are strictly interval-aligned.
@@ -216,13 +216,33 @@ pub fn peek_item_header_at(
 
     let s_axiom = StatsAxiom::new(version, crate::domain::item::ItemQuality::Normal, alpha_mode)
         .with_compact(is_compact);
-    let is_personalized = h_axiom.is_personalized(flags);
-    let geometry = h_axiom.header_geometry(flags, is_compact, is_personalized);
+    let _is_personalized = h_axiom.is_personalized(flags);
+    
+    // Trial peek to resolve Alpha v105 runeword header gaps (Axiom 0365)
+    let mut trial_is_rw = false;
+    if alpha_mode {
+        // Assume 24-bit gap for RW/Shadow items in Alpha v105
+        let trial_skip = base_header_len as u32 + 24;
+        let mut t_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+        if t_reader.skip(start_bit as u32 + trial_skip).is_ok() {
+            let mut t_cursor = BitCursor::new(t_reader);
+            let mut t_code = String::new();
+            for _ in 0..4 {
+                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { t_code.push(ch); }
+                else { break; }
+            }
+            if h_axiom.is_runeword(flags, Some(&t_code)) {
+                trial_is_rw = true;
+            }
+        }
+    }
+
+    let geometry = h_axiom.header_geometry(flags, if trial_is_rw { Some("acww") } else { None });
     
     let mut total_skip = base_header_len as u32;
     if geometry.has_header_gap && alpha_mode {
         let is_v105_shadow = s_axiom.is_v105_shadow(flags);
-        let is_rw = s_axiom.is_runeword(flags);
+        let is_rw = trial_is_rw || s_axiom.is_runeword(flags);
         if is_rw || is_v105_shadow {
             let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
             total_skip += if is_v105_shadow_local { 8 } else { 24 };
@@ -265,8 +285,8 @@ pub fn peek_item_header_at(
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = s_axiom.is_compact(flags);
     let s_axiom = s_axiom.with_compact(is_compact);
-    let is_personalized = s_axiom.is_personalized(flags);
-    let geometry = axiom.header_geometry(flags, is_compact, is_personalized);
+    let _is_personalized = s_axiom.is_personalized(flags);
+    let geometry = axiom.header_geometry(flags, Some(&code));
 
     let mut possible_gaps = Vec::new();
     if alpha_mode {
@@ -1172,13 +1192,11 @@ pub fn write_property_list(
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }
         if !preserve_trailing_align { emitter.byte_align()?; }
+    }
 
-        // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
-        if axiom.is_alpha() && (version == 0 || version == 1 || version == 4 || version == 6 || version == 2) {
-            if !is_rw {
-                emitter.write_bits(0, 9)?;
-            }
-        }
+    // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
+    if properties_complete && axiom.has_tvs_padding(alpha_runeword) {
+        emitter.write_bits(0, 9)?;
     }
 
     Ok(())

@@ -508,12 +508,12 @@ impl Item {
         }
         
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
-        let geometry = h_axiom.header_geometry(self.header.flags, s_axiom.is_compact, self.header.is_personalized);
+        let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
         if geometry.has_header_gap {
             if h_axiom.is_alpha() {
                 let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
-                let is_rw = h_axiom.is_runeword(self.header.flags);
+                let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
 
                 // Normal alpha items: write geometry bits separately
                 if !is_v105_shadow && !is_rw {
@@ -767,16 +767,16 @@ pub fn parse_item_header<R: BitRead>(
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
-    let is_compact = forced_compact.unwrap_or_else(|| s_axiom.is_compact(flags));
+    let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags);
     let mut y = 0; let mut page = 0; let mut socket_hint = 0;
-    let geometry = h_axiom.header_geometry(flags, is_compact, is_personalized);
+    let geometry = h_axiom.header_geometry(flags, code_hint);
     let mut alpha_header_gap = None;
     let mut alpha_header_gap_bits = Vec::new();
     if geometry.has_header_gap {
         if h_axiom.is_alpha() {
             let is_v105_shadow = h_axiom.is_v105_shadow(flags);
-            let is_rw = h_axiom.is_runeword(flags);
+            let is_rw = h_axiom.is_runeword(flags, code_hint);
             if is_rw || is_v105_shadow {
                 let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 let gap_bits = if is_v105_shadow_local { 8 } else { 24 };

@@ -102,11 +102,19 @@ impl HeaderAxiom {
         }
     }
 
-    pub fn is_compact(&self, flags: u32) -> bool {
-        if self.is_runeword(flags) {
+    pub fn is_compact(&self, flags: u32, code: Option<&str>) -> bool {
+        if self.is_runeword(flags, code) {
             return false;
         }
         if self.alpha_mode {
+            if let Some(c) = code {
+                let t = c.trim();
+                // Forensic (Axiom 0365): Blank or structural compact types (TSC, ISC) 
+                // often lack the compact flag despite being structurally compact.
+                if t.is_empty() || t == "tsc" || t == "isc" {
+                    return true;
+                }
+            }
             let _identified = self.is_identified(flags);
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
@@ -161,8 +169,15 @@ impl HeaderAxiom {
         }
     }
 
-    pub fn is_runeword(&self, flags: u32) -> bool {
+    pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
         if self.alpha_mode {
+            if let Some(c) = code {
+                let t = c.trim();
+                // Forensic (Axiom 0365): Support Alpha v105 Runeword codes that may lack bit 26.
+                if t == "acww" || t == "umsw" || t == "7pw" || t == "oesw" || t == "hps7" || t == "ics" {
+                    return true;
+                }
+            }
             if self.version == 5 || self.version == 1 {
                 if (flags & (1 << 26)) != 0 { return true; }
                 let is_frag = (flags & (1 << 27)) != 0;
@@ -181,9 +196,12 @@ impl HeaderAxiom {
         self.alpha_mode && (self.version == 5 || self.version == 2) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
     }
 
-    pub fn header_geometry(&self, flags: u32, is_compact: bool, is_personalized: bool) -> HeaderGeometry {
+    pub fn header_geometry(&self, flags: u32, code: Option<&str>) -> HeaderGeometry {
+        let is_compact = self.is_compact(flags, code);
+        let is_personalized = self.is_personalized(flags);
+
         if self.alpha_mode {
-            let is_rw = self.is_runeword(flags);
+            let is_rw = self.is_runeword(flags, code);
             let is_v105_shadow = self.is_v105_shadow(flags);
 
             if is_rw || is_v105_shadow || is_personalized {
@@ -213,7 +231,6 @@ impl HeaderAxiom {
                     skip_geometry: is_compact,
                 };
             }
-            }
 
         }
         
@@ -234,6 +251,7 @@ impl ItemHeader {
     pub fn read_from_cursor<R: BitRead>(
         cursor: &mut BitCursor<R>,
         alpha_mode: bool,
+        code: Option<&str>,
     ) -> ParsingResult<(Self, Option<u32>)> {
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Header);
@@ -265,14 +283,15 @@ impl ItemHeader {
         
         let axiom = HeaderAxiom::new(version, alpha_mode);
         let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
-        let is_compact = s_axiom.is_compact(flags);
+        let _is_compact = s_axiom.is_compact(flags);
         let is_personalized = s_axiom.is_personalized(flags);
         
         let mut y = 0;
         let mut page = 0;
         let mut socket_hint = 0;
 
-        let geometry = axiom.header_geometry(flags, is_compact, is_personalized);
+        let geometry = axiom.header_geometry(flags, code);
+        let is_compact = axiom.is_compact(flags, code);
 
         let mut alpha_header_gap = None;
         if geometry.has_header_gap {
@@ -344,8 +363,9 @@ impl ItemHeader {
 pub fn parse_item_header<R: BitRead>(
     cursor: &mut BitCursor<R>,
     alpha_mode: bool,
+    code: Option<&str>,
 ) -> ParsingResult<(ItemHeader, Option<u32>)> {
-    ItemHeader::read_from_cursor(cursor, alpha_mode)
+    ItemHeader::read_from_cursor(cursor, alpha_mode, code)
 }
 
 /// Calculates the Alpha v105 item header checksum.
