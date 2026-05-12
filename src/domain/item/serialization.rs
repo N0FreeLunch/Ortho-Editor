@@ -901,7 +901,7 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
         "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
         "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|
-        "8wc"|"bmf"|"c mt"|"acww"|"umsw"|"7pw"
+        "8wc"|"bmf"|"c mt"|"acww"|"umsw"
     )
 }
 
