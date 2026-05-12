@@ -168,7 +168,48 @@ pub fn peek_item_header_at(
     };
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
-    let is_compact = h_axiom.is_compact(flags);
+    let mut is_compact = h_axiom.is_compact(flags);
+    
+    // Axiom 0344: In Alpha v105, blank items and certain compact types 
+    // often lack the is_compact flag but are strictly interval-aligned.
+    // Use physical interval sniffing to force compact mode.
+    if alpha_mode && !is_compact {
+        for &interval in &[72, 80, 88] {
+            let next_bit = start_bit + interval;
+            if next_bit + 64 <= (section_bytes.len() * 8) as u64 {
+                 let mut jm_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                 if jm_reader.skip(next_bit as u32).is_ok() {
+                     if let Ok(next_flags) = jm_reader.read::<32, u32>() {
+                         // Check for JM marker or Alpha plausibility
+                         if (next_flags & 0xFFFF) == 0x4D4A {
+                             is_compact = true;
+                             break;
+                         }
+                         
+                         let mut p_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                         if p_reader.skip(next_bit as u32 + 32).is_ok() {
+                             // Check for version 5 checksum or plausible mode/loc
+                             let saved = p_reader.checkpoint();
+                             if let (Ok(ck), Ok(nv)) = (p_reader.read::<8, u8>(), p_reader.read::<3, u8>()) {
+                                 if ck == calculate_alpha_v105_checksum(next_flags, nv) {
+                                     is_compact = true;
+                                     break;
+                                 }
+                             }
+                             p_reader.rollback(saved);
+                             if let (Ok(nv), Ok(nm), Ok(nl)) = (p_reader.read::<3, u8>(), p_reader.read::<3, u8>(), p_reader.read::<3, u8>()) {
+                                 if nv <= 7 && nm <= 6 && nl <= 6 && (next_flags != 0 || nv != 0) {
+                                     is_compact = true;
+                                     break;
+                                 }
+                             }
+                         }
+                     }
+                 }
+            }
+        }
+    }
+
     let s_axiom = StatsAxiom::new(version, crate::domain::item::ItemQuality::Normal, alpha_mode)
         .with_compact(is_compact);
     let is_personalized = h_axiom.is_personalized(flags);
@@ -536,6 +577,7 @@ impl Item {
                     let mut final_item = item.clone();
                     let actual_consumed = if let Some(flen) = forced_length { flen } else { consumed_bits };
                     
+                    final_item.expected_start_bit = start;
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
                     final_item.total_bits = actual_consumed;
@@ -608,6 +650,7 @@ impl Item {
                     }
 
                     let mut opaque_item = Item::default();
+                    opaque_item.expected_start_bit = start;
                     opaque_item.code = peek_code;
                     opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
                     for (idx, b) in bits.iter().enumerate() {
@@ -652,6 +695,7 @@ impl Item {
                     }
 
                     let mut opaque_item = Item::default();
+                    opaque_item.expected_start_bit = start;
                     opaque_item.code = "    ".to_string();
                     opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
                     for (idx, b) in bits.iter().enumerate() {
