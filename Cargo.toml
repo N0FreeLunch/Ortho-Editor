@@ -52,6 +52,10 @@ name = "d2save_batch"
 path = "src/bin/verify/batch.rs"
 
 [[bin]]
+name = "d2save_taxonomy"
+path = "src/bin/verify/taxonomy.rs"
+
+[[bin]]
 name = "d2save_map"
 path = "src/bin/verify/d2save_map.rs"
 
