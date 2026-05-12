@@ -21,14 +21,48 @@ fn main() -> anyhow::Result<()> {
 
         println!("=== File: {} ===", path);
         if let Some(w4) = w4_data {
-            println!("w4 Marker: {:02X?}", &w4[0..2]);
-            println!("w4 Bytes (first 64): {:02X?}", &w4[..w4.len().min(64)]);
+            let has_marker = w4.starts_with(b"w4");
+            println!("w4 Section (pos={}): Marker Present: {}", map.w4_pos.unwrap_or(0), has_marker);
+            println!("w4 Bytes (first 32): {:02X?}", &w4[..w4.len().min(32)]);
             
             // Re-decode using hybrid logic
-            let w4_payload = &w4[2..]; // Skip 'w4'
-            let merc = MercenaryState::from_hybrid(&bytes, Some(w4_payload));
-            println!("Hybrid Decoded: ID={}, Class={}, Subtype={}, XP={}, NameID={}", 
-                merc.hireling_id, merc.class_id, merc.subtype_id, merc.experience, merc.name_id);
+            // Note: from_hybrid handles marker stripping internally (Axiom 0367)
+            let merc = MercenaryState::from_hybrid(&bytes, Some(w4));
+
+            let class_name = match merc.class_id {
+                1 => "Rogue (Act 1)",
+                2 => "Desert Warrior (Act 2)",
+                9 => "Iron Wolf (Act 3)",
+                12 => "Barbarian (Act 5)",
+                _ => "Unknown",
+            };
+
+            let subtype_name = if merc.class_id == 9 {
+                match merc.subtype_id {
+                    15 => "Fire",
+                    16 => "Cold",
+                    17 => "Lightning",
+                    _ => "Unknown Element",
+                }
+            } else {
+                "N/A"
+            };
+
+            println!("Hybrid Decoded:");
+            println!("  Class:    {} ({})", merc.class_id, class_name);
+            println!("  Subtype:  {} ({})", merc.subtype_id, subtype_name);
+            println!("  ID (H169):{}", merc.hireling_id);
+            println!("  Experience: {} (0x{:08X})", merc.experience, merc.experience);
+            println!("  Name ID:   {}", merc.name_id);
+            
+            // Axiom 0367 Alignment Check
+            let c_off = if has_marker { 6 } else { 4 };
+            let raw_class = w4.get(c_off).copied().unwrap_or(0);
+            println!("  Alignment Check (Axiom 0367): Offset {} -> Raw Class {}", c_off, raw_class);
+            if raw_class != merc.class_id {
+                println!("  [WARN] Alignment Drift Detected! MercenaryState class ({}) != raw class ({})", merc.class_id, raw_class);
+            }
+
         } else {
             println!("w4 section NOT found");
         }

@@ -49,23 +49,29 @@ impl MercenaryState {
             0
         };
 
-        // 3. Hireling IDs: Priority to w4[4] if non-zero
+        // 3. Hireling IDs: Priority to w4 section
         let mut class_id = 0;
         let mut raw_w4 = Vec::new();
         let mut name_id = 0;
 
         if let Some(w4_bytes) = w4 {
             raw_w4 = w4_bytes.to_vec();
-            class_id = w4_bytes.get(4).copied().unwrap_or(0);
             
-            if w4_bytes.len() >= 29 {
-                name_id = u16::from_le_bytes(w4_bytes[27..29].try_into().unwrap_or([0; 2]));
-            }
+            // Detect if marker 'w4' is included to handle both raw sections and stripped payloads.
+            let has_marker = w4_bytes.starts_with(b"w4");
+            let c_off = if has_marker { 6 } else { 4 }; // Class ID is 4 bytes after marker
+            let n_id_off = if has_marker { 5 } else { 3 }; // Name ID is 3 bytes after marker
+
+            class_id = w4_bytes.get(c_off).copied().unwrap_or(0);
+            
+            // Name ID: Usually a single byte in this context? 
+            // Or part of a larger field. For now, take the verified index 5.
+            name_id = w4_bytes.get(n_id_off).copied().map(|v| v as u16).unwrap_or(0);
         }
 
-        // Hireling ID logic: 
-        // In Alpha v105, Header[169] is the most reliable persistent ID.
-        // w4 sectional ID (class_id) is kept for forensic classification.
+        // Hireling ID logic (Axiom 0366): 
+        // In Alpha v105, Header[169] is the persistent attribute/subtype ID.
+        // For Act 3 (Class 9), this is the elemental variant (15=Fire, 16=Cold, 17=Lightning).
         let hireling_id = subtype_id;
 
         Self {
