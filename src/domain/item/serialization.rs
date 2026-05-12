@@ -785,6 +785,7 @@ impl Item {
         }
 
         let s_axiom = StatsAxiom::new(header.version, header.quality.unwrap_or(crate::domain::item::ItemQuality::Normal), alpha_mode)
+            .with_compact(header.is_compact)
             .with_code(code_peek.unwrap_or(""));
 
         if s_axiom.is_header_only(header.flags, code_peek.unwrap_or("")) {
@@ -970,12 +971,12 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         return false;
     }
     matches!(trimmed, 
-        "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|"isc"|"tsc"|
+        "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|
         "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
         "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
         "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|
-        "8wc"|"bmf"|"c mt"|"acww"|"umsw"|"wuyw"|"bs m"
+        "bmf"|"c mt"|"wuyw"|"bs m"
     )
 }
 
