@@ -45,13 +45,17 @@ fn main() {
                 println!("Cascading Desync Report for: {}", path);
                 println!("Mode: {}", if is_alpha { "Alpha v105" } else { "Retail" });
                 println!("{:-<100}", "");
-                println!("{:>5} | {:>12} | {:>12} | {:>8} | {:>10} | {:>10} | {:>5}", "Index", "Oracle Start", "Parser Start", "Drift", "Oracle Code", "Parser Code", "Match");
+                println!("{:>5} | {:>12} | {:>12} | {:>8} | {:>10} | {:>10} | {:>18} | {:>5}", "Index", "Oracle Start", "Parser Start", "Drift", "Oracle Code", "Parser Code", "First Divergence", "Match");
                 println!("{:-<100}", "");
                 
                 let mut first_desync_report = None;
                 for r in &reports {
-                    println!("{:5} | {:12} | {:12} | {:8} | {:11} | {:11} | {:5}", 
-                        r.item_index, r.oracle_start, r.parser_start, r.drift, r.oracle_code, r.parser_code, if r.is_match { "OK" } else { "FAIL" }
+                    let family = r
+                        .first_divergence_family
+                        .map(|f| f.as_str())
+                        .unwrap_or("none");
+                    println!("{:5} | {:12} | {:12} | {:8} | {:11} | {:11} | {:18} | {:5}", 
+                        r.item_index, r.oracle_start, r.parser_start, r.drift, r.oracle_code, r.parser_code, family, if r.is_match { "OK" } else { "FAIL" }
                     );
                     if !r.is_match && first_desync_report.is_none() {
                         first_desync_report = Some(r.clone());
@@ -61,6 +65,9 @@ fn main() {
                 
                 if let Some(r) = first_desync_report {
                     println!("[ALERT] First desync detected at Item Index {}.", r.item_index);
+                    if let Some(family) = r.first_divergence_family {
+                        println!("  First Divergence Family: {}", family.as_str());
+                    }
                     println!("\nForensic Bit Comparison at Drift Point:");
                     if let Some(dump) = &r.bit_dump {
                         println!("  Oracle Start ({:12}): {}", r.oracle_start, dump);

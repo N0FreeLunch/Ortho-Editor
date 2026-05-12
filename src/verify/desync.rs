@@ -3,6 +3,24 @@ use serde::Serialize;
 use crate::item::{Item, HuffmanTree, peek_item_header_at, is_plausible_item_header};
 use crate::error::ParsingResult;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DivergenceFamily {
+    ScannerSelection,
+    HeaderGeometry,
+    Ambiguous,
+}
+
+impl DivergenceFamily {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ScannerSelection => "scanner_selection",
+            Self::HeaderGeometry => "header_geometry",
+            Self::Ambiguous => "ambiguous",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DesyncReport {
     pub item_index: usize,
@@ -13,6 +31,7 @@ pub struct DesyncReport {
     pub parser_code: String,
     pub bit_dump: Option<String>,
     pub is_match: bool,
+    pub first_divergence_family: Option<DivergenceFamily>,
 }
 
 /// Detects bit-level drift between empirical item starts (Oracle) and parser-calculated starts.
@@ -84,6 +103,19 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
             parser_code: parsed_items[i].code.trim().to_string(),
             bit_dump,
             is_match: drift == 0,
+            first_divergence_family: if drift == 0 {
+                None
+            } else {
+                let oracle_code = oracle_starts[i].1.trim();
+                let parser_code = parsed_items[i].code.trim();
+                if oracle_code.is_empty() && parser_code.is_empty() {
+                    Some(DivergenceFamily::Ambiguous)
+                } else if oracle_code == parser_code {
+                    Some(DivergenceFamily::HeaderGeometry)
+                } else {
+                    Some(DivergenceFamily::ScannerSelection)
+                }
+            },
         });
     }
 
