@@ -35,7 +35,8 @@ impl StatsAxiom {
             trimmed == "tsc" || trimmed == "isc" || 
             (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
             (trimmed.starts_with('h') && trimmed.len() == 3) || // hp1, hp2, etc
-            (trimmed.starts_with('m') && trimmed.len() == 3)    // mp1, mp2, etc
+            (trimmed.starts_with('m') && trimmed.len() == 3) || // mp1, mp2, etc
+            trimmed == "wsww" || trimmed == "wuyw" || trimmed == "bs m"
         ) {
             self.is_compact = true;
         }

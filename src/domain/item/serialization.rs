@@ -189,15 +189,19 @@ pub fn peek_item_header_at(
                          let mut p_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
                          if p_reader.skip(next_bit as u32 + 32).is_ok() {
                              // Check for version 5 checksum or plausible mode/loc
-                             let saved = p_reader.checkpoint();
-                             if let (Ok(ck), Ok(nv)) = (p_reader.read::<8, u8>(), p_reader.read::<3, u8>()) {
+                             let ck_res = p_reader.read::<8, u8>();
+                             let nv_res = p_reader.read::<3, u8>();
+                             if let (Ok(ck), Ok(nv)) = (ck_res, nv_res) {
                                  if ck == calculate_alpha_v105_checksum(next_flags, nv) {
                                      is_compact = true;
                                      break;
                                  }
                              }
-                             p_reader.rollback(saved);
-                             if let (Ok(nv), Ok(nm), Ok(nl)) = (p_reader.read::<3, u8>(), p_reader.read::<3, u8>(), p_reader.read::<3, u8>()) {
+                             
+                             // Manual retry with fresh reader instead of rollback
+                             let mut b_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                             let _ = b_reader.skip(next_bit as u32 + 32);
+                             if let (Ok(nv), Ok(nm), Ok(nl)) = (b_reader.read::<3, u8>(), b_reader.read::<3, u8>(), b_reader.read::<3, u8>()) {
                                  if nv <= 7 && nm <= 6 && nl <= 6 && (next_flags != 0 || nv != 0) {
                                      is_compact = true;
                                      break;
@@ -549,9 +553,15 @@ impl Item {
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
                 is_compact_final = is_compact;
-                // Slice 6: Axiom 0344 inference for blank items missing the compact flag
-                if alpha_mode && code.trim().is_empty() {
-                    is_compact_final = true;
+                // Slice 6/9: Axiom 0344 inference for blank items and summary codes missing the compact flag
+                if alpha_mode && !is_compact && (code.trim().is_empty() || is_v105_summary_code(&code)) {
+                    // Refined: Only force compact if there's another plausible marker 80 bits later
+                    if let Some(next_header) = peek_item_header_at(section_bytes, start + 80, huffman, alpha_mode) {
+                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
+                         if is_plausible_item_header(n_mode, n_loc, &n_code, n_flags, n_ver, alpha_mode) {
+                             is_compact_final = true;
+                         }
+                    }
                 }
                 
                 // Alpha v105 forensic: Socketed items add 8-bit alignment padding
@@ -945,7 +955,7 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
         "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
         "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|
-        "8wc"|"bmf"|"c mt"|"acww"|"umsw"
+        "8wc"|"bmf"|"c mt"|"acww"|"umsw"|"wuyw"|"bs m"
     )
 }
 
