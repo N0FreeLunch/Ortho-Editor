@@ -175,6 +175,10 @@ where
             Ok(None) => break,
             Err(_) => {
                 if recorder.read_bit().is_err() {
+                    if axiom.is_alpha() {
+                        // Rhythm Integrity: Treat end-of-stream as valid terminator in Alpha v105
+                        saw_terminator = true;
+                    }
                     break;
                 }
             }
