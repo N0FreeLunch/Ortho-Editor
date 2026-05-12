@@ -90,6 +90,10 @@ impl HeaderAxiom {
         }
 
         if self.alpha_mode {
+            // Forensic (Axiom 0340): Strictly reject known false positive codes that cause desyncs
+            if trimmed == "acww" || trimmed == "umsw" || trimmed == "rksw" {
+                return false;
+            }
             // Forensic: Alpha v105 follows standard mode/location boundaries
             return mode <= 6 && location <= 5;
         } else {
@@ -103,7 +107,7 @@ impl HeaderAxiom {
             return false;
         }
         if self.alpha_mode {
-            let identified = self.is_identified(flags);
+            let _identified = self.is_identified(flags);
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 (flags & (1 << 23)) != 0 && !is_fragment
@@ -208,6 +212,7 @@ impl HeaderAxiom {
                     has_header_gap: self.version == 5,
                     skip_geometry: is_compact,
                 };
+            }
         }
         
         // Retail / Fallback

@@ -256,7 +256,7 @@ where
             }
 
             // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
-            if axiom.is_alpha() && (version == 0 || version == 1 || version == 4 || version == 6 || version == 2) {
+            if axiom.is_alpha() && (_version == 0 || _version == 1 || _version == 4 || _version == 6 || _version == 2) {
                 if !alpha_runeword {
                     let _tvs = recorder.read_bits::<u32>(9)?;
                 }
