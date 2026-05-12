@@ -54,10 +54,14 @@ impl V105HeaderGapAxiom {
                     }
                 }
             }
+            if trimmed == "acww" || trimmed == "umsw" || trimmed == "7pw" || trimmed == "oesw" || trimmed == "hps7" || trimmed == "ics" {
+                return 24;
+            }
         }
 
-        if is_first_item {
+        if is_first_item && version != 5 {
             // Forensic (Axiom 0340): Alpha v105 standard items do not use a gap before the first item in a section.
+            // Version 5 runewords like acww still use a gap even if they are first.
             return 0;
         }
 

@@ -106,7 +106,7 @@ impl StatsAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32) -> bool {
-        (flags & (1 << 26)) != 0 || self.code == "w8wc" || self.code == "acww"
+        (flags & (1 << 26)) != 0 || self.code == "w8wc" || self.code == "acww" || self.code == "umsw" || self.code == "7pw" || self.code == "oesw" || self.code == "hps7" || self.code == "ics"
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
