@@ -90,10 +90,6 @@ impl HeaderAxiom {
         }
 
         if self.alpha_mode {
-            // Forensic (Axiom 0340): Strictly reject known false positive codes that cause desyncs
-            if trimmed == "acww" || trimmed == "umsw" || trimmed == "rksw" {
-                return false;
-            }
             // Forensic: Alpha v105 follows standard mode/location boundaries
             return mode <= 6 && location <= 5;
         } else {
@@ -109,9 +105,7 @@ impl HeaderAxiom {
         if self.alpha_mode {
             if let Some(c) = code {
                 let t = c.trim();
-                // Forensic (Axiom 0365): Blank or structural compact types (TSC, ISC) 
-                // often lack the compact flag despite being structurally compact.
-                if t.is_empty() || t == "tsc" || t == "isc" {
+                if t.is_empty() {
                     return true;
                 }
             }

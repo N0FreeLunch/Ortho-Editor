@@ -54,7 +54,7 @@ impl V105HeaderGapAxiom {
                     }
                 }
             }
-            if trimmed == "acww" || trimmed == "umsw" || trimmed == "7pw" || trimmed == "oesw" || trimmed == "hps7" || trimmed == "ics" {
+            if trimmed == "acww" || trimmed == "umsw" || trimmed == "7pw" || trimmed == "oesw" || trimmed == "hps7" || trimmed == "isc" || trimmed == "tsc" {
                 return 24;
             }
         }
@@ -65,10 +65,8 @@ impl V105HeaderGapAxiom {
             return 0;
         }
 
-        // Forensic (Axiom 0340): Early Alpha versions (0, 1, 4, 6) often use tightly packed items without gaps.
-        if version == 0 || version == 1 || version == 4 || version == 6 {
-            return 0;
-        }
+        // Forensic (Axiom 0340): Some early Alpha versions may still use gaps.
+        // Falling through to standard logic.
 
         // Forensic: 'cwd' (compact) items often use a 24-bit alignment gap instead of the standard 32.
         // If flag bit 26 or 27 is set, use 8 bits, otherwise check for compact flag.
@@ -81,7 +79,7 @@ impl V105HeaderGapAxiom {
             // If the code is known to be one of these, or if we are in a 'shifted' state, use 24.
             if let Some(c) = code {
                 let t = c.trim();
-                if t == "umsw" || t == "rin" || t == "ics" {
+                if t == "umsw" || t == "rin" || t == "isc" || t == "tsc" {
                     return 24;
                 }
             }
