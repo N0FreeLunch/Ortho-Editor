@@ -160,12 +160,13 @@ impl HeaderAxiom {
     pub fn is_runeword(&self, flags: u32) -> bool {
         if self.alpha_mode {
             if self.version == 5 || self.version == 1 {
-                let is_frag = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+                if (flags & (1 << 26)) != 0 { return true; }
+                let is_frag = (flags & (1 << 27)) != 0;
                 !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
             } else if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
                 (flags & (1 << 26)) != 0
             } else {
-                (flags & (1 << 11)) != 0
+                (flags & (1 << 11)) != 0 || (flags & (1 << 26)) != 0
             }
         } else {
             (flags & (1 << 26)) != 0

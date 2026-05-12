@@ -866,7 +866,7 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
         "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
         "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|
-        "8wc"|"bmf"|"c mt"
+        "8wc"|"bmf"|"c mt"|"acww"|"umsw"|"7pw"
     )
 }
 
@@ -1071,8 +1071,8 @@ pub fn write_property_list(
         }
     }
     let already_has_term = props.iter().any(|p| p.stat_id == terminator);
-    let is_acww = code.trim() == "acww";
-    if properties_complete && !already_has_term && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) && !is_acww && !is_compact {
+    let is_rw = axiom.is_runeword(0);
+    if properties_complete && !already_has_term && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) && !is_rw && !is_compact {
         emitter.write_bits(terminator, id_bits)?;
     }
     let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1 || version == 2);
