@@ -114,6 +114,9 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2save_arch`**   | Save | **Bit Archaeologist**: Unified bit-level `dump` and `diff` for deep forensic exploration. |
 | **`d2item_serialization_audit`** | Item | **Fidelity Master**: Visual bitstream alignment and forensic audit report. |
 | **`d2item_global_audit`** | Item | **Batch Auditor**: Scans directories for serialization parity mismatches. |
+| **`d2save_taxonomy`** | Save | **Structural Auditor**: Categorizes fixtures by version and bitstream shape. |
+| **`d2item_rhythm_oracle`** | Item | **Rhythm Oracle**: Validates 9-bit property stream rhythms and terminators. |
+| **`d2item_alignment_oracle`** | Item | **Alignment Oracle**: Detects bit-drift and calculates required offsets. |
 | **`d2item_registry_recommender`** | Forensic | **Triage Oracle**: Suggests bit-width updates from audit logs. |
 | **`d2item_registry_patcher`** | Forensic | **Auto-Patcher**: Applies recommendations to the registry atomically. |
 
