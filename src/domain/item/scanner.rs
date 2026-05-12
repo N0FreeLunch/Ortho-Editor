@@ -3,7 +3,7 @@ use rayon::prelude::*;
 
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
 
-pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Vec<u64> {
+pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64) -> Vec<u64> {
     if bytes.is_empty() {
         return Vec::new();
     }
@@ -12,6 +12,19 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
     // We split the byte stream into chunks and scan each chunk in parallel.
     // To avoid missing markers straddling chunk boundaries, we overlap chunks slightly.
     let limit_bits = (bytes.len() * 8) as u64;
+    
+    // Slice 8: Parse D2R_FORCE_LENGTH to ensure true markers are not dropped
+    let mut force_length_map = std::collections::HashMap::new();
+    if let Ok(env_val) = std::env::var("D2R_FORCE_LENGTH") {
+        for pair in env_val.split(',') {
+            let parts: Vec<&str> = pair.split(':').collect();
+            if parts.len() == 2 {
+                if let (Ok(offset), Ok(length)) = (parts[0].trim().parse::<u64>(), parts[1].trim().parse::<u64>()) {
+                    force_length_map.insert(offset, length);
+                }
+            }
+        }
+    }
     
     let chunk_count = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
     
@@ -23,7 +36,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
             
             let start_bit = (start_byte * 8) as u64;
             // Overlap by 256 bits (sufficient for any item header + some buffer)
-            let end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
+            let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
             
             let mut local_markers = Vec::new();
             let mut probe = start_bit;
@@ -45,7 +58,14 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
                                 continue;
                             }
                             
-                            if alpha && !is_compact {
+                            // Slice 8: Targeted Oracle. If forced, skip lookahead.
+                            let mut is_forced = false;
+                            let absolute_offset = section_bit_offset + scan_pos;
+                            if force_length_map.contains_key(&absolute_offset) {
+                                is_forced = true;
+                            }
+
+                            if alpha && !is_compact && !is_forced {
                                 if !verify_marker_lookahead(bytes, scan_pos + _header_len, huffman, alpha) {
                                     continue;
                                 }
@@ -70,7 +90,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Ve
                 if max_confidence > 0 {
                     local_markers.push(best_offset);
                     if alpha {
-                        probe = best_offset + best_header_len; 
+                        let absolute_offset = section_bit_offset + best_offset;
+                        if let Some(&flen) = force_length_map.get(&absolute_offset) {
+                            probe = best_offset + flen;
+                        } else {
+                            probe = best_offset + best_header_len; 
+                        }
                     } else {
                         probe = best_offset + 32; 
                     }

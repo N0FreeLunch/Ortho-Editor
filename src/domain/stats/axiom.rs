@@ -140,7 +140,7 @@ impl StatsAxiom {
 
     pub fn is_header_only(&self, flags: u32, code: &str) -> bool {
         if self.is_v105_shadow(flags) { return true; }
-        if self.save_is_alpha && self.version == 0 && !code.is_empty() && code.trim().is_empty() {
+        if self.save_is_alpha && !code.is_empty() && code.trim().is_empty() {
             return true;
         }
         false

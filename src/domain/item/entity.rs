@@ -552,6 +552,15 @@ impl Item {
 
         // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
         if s_axiom.is_header_only(self.header.flags, &self.code) {
+            let current_bits = emitter.written_bits();
+            if self.total_bits > (current_bits - start_bit) {
+                let padding_needed = (self.total_bits - (current_bits - start_bit)) as u32;
+                if !self.body.alpha_alignment_padding.is_empty() { 
+                    for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } 
+                } else { 
+                    emitter.write_bits(0, padding_needed)?; 
+                }
+            }
             return Ok(());
         }
 
@@ -663,11 +672,19 @@ impl Item {
         }
         if !alpha_mode && self.header.version != 5 && self.header.version != 7 { emitter.write_bit(false)?; }
         let current_bits = emitter.written_bits();
-        let final_bits = s_axiom.calculate_alignment(
+        let mut final_bits = s_axiom.calculate_alignment(
             current_bits - start_bit,
             &self.code,
             self.header.flags,
         );
+        
+        // Slice 8: Targeted Length Oracle Support
+        // If the item's recorded total_bits is greater than the calculated alignment (via D2R_FORCE_LENGTH),
+        // respect the physical evidence and pad to the recorded length.
+        if self.total_bits > final_bits {
+            final_bits = self.total_bits;
+        }
+
         if final_bits > (current_bits - start_bit) {
             let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
             if !self.body.alpha_alignment_padding.is_empty() { for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } }
@@ -716,6 +733,7 @@ pub fn parse_item_header<R: BitRead>(
     code_hint: Option<&str>,
     gap_override: Option<usize>,
     is_first_item: bool,
+    forced_compact: Option<bool>,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
@@ -727,7 +745,7 @@ pub fn parse_item_header<R: BitRead>(
         let saved_pos = cursor.checkpoint();
         let checksum_res = cursor.read_bits::<u8>(8);
         let v_res = cursor.read_bits::<u8>(3);
-        
+
         if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
             let expected = calculate_alpha_v105_checksum(flags, v);
             if checksum == expected {
@@ -746,10 +764,10 @@ pub fn parse_item_header<R: BitRead>(
     let mode = cursor.read_bits::<u8>(3)? as u8;
     let location = cursor.read_bits::<u8>(3)? as u8;
     let x = cursor.read_bits::<u8>(4)? as u8;
-    
+
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
-    let is_compact = s_axiom.is_compact(flags);
+    let is_compact = forced_compact.unwrap_or_else(|| s_axiom.is_compact(flags));
     let is_personalized = s_axiom.is_personalized(flags);
     let mut y = 0; let mut page = 0; let mut socket_hint = 0;
     let geometry = h_axiom.header_geometry(flags, is_compact, is_personalized);
@@ -779,7 +797,7 @@ pub fn parse_item_header<R: BitRead>(
                 let gap_bits = if let Some(go) = gap_override {
                     if go >= geom_bits { go - geom_bits } else { 8 }
                 } else {
-                    V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item)
+                    V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact)
                 };
 
                 alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;

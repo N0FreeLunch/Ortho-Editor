@@ -43,7 +43,7 @@ impl ForensicAxiom for V105HeaderGapAxiom {
 }
 
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool) -> usize {
+    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
@@ -74,7 +74,7 @@ impl V105HeaderGapAxiom {
         // If flag bit 26 or 27 is set, use 8 bits, otherwise check for compact flag.
         if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
             8
-        } else if (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
+        } else if is_compact || (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
             8 // Compact items (potions) in Alpha v105 use an 8-bit header gap when not the first item (Axiom 0340)
         } else {
             // Forensic: Amulets (umsw) and Rings often use a 24-bit gap in certain Alpha variants.

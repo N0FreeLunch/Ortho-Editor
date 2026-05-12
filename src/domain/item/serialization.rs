@@ -387,6 +387,7 @@ pub fn parse_item_at_with_limit(
     idx: usize,
     alpha: bool,
     limit: Option<u64>,
+    forced_compact: Option<bool>,
 ) -> ParsingResult<(Item, u64)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
@@ -394,7 +395,7 @@ pub fn parse_item_at_with_limit(
     if let Some(l) = limit {
         cursor.set_limit(l);
     }
-    let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx == 0)?;
+    let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx == 0, forced_compact)?;
     Ok((item, cursor.pos()))
 }
 
@@ -436,7 +437,7 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
 }
 
 pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
-    let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None)?;
+    let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None, None)?;
     Ok(item)
 }
 
@@ -453,8 +454,21 @@ impl Item {
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
+        // Parse D2R_FORCE_LENGTH (e.g., "7256:80,7336:80")
+        let mut force_length_map = std::collections::HashMap::new();
+        if let Ok(env_val) = std::env::var("D2R_FORCE_LENGTH") {
+            for pair in env_val.split(',') {
+                let parts: Vec<&str> = pair.split(':').collect();
+                if parts.len() == 2 {
+                    if let (Ok(offset), Ok(length)) = (parts[0].trim().parse::<u64>(), parts[1].trim().parse::<u64>()) {
+                        force_length_map.insert(offset, length);
+                    }
+                }
+            }
+        }
+
         // Forensic: Resolve variable header gap specific to Alpha v105
-        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode);
+        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset);
         if markers.is_empty() { return Ok(items); }
         
         let mut start_offset = markers[0];
@@ -470,10 +484,17 @@ impl Item {
             let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
             let limit = next_marker - start;
 
+            let absolute_offset = section_bit_offset + start;
+            let forced_length = force_length_map.get(&absolute_offset).cloned();
+
             // Refined: Dynamically adjust chunk limit for known variable padding
             let mut dynamic_limit = limit;
             let mut is_compact_final = false;
-            if let Some((_, _, _, code, flags, _, is_compact, _, _, _)) =
+            
+            if let Some(flen) = forced_length {
+                dynamic_limit = flen;
+                is_compact_final = true;
+            } else if let Some((_, _, _, code, flags, _, is_compact, _, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode)
             {
                 is_compact_final = is_compact;
@@ -487,7 +508,7 @@ impl Item {
                     dynamic_limit += 8;
                 }
             }
-            
+
             if !alpha_mode && !is_compact_final {
                 dynamic_limit += 128; // Safety buffer (Retail only)
             }
@@ -499,10 +520,11 @@ impl Item {
                 items.len(),
                 alpha_mode,
                 Some(dynamic_limit),
+                if is_compact_final { Some(true) } else { None },
             ) {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
-                    let actual_consumed = consumed_bits;
+                    let actual_consumed = if let Some(flen) = forced_length { flen } else { consumed_bits };
                     
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
@@ -543,7 +565,9 @@ impl Item {
                         probe_pos += 8;
                     }
 
-                    let (peek_code, peek_limit) = if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
+                    let (peek_code, peek_limit) = if let Some(flen) = forced_length {
+                        ("    ".to_string(), flen)
+                    } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
                         peek_item_header_at(section_bytes, start, huffman, alpha_mode)
                     {
                         let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode)
@@ -643,7 +667,7 @@ impl Item {
         alpha: bool,
     ) -> ParsingResult<Item> {
         let mut cursor = BitCursor::new(reader);
-        Self::from_reader_with_context(&mut cursor, huffman, None, alpha, false)
+        Self::from_reader_with_context(&mut cursor, huffman, None, alpha, false, None)
     }
 
     pub fn from_reader_with_context<R: BitRead>(
@@ -652,6 +676,7 @@ impl Item {
         ctx: Option<(&[u8], u64)>,
         alpha_mode: bool,
         is_first_item: bool,
+        forced_compact: Option<bool>,
     ) -> ParsingResult<Item> {
         cursor.set_trace(crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
@@ -665,7 +690,7 @@ impl Item {
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
         let _has_checksum_peek = peek.as_ref().map(|p| p.9);
 
-        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item)?;
+        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact)?;
 
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {
@@ -892,7 +917,7 @@ pub fn scan_socket_children(
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);
-                    if let Ok((item, consumed)) = parse_item_at_with_limit(bytes, current_pos, huffman, 0, alpha, Some(remaining)) {
+                    if let Ok((item, consumed)) = parse_item_at_with_limit(bytes, current_pos, huffman, 0, alpha, Some(remaining), None) {
                         let mut item_end = current_pos + consumed;
                         if alpha {
                             if let Some(next_start) = find_next_item_match(bytes, current_pos + 64, huffman, alpha) {
