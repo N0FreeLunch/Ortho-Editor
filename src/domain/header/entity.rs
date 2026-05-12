@@ -179,59 +179,45 @@ impl HeaderAxiom {
 
     pub fn header_geometry(&self, flags: u32, is_compact: bool, is_personalized: bool) -> HeaderGeometry {
         if self.alpha_mode {
-            if self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6 {
-                let is_rw = self.is_runeword(flags);
-                let is_v105_shadow = self.is_v105_shadow(flags);
+            let is_rw = self.is_runeword(flags);
+            let is_v105_shadow = self.is_v105_shadow(flags);
 
-                if is_rw || is_v105_shadow || is_personalized {
-                    HeaderGeometry {
-                        y_bits: 0,
-                        page_bits: 0,
-                        socket_hint_bits: 0,
-                        has_header_gap: true,
-                        skip_geometry: true,
-                    }
-                } else {
-                    HeaderGeometry {
-                        y_bits: if is_compact { 0 } else { 4 },
-                        page_bits: if is_compact { 0 } else { 3 },
-                        socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
-                        has_header_gap: self.version != 6,
-                        skip_geometry: false,
-                    }
-                }
+            if is_rw || is_v105_shadow || is_personalized {
+                return HeaderGeometry {
+                    y_bits: 0,
+                    page_bits: 0,
+                    socket_hint_bits: 0,
+                    has_header_gap: true,
+                    skip_geometry: true,
+                };
+            }
+
+            if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 6 {
+                return HeaderGeometry {
+                    y_bits: if is_compact { 0 } else { 4 },
+                    page_bits: if is_compact { 0 } else { 3 },
+                    socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
+                    has_header_gap: self.version != 6,
+                    skip_geometry: false,
+                };
             } else if self.version == 4 || self.version == 5 {
-                HeaderGeometry {
+                return HeaderGeometry {
                     y_bits: if is_compact { 0 } else { 4 },
                     page_bits: if is_compact { 0 } else { 3 },
                     socket_hint_bits: if is_compact { 0 } else { 3 },
                     has_header_gap: self.version == 5,
                     skip_geometry: is_compact,
-                }
-            } else if self.version == 0 || self.version == 1 || self.version == 2 {
-                HeaderGeometry {
-                    y_bits: if is_compact { 0 } else { 4 },
-                    page_bits: if is_compact { 0 } else { 3 },
-                    socket_hint_bits: if is_compact { 0 } else { 3 },
-                    has_header_gap: false,
-                    skip_geometry: is_compact,
-                }
-            } else {
-                HeaderGeometry {
-                    y_bits: if is_compact { 0 } else { 4 },
-                    page_bits: if is_compact { 0 } else { 3 },
-                    socket_hint_bits: if is_compact { 0 } else { 3 },
-                    has_header_gap: false,
-                    skip_geometry: is_compact,
-                }
+                };
+        }
+        
+        // Retail / Fallback
+        if is_compact {
+            HeaderGeometry {
+                y_bits: 0, page_bits: 0, socket_hint_bits: 0, has_header_gap: false, skip_geometry: true,
             }
         } else {
             HeaderGeometry {
-                y_bits: if is_compact { 0 } else { 4 },
-                page_bits: if is_compact { 0 } else { 3 },
-                socket_hint_bits: if is_compact { 0 } else { 3 },
-                has_header_gap: false,
-                skip_geometry: is_compact,
+                y_bits: 4, page_bits: 3, socket_hint_bits: 0, has_header_gap: false, skip_geometry: false,
             }
         }
     }

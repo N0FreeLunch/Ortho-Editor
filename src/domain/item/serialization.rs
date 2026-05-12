@@ -1107,10 +1107,10 @@ pub fn write_property_list(
     }
     let already_has_term = props.iter().any(|p| p.stat_id == terminator);
     let is_rw = axiom.is_runeword(0);
-    if properties_complete && !already_has_term && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2) && !is_rw && !is_compact {
+    if properties_complete && !already_has_term && (!axiom.is_alpha() || version == 5 || version == 0 || version == 1 || version == 2 || version == 4 || version == 6) && !is_rw && !is_compact {
         emitter.write_bits(terminator, id_bits)?;
     }
-    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1 || version == 2);
+    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1 || version == 2 || version == 4 || version == 6);
     if properties_complete && rhythm.has_terminal_bit {
         if crate::item::item_trace_enabled() {
             eprintln!("[DEBUG Write] Writing terminal bit ({}) for code={}", terminator_bit, code);
@@ -1118,6 +1118,13 @@ pub fn write_property_list(
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }
         if !preserve_trailing_align { emitter.byte_align()?; }
+
+        // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
+        if axiom.is_alpha() && (version == 0 || version == 1 || version == 4 || version == 6 || version == 2) {
+            if !is_rw {
+                emitter.write_bits(0, 9)?;
+            }
+        }
     }
 
     Ok(())

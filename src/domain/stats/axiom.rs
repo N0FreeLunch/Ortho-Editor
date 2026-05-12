@@ -106,7 +106,8 @@ impl StatsAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32) -> bool {
-        (flags & (1 << 26)) != 0 || self.code == "w8wc" || self.code == "acww" || self.code == "umsw" || self.code == "7pw" || self.code == "oesw" || self.code == "hps7" || self.code == "ics"
+        let c = self.code.trim();
+        (flags & (1 << 26)) != 0 || c == "w8wc" || c == "acww" || c == "umsw" || c == "7pw" || c == "oesw" || c == "hps7" || c == "ics"
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
@@ -176,7 +177,7 @@ impl StatsAxiom {
             
             // Alpha v105 18-bit rhythm (9+9) is the dominant pattern for most items
             // including Act 5 hybrids and Runewords.
-            if self.version == 1 || self.version == 0 || self.version == 2 || _is_runeword || self.code == "Opaque" {
+            if self.version == 1 || self.version == 0 || self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
                  return PropertyRhythm {
                     id_bits: 9,
                     value_bits: Some(9),
