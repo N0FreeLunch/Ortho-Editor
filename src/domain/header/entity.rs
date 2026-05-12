@@ -213,6 +213,8 @@ impl HeaderAxiom {
                     skip_geometry: is_compact,
                 };
             }
+            }
+
         }
         
         // Retail / Fallback

@@ -213,7 +213,7 @@ where
 
 fn parse_single_property_internal<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
-    _version: u8,
+    version: u8,
     huffman: &HuffmanTree,
     alpha_runeword: bool,
     is_compact: bool,
