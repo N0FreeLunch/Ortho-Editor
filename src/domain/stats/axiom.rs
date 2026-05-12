@@ -3,7 +3,6 @@ use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidenc
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
 use crate::domain::header::entity::{HeaderAxiom, HeaderGeometry};
-use crate::item_trace;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsAxiom {
@@ -102,8 +101,23 @@ impl StatsAxiom {
             .unwrap_or(raw_id)
     }
 
-    pub fn header_geometry(&self, flags: u32, is_compact: bool) -> HeaderGeometry {
-        self.header_axiom().header_geometry(flags, is_compact, self.is_personalized)
+    /// Determines if a specific Alpha v105 version/item-type requires 9-bit TVS padding 
+    /// after the property terminator (511).
+    pub fn has_tvs_padding(&self, is_runeword: bool) -> bool {
+        if !self.is_alpha() {
+            return false;
+        }
+        // Axiom 0354: Standard Alpha items (Version 0, 1, 4, 6, 2, 5) expect 
+        // a 9-bit terminator followed by a 9-bit padding slot (TVS).
+        // Runewords and compact items omit this padding.
+        if is_runeword || self.is_compact {
+            return false;
+        }
+        matches!(self.version, 0 | 1 | 2 | 4 | 5 | 6)
+    }
+
+    pub fn header_geometry(&self, flags: u32) -> HeaderGeometry {
+        self.header_axiom().header_geometry(flags, Some(&self.code))
     }
 
     pub fn is_runeword(&self, flags: u32) -> bool {

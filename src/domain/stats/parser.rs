@@ -213,7 +213,7 @@ where
 
 fn parse_single_property_internal<R: BitRead, F>(
     recorder: &mut BitCursor<R>,
-    version: u8,
+    _version: u8,
     huffman: &HuffmanTree,
     alpha_runeword: bool,
     is_compact: bool,
@@ -254,13 +254,11 @@ where
                     let _p = recorder.read_bit()?;
                 }
             }
+        }
 
-            // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
-            if axiom.is_alpha() && (_version == 0 || _version == 1 || _version == 4 || _version == 6 || _version == 2) {
-                if !alpha_runeword {
-                    let _tvs = recorder.read_bits::<u32>(9)?;
-                }
-            }
+        // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
+        if axiom.has_tvs_padding(alpha_runeword) {
+            let _tvs = recorder.read_bits::<u32>(9)?;
         }
         return Ok(Some((
             ItemProperty {
