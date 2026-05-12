@@ -59,9 +59,9 @@ impl V105HeaderGapAxiom {
             }
         }
 
-        if is_first_item && version != 5 {
-            // Forensic (Axiom 0340): Alpha v105 standard items do not use a gap before the first item in a section.
-            // Version 5 runewords like acww still use a gap even if they are first.
+        if is_first_item {
+            // Forensic (Axiom 0340): The first item in a JM section is gap-free.
+            // Later items may still carry the version- and flag-dependent header gap below.
             return 0;
         }
 

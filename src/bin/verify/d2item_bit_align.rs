@@ -63,7 +63,7 @@ fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree) ->
 
     let mut reader = BitReader::endian(Cursor::new(&expected_encoded_bytes), LittleEndian);
     let mut cursor = BitCursor::new(reader);
-    let _ = Item::from_reader_with_context(&mut cursor, huffman, None, false, false).ok();
+    let _ = Item::from_reader_with_context(&mut cursor, huffman, None, false, false, None).ok();
     let expected: Vec<bool> = cursor.recorded_bits().iter().map(|rb| rb.bit).collect();
 
     let aligner = BitAligner::new(2, -1, -3, -1);

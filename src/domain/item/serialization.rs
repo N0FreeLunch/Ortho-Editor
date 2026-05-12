@@ -450,6 +450,16 @@ impl Item {
         read_player_items(bytes, huffman, alpha)
     }
 
+    pub fn read_section_ext(section_bytes: &[u8], section_bit_offset: u64, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool, preserve_unparsed: bool) -> ParsingResult<Vec<Item>> {
+        let _ = preserve_unparsed;
+        Self::read_section(section_bytes, section_bit_offset, top_level_count, huffman, alpha_mode)
+    }
+
+    pub fn parse_at_bit_offset(bytes: &[u8], bit_offset: u64, huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
+        let (item, _) = parse_item_at_with_limit(bytes, bit_offset, huffman, 0, alpha, None, None)?;
+        Ok(item)
+    }
+
     pub fn read_section(section_bytes: &[u8], section_bit_offset: u64, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
@@ -1392,5 +1402,4 @@ mod tests {
         }
     }
 }
-
 

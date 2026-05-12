@@ -171,6 +171,7 @@ fn main() {
             Some((&bytes, ((jm_pos + 4) * 8) as u64)),
             is_alpha,
             i == 0,
+            None,
         ) {
             Ok(item) => {
                 if is_json {
