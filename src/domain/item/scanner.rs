@@ -1,4 +1,6 @@
 use crate::item::{HuffmanTree, peek_item_header_at, is_plausible_item_header, verify_marker_lookahead};
+use crate::domain::item::quality::ItemQuality;
+use crate::domain::stats::axiom::StatsAxiom;
 use rayon::prelude::*;
 
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
@@ -44,7 +46,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
-                let mut best_header_len = 8;
+                let mut best_item_len = 8;
 
                 // Try 8 possible bit-alignments within a byte (0-7)
                 for offset in 0..8 {
@@ -52,6 +54,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     if scan_pos + 128 > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
+                        if (section_bit_offset + scan_pos) == 7256 {
+                            println!("[DEBUG-SLICE12] SCAN item at 7256: mode={}, loc={}, code={}, flags=0x{:X}, v={}, ck={}", mode, location, code, flags, version, has_checksum);
+                        }
                         if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                             let is_known = crate::domain::item::serialization::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
                             if alpha && !is_known {
@@ -65,7 +70,21 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 is_forced = true;
                             }
 
+                            // Axiom 0344: Forced 80-bit slot check for Alpha v105 summary items (potions, etc.)
+                            let mut forced_80 = false;
                             if alpha && !is_compact && !is_forced {
+                                let is_v105_summary = crate::domain::item::serialization::is_v105_summary_code(&code);
+                                if is_v105_summary {
+                                    if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha) {
+                                        let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
+                                        if is_plausible_item_header(n_mode, n_loc, &n_code, n_flags, n_ver, alpha) {
+                                            forced_80 = true;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if alpha && !is_compact && !is_forced && !forced_80 {
                                 if !verify_marker_lookahead(bytes, scan_pos + _header_len, huffman, alpha) {
                                     continue;
                                 }
@@ -81,7 +100,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             if confidence > max_confidence {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
-                                best_header_len = _header_len;
+                                
+                                let item_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha).with_code(&code);
+                                best_item_len = item_axiom.calculate_alignment(_header_len as u64, &code, flags) as u64;
                             }
                         }
                     }
@@ -94,7 +115,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                         if let Some(&flen) = force_length_map.get(&absolute_offset) {
                             probe = best_offset + flen;
                         } else {
-                            probe = best_offset + best_header_len; 
+                            probe = best_offset + best_item_len; 
                         }
                     } else {
                         probe = best_offset + 32; 
@@ -106,6 +127,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             local_markers
         })
         .collect();
+
 
     // Consolidate markers: sort and remove duplicates caused by overlapping scan
     let mut final_markers = markers;
