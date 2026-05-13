@@ -15,7 +15,7 @@ impl ParallelItemEngine {
 
     pub fn deserialize_all(&self, bytes: &[u8]) -> Vec<ParsedResult<Item>> {
         // Step 1: Tier 1 - Parallel Marker Scan
-        let markers = scan_item_markers(bytes, &self.huffman, self.alpha);
+        let markers = scan_item_markers(bytes, &self.huffman, self.alpha, 0);
         if markers.is_empty() {
             return Vec::new();
         }
@@ -38,6 +38,7 @@ impl ParallelItemEngine {
                         range: (start_bit, end_bit),
                         raw: bytes[((start_bit/8) as usize)..((end_bit/8 + 1) as usize).min(bytes.len())].to_vec(),
                         inferred_type: None, // TODO: Apply inference
+                        diagnosis: None,
                     }
                 }
             }
