@@ -119,6 +119,32 @@ pub fn verify_marker_lookahead(bytes: &[u8], start_bit: u64, _huffman: &HuffmanT
     false
 }
 
+pub fn classify_failure(err: &crate::error::ParsingError) -> crate::domain::item::FailureFamily {
+    use crate::error::ParsingError::*;
+    use crate::domain::item::FailureFamily::*;
+
+    match err {
+        InvalidHuffmanBit { bit_offset } => {
+            if *bit_offset < 100 { Geometry } else { Nudge }
+        }
+        InvalidStatId { .. } => Stat,
+        UnexpectedSegmentEnd { .. } => Geometry,
+        BitSymmetryFailure { .. } => Geometry,
+        InvariantViolation { field, .. } => {
+            if field.contains("marker") || field.contains("header") { Geometry } else { Stat }
+        }
+        UnexpectedValue { field, .. } => {
+            if field.contains("quality") || field.contains("unique") { RWSet } else { Stat }
+        }
+        MissingMarker { .. } => Geometry,
+        BitDriftDetected { .. } => Nudge,
+        AlignmentError { .. } => Geometry,
+        BitBudgetExceeded { .. } => Stat,
+        Io(_) => Unknown,
+        Generic(_) => Unknown,
+    }
+}
+
 pub fn is_plausible_item_header(
     mode: u8,
     location: u8,
