@@ -1,6 +1,5 @@
 use crate::item::{HuffmanTree, peek_item_header_at, is_plausible_item_header, verify_marker_lookahead};
-use crate::domain::item::quality::ItemQuality;
-use crate::domain::stats::axiom::StatsAxiom;
+use crate::domain::item::serialization::is_v105_summary_code;
 use rayon::prelude::*;
 
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
@@ -30,7 +29,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     
     let chunk_count = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
     
-    let markers: Vec<(u64, u32)> = (0..chunk_count)
+    let markers: Vec<(u64, u32, String)> = (0..chunk_count)
         .into_par_iter()
         .flat_map(|chunk_idx| {
             let start_byte = chunk_idx * SCAN_CHUNK_SIZE;
@@ -40,12 +39,13 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             // Overlap by 256 bits (sufficient for any item header + some buffer)
             let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
             
-            let mut local_markers: Vec<(u64, u32)> = Vec::new();
+            let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
             let mut probe = start_bit;
             
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
+                let mut best_code = String::new();
 
                 // Try 8 possible bit-alignments within a byte (0-7)
                 for offset in 0..8 {
@@ -99,13 +99,14 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             if confidence > max_confidence {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
+                                best_code = code.clone();
                             }
                         }
                     }
                 }
                 
                 if max_confidence > 0 {
-                    local_markers.push((best_offset, max_confidence));
+                    local_markers.push((best_offset, max_confidence, best_code));
                     probe = best_offset + 8;
                 } else {
                     probe += 8;
@@ -120,20 +121,72 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     let mut final_markers = markers;
     final_markers.sort_unstable_by_key(|m| m.0);
     
-    // Slice 14: Tighten dedup to avoid ghost markers causing "limit" truncation in read_section.
-    // We use a 32-bit sliding window to pick the highest confidence marker in a neighborhood.
-    // 32 bits is a safe minimum (width of a JM header) to prune redundant hits on the same marker.
-    let mut filtered: Vec<(u64, u32)> = Vec::new();
-    for (offset, confidence) in final_markers {
-        if let Some(last) = filtered.last_mut() {
-            if offset < last.0 + 32 {
-                if confidence > last.1 {
-                    *last = (offset, confidence);
-                }
-                continue;
-            }
+    // Slice 14.1: Slot-Aligned Competitive Advancement.
+    // We use a lookahead window to pick the highest confidence marker,
+    // prioritizing those that align with the previous item's slot boundary.
+    let mut filtered: Vec<(u64, u32, String)> = Vec::new();
+    let mut i = 0;
+    let mut last_offset = 0;
+    let mut last_code = String::new();
+    
+    while i < final_markers.len() {
+        let (offset, confidence, _code) = &final_markers[i];
+        
+        // Find the best candidate in a lookahead window
+        let mut best_idx = i;
+        let mut max_score = *confidence as i32;
+        
+        // Alignment bonus for the current candidate
+        if alpha && !filtered.is_empty() && is_alpha_v105_slot_item(&last_code) && is_v105_aligned(offset - last_offset) {
+            max_score += 150;
         }
-        filtered.push((offset, confidence));
+        
+        // Look ahead to see if there's a better (e.g. aligned) marker nearby
+        let lookahead_limit = offset + 120;
+        let mut j = i + 1;
+        while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
+            let (o_offset, o_conf, _o_code) = &final_markers[j];
+            let mut score = *o_conf as i32;
+            if alpha && !filtered.is_empty() && is_alpha_v105_slot_item(&last_code) && is_v105_aligned(o_offset - last_offset) {
+                score += 150;
+            }
+            
+            if score > max_score {
+                max_score = score;
+                best_idx = j;
+            }
+            j += 1;
+        }
+        
+        let best = &final_markers[best_idx];
+        
+        last_offset = best.0;
+        last_code = best.2.clone();
+        filtered.push((best.0, max_score as u32, best.2.clone()));
+        
+        // Advance i to after the lookahead window and skip the rest of this item's space
+        let skip_until = best.0 + 72;
+        i = best_idx + 1;
+        while i < final_markers.len() && final_markers[i].0 < skip_until {
+            i += 1;
+        }
     }
-    filtered.into_iter().map(|(off, _)| off).collect()
+    filtered.into_iter().map(|(off, _, _)| off).collect()
+}
+
+fn is_alpha_v105_slot_item(code: &str) -> bool {
+    let trimmed = code.trim();
+    // Potions, Scrolls, and other common inventory slot items in Alpha v105.
+    matches!(trimmed, 
+        "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
+        "rvs"|"rvl"|"vps"|"tsc"|"isc"|"yps"|"wps"|"us g"|"w8cs"|"w88w"|"xrs"|
+        "6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|"mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|
+        "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"
+    )
+}
+
+fn is_v105_aligned(diff: u64) -> bool {
+    // Standard Alpha v105 slot sizes are 72, 80, 88.
+    // We also allow sums of these (e.g., 144, 152, 160) for empty slots.
+    matches!(diff, 72 | 80 | 88 | 144 | 152 | 160 | 168 | 176 | 216 | 224 | 232 | 240)
 }

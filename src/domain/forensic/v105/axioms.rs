@@ -43,7 +43,7 @@ impl ForensicAxiom for V105HeaderGapAxiom {
 }
 
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool) -> usize {
+    pub fn resolve_gap(&self, _version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
