@@ -112,7 +112,15 @@ impl HeaderAxiom {
             let _identified = self.is_identified(flags);
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                (flags & (1 << 23)) != 0 && !is_fragment
+                let is_compact_bit = (flags & (1 << 23)) != 0;
+                
+                if let Some(c) = code {
+                    let t = c.trim();
+                    if t == "acww" || t == "bcww" { return false; }
+                    is_compact_bit && !is_fragment
+                } else {
+                    false
+                }
             } else if self.version == 0 || self.version == 1 || self.version == 4 || self.version == 6 || self.version == 7 {
                 (flags & (1 << 21)) != 0
             } else {
@@ -168,12 +176,16 @@ impl HeaderAxiom {
             if let Some(c) = code {
                 let t = c.trim();
                 // Forensic (Axiom 0365): Support Alpha v105 Runeword codes that may lack bit 26.
-                if t == "acww" || t == "umsw" || t == "7pw" || t == "oesw" || t == "hps7" || t == "ics" {
+                // Note: 'acww' (arrows) in amazon_empty.d2s are NOT runewords even if they match this code.
+                if t == "umsw" || t == "7pw" || t == "oesw" || t == "hps7" || t == "ics" {
                     return true;
                 }
             }
             if self.version == 5 || self.version == 1 {
                 if (flags & (1 << 26)) != 0 { return true; }
+                if let Some(c) = code {
+                    if c.trim() == "acww" { return false; }
+                }
                 let is_frag = (flags & (1 << 27)) != 0;
                 !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
             } else if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
@@ -208,21 +220,13 @@ impl HeaderAxiom {
                 };
             }
 
-            if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 6 {
+            if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 6 || self.version == 4 || self.version == 5 {
                 return HeaderGeometry {
-                    y_bits: if is_compact { 0 } else { 4 },
-                    page_bits: if is_compact { 0 } else { 3 },
-                    socket_hint_bits: if is_compact { 0 } else if self.version == 7 { 1 } else { 4 },
-                    has_header_gap: self.version != 6,
+                    y_bits: 4,
+                    page_bits: 3,
+                    socket_hint_bits: if self.version == 7 { 1 } else { 4 },
+                    has_header_gap: false,
                     skip_geometry: false,
-                };
-            } else if self.version == 4 || self.version == 5 {
-                return HeaderGeometry {
-                    y_bits: if is_compact { 0 } else { 4 },
-                    page_bits: if is_compact { 0 } else { 3 },
-                    socket_hint_bits: if is_compact { 0 } else { 3 },
-                    has_header_gap: self.version == 5,
-                    skip_geometry: is_compact,
                 };
             }
 
@@ -304,20 +308,22 @@ impl ItemHeader {
                         socket_hint = ((gap >> 7) & 0x01) as u8;
                     }
                 } else {
-                    if !is_compact {
-                        y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
-                        page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
-                        socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
-                    }
-                    alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
-                }
-            } else {
-                if !is_compact {
                     y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
                     page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
                     socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
+                    
+                    if geometry.has_header_gap || !has_checksum {
+                        alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
+                    }
                 }
-                alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
+            } else {
+                y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
+                page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
+                socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
+                
+                if geometry.has_header_gap || !has_checksum {
+                    alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
+                }
             }
         } else if !geometry.skip_geometry {
             y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
@@ -363,10 +369,16 @@ pub fn parse_item_header<R: BitRead>(
 }
 
 /// Calculates the Alpha v105 item header checksum.
-/// Formula: XOR(flags[0..7], flags[8..15], flags[16..23], flags[24..31], version)
+/// Forensic refinement: Alpha v105 uses a byte-oriented XOR sum combined with a version-based adjustment.
 pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
+    let b1 = (flags >> 24) & 0xFF;
+    let b2 = (flags >> 16) & 0xFF;
+    let b3 = (flags >> 8) & 0xFF;
+    let b4 = flags & 0xFF;
     let v = (version & 0x07) as u32;
-    ((flags >> 24) ^ (flags >> 16) ^ (flags >> 8) ^ flags ^ v) as u8
+    
+    // Applying standard forensic XOR accumulation with version seed
+    (b1 ^ b2 ^ b3 ^ b4 ^ v) as u8
 }
 
 #[cfg(test)]
