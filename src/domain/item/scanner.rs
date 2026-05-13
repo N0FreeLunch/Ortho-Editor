@@ -53,9 +53,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     if scan_pos + 128 > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
-                        if (section_bit_offset + scan_pos) == 7256 {
-                            println!("[DEBUG-SLICE12] SCAN item at 7256: mode={}, loc={}, code={}, flags=0x{:X}, v={}, ck={}", mode, location, code, flags, version, has_checksum);
-                        }
                         if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                             let is_known = crate::domain::item::serialization::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
                             if alpha && !is_known {

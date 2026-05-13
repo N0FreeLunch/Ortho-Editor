@@ -183,11 +183,17 @@ impl HeaderAxiom {
             }
             if self.version == 5 || self.version == 1 {
                 if (flags & (1 << 26)) != 0 { return true; }
+                
+                // Forensic (Axiom 0365): If code is unknown, do NOT assume runeword based on bit 11.
+                // Standard socketed items in Alpha v105 also have bit 11 set.
                 if let Some(c) = code {
-                    if c.trim() == "acww" { return false; }
+                    let t = c.trim();
+                    if t == "acww" { return false; }
+                    let is_frag = (flags & (1 << 27)) != 0;
+                    !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
+                } else {
+                    false
                 }
-                let is_frag = (flags & (1 << 27)) != 0;
-                !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
             } else if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
                 (flags & (1 << 26)) != 0
             } else {

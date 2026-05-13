@@ -28,22 +28,52 @@ impl ForensicAxiom for V105ShadowAxiom {
     }
 }
 
-/// Variable 0-bit/8-bit gap between JM header and body in Alpha v105.
+/// Variable 0-bit/8-bit gap between JM header and item body in Alpha v105.
 #[derive(Debug, Clone, Default)]
 pub struct V105HeaderGapAxiom;
 
 impl ForensicAxiom for V105HeaderGapAxiom {
     fn metadata(&self) -> ForensicMetadata {
         ForensicMetadata::new(
-            Confidence::EmergingHypothesis,
-            Intentionality::Artifactual,
+            Confidence::StrongPattern,
+            Intentionality::Structural,
             "Variable gap between JM header and item body in Alpha v105",
         )
     }
 }
 
+/// Nudge logic for property block alignment in Version 5 items.
+#[derive(Debug, Clone, Default)]
+pub struct V105PropertyNudgeAxiom;
+
+impl ForensicAxiom for V105PropertyNudgeAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Explicit bit-level nudges for Version 5 property block alignment",
+        )
+    }
+}
+
+impl V105PropertyNudgeAxiom {
+    pub fn get_nudge(&self, version: u8) -> u8 {
+        match version {
+            5 => 3, // Version 5 requires a 3-bit nudge
+            _ => 0,
+        }
+    }
+}
+
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, _version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool) -> usize {
+    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
+        let gap = self.resolve_gap_internal(version, code, flags, is_first_item, is_compact, has_checksum);
+        println!("[DEBUG-SLICE12] Axiom resolve_gap: version={}, code={:?}, is_first={}, is_compact={}, flags=0x{:X}, has_checksum={} -> gap={}", 
+            version, code, is_first_item, is_compact, flags, has_checksum, gap);
+        gap
+    }
+
+    fn resolve_gap_internal(&self, version: u8, code: Option<&str>, flags: u32, _is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
@@ -59,50 +89,40 @@ impl V105HeaderGapAxiom {
             }
         }
 
-        if is_first_item {
-            // Forensic (Axiom 0340): The first item in a JM section is gap-free.
-            // Later items may still carry the version- and flag-dependent header gap below.
-            return 0;
-        }
-
-        // Forensic (Axiom 0340): Some early Alpha versions may still use gaps.
-        // Falling through to standard logic.
-
-        // Forensic: 'cwd' (compact) items often use a 24-bit alignment gap instead of the standard 32.
-        // If flag bit 26 or 27 is set, use 8 bits, otherwise check for compact flag.
+        // Runeword/Shadow Items (Bit 26/27)
         if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
             8
         } else if is_compact || (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
-            8 // Compact items (potions) in Alpha v105 use an 8-bit header gap when not the first item (Axiom 0340)
+            if has_checksum { 0 } else { 8 }
         } else {
-            // Forensic: Amulets (umsw) and Rings often use a 24-bit gap in certain Alpha variants.
-            // If the code is known to be one of these, or if we are in a 'shifted' state, use 24.
-            if let Some(c) = code {
-                let t = c.trim();
-                if t == "umsw" || t == "rin" || t == "isc" || t == "tsc" {
-                    return 24;
-                }
-            }
-            32
+            // Standard equipment
+            if has_checksum { 0 } else { 8 }
         }
     }
 }
 
-/// 9+9 bit property rhythm (ID: 9, Value: 9) in Alpha v105.
+/// 19-bit alignment drift resolution for Huffman stream start.
 #[derive(Debug, Clone, Default)]
-pub struct V105PropertyRhythmAxiom;
+pub struct V105AlignmentAxiom;
 
-impl ForensicAxiom for V105PropertyRhythmAxiom {
+impl ForensicAxiom for V105AlignmentAxiom {
     fn metadata(&self) -> ForensicMetadata {
         ForensicMetadata::new(
             Confidence::VerifiedTruth,
             Intentionality::Structural,
-            "9+9 property rhythm (9-bit ID, 9-bit Value) in Alpha v105",
+            "19-bit huffman alignment drift resolution for Alpha v105",
         )
     }
 }
 
-
+impl V105AlignmentAxiom {
+    pub fn get_alignment_nudge(&self, version: u8, _is_compact: bool) -> usize {
+        match version {
+            0 | 1 | 2 | 5 => 19, // 19-bit drift identified in standard items
+            _ => 0,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -117,9 +137,9 @@ mod tests {
         assert_eq!(shadow.metadata().confidence, Confidence::StrongPattern);
         
         let gap = V105HeaderGapAxiom;
-        assert_eq!(gap.metadata().confidence, Confidence::EmergingHypothesis);
+        assert_eq!(gap.metadata().confidence, Confidence::StrongPattern);
 
-        let rhythm = V105PropertyRhythmAxiom;
+        let rhythm = V105PropertyNudgeAxiom;
         assert_eq!(rhythm.metadata().confidence, Confidence::VerifiedTruth);
     }
 }

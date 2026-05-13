@@ -7,7 +7,7 @@ use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
-use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyRhythmAxiom};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom, V105AlignmentAxiom};
 
 pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha: bool) -> Option<u64> {
     let limit = (bytes.len() * 8) as u64;
@@ -152,7 +152,7 @@ pub fn peek_item_header_at(
     let v = alpha_reader.read::<3, u8>().ok()?;
     let calculated = calculate_alpha_v105_checksum(flags, v);
     
-    let (version, mode, loc, _x_val, base_header_len, _has_checksum) = if calculated == checksum {
+    let (version, mode, loc, _x_val, base_header_len, has_checksum) = if calculated == checksum {
         let m = alpha_reader.read::<3, u8>().ok()?;
         let l = alpha_reader.read::<3, u8>().ok()?;
         let x = alpha_reader.read::<4, u8>().ok()?;
@@ -250,7 +250,7 @@ pub fn peek_item_header_at(
             if !is_compact {
                 total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
             }
-            total_skip += 8; // Alpha v105 standard header gap
+            total_skip += if has_checksum { 0 } else { 8 }; // Standard Alpha v105 items are 80-bit aligned
         }
     } else if !geometry.skip_geometry {
          total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
@@ -258,7 +258,8 @@ pub fn peek_item_header_at(
 
     let mut code = String::new();
     let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if n_reader.skip(start_bit as u32 + total_skip).is_err() { return None; }
+    let alignment_nudge = if alpha_mode { V105AlignmentAxiom::default().get_alignment_nudge(version, is_compact) } else { 0 };
+    if n_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_err() { return None; }
     let mut n_cursor = BitCursor::new(n_reader);
     for i in 0..4 {
         match huffman.decode_recorded(&mut n_cursor) {
@@ -485,9 +486,9 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
         if count == 0 { continue; }
 
         let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
-        let section_bytes = &bytes[pos + 4..next_pos];
+        let section_bytes = &bytes[pos..next_pos];
 
-        match Item::read_section(section_bytes, (pos as u64 + 4) * 8, count, huffman, alpha) {
+        match Item::read_section(section_bytes, (pos as u64) * 8, count, huffman, alpha) {
             Ok(items) => {
                 all_items.extend(items);
             }
@@ -554,6 +555,17 @@ impl Item {
             }
             if start < start_offset {
                 continue;
+            }
+            
+            // Forensic: Force alignment for v5 items before property block (1-bit nudge)
+            if alpha_mode {
+                if let Some((_, _, _, _, _, v, _, _, _, _)) = peek_item_header_at(section_bytes, start, huffman, alpha_mode) {
+                    if v == 5 {
+                        let mut nudge_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                        let _ = nudge_reader.skip(start as u32 + 88); // Offset 88 is post-header gap
+                        let _nudge = nudge_reader.read_bit()?;
+                    }
+                }
             }
 
             let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
@@ -804,7 +816,10 @@ impl Item {
             });
         }
 
-        let body_start_bit = cursor.pos();        let body_res = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode);
+        let body_start_bit = cursor.pos();        
+        // Force V5 propagation if header detected v5
+        let body_res = crate::domain::item::entity::parse_item_body(cursor, huff, &header, alpha_mode);
+
         let mut rhythm_recovery = false;
         let (mut body, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,
@@ -887,7 +902,7 @@ impl Item {
         if item.body.alpha_nudge.is_some() { item.forensic_audit.record(V105NudgeAxiom.metadata()); }
         if item.body.alpha_header_gap.is_some() { item.forensic_audit.record(V105HeaderGapAxiom.metadata()); }
         if item.body.alpha_shadow_skip_bits.is_some() { item.forensic_audit.record(V105ShadowAxiom.metadata()); }
-        if rhythm_recovery { item.forensic_audit.record(V105PropertyRhythmAxiom.metadata()); }
+        if rhythm_recovery { item.forensic_audit.record(V105PropertyNudgeAxiom::default().metadata()); }
 
         // Slice 1: Force stats reading for Alpha v105 items even if compact, 
         // to detect residue Defense/Durability as per mini-spec.

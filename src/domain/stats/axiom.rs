@@ -34,7 +34,8 @@ impl StatsAxiom {
             (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
             (trimmed.starts_with('h') && trimmed.len() == 3) || // hp1, hp2, etc
             (trimmed.starts_with('m') && trimmed.len() == 3) || // mp1, mp2, etc
-            trimmed == "wsww" || trimmed == "wuyw" || trimmed == "bs m"
+            trimmed == "wsww" || trimmed == "wuyw" || trimmed == "bs m" ||
+            trimmed == "tsc" || trimmed == "isc"
         ) {
             self.is_compact = true;
         }
@@ -121,7 +122,7 @@ impl StatsAxiom {
 
     pub fn is_runeword(&self, flags: u32) -> bool {
         let c = self.code.trim();
-        (flags & (1 << 26)) != 0 || c == "w8wc" || c == "acww" || c == "umsw" || c == "7pw" || c == "oesw" || c == "hps7" || c == "ics"
+        (flags & (1 << 26)) != 0 || (c == "w8wc" || c == "umsw" || c == "7pw" || c == "oesw" || c == "hps7" || c == "ics")
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
@@ -130,7 +131,13 @@ impl StatsAxiom {
 
     pub fn is_compact(&self, flags: u32) -> bool {
         if self.save_is_alpha {
-            (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+            if self.version == 5 {
+                let t = self.code.trim();
+                if t == "acww" || t == "bcww" { return false; }
+                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+            } else {
+                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+            }
         } else {
             (flags & (1 << 21)) != 0
         }
@@ -154,8 +161,11 @@ impl StatsAxiom {
     }
 
     pub fn is_header_only(&self, flags: u32, code: &str) -> bool {
+        let trimmed = code.trim();
+        if !trimmed.is_empty() { return false; }
+        
         if self.is_v105_shadow(flags) { return true; }
-        if self.save_is_alpha && !code.is_empty() && code.trim().is_empty() {
+        if self.save_is_alpha && !code.is_empty() && trimmed.is_empty() {
             return true;
         }
         false
@@ -312,8 +322,15 @@ impl StatsAxiom {
             // 4. Alpha v105 32-bit Alignment Axiom
             // Priority: Personalized items, Compact items, and Runewords bypass the 32-bit forced tail.
             if !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized {
+                // Alpha v105 Forensic: Version 5 and 7 equipment items require 32-bit alignment 
+                // only if the item does not already align with the expected bit-width of its properties.
                 if final_len % 32 != 0 {
                     final_len += 32 - (final_len % 32);
+                }
+            } else if self.version == 5 && self.is_runeword(flags) {
+                // Alpha v105 Runewords require byte-level alignment (8-bit)
+                if final_len % 8 != 0 {
+                    final_len += 8 - (final_len % 8);
                 }
             }
 
