@@ -30,7 +30,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     
     let chunk_count = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
     
-    let markers: Vec<u64> = (0..chunk_count)
+    let markers: Vec<(u64, u32)> = (0..chunk_count)
         .into_par_iter()
         .flat_map(|chunk_idx| {
             let start_byte = chunk_idx * SCAN_CHUNK_SIZE;
@@ -40,13 +40,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             // Overlap by 256 bits (sufficient for any item header + some buffer)
             let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
             
-            let mut local_markers = Vec::new();
+            let mut local_markers: Vec<(u64, u32)> = Vec::new();
             let mut probe = start_bit;
             
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
-                let mut best_item_len = 8;
 
                 // Try 8 possible bit-alignments within a byte (0-7)
                 for offset in 0..8 {
@@ -100,26 +99,14 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             if confidence > max_confidence {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
-                                
-                                let item_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha).with_code(&code);
-                                best_item_len = item_axiom.calculate_alignment(_header_len as u64, &code, flags) as u64;
                             }
                         }
                     }
                 }
                 
                 if max_confidence > 0 {
-                    local_markers.push(best_offset);
-                    if alpha {
-                        let absolute_offset = section_bit_offset + best_offset;
-                        if let Some(&flen) = force_length_map.get(&absolute_offset) {
-                            probe = best_offset + flen;
-                        } else {
-                            probe = best_offset + best_item_len; 
-                        }
-                    } else {
-                        probe = best_offset + 32; 
-                    }
+                    local_markers.push((best_offset, max_confidence));
+                    probe = best_offset + 8;
                 } else {
                     probe += 8;
                 }
@@ -131,7 +118,22 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
     // Consolidate markers: sort and remove duplicates caused by overlapping scan
     let mut final_markers = markers;
-    final_markers.sort_unstable();
-    final_markers.dedup();
-    final_markers
+    final_markers.sort_unstable_by_key(|m| m.0);
+    
+    // Slice 14: Tighten dedup to avoid ghost markers causing "limit" truncation in read_section.
+    // We use a 32-bit sliding window to pick the highest confidence marker in a neighborhood.
+    // 32 bits is a safe minimum (width of a JM header) to prune redundant hits on the same marker.
+    let mut filtered: Vec<(u64, u32)> = Vec::new();
+    for (offset, confidence) in final_markers {
+        if let Some(last) = filtered.last_mut() {
+            if offset < last.0 + 32 {
+                if confidence > last.1 {
+                    *last = (offset, confidence);
+                }
+                continue;
+            }
+        }
+        filtered.push((offset, confidence));
+    }
+    filtered.into_iter().map(|(off, _)| off).collect()
 }
