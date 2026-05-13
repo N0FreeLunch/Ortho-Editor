@@ -68,7 +68,7 @@ impl V105PropertyNudgeAxiom {
 impl V105HeaderGapAxiom {
     pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
         let gap = self.resolve_gap_internal(version, code, flags, is_first_item, is_compact, has_checksum);
-        println!("[DEBUG-SLICE12] Axiom resolve_gap: version={}, code={:?}, is_first={}, is_compact={}, flags=0x{:X}, has_checksum={} -> gap={}", 
+        println!("[DEBUG-SLICE12] Axiom resolve_gap: version={}, code={:?}, is_first={}, is_compact={}, flags=0x{:X}, has_checksum={} -> gap={}",
             version, code, is_first_item, is_compact, flags, has_checksum, gap);
         gap
     }
@@ -132,10 +132,10 @@ mod tests {
     fn test_v105_axioms_metadata() {
         let nudge = V105NudgeAxiom;
         assert_eq!(nudge.metadata().confidence, Confidence::VerifiedTruth);
-        
+
         let shadow = V105ShadowAxiom;
         assert_eq!(shadow.metadata().confidence, Confidence::StrongPattern);
-        
+
         let gap = V105HeaderGapAxiom;
         assert_eq!(gap.metadata().confidence, Confidence::StrongPattern);
 
