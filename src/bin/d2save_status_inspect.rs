@@ -1,8 +1,7 @@
-use bitstream_io::{BitRead, BitReader, LittleEndian};
-use d2r_core::save::{AttributeSection, Save, SaveSectionMap, map_core_sections};
+use d2r_core::save::{AttributeSection, Save, map_core_sections, class_skill_base_id};
+use d2r_core::domain::character::skills::parse_skill_section;
 use std::env;
 use std::fs;
-use std::io::Cursor;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -53,12 +52,38 @@ fn main() {
                         .actual_value(entry.stat_id, is_alpha)
                         .unwrap_or(entry.raw_value as i32)
                 );
-                if let Some(ref bits) = entry.opaque_bits {
-                    println!("  [WARN] Entry has {} opaque bits", bits.len());
-                }
             }
         }
         Err(e) => println!("  Failed to parse attributes: {}", e),
+    }
+
+    // Skills (if section)
+    println!("\n--- Skills (if section at {}) ---", map.if_pos);
+    let jm0 = map.jm_positions.first().copied();
+    match parse_skill_section(&bytes, map.if_pos, jm0) {
+        Ok(skills) => {
+            if let Some(base_id) = class_skill_base_id(save.header.char_class) {
+                let class_skills = skills.iter_skills(base_id);
+                for skill_level in class_skills {
+                    if skill_level.level > 0 {
+                        let skill_name = d2r_core::data::skills::SKILLS
+                            .iter()
+                            .find(|s| s.id == skill_level.skill_id)
+                            .map(|s| s.key)
+                            .unwrap_or("Unknown Skill");
+                        println!("  SkillID {:>3} {:<20}: Level={}", skill_level.skill_id, skill_name, skill_level.level);
+                    }
+                }
+            } else {
+                println!("  [WARN] Unknown class, cannot map skills.");
+                for (i, &level) in skills.0.iter().enumerate() {
+                    if level > 0 {
+                        println!("  Skill Slot {:>2}: Level={}", i, level);
+                    }
+                }
+            }
+        }
+        Err(e) => println!("  Failed to parse skills: {}", e),
     }
 
     // Item Sections (JM markers)
@@ -69,6 +94,6 @@ fn main() {
         } else {
             0
         };
-        println!("  JM[{}]: offset={} (0x{:04X}), count={}", i, pos, pos, count);
+        println!("  JM[{}]: offset={} (bit {}), count={}", i, pos, pos * 8, count);
     }
 }

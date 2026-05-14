@@ -66,6 +66,27 @@ fn main() -> anyhow::Result<()> {
         save.header.char_name
     );
 
+    use d2r_core::save::map_core_sections;
+    if let Ok(map) = map_core_sections(&bytes) {
+        println!();
+        println!("[CORE SECTIONS]");
+        println!("  gf_pos:  Offset {:>5} (bit {:>6}) | Attributes", map.gf_pos, map.gf_pos * 8);
+        println!("  if_pos:  Offset {:>5} (bit {:>6}) | Skills", map.if_pos, map.if_pos * 8);
+        let gf_len = map.if_pos.saturating_sub(map.gf_pos);
+        println!("  (gf delta: {} bytes / {} bits)", gf_len, gf_len * 8);
+
+        if save.header.version == 105 {
+            println!();
+            println!("[FORENSIC MARKERS (Alpha v105)]");
+            if let Some(pos) = map.woo_pos { println!("  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)", pos * 8); }
+            if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
+            if let Some(pos) = map.w4_pos { println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data", pos * 8); }
+            if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
+            if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer Start", pos * 8); }
+            if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer End", pos * 8); }
+        }
+    }
+
     println!();
     println!("[JM MARKERS]");
 
@@ -78,6 +99,7 @@ fn main() -> anyhow::Result<()> {
         "Iron Golem",
     ];
 
+    let mut last_jm_pos = 0;
     for (idx, &pos) in jm_positions.iter().enumerate() {
         let label = section_labels
             .get(idx)
@@ -91,6 +113,11 @@ fn main() -> anyhow::Result<()> {
             "  [JM #{idx}] Offset {pos:>5} (bit {:>6}) | {label:<20} | count={item_count}, section_bytes={section_size}",
             pos * 8
         );
+        if idx > 0 {
+            let delta = pos - last_jm_pos;
+            println!("    (Delta from prev JM: {} bytes / {} bits)", delta, delta * 8);
+        }
+        last_jm_pos = pos;
 
         if item_count > 0 {
             use d2r_core::item::{Item, HuffmanTree};
@@ -110,15 +137,6 @@ fn main() -> anyhow::Result<()> {
                         if item.code == "Opaque" {
                             println!("        [Opaque] {} bits", item.total_bits);
                         }
-                        for prop in &item.properties {
-                            println!("        Prop: ID={} (raw={})", prop.stat_id, prop.raw_value);
-                        }
-                        if !item.socketed_items.is_empty() {
-                            println!("        Socketed Items ({}):", item.socketed_items.len());
-                            for child in &item.socketed_items {
-                                println!("          Child: {}", child.code.trim());
-                            }
-                        }
                     }
                 }
                 Err(e) => {
@@ -132,68 +150,12 @@ fn main() -> anyhow::Result<()> {
         println!("  [WARN] No JM markers found in file");
     }
 
-    if save.header.version == 105 {
-        use d2r_core::save::map_core_sections;
-        if let Ok(map) = map_core_sections(&bytes) {
-            println!();
-            println!("[FORENSIC MARKERS (Alpha v105)]");
-            if let Some(pos) = map.woo_pos { println!("  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)", pos * 8); }
-            if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
-            if let Some(pos) = map.w4_pos { 
-                println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data (Section Start)", pos * 8);
-            }
-            if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
-
-            // Slice 10: Hybrid Mercenary Decoding (Axiom 0328)
-            use d2r_core::domain::forensic::v105::MercenaryState;
-            let w4_data_option = map.w4_pos.map(|pos| {
-                let w4_end = map.jf_pos.unwrap_or(bytes.len().min(pos + 40));
-                bytes.get(pos + 2..w4_end).unwrap_or(&[])
-            });
-            let merc = MercenaryState::from_hybrid(&bytes, w4_data_option);
-            
-            println!();
-            println!("[MERCENARY (Hybrid Decoded)]");
-            println!("  Hireling ID: {} (XP: {})", merc.hireling_id, merc.experience);
-            if merc.name_id > 0 {
-                println!("  Name ID:     {}", merc.name_id);
-            }
-
-            println!();
-            println!("[HEADER (Mercenary Raw Anchors)]");
-            println!("  Offset 169 | Hireling ID:   {}", bytes.get(169).copied().unwrap_or(0));
-            println!("  Offset 171 | Experience:    {} (0x{:08X})", 
-                u32::from_le_bytes(bytes.get(171..175).and_then(|b| b.try_into().ok()).unwrap_or([0; 4])),
-                u32::from_le_bytes(bytes.get(171..175).and_then(|b| b.try_into().ok()).unwrap_or([0; 4]))
-            );
-            println!("  Offset 175 | Level (?):     Not found (plain byte search failed)");
-            println!("  Offset 176..185: {:02X?}", bytes.get(176..185).unwrap_or(&[]));
-
-            if let (Some(kf), Some(lf)) = (map.kf_pos, map.lf_pos) {
-                use d2r_core::domain::forensic::v105::MercenaryFooter;
-                let footer_bytes = bytes.get(kf..lf + 2).unwrap_or(&[]);
-                let footer = MercenaryFooter::from_bytes(footer_bytes);
-                
-                println!("  [kf  ] Offset {kf:>5} (bit {:>6}) | Mercenary Footer Start", kf * 8);
-                println!("  [lf  ] Offset {lf:>5} (bit {:>6}) | Mercenary Footer End", lf * 8);
-                println!("  [MERC] Footer Payload: {:02X?} (Standard: {})", footer.raw, footer.is_standard());
-            } else {
-                if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer Start", pos * 8); }
-                if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer End", pos * 8); }
-            }
-        }
-    }
-
     println!();
     println!("[SUMMARY]");
     println!("  Total JM sections: {}", jm_positions.len());
     if let Some(&first_jm) = jm_positions.first() {
         println!("  Header + pre-item data: {} bytes", first_jm);
     }
-    if let (Some(&first_jm), Some(&second_jm)) = (jm_positions.get(0), jm_positions.get(1)) {
-        let player_section_bytes = second_jm - first_jm;
-        println!("  Player item section:    {} bytes", player_section_bytes);
-    }
-
+    
     Ok(())
 }
