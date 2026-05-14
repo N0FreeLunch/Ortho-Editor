@@ -62,17 +62,21 @@ impl MercenaryState {
             let c_off = if has_marker { 6 } else { 4 }; // Class ID is 4 bytes after marker
             let n_id_off = if has_marker { 5 } else { 3 }; // Name ID is 3 bytes after marker
 
+            // Axiom 0380: The Offset 6 Anchor (Physical Class ID)
             class_id = w4_bytes.get(c_off).copied().unwrap_or(0);
             
-            // Name ID: Usually a single byte in this context? 
-            // Or part of a larger field. For now, take the verified index 5.
+            // Name ID: Usually a single byte at Offset 5
             name_id = w4_bytes.get(n_id_off).copied().map(|v| v as u16).unwrap_or(0);
         }
 
-        // Hireling ID logic (Axiom 0366): 
-        // In Alpha v105, Header[169] is the persistent attribute/subtype ID.
-        // For Act 3 (Class 9), this is the elemental variant (15=Fire, 16=Cold, 17=Lightning).
-        let hireling_id = subtype_id;
+        // Axiom 0381: Hybrid Disambiguation Pattern
+        // In Alpha v105, class_id 0 is ambiguous (Act 1 Rogue or Act 2 Desert).
+        // Use Header[169] (subtype_id) as the tie-breaker.
+        let hireling_id = if class_id == 0 {
+            subtype_id // Return Header ID (1=Rogue, 8=Desert etc)
+        } else {
+            class_id // Return w4 Class ID (1=Iron Wolf, 9=Barbarian)
+        };
 
         Self {
             hireling_id,

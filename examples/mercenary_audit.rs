@@ -30,14 +30,13 @@ fn main() -> anyhow::Result<()> {
             let merc = MercenaryState::from_hybrid(&bytes, Some(w4));
 
             let class_name = match merc.class_id {
-                1 => "Rogue (Act 1)",
-                2 => "Desert Warrior (Act 2)",
-                9 => "Iron Wolf (Act 3)",
-                12 => "Barbarian (Act 5)",
+                0 => if merc.hireling_id >= 8 { "Desert Warrior (Act 2)" } else { "Rogue (Act 1)" },
+                1 => "Iron Wolf (Act 3)",
+                9 => "Barbarian (Act 5)",
                 _ => "Unknown",
             };
 
-            let subtype_name = if merc.class_id == 9 {
+            let subtype_name = if merc.class_id == 1 { // Iron Wolf in v105 is Class 1
                 match merc.subtype_id {
                     15 => "Fire",
                     16 => "Cold",
