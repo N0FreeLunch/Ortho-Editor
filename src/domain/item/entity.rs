@@ -510,34 +510,30 @@ impl Item {
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
-        if alpha_mode && geometry.target_width > 0 {
-            let current_bits = emitter.written_bits() - start_bit;
-            if current_bits < geometry.target_width as u64 {
-                let to_write = geometry.target_width as u64 - current_bits;
-                if !self.body.alpha_header_gap_bits.is_empty() {
-                    for i in 0..to_write {
-                        emitter.write_bit(self.body.alpha_header_gap_bits.get(i as usize).cloned().unwrap_or(false))?;
-                    }
-                } else {
-                    emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), to_write as u32)?;
-                }
+        if alpha_mode && self.header.save_is_alpha {
+            let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
+            let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
+
+            // Alpha v105 Forensic: Always write geometry bits for standard Alpha items
+            if !is_v105_shadow && !is_rw && !geometry.skip_geometry {
+                emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
+                emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
+                emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
             }
-        } else if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
-            if h_axiom.is_alpha() {
-                let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
-                let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
 
-                // Normal alpha items: write geometry bits separately
-                if !is_v105_shadow && !is_rw {
-                    emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
-                    emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-                    emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
-                }
-
-                if !self.body.alpha_header_gap_bits.is_empty() {
-                    for &bit in &self.body.alpha_header_gap_bits {
-                        emitter.write_bit(bit)?;
+            if geometry.target_width > 0 {
+                let current_bits = emitter.written_bits() - start_bit;
+                if current_bits < geometry.target_width as u64 {
+                    let to_write = (geometry.target_width as u64 - current_bits) as u32;
+                    if !self.body.alpha_header_gap_bits.is_empty() {
+                         for &bit in &self.body.alpha_header_gap_bits { emitter.write_bit(bit)?; }
+                    } else {
+                         emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), to_write)?;
                     }
+                }
+            } else if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
+                if !self.body.alpha_header_gap_bits.is_empty() {
+                    for &bit in &self.body.alpha_header_gap_bits { emitter.write_bit(bit)?; }
                 } else if let Some(gap_val) = self.body.alpha_header_gap {
                     if is_v105_shadow || is_rw {
                         let bits = if (self.header.flags & (1 << 26)) != 0 || (self.header.flags & (1 << 27)) != 0 { 8 } else { 24 };
@@ -546,21 +542,15 @@ impl Item {
                         emitter.write_bits(gap_val, 8)?;
                     }
                 } else if !is_v105_shadow && !is_rw && !self.header.has_checksum {
-                    // Default 8-bit gap for non-checksum Alpha items to maintain 80-bit alignment
                     emitter.write_bits(0, 8)?;
                 }
-            } else {
-                if !s_axiom.is_compact {
-                    emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
-                    emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-                    emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
-                }
-                emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), 8)?;
             }
-        } else if !geometry.skip_geometry {
-            emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
-            emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-            emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+        } else {
+             if !geometry.skip_geometry {
+                emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
+                emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
+                emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+            }
         }
 
         // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
@@ -801,40 +791,38 @@ pub fn parse_item_header<R: BitRead>(
         if h_axiom.is_alpha() {
             let is_v105_shadow = h_axiom.is_v105_shadow(flags);
             let is_rw = h_axiom.is_runeword(flags, code_hint);
-            if is_rw || is_v105_shadow {
+            
+            let gap_bits = if is_rw || is_v105_shadow {
                 let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                let gap_bits = if is_v105_shadow_local { 8 } else { 24 };
-                alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits))?;
-                let gap = if gap_bits <= 32 {
-                    let mut val = 0u32;
-                    for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
-                        if bit { val |= 1 << i; }
-                    }
-                    val
-                } else { 0 };
-                alpha_header_gap = Some(gap);
-                if !is_compact { y = (gap & 0x0F) as u8; page = ((gap >> 4) & 0x07) as u8; socket_hint = ((gap >> 7) & 0x01) as u8; }
+                if is_v105_shadow_local { 8 } else { 24 }
             } else {
-                if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
-                
                 let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize;
-                let gap_bits = if let Some(go) = gap_override {
+                if let Some(go) = gap_override {
                     if go >= geom_bits { go - geom_bits } else { 8 }
                 } else {
                     V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum)
-                };
-
-                alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
-
-                // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
-                if version == 5 {
-                    cursor.byte_align()?;
                 }
+            };
 
-                let mut val = 0u32;                for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
-                    if i < 32 && bit { val |= 1 << i; } 
-                }
-                alpha_header_gap = Some(val);
+            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
+            
+            // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
+            if version == 5 {
+                cursor.byte_align()?;
+            }
+
+            let mut gap = 0u32;
+            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
+                if i < 32 && bit { gap |= 1 << i; }
+            }
+            alpha_header_gap = Some(gap);
+
+            // Alpha v105 Forensic: Equipment coordinates (y, page, socket_hint) 
+            // are packed into the header gap rather than being separate bitfields.
+            if !is_compact && gap_bits >= 8 {
+                y = (gap & 0x0F) as u8; 
+                page = ((gap >> 4) & 0x07) as u8; 
+                socket_hint = ((gap >> 7) & 0x01) as u8; 
             }
         } else {
             if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
@@ -851,15 +839,20 @@ pub fn parse_item_header<R: BitRead>(
         let current_bits = (cursor.pos() - start_bit) as u32;
         if current_bits < geometry.target_width {
             let to_read = geometry.target_width - current_bits;
-            let bits = cursor.with_context("AlphaHeaderGapPadding", |c| c.read_bits_as_vec(to_read))?;
-            for b in bits {
-                alpha_header_gap_bits.push(b);
+            // Forensic: Ensure we don't read past the available bits if target_width is overestimated.
+            let available = cursor.remaining() as u32;
+            let actual_read = std::cmp::min(to_read, available);
+            if actual_read > 0 {
+                let bits = cursor.with_context("AlphaHeaderGapPadding", |c| c.read_bits_as_vec(actual_read))?;
+                for b in bits {
+                    alpha_header_gap_bits.push(b);
+                }
+                let mut val = 0u32;
+                for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
+                    if i < 32 && bit { val |= 1 << i; } 
+                }
+                alpha_header_gap = Some(val);
             }
-            let mut val = 0u32;
-            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
-                if i < 32 && bit { val |= 1 << i; } 
-            }
-            alpha_header_gap = Some(val);
         }
     }
     cursor.end_segment();

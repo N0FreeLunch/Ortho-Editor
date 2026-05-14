@@ -104,29 +104,25 @@ impl HeaderAxiom {
             return false;
         }
         if self.alpha_mode {
+            let mut is_compact = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
             if let Some(c) = code {
-                let t = c.trim();
-                if t.is_empty() {
-                    return true;
+                let trimmed = c.trim();
+                if trimmed.is_empty() { return true; }
+                
+                let reg = crate::domain::forensic::registry::get_registry();
+                if let Some(overrides) = &reg.item_overrides {
+                    if let Some(map) = overrides.get(trimmed) {
+                        if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+                    }
                 }
             }
-            let _identified = self.is_identified(flags);
+            
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                let is_compact_bit = (flags & (1 << 23)) != 0;
-                
-                if let Some(c) = code {
-                    let t = c.trim();
-                    if t == "acww" || t == "bcww" { return false; }
-                    is_compact_bit && !is_fragment
-                } else {
-                    false
-                }
-            } else if self.version == 0 || self.version == 1 || self.version == 4 || self.version == 6 || self.version == 7 {
-                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+                if code.is_none() { return false; } // Conservatively return false if no code hint
+                is_compact && !is_fragment
             } else {
-                // Fallback to bit 21/23 for other Alpha versions
-                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+                is_compact
             }
         } else {
             (flags & (1 << 21)) != 0
@@ -173,45 +169,49 @@ impl HeaderAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
+        if (flags & (1 << 26)) != 0 { return true; }
         if self.alpha_mode {
             if let Some(c) = code {
-                let t = c.trim();
-                // Forensic (Axiom 0365): Support Alpha v105 Runeword codes that may lack bit 26.
-                if t == "umsw" || t == "7pw" || t == "oesw" || t == "hps7" || t == "ics" {
-                    return true;
-                }
-            }
-            if self.version == 5 || self.version == 1 {
-                if (flags & (1 << 26)) != 0 { return true; }
+                let trimmed = c.trim();
+                let reg = crate::domain::forensic::registry::get_registry();
                 
-                if let Some(c) = code {
-                    let t = c.trim();
-                    if t == "acww" { return false; }
-                    let is_frag = (flags & (1 << 27)) != 0;
-                    !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0)
-                } else {
-                    false
+                // 1. Check registry root list
+                if let Some(codes) = &reg.forced_runeword_codes {
+                    if codes.iter().any(|rc| rc == trimmed) { return true; }
                 }
-            } else if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
-                (flags & (1 << 26)) != 0
-            } else {
-                (flags & (1 << 11)) != 0 || (flags & (1 << 26)) != 0
+                
+                // 2. Check item overrides
+                if let Some(overrides) = &reg.item_overrides {
+                    if let Some(map) = overrides.get(trimmed) {
+                        if let Some(&val) = map.get("is_runeword") { return val != 0; }
+                    }
+                }
+                
+                if self.version == 5 || self.version == 1 {
+                    let is_frag = (flags & (1 << 27)) != 0;
+                    return !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0);
+                }
+            } else if self.version == 5 || self.version == 1 {
+                return false; // Conservatively false if no code hint
             }
-        } else {
-            (flags & (1 << 26)) != 0
+            
+            if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
+                return (flags & (1 << 26)) != 0;
+            }
         }
+        (flags & (1 << 26)) != 0
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
         self.alpha_mode && (self.version == 5 || self.version == 2) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
     }
 
-    pub fn header_geometry(&self, flags: u32, code: Option<&str>) -> HeaderGeometry {
-        let is_compact = self.is_compact(flags, code);
+    pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
+        let is_compact = self.is_compact(flags, code_hint);
         let is_personalized = self.is_personalized(flags);
 
         if self.alpha_mode {
-            let is_rw = self.is_runeword(flags, code);
+            let is_rw = self.is_runeword(flags, code_hint);
             let is_v105_shadow = self.is_v105_shadow(flags);
 
             if is_rw || is_v105_shadow || is_personalized {
@@ -225,36 +225,20 @@ impl HeaderAxiom {
                 };
             }
 
-            if is_compact {
-                return HeaderGeometry {
-                    y_bits: 0,
-                    page_bits: 0,
-                    socket_hint_bits: 0,
-                    has_header_gap: true,
-                    skip_geometry: true,
-                    target_width: 56,
-                };
-            }
+            let target_width = if self.is_alpha() {
+                let code_str = code_hint.unwrap_or("");
+                crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code_str, flags)
+            } else { 80 };
 
-            if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 4 || self.version == 6 {
-                return HeaderGeometry {
-                    y_bits: 4,
-                    page_bits: 3,
-                    socket_hint_bits: 1,
-                    has_header_gap: true,
-                    skip_geometry: false,
-                    target_width: 80,
-                };
-            }
-            
             return HeaderGeometry {
-                y_bits: 4,
+                y_bits: 3,
                 page_bits: 3,
-                socket_hint_bits: if self.version == 5 { 0 } else { 1 },
+                socket_hint_bits: 2,
                 has_header_gap: true,
                 skip_geometry: false,
-                target_width: 80,
+                target_width,
             };
+
         }
         
         // Retail / Fallback

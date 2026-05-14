@@ -68,8 +68,8 @@ impl V105PropertyNudgeAxiom {
 impl V105HeaderGapAxiom {
     pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
         let gap = self.resolve_gap_internal(version, code, flags, is_first_item, is_compact, has_checksum);
-        println!("[DEBUG-SLICE12] Axiom resolve_gap: version={}, code={:?}, is_first={}, is_compact={}, flags=0x{:X}, has_checksum={} -> gap={}",
-            version, code, is_first_item, is_compact, flags, has_checksum, gap);
+        // println!("[DEBUG-SLICE12] Axiom resolve_gap: version={}, code={:?}, is_first={}, is_compact={}, flags=0x{:X}, has_checksum={} -> gap={}",
+        //     version, code, is_first_item, is_compact, flags, has_checksum, gap);
         gap
     }
 
@@ -84,9 +84,6 @@ impl V105HeaderGapAxiom {
                     }
                 }
             }
-            if trimmed == "acww" || trimmed == "umsw" || trimmed == "7pw" || trimmed == "oesw" || trimmed == "hps7" || trimmed == "isc" || trimmed == "tsc" {
-                return 24;
-            }
         }
 
         // Runeword/Shadow Items (Bit 26/27)
@@ -94,8 +91,6 @@ impl V105HeaderGapAxiom {
             8
         } else if is_compact {
             0
-        } else if (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
-            if has_checksum { 0 } else { 8 }
         } else {
             // Standard equipment
             if has_checksum { 0 } else { 8 }
@@ -132,6 +127,56 @@ impl V105AlignmentAxiom {
     }
 }
 
+pub fn is_v105_summary_code(code: &str) -> bool {
+    let trimmed = code.trim();
+    if trimmed.is_empty() {
+        return true; // Blank items are compact
+    }
+    // Forensic (Slice 20): Support non-ASCII Summary Item codes (e.g. 0xCF 0x4F)
+    let bytes = code.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
+        return true;
+    }
+
+    let reg = crate::domain::forensic::registry::get_registry();
+    // 1. Check registry root list
+    if let Some(codes) = &reg.forced_compact_codes {
+        if codes.iter().any(|c| c == trimmed) { return true; }
+    }
+
+    // 2. Check item overrides
+    if let Some(overrides) = &reg.item_overrides {
+        if let Some(map) = overrides.get(trimmed) {
+            if let Some(&val) = map.get("is_compact") { return val != 0; }
+        }
+    }
+
+    false
+}
+pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
+    let trimmed = code.trim();
+    let is_summary = is_v105_summary_code(code);
+    let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
+    let reg = crate::domain::forensic::registry::get_registry();
+
+    if is_summary || is_compact_flag {
+        if let Some(overrides) = &reg.item_overrides {
+            if let Some(map) = overrides.get(trimmed) {
+                if let Some(&width) = map.get("fixed_width") { return width; }
+            }
+        }
+        if trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0) {
+            return reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(77) as u32;
+        }
+        return reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72) as u32;
+    }
+
+    match version {
+        1 | 2 | 0 | 4 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(80) as u32,
+        5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
+        _ => 0,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

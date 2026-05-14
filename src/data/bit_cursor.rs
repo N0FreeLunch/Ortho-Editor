@@ -70,6 +70,15 @@ impl<R: BitRead> BitCursor<R> {
         self.limit
     }
 
+    /// Returns the number of bits remaining until the limit, or a large value if no limit is set.
+    pub fn remaining(&self) -> u64 {
+        if let Some(limit) = self.limit {
+            limit.saturating_sub(self.bit_pos)
+        } else {
+            u64::MAX
+        }
+    }
+
     /// Alias for pos() to match BitRecorder's total_read
     pub fn total_read(&self) -> u64 {
         self.bit_pos

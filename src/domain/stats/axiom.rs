@@ -26,18 +26,33 @@ impl StatsAxiom {
 
     pub fn with_code(mut self, code: &str) -> Self {
         self.code = code.to_string();
-        // Axiom 0344: Blank items and known compact types in Alpha v105 
-        // often lack the compact flag despite being structurally compact.
         let trimmed = self.code.trim();
-        if self.save_is_alpha && (
-            trimmed.is_empty() || 
-            (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
-            (trimmed.starts_with('h') && trimmed.len() == 3) || // hp1, hp2, etc
-            (trimmed.starts_with('m') && trimmed.len() == 3) || // mp1, mp2, etc
-            trimmed == "wsww" || trimmed == "wuyw" || trimmed == "bs m" ||
-            trimmed == "tsc" || trimmed == "isc"
-        ) {
-            self.is_compact = true;
+        if self.save_is_alpha {
+            let reg = get_registry();
+            let mut is_compact = false;
+            
+            // 1. Check registry root list
+            if let Some(codes) = &reg.forced_compact_codes {
+                if codes.iter().any(|c| c == trimmed) { is_compact = true; }
+            }
+            
+            // 2. Check item overrides
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(map) = overrides.get(trimmed) {
+                    if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+                }
+            }
+            
+            // 3. Fallback to structural patterns (Potions/Runes)
+            if !is_compact && (
+                (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
+                (trimmed.starts_with('h') && trimmed.len() == 3) ||
+                (trimmed.starts_with('m') && trimmed.len() == 3)
+            ) {
+                is_compact = true;
+            }
+            
+            self.is_compact = is_compact;
         }
         self
     }
@@ -121,26 +136,28 @@ impl StatsAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32) -> bool {
-        let c = self.code.trim();
-        (flags & (1 << 26)) != 0 || (c == "w8wc" || c == "umsw" || c == "7pw" || c == "oesw" || c == "hps7" || c == "ics")
+        let trimmed = self.code.trim();
+        if (flags & (1 << 26)) != 0 { return true; }
+        if self.save_is_alpha {
+            let reg = get_registry();
+            if let Some(codes) = &reg.forced_runeword_codes {
+                if codes.iter().any(|c| c == trimmed) { return true; }
+            }
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(map) = overrides.get(trimmed) {
+                    if let Some(&val) = map.get("is_runeword") { return val != 0; }
+                }
+            }
+        }
+        false
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
         self.header_axiom().is_socketed(flags, is_compact)
     }
 
-    pub fn is_compact(&self, flags: u32) -> bool {
-        if self.save_is_alpha {
-            if self.version == 5 {
-                let t = self.code.trim();
-                if t == "acww" || t == "bcww" { return false; }
-                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
-            } else {
-                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
-            }
-        } else {
-            (flags & (1 << 21)) != 0
-        }
+    pub fn is_compact(&self, _flags: u32) -> bool {
+        self.is_compact
     }
 
     pub fn is_ethereal(&self, flags: u32) -> bool {
