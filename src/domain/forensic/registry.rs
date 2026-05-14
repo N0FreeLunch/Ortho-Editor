@@ -14,6 +14,8 @@ pub struct AlphaForensics {
     pub forced_compact_codes: Option<Vec<String>>,
     #[serde(default)]
     pub forced_runeword_codes: Option<Vec<String>>,
+    #[serde(default)]
+    pub compact_code_encoding: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

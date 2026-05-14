@@ -374,6 +374,3 @@ path = "src/bin/verify/d2save_section_bits.rs"
 [[bin]]
 name = "d2item_code_fuzzer"
 path = "src/bin/verify/d2item_code_fuzzer.rs"
-
-[dev-dependencies]
-criterion = "0.8.2"

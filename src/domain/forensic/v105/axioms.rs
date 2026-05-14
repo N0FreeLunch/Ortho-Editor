@@ -166,9 +166,9 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
             }
         }
         if trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0) {
-            return reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(77) as u32;
+            return reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(80) as u32;
         }
-        return reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72) as u32;
+        return reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(80) as u32;
     }
 
     match version {

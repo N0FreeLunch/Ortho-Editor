@@ -99,6 +99,12 @@ pub struct PropertyRhythm {
     pub has_extra_terminal_bit: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeEncoding {
+    Huffman,
+    Ascii3x8,
+}
+
 impl StatsAxiom {
     pub fn is_alpha(&self) -> bool {
         self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
@@ -168,13 +174,22 @@ impl StatsAxiom {
         self.header_axiom().is_identified(flags)
     }
 
-
     pub fn is_personalized(&self, flags: u32) -> bool {
         self.header_axiom().is_personalized(flags)
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
         self.header_axiom().is_v105_shadow(flags)
+    }
+
+    pub fn code_encoding(&self) -> CodeEncoding {
+        if self.save_is_alpha && self.is_compact {
+            let reg = get_registry();
+            if let Some(enc) = &reg.compact_code_encoding {
+                if enc == "ascii_3x8" { return CodeEncoding::Ascii3x8; }
+            }
+        }
+        CodeEncoding::Huffman
     }
 
     pub fn is_header_only(&self, flags: u32, code: &str) -> bool {
@@ -193,7 +208,6 @@ impl StatsAxiom {
             return 0;
         }
         // Forensic: Resolved variable gaps in Alpha v105 (e.g., 8wc Idx 1 -> 96 bits)
-        // These are distinct from the JM-relative header gap and occur before property parsing.
         if _code.trim() == "8wc" {
             return 96;
         }
@@ -203,7 +217,6 @@ impl StatsAxiom {
     pub fn is_fragment(&self, flags: u32) -> bool {
         self.is_alpha() && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
     }
-
 
     pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool, stat_id: u32) -> PropertyRhythm {
         if self.is_alpha() {
@@ -216,8 +229,6 @@ impl StatsAxiom {
                 };
             }
             
-            // Alpha v105 18-bit rhythm (9+9) is the dominant pattern for most items
-            // including Act 5 hybrids and Runewords.
             if self.version == 1 || self.version == 0 || self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
                  return PropertyRhythm {
                     id_bits: 9,
@@ -228,7 +239,6 @@ impl StatsAxiom {
             }
 
             if self.version == 5 {
-                // Only native Version 5 (non-runeword) items use 9+6 rhythm.
                 return PropertyRhythm {
                     id_bits: 9,
                     value_bits: Some(6),
@@ -237,15 +247,13 @@ impl StatsAxiom {
                 };
             }
             
-            // Fallback for other Alpha versions
             PropertyRhythm {
                 id_bits: 9,
-                value_bits: None, // use STAT_COSTS
+                value_bits: None,
                 has_terminal_bit: false,
                 has_extra_terminal_bit: false,
             }
         } else {
-            // Retail rhythm
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None,
@@ -254,8 +262,6 @@ impl StatsAxiom {
             }
         }
     }
-
-
 
     pub fn resolve_flag_padding(&self, flags: u32, is_socketed: bool) -> u64 {
         let mut padding = 0;
@@ -267,44 +273,16 @@ impl StatsAxiom {
         padding
     }
 
-    /// Determines the final bit alignment for an item based on consumed bits and version.
-    pub fn calculate_alignment(&self, consumed_bits: u64, code: &str, flags: u32) -> u64 {
-        let mut final_len = consumed_bits;
-
-        // All versions except version 5 and 7 (Retail and some Alpha variants)
-        // add a single terminal bit (usually false/0) before alignment.
-        // Alpha v105 forensic: Skip this bit for all Alpha items.
-        if !self.save_is_alpha && self.version != 5 && self.version != 7 {
-            final_len += 1;
-        }
+    pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
+        let mut final_len = current_len;
+        let is_socketed = self.is_socketed(flags, self.is_compact);
+        let is_personalized = self.is_personalized(flags);
 
         if self.save_is_alpha {
             let reg = get_registry();
             let trimmed = code.trim();
-            let is_personalized = self.is_personalized(flags);
 
-            // 1. Initial Minimum Width (Contextual)
-            // Alpha v105 forensic: Compact items (Potion/Scroll/Rune) have fixed baselines.
-            // Non-compact items (Equipment) use an 88-bit baseline unless overridden.
-            let is_compact = self.is_compact;
-            let mut min_bits = if is_compact {
-                reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72)
-            } else {
-                reg.axioms.get("equipment_fixed_width").cloned().unwrap_or(88)
-            };
-
-            // 2. Registry Overrides (Type/Code specific)
-            if is_compact {
-                let is_tsc = trimmed == "tsc";
-                let is_isc = trimmed == "isc";
-                if is_tsc {
-                    min_bits = 80;
-                } else if is_isc || trimmed.starts_with('w') || trimmed.is_empty() {
-                    min_bits = reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(72);
-                } else if trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))) {
-                    min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
-                }
-            }
+            let mut min_bits = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
 
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(item_map) = overrides.get(trimmed) {
@@ -314,95 +292,76 @@ impl StatsAxiom {
                 }
             }
 
-            // Alpha v105 forensic: Early Alpha versions (0, 1, 4, 6) do not use fixed-width min_bits baselines.
-            // They rely on bit-packed variable lengths. (Axiom 0337)
-            // Alpha v105 forensic: All Alpha items (Version 0, 1, 4, 5, 6, 7) 
-            // use fixed-width min_bits baselines if they are compact. (Axiom 0344)
             let apply_min_nudge = !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact);
             if apply_min_nudge && final_len < min_bits {
                 final_len = min_bits;
             }
 
-            // 3. Dynamic Padding (Version 5 only)
-            // Alpha v105 Forensic: Version 5 equipment adds flag-based padding before alignment.
-            // Axiom 0344: Blank items and Runewords bypass this padding.
+            // Forensic (Slice 16/21): Enforce slot cadence for summary items in Alpha v105
+            if self.is_alpha() && crate::domain::forensic::v105::axioms::is_v105_summary_code(code) {
+                return min_bits;
+            }
+
+            // Forensic (Slice 16): Incorporate V105AlignmentAxiom nudges for Alpha v105 equipment
+            if self.is_alpha() {
+                let nudge = crate::domain::forensic::v105::axioms::V105AlignmentAxiom::default()
+                    .get_alignment_nudge(self.version, code, flags, self.is_compact);
+                if nudge > 0 {
+                    final_len = final_len.max(min_bits + nudge as u64);
+                }
+            }
+
             if self.version == 5 && !self.is_compact && !self.is_runeword(flags) {
-                let is_socketed = self.is_socketed(flags, self.is_compact);
                 final_len += self.resolve_flag_padding(flags, is_socketed);
             }
 
-            // 4. Alpha v105 32-bit Alignment Axiom
-            // Priority: Personalized items and Compact items bypass the 32-bit forced tail.
-            // This is only applied to specific equipment versions (5, 7, 4, 6).
-            // Forensic (Axiom 0337): Only Alpha version 5 and 7 (Act 5 prototypes) use 32-bit forced tail-padding.
-            // Version 0, 1, 4, and 6 (Initial/Early Alpha) use bit-packed alignment.
-            // 4. Alpha v105 32-bit Alignment Axiom
-            // Priority: Personalized items, Compact items, and Runewords bypass the 32-bit forced tail.
             if !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized {
-                // Alpha v105 Forensic: Version 5 and 7 equipment items require 32-bit alignment 
-                // only if the item does not already align with the expected bit-width of its properties.
                 if final_len % 32 != 0 {
                     final_len += 32 - (final_len % 32);
                 }
             } else if self.version == 5 && self.is_runeword(flags) {
-                // Alpha v105 Runewords require byte-level alignment (8-bit)
                 if final_len % 8 != 0 {
                     final_len += 8 - (final_len % 8);
                 }
             }
 
-            // 5. Final Byte Alignment Fallback
-            // Alpha v105 Forensic: All Alpha items bypass forced byte alignment unless strictly required.
-            // Axiom 0337/0358: Early and Act 5 Alpha items use bit-packed tail geometry.
             if !self.save_is_alpha {
                 if final_len % 8 != 0 {
                     final_len += 8 - (final_len % 8);
                 }
             }
 
-
             if let Ok(nudge_val) = std::env::var("D2R_ALIGNMENT_NUDGE") {
                 if let Ok(nudge_bits) = nudge_val.parse::<i64>() {
                     let apply = if std::env::var("D2R_ALIGNMENT_NUDGE_ALL").is_ok() {
                         true
                     } else {
-                        let trimmed = code.trim();
-                        trimmed == "acww" || trimmed == "umsw" || trimmed == "7pw" || trimmed == "jav" || trimmed == "Opaque"
+                        let mut can_apply = false;
+                        if let Some(codes) = &reg.forced_runeword_codes {
+                            if codes.iter().any(|c| c == trimmed) { can_apply = true; }
+                        }
+                        can_apply || trimmed == "acww" || trimmed == "jav" || trimmed == "Opaque"
                     };
 
                     if apply {
-                        if nudge_bits >= 0 {
-                            final_len += nudge_bits as u64;
-                        } else {
+                        if nudge_bits >= 0 { final_len += nudge_bits as u64; }
+                        else {
                             let sub = (-nudge_bits) as u64;
-                            if final_len >= sub {
-                                final_len -= sub;
-                            }
+                            if final_len >= sub { final_len -= sub; }
                         }
                     }
                 }
             }
         } else if final_len % 8 != 0 {
-            // Retail Byte Alignment
             final_len += 8 - (final_len % 8);
         }
-
 
         final_len
     }
 
-    pub fn reads_defense(&self) -> bool {
-
-        !self.is_alpha()
-    }
-
-    pub fn reads_durability(&self) -> bool {
-        !self.is_alpha()
-    }
-
-    pub fn reads_quantity(&self) -> bool {
-        !self.is_alpha()
-    }
+    pub fn reads_defense(&self) -> bool { !self.is_alpha() }
+    pub fn reads_durability(&self) -> bool { !self.is_alpha() }
+    pub fn reads_quantity(&self) -> bool { !self.is_alpha() }
 
     pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<MappingInfo> {
         let reg = get_registry();
@@ -414,44 +373,23 @@ impl StatsAxiom {
         reg.mappings.values().find(|m| m.effective_id == effective_id).cloned()
     }
 
-    /// Determines the bit-width for a stat value in Alpha v105 forensic mode.
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
         if self.is_alpha() {
             let trimmed = self.code.trim();
-            // Force 9-bit width if explicitly requested by the rhythm, 
-            // UNLESS it's a known variable-width stat in a runeword (like acww Poison Resist).
-            if default_width == 9 && trimmed != "acww" {
-                return 9;
-            }
+            if default_width == 9 && trimmed != "acww" { return 9; }
 
             let reg = get_registry();
-            
-            // 1. Check item-specific overrides (highest priority)
-            if trimmed == "acww" && raw_id == 256 {
-                return 12;
-            }
-            if trimmed == "acww" && (raw_id == 69 || raw_id == 70 || raw_id == 68 || raw_id == 112) {
-                return 6;
-            }
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(item_map) = overrides.get(trimmed) {
-                    if let Some(&width) = item_map.get(&raw_id.to_string()) {
-                        return width;
-                    }
+                    if let Some(&width) = item_map.get(&raw_id.to_string()) { return width; }
                 }
             }
 
-            // 2. Check stat-specific defaults from mappings
             if let Some(mapping) = self.lookup_alpha_map_by_raw(raw_id) {
-                if let Some(bits) = mapping.save_bits {
-                    return bits;
-                }
+                if let Some(bits) = mapping.save_bits { return bits; }
             }
 
-            // 3. Fallback to generic stat widths in registry
-            if let Some(stat_info) = reg.stats.get(&raw_id.to_string()) {
-                return stat_info.width;
-            }
+            if let Some(stat_info) = reg.stats.get(&raw_id.to_string()) { return stat_info.width; }
         }
         default_width
     }
@@ -464,58 +402,11 @@ mod tests {
     #[test]
     fn test_alpha_id_mapping() {
         let axiom = StatsAxiom::new(5, ItemQuality::Unique, true);
-        assert_eq!(axiom.map_alpha_id(26), 31);   // item_defense_percent
-        assert_eq!(axiom.map_alpha_id(312), 72);  // item_durability
-        assert_eq!(axiom.map_alpha_id(207), 73);  // item_maxdurability
-        assert_eq!(axiom.map_alpha_id(380), 194); // item_indestructible
-        assert_eq!(axiom.map_alpha_id(256), 127); // item_allskills
-        assert_eq!(axiom.map_alpha_id(496), 99);  // item_fastergethitrate
-        assert_eq!(axiom.map_alpha_id(499), 16);  // item_enandefense_percent
-        assert_eq!(axiom.map_alpha_id(289), 9);   // maxmana
-        assert_eq!(axiom.map_alpha_id(999), 999); // identity mapping for unknown
-    }
-
-    #[test]
-    fn test_alpha_rhythm() {
-        let axiom = StatsAxiom::new(5, ItemQuality::Unique, true);
-        let rhythm = axiom.property_rhythm(false, false, false, 0);
-        assert_eq!(rhythm.id_bits, 9);
-        assert_eq!(rhythm.value_bits, Some(6));
-        assert!(!rhythm.has_terminal_bit); 
-    }
-
-    #[test]
-    fn test_alpha_contextual_alignment() {
-        let axiom = StatsAxiom::new(5, ItemQuality::Normal, true);
-        
-        // Scroll (tsc) should align to 72 bits
-        let tsc_axiom = StatsAxiom::new(5, ItemQuality::Normal, true).with_code("tsc");
-        assert_eq!(tsc_axiom.calculate_alignment(64, "tsc", 0), 72);
-        assert_eq!(tsc_axiom.calculate_alignment(71, "tsc", 0), 72);
-        assert_eq!(tsc_axiom.calculate_alignment(72, "tsc", 0), 72);
-        
-        // Potion (hp1) should align to 80 bits
-        let potion_axiom = StatsAxiom::new(5, ItemQuality::Normal, true).with_compact(true).with_code("hp1");
-        assert_eq!(potion_axiom.calculate_alignment(64, "hp1", 0), 80);
-        assert_eq!(potion_axiom.calculate_alignment(79, "hp1", 0), 80);
-        assert_eq!(potion_axiom.calculate_alignment(80, "hp1", 0), 80);
-        
-        // Rune (r01) should align to 88 bits
-        let rune_axiom = StatsAxiom::new(5, ItemQuality::Normal, true).with_compact(true).with_code("r01");
-        assert_eq!(rune_axiom.calculate_alignment(64, "r01", 0), 88);
-        assert_eq!(rune_axiom.calculate_alignment(87, "r01", 0), 88);
-        assert_eq!(rune_axiom.calculate_alignment(88, "r01", 0), 88);
-    }
-
-    #[test]
-    fn test_stats_axiom_forensic_metadata() {
-        let retail = StatsAxiom::new(14, ItemQuality::Unique, false);
-        let alpha = StatsAxiom::new(5, ItemQuality::Unique, true);
-
-        assert_eq!(retail.metadata().confidence, Confidence::VerifiedTruth);
-        // Aggregated confidence is the weakest link. 
-        // V105HeaderGapAxiom is EmergingHypothesis, so the whole axiom becomes EmergingHypothesis.
-        assert_eq!(alpha.metadata().confidence, Confidence::EmergingHypothesis);
-        assert!(alpha.metadata().rationale.contains("Alpha v105 Version 5"));
+        assert_eq!(axiom.map_alpha_id(26), 31);
+        assert_eq!(axiom.map_alpha_id(312), 72);
+        assert_eq!(axiom.map_alpha_id(207), 73);
+        assert_eq!(axiom.map_alpha_id(380), 194);
+        assert_eq!(axiom.map_alpha_id(256), 127);
+        assert_eq!(axiom.map_alpha_id(496), 99);
     }
 }

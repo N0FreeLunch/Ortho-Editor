@@ -110,6 +110,9 @@ impl HeaderAxiom {
                 if trimmed.is_empty() { return true; }
                 
                 let reg = crate::domain::forensic::registry::get_registry();
+                if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+                    is_compact = true;
+                }
                 if let Some(overrides) = &reg.item_overrides {
                     if let Some(map) = overrides.get(trimmed) {
                         if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
@@ -119,7 +122,6 @@ impl HeaderAxiom {
             
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                if code.is_none() { return false; } // Conservatively return false if no code hint
                 is_compact && !is_fragment
             } else {
                 is_compact
@@ -225,10 +227,16 @@ impl HeaderAxiom {
                 };
             }
 
-            let target_width = if self.is_alpha() {
+            let mut target_width = if self.is_alpha() {
                 let code_str = code_hint.unwrap_or("");
                 crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code_str, flags)
             } else { 80 };
+
+            if is_compact && self.alpha_mode {
+                // For compact items, target_width from axioms is the TOTAL width.
+                // Subtract 24 bits for the fixed-width code to get the header target.
+                target_width = target_width.saturating_sub(24);
+            }
 
             return HeaderGeometry {
                 y_bits: 3,

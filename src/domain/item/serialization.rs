@@ -200,7 +200,7 @@ pub fn peek_item_header_at(
     // often lack the is_compact flag but are strictly interval-aligned.
     // Use physical interval sniffing to force compact mode.
     if alpha_mode && !is_compact {
-        for &interval in &[72, 80, 88] {
+        for &interval in &[80, 72, 88] {
             let next_bit = start_bit + interval;
             if next_bit + 64 <= (section_bytes.len() * 8) as u64 {
                  let mut jm_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -422,7 +422,8 @@ pub fn peek_item_header_at_specific_gap(
     let v = alpha_reader.read::<3, u8>().ok()?;
     let calculated = calculate_alpha_v105_checksum(flags, v);
     
-    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum {
+    // Alpha Forensic (Axiom 0365): Some summary items use 0 as a checksum sentinel.
+    let (version, mode, loc, x_val, base_header_len, has_checksum) = if calculated == checksum || (alpha_mode && checksum == 0) {
         let m = alpha_reader.read::<3, u8>().ok()?;
         let l = alpha_reader.read::<3, u8>().ok()?;
         let x = alpha_reader.read::<4, u8>().ok()?;
@@ -1032,18 +1033,7 @@ impl Item {
 
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    let trimmed = code.trim();
-    if trimmed.is_empty() || code.chars().all(|c| c.is_whitespace()) {
-        return false;
-    }
-    matches!(trimmed, 
-        "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvl"|"rvs"|
-        "w8cs"|"w88w"|"us g"|"xrs"|"6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|
-        "mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|"vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"vps"|"mac"|"ulss"|"9tr"|
-        "box"|"ibk"|"tbk"|"2swc"|"gpb"|"7pw"|"oesw"|"ics"|"wc"|"bsd"|
-        "wsww"|"hps7"|"wwxs"|"cwww"|"m af"|"2uu8"|"btpp"|"o wu"|"wurl"|"bc"|"wa7g"|"rc7s"|
-        "bmf"|"c mt"|"wuyw"|"bs m"|"tsc"|"isc"
-    )
+    crate::domain::forensic::v105::axioms::is_v105_summary_code(code)
 }
 
 pub fn item_template(code: &str) -> Option<&'static crate::data::item_codes::ItemTemplate> {
