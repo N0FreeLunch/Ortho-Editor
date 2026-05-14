@@ -510,7 +510,19 @@ impl Item {
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
-        if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
+        if alpha_mode && geometry.target_width > 0 {
+            let current_bits = emitter.written_bits() - start_bit;
+            if current_bits < geometry.target_width as u64 {
+                let to_write = geometry.target_width as u64 - current_bits;
+                if !self.body.alpha_header_gap_bits.is_empty() {
+                    for i in 0..to_write {
+                        emitter.write_bit(self.body.alpha_header_gap_bits.get(i as usize).cloned().unwrap_or(false))?;
+                    }
+                } else {
+                    emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), to_write as u32)?;
+                }
+            }
+        } else if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
             if h_axiom.is_alpha() {
                 let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
                 let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
@@ -817,7 +829,6 @@ pub fn parse_item_header<R: BitRead>(
                 // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
                 if version == 5 {
                     cursor.byte_align()?;
-                    println!("[DEBUG-SLICE12] v5 applied byte_align, pos={}", cursor.pos());
                 }
 
                 let mut val = 0u32;                for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
@@ -834,6 +845,22 @@ pub fn parse_item_header<R: BitRead>(
         }
     } else if !geometry.skip_geometry {
         y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
+    }
+
+    if alpha_mode && geometry.target_width > 0 {
+        let current_bits = (cursor.pos() - start_bit) as u32;
+        if current_bits < geometry.target_width {
+            let to_read = geometry.target_width - current_bits;
+            let bits = cursor.with_context("AlphaHeaderGapPadding", |c| c.read_bits_as_vec(to_read))?;
+            for b in bits {
+                alpha_header_gap_bits.push(b);
+            }
+            let mut val = 0u32;
+            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
+                if i < 32 && bit { val |= 1 << i; } 
+            }
+            alpha_header_gap = Some(val);
+        }
     }
     cursor.end_segment();
     Ok((ItemHeader {
@@ -853,7 +880,6 @@ pub fn parse_item_body<R: BitRead>(
     alpha_mode: bool,
 ) -> ParsingResult<(ItemBody, Option<u8>, Option<u8>, Option<String>)> {
     let h_axiom = HeaderAxiom::new(header.version, alpha_mode);
-    println!("[DEBUG-SLICE12] parse_item_body active header version: {}", header.version);
     let is_ear = header.is_ear;
     let (code, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
         cursor.begin_segment(ItemSegmentType::Unknown);
@@ -904,14 +930,12 @@ pub fn parse_item_body<R: BitRead>(
                 }
             }
         }
-    println!("[DEBUG-SLICE12] parse_item_body received version={}", header.version);
     let mut alpha_nudge = None;
     if alpha_mode {
         // Forensic: Apply 2-bit alignment nudge for Version 5 item bodies
         if h_axiom.is_alpha() && !header.is_compact {
             if header.version == 5 {
                 let nudge_val = cursor.read_bits::<u8>(2)?;
-                println!("[DEBUG-SLICE12] v5 applied 2-bit body-nudge: 0b{:02b}, pos={}", nudge_val, cursor.pos());
                 alpha_nudge = Some(nudge_val);
             } else if header.version == 0 || header.version == 1 { 
                 alpha_nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
@@ -919,13 +943,11 @@ pub fn parse_item_body<R: BitRead>(
         }
     }
         
-        let props_start = cursor.pos();
-        println!("[DEBUG-SLICE12] parse_item_body properties start at {}", props_start);
+        let _props_start = cursor.pos();
 
         // Forensic: Ensure byte-alignment after body properties for Version 5 to resolve drift
         if header.version == 5 {
             cursor.byte_align()?;
-            println!("[DEBUG-SLICE12] v5 applied byte_align at pos={}", cursor.pos());
         }
 
         cursor.end_segment();
@@ -961,20 +983,17 @@ impl ExtendedStatsData {
         if axiom.is_alpha() {
             if !is_compact {
                 let quality_raw = cursor.read_bits::<u8>(3)?;
-                println!("[DEBUG-SLICE12] v5 property quality_raw={}, pos={}", quality_raw, cursor.pos());
                 let quality = ItemQuality::from(quality_raw);
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
 
                 // Forensic: Correct 3-bit alignment nudge for Version 5 stats
                 if version == 5 {
-                    let nudge = cursor.read_bits::<u8>(3)?;
-                    println!("[DEBUG-SLICE12] v5 applied 3-bit property nudge: 0b{:03b}, pos={}", nudge, cursor.pos());
+                    let _nudge = cursor.read_bits::<u8>(3)?;
                 }
 
                 if (version == 5 || version == 6 || version == 7) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags)) {
                     data.v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);
-                    println!("[DEBUG-SLICE12] v5 runeword_extra read, pos={}", cursor.pos());
                     data.id = Some(0);
                 } else if version == 5 && crate::domain::item::serialization::is_v105_summary_code(trimmed_code) {
                     cursor.end_segment();
@@ -984,8 +1003,7 @@ impl ExtendedStatsData {
                 }
                 // Forensic: Apply 1-bit final property-stream alignment for V5
                 if version == 5 {
-                    let padding = cursor.read_bit()?;
-                    println!("[DEBUG-SLICE12] v5 final property alignment: {}, pos={}", padding, cursor.pos());
+                    let _padding = cursor.read_bit()?;
                 }
             } else { data.id = Some(0); }
         } else {

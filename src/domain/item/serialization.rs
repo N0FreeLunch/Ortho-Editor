@@ -266,7 +266,9 @@ pub fn peek_item_header_at(
     let geometry = h_axiom.header_geometry(flags, if trial_is_rw { Some("acww") } else { None });
     
     let mut total_skip = base_header_len as u32;
-    if geometry.has_header_gap && alpha_mode {
+    if alpha_mode && geometry.target_width > 0 {
+        total_skip = geometry.target_width;
+    } else if geometry.has_header_gap && alpha_mode {
         let is_v105_shadow = s_axiom.is_v105_shadow(flags);
         let is_rw = trial_is_rw || s_axiom.is_runeword(flags);
         if is_rw || is_v105_shadow {
@@ -284,7 +286,22 @@ pub fn peek_item_header_at(
 
     let mut code = String::new();
     let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    let alignment_nudge = if alpha_mode { V105AlignmentAxiom::default().get_alignment_nudge(version, is_compact) } else { 0 };
+    
+    // Trial peek for code to determine adaptive alignment nudge (Slice 14)
+    let trial_nudge = if alpha_mode && version == 0 { 19 } else { 0 };
+    let mut trial_code = String::new();
+    let mut trial_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    if trial_reader.skip(start_bit as u32 + total_skip + trial_nudge).is_ok() {
+        let mut t_cursor = BitCursor::new(trial_reader);
+        for _ in 0..4 {
+            if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { trial_code.push(ch); }
+            else { break; }
+        }
+    }
+
+    let alignment_nudge = if alpha_mode { 
+        V105AlignmentAxiom::default().get_alignment_nudge(version, &trial_code, flags, is_compact)
+    } else { 0 };
     if n_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_err() { return None; }
     let mut n_cursor = BitCursor::new(n_reader);
     for i in 0..4 {
@@ -333,8 +350,16 @@ pub fn peek_item_header_at(
         possible_gaps.push(geom_bits + 24);
         possible_gaps.push(geom_bits + 32);
 
+        // Alpha v105 forensic: Include the adaptive alignment nudge (Slice 14)
+        if alignment_nudge > 0 {
+            let base_geom_gap = (total_skip as i32 - base_header_len as i32) as i32;
+            let nudge_gap = base_geom_gap + alignment_nudge as i32;
+            if nudge_gap >= 0 {
+                possible_gaps.push(nudge_gap as u64);
+            }
+        }
+
         // Alpha v105 forensic: Try 1-bit and 2-bit nudges (Axiom 0340)
-        // These handle the bitstream drift seen in Act 5 items like potions.
         possible_gaps.push(geom_bits + 1);
         possible_gaps.push(geom_bits + 2);
         possible_gaps.push(geom_bits + 9);

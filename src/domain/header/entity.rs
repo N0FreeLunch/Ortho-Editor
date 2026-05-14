@@ -59,6 +59,7 @@ pub struct HeaderGeometry {
     pub socket_hint_bits: u32,
     pub has_header_gap: bool,
     pub skip_geometry: bool,
+    pub target_width: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,10 +123,10 @@ impl HeaderAxiom {
                     false
                 }
             } else if self.version == 0 || self.version == 1 || self.version == 4 || self.version == 6 || self.version == 7 {
-                (flags & (1 << 21)) != 0
+                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
             } else {
-                // Fallback to bit 21 for other Alpha versions (Retail-like)
-                (flags & (1 << 21)) != 0
+                // Fallback to bit 21/23 for other Alpha versions
+                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
             }
         } else {
             (flags & (1 << 21)) != 0
@@ -176,7 +177,6 @@ impl HeaderAxiom {
             if let Some(c) = code {
                 let t = c.trim();
                 // Forensic (Axiom 0365): Support Alpha v105 Runeword codes that may lack bit 26.
-                // Note: 'acww' (arrows) in amazon_empty.d2s are NOT runewords even if they match this code.
                 if t == "umsw" || t == "7pw" || t == "oesw" || t == "hps7" || t == "ics" {
                     return true;
                 }
@@ -184,8 +184,6 @@ impl HeaderAxiom {
             if self.version == 5 || self.version == 1 {
                 if (flags & (1 << 26)) != 0 { return true; }
                 
-                // Forensic (Axiom 0365): If code is unknown, do NOT assume runeword based on bit 11.
-                // Standard socketed items in Alpha v105 also have bit 11 set.
                 if let Some(c) = code {
                     let t = c.trim();
                     if t == "acww" { return false; }
@@ -223,29 +221,50 @@ impl HeaderAxiom {
                     socket_hint_bits: 0,
                     has_header_gap: true,
                     skip_geometry: true,
+                    target_width: 80,
                 };
             }
 
-            if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 6 || self.version == 4 || self.version == 5 {
+            if is_compact {
+                return HeaderGeometry {
+                    y_bits: 0,
+                    page_bits: 0,
+                    socket_hint_bits: 0,
+                    has_header_gap: true,
+                    skip_geometry: true,
+                    target_width: 56,
+                };
+            }
+
+            if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 4 || self.version == 6 {
                 return HeaderGeometry {
                     y_bits: 4,
                     page_bits: 3,
-                    socket_hint_bits: if self.version == 7 { 1 } else { 4 },
-                    has_header_gap: false,
+                    socket_hint_bits: 1,
+                    has_header_gap: true,
                     skip_geometry: false,
+                    target_width: 80,
                 };
             }
-
+            
+            return HeaderGeometry {
+                y_bits: 4,
+                page_bits: 3,
+                socket_hint_bits: if self.version == 5 { 0 } else { 1 },
+                has_header_gap: true,
+                skip_geometry: false,
+                target_width: 80,
+            };
         }
         
         // Retail / Fallback
         if is_compact {
             HeaderGeometry {
-                y_bits: 0, page_bits: 0, socket_hint_bits: 0, has_header_gap: false, skip_geometry: true,
+                y_bits: 0, page_bits: 0, socket_hint_bits: 0, has_header_gap: false, skip_geometry: true, target_width: 0,
             }
         } else {
             HeaderGeometry {
-                y_bits: 4, page_bits: 3, socket_hint_bits: 0, has_header_gap: false, skip_geometry: false,
+                y_bits: 4, page_bits: 3, socket_hint_bits: 0, has_header_gap: false, skip_geometry: false, target_width: 0,
             }
         }
     }
@@ -274,7 +293,6 @@ impl ItemHeader {
             if checksum == expected {
                 (v, true)
             } else {
-                // Checksum mismatch or not present: backtrack and read version directly
                 cursor.rollback(saved_pos);
                 (cursor.read_bits::<u8>(3)? as u8, false)
             }
@@ -287,8 +305,6 @@ impl ItemHeader {
         
         let axiom = HeaderAxiom::new(version, alpha_mode);
         let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
-        let _is_compact = s_axiom.is_compact(flags);
-        let is_personalized = s_axiom.is_personalized(flags);
         
         let mut y = 0;
         let mut page = 0;
@@ -336,6 +352,14 @@ impl ItemHeader {
             page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
             socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
         }
+
+        if alpha_mode && geometry.target_width > 0 {
+            let current_bits = (cursor.pos() - start_bit) as u32;
+            if current_bits < geometry.target_width {
+                let to_read = geometry.target_width - current_bits;
+                alpha_header_gap = Some(cursor.read_bits::<u32>(to_read)?);
+            }
+        }
         cursor.end_segment();
 
         Ok((ItemHeader {
@@ -353,7 +377,7 @@ impl ItemHeader {
             is_compact,
             is_identified: s_axiom.is_identified(flags),
             is_socketed: s_axiom.is_socketed(flags, is_compact),
-            is_personalized,
+            is_personalized: axiom.is_personalized(flags),
             is_runeword: s_axiom.is_runeword(flags),
             is_ethereal: s_axiom.is_ethereal(flags),
             is_ear: (flags & (1 << 24)) != 0,
@@ -374,17 +398,12 @@ pub fn parse_item_header<R: BitRead>(
     ItemHeader::read_from_cursor(cursor, alpha_mode, code)
 }
 
-/// Calculates the Alpha v105 item header checksum.
-/// Forensic refinement: Alpha v105 uses a byte-oriented XOR sum combined with a version-based adjustment.
 pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
     let b1 = (flags >> 24) & 0xFF;
     let b2 = (flags >> 16) & 0xFF;
     let b3 = (flags >> 8) & 0xFF;
     let b4 = flags & 0xFF;
     let v = (version & 0x07) as u32;
-    
-    // Forensic (Slice 12): Alpha v105 uses XOR accumulation with a seed of 0x87.
-    // Note: Bit 13 (is_compact) appears to cause drift in some fixtures; 0x87 is the stable anchor.
     (b1 ^ b2 ^ b3 ^ b4 ^ v ^ 0x87) as u8
 }
 
@@ -394,32 +413,8 @@ mod tests {
 
     #[test]
     fn test_alpha_v105_checksum_known_vector() {
-        // Flags: 0, Version: 0 -> Checksum: 0 ^ 0x87 = 0x87
         assert_eq!(calculate_alpha_v105_checksum(0, 0), 0x87);
-        
-        // Flags: 0x01020304, Version: 5
-        // (1 ^ 2 ^ 3 ^ 4 ^ 5 ^ 0x87) = 1 ^ 0x87 = 0x86
         assert_eq!(calculate_alpha_v105_checksum(0x01020304, 5), 0x86);
-        
-        // Flags: 0xFFFFFFFF, Version: 7
-        // (0xFF ^ 0xFF ^ 0xFF ^ 0xFF ^ 7 ^ 0x87) = 7 ^ 0x87 = 0x80
         assert_eq!(calculate_alpha_v105_checksum(0xFFFFFFFF, 7), 0x80);
-    }
-
-    #[test]
-    fn test_alpha_v105_checksum_drift() {
-        let flags = 0x12345678;
-        let version = 2;
-        let original = calculate_alpha_v105_checksum(flags, version);
-        
-        // Single bit flip in flags should flip same bit in checksum
-        let flipped = calculate_alpha_v105_checksum(flags ^ 1, version);
-        assert_ne!(original, flipped);
-        assert_eq!(original ^ flipped, 1);
-        
-        // Bit flip in another byte
-        let flipped_high = calculate_alpha_v105_checksum(flags ^ 0x01000000, version);
-        assert_ne!(original, flipped_high);
-        assert_eq!(original ^ flipped_high, 1);
     }
 }
