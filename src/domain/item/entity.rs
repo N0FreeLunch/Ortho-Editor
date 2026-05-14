@@ -510,7 +510,7 @@ impl Item {
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
-        if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum) {
+        if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
             if h_axiom.is_alpha() {
                 let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
                 let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
@@ -570,10 +570,19 @@ impl Item {
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
             write_player_name(emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.header.version == 5)?;
             if alpha_mode && self.header.version == 5 { emitter.byte_align()?; }
+        } else if alpha_mode && s_axiom.is_compact {
+            // Forensic (Axiom 0344): Compact items in Alpha v105 
+            // use 3x8-bit fixed width characters for the item code.
+            let trimmed = self.code.trim();
+            let chars: Vec<char> = trimmed.chars().collect();
+            for i in 0..3 {
+                let ch = if i < chars.len() { chars[i] as u32 } else { 0 };
+                emitter.write_bits(ch, 8)?;
+            }
         } else {
             let encoded_code = huffman.encode(&self.code)?;
             emitter.extend_bits(encoded_code)?;
-            if h_axiom.is_alpha() && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) {
+            if h_axiom.is_alpha() && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) && !s_axiom.is_compact {
                 let nudge = self.body.alpha_nudge.unwrap_or(0);
                 emitter.write_bits(nudge as u32, 2)?;
             }
@@ -753,7 +762,9 @@ pub fn parse_item_header<R: BitRead>(
                 (v, true)
             } else {
                 cursor.rollback(saved_pos);
-                (cursor.read_bits::<u8>(3)? as u8, false)
+                let v = cursor.read_bits::<u8>(3)? as u8;
+                // Forensic: Support Version 5 items without checksum (e.g. in amazon_empty.d2s)
+                (v, false)
             }
         } else {
             cursor.rollback(saved_pos);
@@ -855,44 +866,56 @@ pub fn parse_item_body<R: BitRead>(
     } else {
         cursor.begin_segment(ItemSegmentType::Code);
         let mut code = String::new();
-        for i in 0..4 {
-            match huff.decode_recorded(cursor) {
-                Ok(ch) => code.push(ch),
-                Err(e) => {
-                    if alpha_mode && i >= 1 {
-                        // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
-                        let saved_pos = cursor.pos();
-                        // Try 1-bit nudge
-                        if let Ok(_) = cursor.read_bit() {
-                            if let Ok(ch) = huff.decode_recorded(cursor) {
-                                code.push(ch);
-                                continue;
+        
+        if alpha_mode && header.is_compact {
+            // Forensic (Axiom 0344): Compact items in Alpha v105 
+            // use 3x8-bit fixed width characters for the item code.
+            for _ in 0..3 {
+                let ch = cursor.read_bits::<u8>(8)?;
+                if ch != 0 { code.push(ch as char); }
+            }
+        } else {
+            for i in 0..4 {
+                match huff.decode_recorded(cursor) {
+                    Ok(ch) => code.push(ch),
+                    Err(e) => {
+                        if alpha_mode && i >= 1 {
+                            // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
+                            let saved_pos = cursor.pos();
+                            // Try 1-bit nudge
+                            if let Ok(_) = cursor.read_bit() {
+                                if let Ok(ch) = huff.decode_recorded(cursor) {
+                                    code.push(ch);
+                                    continue;
+                                }
                             }
-                        }
-                        // Try 2-bit nudge
-                        cursor.rollback(saved_pos);
-                        if let Ok(_) = cursor.read_bits::<u8>(2) {
-                            if let Ok(ch) = huff.decode_recorded(cursor) {
-                                code.push(ch);
-                                continue;
+                            // Try 2-bit nudge
+                            cursor.rollback(saved_pos);
+                            if let Ok(_) = cursor.read_bits::<u8>(2) {
+                                if let Ok(ch) = huff.decode_recorded(cursor) {
+                                    code.push(ch);
+                                    continue;
+                                }
                             }
+                            cursor.rollback(saved_pos);
                         }
-                        cursor.rollback(saved_pos);
+                        return Err(e);
                     }
-                    return Err(e);
                 }
             }
         }
     println!("[DEBUG-SLICE12] parse_item_body received version={}", header.version);
-    let mut nudge = None;
+    let mut alpha_nudge = None;
     if alpha_mode {
         // Forensic: Apply 2-bit alignment nudge for Version 5 item bodies
-        if header.version == 5 {
-            let nudge_val = cursor.read_bits::<u8>(2)?;
-            println!("[DEBUG-SLICE12] v5 applied 2-bit body-nudge: 0b{:02b}, pos={}", nudge_val, cursor.pos());
-            nudge = Some(nudge_val);
-        } else if header.version == 0 || header.version == 1 { 
-            nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
+        if h_axiom.is_alpha() && !header.is_compact {
+            if header.version == 5 {
+                let nudge_val = cursor.read_bits::<u8>(2)?;
+                println!("[DEBUG-SLICE12] v5 applied 2-bit body-nudge: 0b{:02b}, pos={}", nudge_val, cursor.pos());
+                alpha_nudge = Some(nudge_val);
+            } else if header.version == 0 || header.version == 1 { 
+                alpha_nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
+            }
         }
     }
         
@@ -906,7 +929,7 @@ pub fn parse_item_body<R: BitRead>(
         }
 
         cursor.end_segment();
-        (code, nudge, None, None, None)
+        (code, alpha_nudge, None, None, None)
     };
 Ok((ItemBody {
 code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,

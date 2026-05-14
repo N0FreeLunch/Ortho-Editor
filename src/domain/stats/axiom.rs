@@ -271,7 +271,7 @@ impl StatsAxiom {
             // Non-compact items (Equipment) use an 88-bit baseline unless overridden.
             let is_compact = self.is_compact;
             let mut min_bits = if is_compact {
-                reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(80)
+                reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72)
             } else {
                 reg.axioms.get("equipment_fixed_width").cloned().unwrap_or(88)
             };
@@ -282,7 +282,7 @@ impl StatsAxiom {
                 let is_isc = trimmed == "isc";
                 if is_tsc {
                     min_bits = 80;
-                } else if is_isc {
+                } else if is_isc || trimmed.starts_with('w') || trimmed.is_empty() {
                     min_bits = reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(72);
                 } else if trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))) {
                     min_bits = reg.axioms.get("rune_fixed_width").cloned().unwrap_or(88);
