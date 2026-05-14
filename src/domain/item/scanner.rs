@@ -88,10 +88,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
                             let mut confidence = if is_known { 200 } else { 50 };
                             if alpha && version == 5 {
-                                confidence += 600; // Further increased bonus to ensure selection
+                                confidence += 100;
                             }
                             if alpha && has_checksum {
-                                confidence += 250; // Increased bonus
+                                confidence += 100;
                             }
                             if confidence > max_confidence {
                                 max_confidence = confidence;
