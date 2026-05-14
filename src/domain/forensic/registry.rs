@@ -10,6 +10,10 @@ pub struct AlphaForensics {
     pub mappings: HashMap<String, MappingInfo>,
     pub axioms: HashMap<String, u64>,
     pub item_overrides: Option<HashMap<String, HashMap<String, u32>>>,
+    #[serde(default)]
+    pub forced_compact_codes: Option<Vec<String>>,
+    #[serde(default)]
+    pub forced_runeword_codes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

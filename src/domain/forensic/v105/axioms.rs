@@ -92,7 +92,9 @@ impl V105HeaderGapAxiom {
         // Runeword/Shadow Items (Bit 26/27)
         if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
             8
-        } else if is_compact || (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
+        } else if is_compact {
+            0
+        } else if (flags & (1 << 21)) != 0 || (flags & (1 << 23)) != 0 {
             if has_checksum { 0 } else { 8 }
         } else {
             // Standard equipment
@@ -116,9 +118,15 @@ impl ForensicAxiom for V105AlignmentAxiom {
 }
 
 impl V105AlignmentAxiom {
-    pub fn get_alignment_nudge(&self, version: u8, _is_compact: bool) -> usize {
-        match version {
-            0 | 1 | 2 | 5 => 19, // 19-bit drift identified in standard items
+    pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, _is_compact: bool) -> usize {
+        let is_socketed = (flags & 0x00000008) != 0;
+        let trimmed = code.trim();
+        match (version, trimmed) {
+            (5, "wuw8") => 176,
+            (5, "w8cs") => 96,
+            (0, "wuw8") | (0, "s7ds") => 22, // 3-bit drift from standard 19-bit
+            (0, _) if is_socketed => 32,
+            (0, _) => 19,
             _ => 0,
         }
     }
