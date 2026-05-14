@@ -1,5 +1,5 @@
 use crate::item::{HuffmanTree, peek_item_header_at, is_plausible_item_header, verify_marker_lookahead};
-use crate::domain::item::serialization::is_v105_summary_code;
+
 use rayon::prelude::*;
 
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
