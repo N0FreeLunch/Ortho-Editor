@@ -5,7 +5,7 @@ pub mod axiom;
 pub use quest::{Quest, QuestSet, QuestSection};
 pub use waypoint::{Waypoint, WaypointSet, WaypointSection};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicResult, ForensicAxiom};
-use crate::domain::progression::axiom::{AlphaDifficultyAxiom, V105QuestAxiom, V105WaypointAxiom, PROG_START_FILE, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET};
+use crate::domain::progression::axiom::{AlphaDifficultyAxiom, V105QuestAxiom, V105WaypointAxiom, PROG_START_FILE, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET, V105_NPC_OFFSET};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Progression {
@@ -52,6 +52,16 @@ impl Progression {
             };
             let waypoints = WaypointSet::from_bytes(wp_bytes, difficulty, wp_anchor);
             
+            // Slice 4: Mercenary Forensic Integration
+            let header = &bytes[0..V105_WAYPOINT_OFFSET.min(bytes.len())]; // Rough header approximation
+            let w4_bytes = if bytes.len() > V105_NPC_OFFSET {
+                Some(&bytes[V105_NPC_OFFSET..])
+            } else {
+                None
+            };
+            let merc = crate::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
+            merc.record_forensics(&mut audit);
+
             ForensicResult { value: Ok(Progression { difficulty, quests, waypoints, audit: audit.clone() }), audit }
         } else {
             let difficulty = if bytes.len() > 0x0257 { bytes[0x0257] } else { 0 };

@@ -72,7 +72,12 @@ impl MercenaryState {
         // Axiom 0381: Hybrid Disambiguation Pattern
         // In Alpha v105, class_id 0 is ambiguous (Act 1 Rogue or Act 2 Desert).
         // Use Header[169] (subtype_id) as the tie-breaker.
-        let hireling_id = if class_id == 0 {
+        let reg = crate::domain::forensic::registry::get_registry();
+        let is_ambiguous = reg.mercenary_class_map.get(&class_id)
+            .map(|name| name == "Ambiguous")
+            .unwrap_or(class_id == 0); // Fallback to 0 if registry is missing entry
+
+        let hireling_id = if is_ambiguous {
             subtype_id // Return Header ID (1=Rogue, 8=Desert etc)
         } else {
             class_id // Return w4 Class ID (1=Iron Wolf, 9=Barbarian)
@@ -86,6 +91,26 @@ impl MercenaryState {
             name_id,
             raw_w4,
         }
+    }
+
+    /// Returns the localized class name from the forensic registry.
+    pub fn class_name(&self) -> String {
+        let reg = crate::domain::forensic::registry::get_registry();
+        reg.mercenary_class_map.get(&self.class_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Unknown({})", self.class_id))
+    }
+
+    /// Records forensic evidence about the mercenary state to the audit.
+    pub fn record_forensics(&self, audit: &mut crate::domain::item::axiom_meta::ForensicAudit) {
+        use crate::domain::item::axiom_meta::{ForensicMetadata, Confidence, Intentionality};
+        
+        let name = self.class_name();
+        audit.record(ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            format!("Alpha v105 Mercenary identified as {} (ClassID={}, HirelingID={})", name, self.class_id, self.hireling_id),
+        ));
     }
 
     /// Legacy decoder (w4-only). Prefer `from_hybrid`.

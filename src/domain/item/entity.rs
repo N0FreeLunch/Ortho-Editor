@@ -7,7 +7,7 @@ use crate::domain::item::axiom_meta::ForensicAudit;
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
-use crate::domain::forensic::v105::{V105HeaderGapAxiom, is_v105_summary_code};
+use crate::domain::forensic::v105::V105HeaderGapAxiom;
 use std::ops::{Deref, DerefMut};
 use std::io;
 
@@ -566,14 +566,14 @@ impl Item {
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
             write_player_name(emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.header.version == 5)?;
             if alpha_mode && self.header.version == 5 { emitter.byte_align()?; }
-        } else if alpha_mode && (s_axiom.is_compact || self.code.trim().len() <= 3) {
-            // Forensic (Axiom 0344): Short codes and compact items in Alpha v105 
-            // use 3x8-bit fixed width characters for the item code.
+        } else if s_axiom.code_encoding() == crate::domain::stats::axiom::CodeEncoding::Ascii3x8 {
             let trimmed = self.code.trim();
             let chars: Vec<char> = trimmed.chars().collect();
             for i in 0..3 {
                 let ch = if i < chars.len() { chars[i] as u32 } else { 0 };
-                emitter.write_bits(ch, 8)?;
+                for bit in 0..8 {
+                    emitter.write_bit((ch & (1 << bit)) != 0)?;
+                }
             }
         } else {
             let encoded_code = huffman.encode(&self.code)?;
@@ -657,8 +657,7 @@ impl Item {
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
-                let is_summary = is_v105_summary_code(&self.code);
-                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
+                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
                     if gap_len > 0 {
@@ -880,12 +879,16 @@ pub fn parse_item_body<R: BitRead>(
     } else {
         cursor.begin_segment(ItemSegmentType::Code);
         let mut code = String::new();
+        let s_axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode).with_compact(header.is_compact);
         
-        if alpha_mode && header.is_compact {
+        if alpha_mode && header.is_compact && s_axiom.code_encoding() == crate::domain::stats::axiom::CodeEncoding::Ascii3x8 {
             // Forensic (Axiom 0344): Compact items in Alpha v105 
             // use 3x8-bit fixed width characters for the item code.
             for _ in 0..3 {
-                let ch = cursor.read_bits::<u8>(8)?;
+                let mut ch = 0u8;
+                for bit in 0..8 {
+                    if cursor.read_bit()? { ch |= 1 << bit; }
+                }
                 if ch != 0 { code.push(ch as char); }
             }
         } else {
@@ -934,7 +937,7 @@ pub fn parse_item_body<R: BitRead>(
         let _props_start = cursor.pos();
 
         // Forensic: Ensure byte-alignment after body properties for Version 5 to resolve drift
-        if header.version == 5 {
+        if header.version == 5 && !header.is_compact {
             cursor.byte_align()?;
         }
 

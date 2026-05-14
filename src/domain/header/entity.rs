@@ -232,16 +232,29 @@ impl HeaderAxiom {
                 crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code_str, flags)
             } else { 80 };
 
+            let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
+
             if is_compact && self.alpha_mode {
                 // For compact items, target_width from axioms is the TOTAL width.
                 // Subtract 24 bits for the fixed-width code to get the header target.
                 target_width = target_width.saturating_sub(24);
             }
 
+            if is_summary {
+                return HeaderGeometry {
+                    y_bits: 3,
+                    page_bits: 0,
+                    socket_hint_bits: 0,
+                    has_header_gap: true,
+                    skip_geometry: false,
+                    target_width,
+                };
+            }
+
             return HeaderGeometry {
-                y_bits: 3,
+                y_bits: 4,
                 page_bits: 3,
-                socket_hint_bits: 2,
+                socket_hint_bits: if self.version == 7 { 1 } else { 4 },
                 has_header_gap: true,
                 skip_geometry: false,
                 target_width,

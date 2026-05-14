@@ -128,9 +128,6 @@ impl StatsAxiom {
         if !self.is_alpha() {
             return false;
         }
-        // Axiom 0354: Standard Alpha items (Version 0, 1, 4, 6, 2, 5) expect 
-        // a 9-bit terminator followed by a 9-bit padding slot (TVS).
-        // Runewords and compact items omit this padding.
         if is_runeword || self.is_compact {
             return false;
         }
@@ -295,20 +292,6 @@ impl StatsAxiom {
             let apply_min_nudge = !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact);
             if apply_min_nudge && final_len < min_bits {
                 final_len = min_bits;
-            }
-
-            // Forensic (Slice 16/21): Enforce slot cadence for summary items in Alpha v105
-            if self.is_alpha() && crate::domain::forensic::v105::axioms::is_v105_summary_code(code) {
-                return min_bits;
-            }
-
-            // Forensic (Slice 16): Incorporate V105AlignmentAxiom nudges for Alpha v105 equipment
-            if self.is_alpha() {
-                let nudge = crate::domain::forensic::v105::axioms::V105AlignmentAxiom::default()
-                    .get_alignment_nudge(self.version, code, flags, self.is_compact);
-                if nudge > 0 {
-                    final_len = final_len.max(min_bits + nudge as u64);
-                }
             }
 
             if self.version == 5 && !self.is_compact && !self.is_runeword(flags) {
