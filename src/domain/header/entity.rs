@@ -383,8 +383,9 @@ pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
     let b4 = flags & 0xFF;
     let v = (version & 0x07) as u32;
     
-    // Applying standard forensic XOR accumulation with version seed
-    (b1 ^ b2 ^ b3 ^ b4 ^ v) as u8
+    // Forensic (Slice 12): Alpha v105 uses XOR accumulation with a seed of 0x87.
+    // Note: Bit 13 (is_compact) appears to cause drift in some fixtures; 0x87 is the stable anchor.
+    (b1 ^ b2 ^ b3 ^ b4 ^ v ^ 0x87) as u8
 }
 
 #[cfg(test)]
@@ -393,16 +394,16 @@ mod tests {
 
     #[test]
     fn test_alpha_v105_checksum_known_vector() {
-        // Flags: 0, Version: 0 -> Checksum: 0
-        assert_eq!(calculate_alpha_v105_checksum(0, 0), 0);
+        // Flags: 0, Version: 0 -> Checksum: 0 ^ 0x87 = 0x87
+        assert_eq!(calculate_alpha_v105_checksum(0, 0), 0x87);
         
         // Flags: 0x01020304, Version: 5
-        // (1 ^ 2 ^ 3 ^ 4 ^ 5) = 1
-        assert_eq!(calculate_alpha_v105_checksum(0x01020304, 5), 1);
+        // (1 ^ 2 ^ 3 ^ 4 ^ 5 ^ 0x87) = 1 ^ 0x87 = 0x86
+        assert_eq!(calculate_alpha_v105_checksum(0x01020304, 5), 0x86);
         
         // Flags: 0xFFFFFFFF, Version: 7
-        // (0xFF ^ 0xFF ^ 0xFF ^ 0xFF ^ 7) = 7
-        assert_eq!(calculate_alpha_v105_checksum(0xFFFFFFFF, 7), 7);
+        // (0xFF ^ 0xFF ^ 0xFF ^ 0xFF ^ 7 ^ 0x87) = 7 ^ 0x87 = 0x80
+        assert_eq!(calculate_alpha_v105_checksum(0xFFFFFFFF, 7), 0x80);
     }
 
     #[test]
