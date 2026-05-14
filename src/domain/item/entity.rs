@@ -550,8 +550,13 @@ impl Item {
         // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
         if s_axiom.is_header_only(self.header.flags, &self.code) {
             let current_bits = emitter.written_bits();
-            if self.total_bits > (current_bits - start_bit) {
-                let padding_needed = (self.total_bits - (current_bits - start_bit)) as u32;
+            let mut final_bits = s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
+            if self.total_bits > final_bits { final_bits = self.total_bits; }
+            
+            println!("[DEBUG-SLICE13] to_emitter (header-only): code='{}', current={}, final={}", self.code, current_bits - start_bit, final_bits);
+
+            if final_bits > (current_bits - start_bit) {
+                let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
                 if !self.body.alpha_alignment_padding.is_empty() { 
                     for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } 
                 } else { 
@@ -703,9 +708,12 @@ impl Item {
         use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
         for item in items {
-            emitter.extend_bits(item.gap_bits.iter().cloned())?;
+            if !alpha_mode {
+                emitter.extend_bits(item.gap_bits.iter().cloned())?;
+            }
             if alpha_mode {
                 // Alpha v105 Forensic: Items are bit-packed without byte alignment between them.
+                // The gap bits are already included in the item's own bitstream via to_emitter.
                 let item_bits = item.to_bits(huffman, alpha_mode)?;
                 emitter.extend_bits(item_bits)?;
             } else {
@@ -777,6 +785,9 @@ pub fn parse_item_header<R: BitRead>(
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags);
+    let is_rw_initial = h_axiom.is_runeword(flags, code_hint);
+    println!("[DEBUG-SLICE13] parse_item_header: version={}, compact={}, rw={}, pos={}", version, is_compact, is_rw_initial, cursor.pos());
+    
     let mut y = 0; let mut page = 0; let mut socket_hint = 0;
     let geometry = h_axiom.header_geometry(flags, code_hint);
     let mut alpha_header_gap = None;
@@ -889,7 +900,7 @@ pub fn parse_item_body<R: BitRead>(
                 for bit in 0..8 {
                     if cursor.read_bit()? { ch |= 1 << bit; }
                 }
-                if ch != 0 { code.push(ch as char); }
+                code.push(ch as char);
             }
         } else {
             for i in 0..4 {

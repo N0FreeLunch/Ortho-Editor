@@ -148,8 +148,17 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         return true;
     }
 
+    // 3. Fallback to structural patterns (Potions/Runes) - Axiom 0078
+    if (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
+       (trimmed.starts_with('h') && trimmed.len() == 3) ||
+       (trimmed.starts_with('m') && trimmed.len() == 3) ||
+       (trimmed.starts_with('v') && trimmed.len() == 3) // Rejuvenation potions
+    {
+        return true;
+    }
+
     let reg = crate::domain::forensic::registry::get_registry();
-    // 3. Check registry for explicit forced compact
+    // 4. Check registry for explicit forced compact
     if let Some(codes) = &reg.forced_compact_codes {
         if codes.iter().any(|c| c == trimmed) { return true; }
     }

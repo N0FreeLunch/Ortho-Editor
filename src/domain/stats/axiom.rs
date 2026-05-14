@@ -29,27 +29,22 @@ impl StatsAxiom {
         let trimmed = self.code.trim();
         if self.save_is_alpha {
             let reg = get_registry();
-            let mut is_compact = false;
+            let mut is_compact = crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
             
-            // 1. Check registry root list
-            if let Some(codes) = &reg.forced_compact_codes {
-                if codes.iter().any(|c| c == trimmed) { is_compact = true; }
-            }
-            
-            // 2. Check item overrides
-            if let Some(overrides) = &reg.item_overrides {
-                if let Some(map) = overrides.get(trimmed) {
-                    if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+            if trimmed.is_empty() { 
+                is_compact = true; 
+            } else {
+                if let Some(codes) = &reg.forced_compact_codes {
+                    if codes.iter().any(|c| c == trimmed) { is_compact = true; }
                 }
-            }
-            
-            // 3. Fallback to structural patterns (Potions/Runes)
-            if !is_compact && (
-                (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
-                (trimmed.starts_with('h') && trimmed.len() == 3) ||
-                (trimmed.starts_with('m') && trimmed.len() == 3)
-            ) {
-                is_compact = true;
+                
+                if !is_compact {
+                    if let Some(overrides) = &reg.item_overrides {
+                        if let Some(map) = overrides.get(trimmed) {
+                            if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+                        }
+                    }
+                }
             }
             
             self.is_compact = is_compact;
@@ -191,13 +186,12 @@ impl StatsAxiom {
 
     pub fn is_header_only(&self, flags: u32, code: &str) -> bool {
         let trimmed = code.trim();
-        if !trimmed.is_empty() { return false; }
+        let is_shadow = self.is_v105_shadow(flags);
         
-        if self.is_v105_shadow(flags) { return true; }
-        if self.save_is_alpha && !code.is_empty() && trimmed.is_empty() {
-            return true;
-        }
-        false
+        // Alpha v105 forensic: Blank items are header-only markers.
+        let is_header_only = is_shadow || (self.save_is_alpha && trimmed.is_empty());
+        println!("[DEBUG-SLICE13] is_header_only: code='{}', shadow={}, alpha={}, res={}", code, is_shadow, self.save_is_alpha, is_header_only);
+        is_header_only
     }
 
     pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
@@ -303,6 +297,7 @@ impl StatsAxiom {
                     final_len += 32 - (final_len % 32);
                 }
             } else if self.version == 5 && self.is_runeword(flags) {
+                // Alpha v105 Runewords require byte-level alignment (8-bit)
                 if final_len % 8 != 0 {
                     final_len += 8 - (final_len % 8);
                 }
