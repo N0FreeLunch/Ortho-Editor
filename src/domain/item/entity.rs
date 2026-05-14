@@ -7,7 +7,7 @@ use crate::domain::item::axiom_meta::ForensicAudit;
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
-use crate::domain::forensic::v105::V105HeaderGapAxiom;
+use crate::domain::forensic::v105::{V105HeaderGapAxiom, is_v105_summary_code};
 use std::ops::{Deref, DerefMut};
 use std::io;
 
@@ -496,17 +496,11 @@ impl Item {
         emitter.write_bits(self.header.location as u32, 3)?;
         emitter.write_bits(self.header.x as u32, 4)?;
         
-        let mut s_axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+        let s_axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
             .with_personalization(self.header.is_personalized)
-            .with_compact(self.header.is_compact)
-            .with_code(&self.code);
-            
-        // Slice 6: Forced compact-flag propagation for known structurally compact types 
-        // to close the 23-bit drift for blank/opaque items.
-        if alpha_mode && (self.code.trim().is_empty() || self.code.trim() == "tsc" || self.code.trim() == "isc") {
-            s_axiom.is_compact = true;
-        }
-        
+            .with_code(&self.code)
+            .with_compact(self.header.is_compact);
+
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
@@ -572,8 +566,8 @@ impl Item {
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
             write_player_name(emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.header.version == 5)?;
             if alpha_mode && self.header.version == 5 { emitter.byte_align()?; }
-        } else if alpha_mode && s_axiom.is_compact {
-            // Forensic (Axiom 0344): Compact items in Alpha v105 
+        } else if alpha_mode && (s_axiom.is_compact || self.code.trim().len() <= 3) {
+            // Forensic (Axiom 0344): Short codes and compact items in Alpha v105 
             // use 3x8-bit fixed width characters for the item code.
             let trimmed = self.code.trim();
             let chars: Vec<char> = trimmed.chars().collect();
@@ -663,7 +657,8 @@ impl Item {
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
-                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact) || !self.properties.is_empty() {
+                let is_summary = is_v105_summary_code(&self.code);
+                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
                     if gap_len > 0 {

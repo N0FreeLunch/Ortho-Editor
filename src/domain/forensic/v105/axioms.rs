@@ -130,25 +130,28 @@ impl V105AlignmentAxiom {
 pub fn is_v105_summary_code(code: &str) -> bool {
     let trimmed = code.trim();
     if trimmed.is_empty() {
-        return true; // Blank items are compact
+        return true; // Blank items are compact markers
     }
-    // Forensic (Slice 20): Support non-ASCII Summary Item codes (e.g. 0xCF 0x4F)
+
+    // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
+    // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04' 
     let bytes = code.as_bytes();
     if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
         return true;
     }
-
-    let reg = crate::domain::forensic::registry::get_registry();
-    // 1. Check registry root list
-    if let Some(codes) = &reg.forced_compact_codes {
-        if codes.iter().any(|c| c == trimmed) { return true; }
+    if bytes.len() == 2 && bytes[0] == b'H' && bytes[1] == 0x04 {
+        return true;
     }
 
-    // 2. Check item overrides
-    if let Some(overrides) = &reg.item_overrides {
-        if let Some(map) = overrides.get(trimmed) {
-            if let Some(&val) = map.get("is_compact") { return val != 0; }
-        }
+    // 2. Standard markers that are always compact
+    if trimmed == "tsc" || trimmed == "isc" {
+        return true;
+    }
+
+    let reg = crate::domain::forensic::registry::get_registry();
+    // 3. Check registry for explicit forced compact
+    if let Some(codes) = &reg.forced_compact_codes {
+        if codes.iter().any(|c| c == trimmed) { return true; }
     }
 
     false
