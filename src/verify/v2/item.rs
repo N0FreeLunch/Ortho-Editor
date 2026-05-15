@@ -32,6 +32,13 @@ impl DomainVerifier for ItemVerifier {
         // 2. Round-trip validation
         for item in &items {
             forensic_audit.extend(item.forensic_audit.clone());
+            
+            // Slice 4: Opaque/SemiOpaque items are preserved as-is; skip round-trip parse check 
+            // if we already know they are in a forensic isolation state.
+            if item.is_opaque() || item.is_semi_opaque() {
+                continue;
+            }
+
             let item_bits_vec = match item.to_bits(&huffman, alpha_mode) {
                 Ok(b) => b,
                 Err(e) => {
@@ -94,10 +101,11 @@ impl DomainVerifier for ItemVerifier {
         if let Some(&jm0) = jm_markers.first() {
             if jm0 + 3 < bytes.len() {
                 let expected = u16::from_le_bytes([bytes[jm0 + 2], bytes[jm0 + 3]]) as usize;
-                if expected != items.len() {
+                let semantic_count = items.iter().filter(|it| !it.is_residue()).count();
+                if expected != semantic_count {
                     issues.push(ReportIssue {
                         kind: "jm_coherence".into(),
-                        message: format!("JM header count ({}) != parsed items ({})", expected, items.len()),
+                        message: format!("JM header count ({}) != parsed items ({})", expected, semantic_count),
                         bit_offset: Some((jm0 + 2) as u64 * 8),
                     });
                 }

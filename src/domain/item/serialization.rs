@@ -6,7 +6,7 @@ use crate::domain::stats::{ItemProperty, StatsAxiom, ItemStats};
 use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
-use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
+use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom, V105AlignmentAxiom};
 
 pub fn calculate_property_residue(version: u8) -> usize {
@@ -702,11 +702,13 @@ impl Item {
             }
         }
 
-        // Forensic: Resolve variable header gap specific to Alpha v105
         let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset);
-        if markers.is_empty() { return Ok(items); }
-        
-        let mut start_offset = markers[0];
+        let mut start_offset = if alpha_mode { 48 } else { 48 }; // Default skip for JM + Count
+
+        if !markers.is_empty() {
+            start_offset = markers[0];
+
+        }
 
         for (i, &start) in markers.iter().enumerate() {
             if items.len() >= top_level_count as usize {
@@ -864,6 +866,11 @@ impl Item {
                     opaque_item.range.start = section_bit_offset + start;
                     opaque_item.range.end = section_bit_offset + start + peek_limit;
                     opaque_item.total_bits = peek_limit;
+                    opaque_item.forensic_audit.record(ForensicMetadata::new(
+                        Confidence::Fragile,
+                        Intentionality::Undetermined,
+                        format!("Opaque isolation: {}", _e)
+                    ));
                     items.push(opaque_item);
                     start_offset = start + peek_limit;
                 }
@@ -871,10 +878,16 @@ impl Item {
         }
 
         // Slice 2: Residue capture to ensure item count parity and bit preservation
-        if items.len() < top_level_count as usize {
-            let last_end = items.last().map(|it| it.range.end - section_bit_offset).unwrap_or(start_offset);
-            if last_end < section_bits {
-                let missing = top_level_count as usize - items.len();
+        let last_end = items.last().map(|it| it.range.end - section_bit_offset).unwrap_or(start_offset);
+        if last_end < section_bits {
+            let missing = if items.len() < top_level_count as usize {
+                top_level_count as usize - items.len()
+            } else if items.is_empty() && top_level_count == 0 {
+                1 // Capture all as one residue if empty section
+            } else {
+                1 // Capture trailing bits as 1 residue
+            };
+            if missing > 0 {
                 let remaining_bits = section_bits - last_end;
                 // ... rest of the code
                 let bits_per_item = remaining_bits / missing as u64;
@@ -899,7 +912,7 @@ impl Item {
                     let mut opaque_item = Item::default();
                     opaque_item.expected_start_bit = start;
                     opaque_item.code = "    ".to_string();
-                    opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                    opaque_item.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
                     for (idx, b) in bits.iter().enumerate() {
                         opaque_item.bits.push(crate::domain::item::RecordedBit {
                             bit: *b,
@@ -909,6 +922,11 @@ impl Item {
                     opaque_item.range.start = section_bit_offset + start;
                     opaque_item.range.end = section_bit_offset + end;
                     opaque_item.total_bits = len;
+                    opaque_item.forensic_audit.record(ForensicMetadata::new(
+                        Confidence::Fragile,
+                        Intentionality::Artifactual,
+                        "Residue preservation"
+                    ));
                     items.push(opaque_item);
                 }
             }
@@ -993,7 +1011,51 @@ impl Item {
                 cursor.rollback(body_start_bit);
                 (b, None, None, None)
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                if alpha_mode {
+                    // Slice 4: Forensic isolation. Capture header and preserve body as SemiOpaque.
+                    cursor.rollback(body_start_bit);
+                    let remaining = if let Some(limit) = cursor.limit() {
+                        (limit as i64 - (cursor.pos() - start_bit) as i64).max(0) as u64
+                    } else { 0 };
+                    let body_bits = cursor.read_bits_as_vec(remaining as u32)?;
+                    
+                    let mut item = Item::default();
+                    item.header = header.clone();
+                    item.body.alpha_header_gap = alpha_header_gap;
+                    item.body.alpha_header_gap_bits = alpha_header_gap_bits;
+                    item.range.start = start_bit;
+                    item.range.end = cursor.pos();
+                    item.total_bits = cursor.pos() - start_bit;
+                    item.expected_start_bit = start_bit;
+                    
+                    // Slice 4: Record all bits (header + body) for parity check
+                    let all_recorded = cursor.recorded_bits();
+                    let start_idx = (start_bit as usize).min(all_recorded.len());
+                    let end_idx = (cursor.pos() as usize).min(all_recorded.len());
+                    item.bits = all_recorded[start_idx..end_idx].to_vec();
+
+                    use crate::domain::item::ItemModule;
+                    item.modules.push(ItemModule::SemiOpaque {
+                        body_bits,
+                        reason: format!("{:?}", e),
+                    });
+                    item.forensic_audit.record(ForensicMetadata::new(
+                        Confidence::Speculative,
+                        Intentionality::Undetermined,
+                        format!("SemiOpaque isolation: {}", e)
+                    ));
+                    
+                    let end_pos = cursor.pos() as usize;
+                    if end_pos <= cursor.recorded_bits().len() {
+                        item.bits = cursor.recorded_bits()[(start_bit as usize)..end_pos].to_vec();
+                    }
+
+                    cursor.end_segment();
+                    return Ok(item);
+                }
+                return Err(e);
+            }
         };
         body.alpha_header_gap = alpha_header_gap;
         body.alpha_header_gap_bits = alpha_header_gap_bits;

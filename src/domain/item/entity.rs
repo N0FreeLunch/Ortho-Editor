@@ -3,7 +3,7 @@ use crate::error::{ParsingResult, ParsingError};
 use bitstream_io::BitRead;
 use serde::{Serialize, Deserialize};
 use crate::domain::item::quality::ItemQuality;
-use crate::domain::item::axiom_meta::ForensicAudit;
+use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
@@ -81,6 +81,11 @@ pub enum ItemModule {
     Cursed(CursedItemData),
     Augmentation(u32),
     Opaque(Vec<bool>),
+    SemiOpaque {
+        body_bits: Vec<bool>,
+        reason: String,
+    },
+    Residue(Vec<bool>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -183,6 +188,15 @@ impl DerefMut for Item {
 
 impl Item {
     pub fn code(&self) -> &str { &self.body.code }
+    pub fn is_opaque(&self) -> bool {
+        self.modules.iter().any(|m| matches!(m, ItemModule::Opaque(_) | ItemModule::Residue(_)))
+    }
+    pub fn is_semi_opaque(&self) -> bool {
+        self.modules.iter().any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
+    }
+    pub fn is_residue(&self) -> bool {
+        self.modules.iter().any(|m| matches!(m, ItemModule::Residue(_)))
+    }
     pub fn defense(&self) -> Option<u32> { 
         if let Some(d) = self.body.defense { return Some(d); }
         if self.header.save_is_alpha {
@@ -479,9 +493,12 @@ impl Item {
         let start_bit = emitter.written_bits();
         // Slice 2: Opaque pass-through
         for module in &self.modules {
-            if let ItemModule::Opaque(bits) = module {
-                emitter.extend_bits(bits.iter().cloned())?;
-                return Ok(());
+            match module {
+                ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                    emitter.extend_bits(bits.iter().cloned())?;
+                    return Ok(());
+                }
+                _ => {}
             }
         }
 
@@ -544,6 +561,14 @@ impl Item {
                 emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
                 emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
                 emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+            }
+        }
+
+        // Slice 4: Check for SemiOpaque body preservation
+        for module in &self.modules {
+            if let ItemModule::SemiOpaque { body_bits, .. } = module {
+                emitter.extend_bits(body_bits.iter().cloned())?;
+                return Ok(());
             }
         }
 
