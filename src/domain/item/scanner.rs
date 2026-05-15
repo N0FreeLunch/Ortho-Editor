@@ -55,9 +55,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
                         if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                             let is_known = crate::domain::item::serialization::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
-                            if alpha && !is_known {
-                                continue;
-                            }
                             
                             // Slice 8: Targeted Oracle. If forced, skip lookahead.
                             let mut is_forced = false;
@@ -134,8 +131,17 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         let mut max_score = *confidence as i32;
         
         // Alignment bonus for the current candidate
-        if alpha && !filtered.is_empty() && is_alpha_v105_slot_item(&last_code) && is_v105_aligned(offset - last_offset) {
-            max_score += 150;
+        if alpha && !filtered.is_empty() {
+            let diff = offset - last_offset;
+            if is_alpha_v105_slot_item(&last_code) {
+                if diff == 80 {
+                    max_score += 300; // Strongest preference for standard +80 rhythm
+                } else if is_v105_aligned(diff) {
+                    max_score += 150;
+                }
+            } else if is_v105_aligned(diff) {
+                max_score += 50;
+            }
         }
         
         // Look ahead to see if there's a better (e.g. aligned) marker nearby
@@ -144,8 +150,18 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
             let (o_offset, o_conf, _o_code) = &final_markers[j];
             let mut score = *o_conf as i32;
-            if alpha && !filtered.is_empty() && is_alpha_v105_slot_item(&last_code) && is_v105_aligned(o_offset - last_offset) {
-                score += 150;
+            
+            if alpha && !filtered.is_empty() {
+                let diff = o_offset - last_offset;
+                if is_alpha_v105_slot_item(&last_code) {
+                    if diff == 80 {
+                        score += 300;
+                    } else if is_v105_aligned(diff) {
+                        score += 150;
+                    }
+                } else if is_v105_aligned(diff) {
+                    score += 50;
+                }
             }
             
             if score > max_score {
@@ -178,7 +194,7 @@ fn is_alpha_v105_slot_item(code: &str) -> bool {
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
         "rvs"|"rvl"|"vps"|"tsc"|"isc"|"yps"|"wps"|"us g"|"w8cs"|"w88w"|"xrs"|
         "6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|"mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|
-        "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"
+        "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"|"swsp"
     )
 }
 
