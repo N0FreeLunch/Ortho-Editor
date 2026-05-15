@@ -47,7 +47,7 @@ fn main() {
             &huffman,
             Some((&bytes, bit_pos)),
             is_alpha,
-            false,
+            0,
             None,
         ) {
             if recorder.pos() >= 32 {
