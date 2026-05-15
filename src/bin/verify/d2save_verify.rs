@@ -18,7 +18,7 @@ fn main() -> anyhow::Result<()> {
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
         Err(ArgError::Help(h)) => {
-            println!("{}", h);
+            eprintln!("{}", h);
             return Ok(());
         }
         Err(ArgError::Error(e)) => anyhow::bail!("error: {}\n\n{}", e, parser.usage()),
@@ -53,12 +53,13 @@ fn main() -> anyhow::Result<()> {
                         d2r_core::verify::ReportMetadata::new("d2save_verify", path, "unknown"),
                         d2r_core::verify::ReportStatus::Fail,
                     )
+                    .with_forensic_context()
                     .with_issues(vec![d2r_core::verify::ReportIssue {
                         kind: "io".to_string(),
                         message: format!("Cannot read file: {}", e),
                         bit_offset: None,
                     }]);
-                    om.println(&serde_json::to_string(&report)?);
+                    om.json(&serde_json::to_string(&report)?);
                 } else {
                     om.println(&format!("=== {} ===\n  [ERROR] Cannot read file: {}", path, e));
                 }
@@ -77,7 +78,8 @@ fn main() -> anyhow::Result<()> {
         }
 
         if is_json {
-            om.println(&serde_json::to_string(&report)?);
+            let report_json = report.with_forensic_context();
+            om.json(&serde_json::to_string(&report_json)?);
         } else {
             om.println(&format!("=== {} ===", path));
             om.println(&format!("  status: {:?}", report.status));
@@ -124,6 +126,9 @@ fn main() -> anyhow::Result<()> {
                         .map(|b| format!(" (bit {})", b))
                         .unwrap_or_default()
                 ));
+            }
+            for action in &report.suggested_actions {
+                om.println(&format!("  [ACTION] ({:.2}) {}: {}", action.confidence, action.kind, action.command));
             }
             om.println("");
         }

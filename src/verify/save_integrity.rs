@@ -2,7 +2,7 @@ use crate::domain::header::axiom::{ACTIVE_ACT_OFFSET, EXPANSION_FLAG_OFFSET, PRO
 use crate::domain::progression::axiom::{V105_NPC_OFFSET, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET};
 use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
 use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save};
-use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
+use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction};
 use crate::verify::v2::{DomainVerifier, header::HeaderVerifier, progression::ProgressionVerifier, item::ItemVerifier};
 use serde::Serialize;
 
@@ -144,6 +144,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
 
     let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
     let hints = synthesize_hints(&issues);
+    let actions = triage_actions(&issues);
     let issue_count = issues.len();
     let status = if fail { ReportStatus::Fail } else { ReportStatus::Ok };
     let version = format!("0x{:04X}", save.header.version);
@@ -157,6 +158,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     )
     .with_issues(issues)
     .with_hints(hints)
+    .with_actions(actions)
     .with_results(D2SaveVerifyPayload {
         header_version: save.header.version,
         alpha_mode,
@@ -216,4 +218,53 @@ fn synthesize_hints(issues: &[ReportIssue]) -> Vec<String> {
     hints.sort();
     hints.dedup();
     hints
+}
+
+fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
+    let mut actions = Vec::new();
+    let re_parity = regex::Regex::new(r"Orig Len: (\d+), Emit Len: (\d+)").unwrap();
+
+    for issue in issues {
+        if issue.kind == "item_parity" {
+            if let Some(caps) = re_parity.captures(&issue.message) {
+                let orig_str = caps.get(1).map(|m| m.as_str()).unwrap_or("0");
+                let emit_str = caps.get(2).map(|m| m.as_str()).unwrap_or("0");
+                
+                if let (Ok(orig), Ok(emit)) = (orig_str.parse::<i64>(), emit_str.parse::<i64>()) {
+                    let diff_len = (orig - emit).abs();
+                    let bit_offset = issue.bit_offset.unwrap_or(0);
+                    
+                    if diff_len == 16 {
+                        actions.push(SuggestedAction {
+                            kind: "property_alignment".to_string(),
+                            command: format!("d2item_desync_detector --bit-offset {}", bit_offset),
+                            confidence: 0.9,
+                        });
+                    } else if diff_len == 80 {
+                        actions.push(SuggestedAction {
+                            kind: "slot_collision".to_string(),
+                            command: format!("d2item_alignment_oracle --bit-offset {}", bit_offset),
+                            confidence: 0.85,
+                        });
+                    } else if diff_len % 8 != 0 {
+                        actions.push(SuggestedAction {
+                            kind: "bit_rhythm_rupture".to_string(),
+                            command: format!("d2save_verify --dump-bits {} 128", bit_offset),
+                            confidence: 0.7,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    if actions.is_empty() && !issues.is_empty() {
+        actions.push(SuggestedAction {
+            kind: "investigate".to_string(),
+            command: "d2save_verify --json <file>".to_string(),
+            confidence: 0.3,
+        });
+    }
+    
+    actions
 }

@@ -27,6 +27,29 @@ pub struct VerificationIssue {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ForensicContext {
+    pub args: Vec<String>,
+    pub env: std::collections::HashMap<String, String>,
+    pub version: String,
+}
+
+impl ForensicContext {
+    pub fn current() -> Self {
+        let mut env_map = std::collections::HashMap::new();
+        for (key, value) in std::env::vars() {
+            if key.starts_with("D2R_") || key == "GITHUB_ACTIONS" {
+                env_map.insert(key, value);
+            }
+        }
+        Self {
+            args: std::env::args().collect(),
+            env: env_map,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
 impl VerificationReport {
     pub fn success() -> Self {
         Self {
@@ -93,8 +116,17 @@ pub struct ReportIssue {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SuggestedAction {
+    pub kind: String,
+    pub command: String,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Report<T> {
     pub metadata: ReportMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forensic_context: Option<ForensicContext>,
     pub status: ReportStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scan_results: Option<T>,
@@ -102,6 +134,7 @@ pub struct Report<T> {
     pub hints: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shadow_audit: Option<ShadowAuditResult>,
+    pub suggested_actions: Vec<SuggestedAction>,
 }
 
 impl ReportMetadata {
@@ -119,12 +152,19 @@ impl<T> Report<T> {
     pub fn new(metadata: ReportMetadata, status: ReportStatus) -> Self {
         Self {
             metadata,
+            forensic_context: None,
             status,
             scan_results: None,
             issues: Vec::new(),
             hints: Vec::new(),
             shadow_audit: None,
+            suggested_actions: Vec::new(),
         }
+    }
+
+    pub fn with_forensic_context(mut self) -> Self {
+        self.forensic_context = Some(ForensicContext::current());
+        self
     }
 
     pub fn with_results(mut self, results: T) -> Self {
@@ -144,6 +184,11 @@ impl<T> Report<T> {
 
     pub fn with_shadow_audit(mut self, shadow: ShadowAuditResult) -> Self {
         self.shadow_audit = Some(shadow);
+        self
+    }
+
+    pub fn with_actions(mut self, actions: Vec<SuggestedAction>) -> Self {
+        self.suggested_actions = actions;
         self
     }
 }
@@ -176,7 +221,7 @@ impl OutputManager {
             
             let path = format!("antigravity/outputs/{}_{}.txt", tool_name, timestamp);
             if let Ok(f) = File::create(&path) {
-                println!("[TOKEN-EFFICIENT] Log saved to: {}", path);
+                eprintln!("[TOKEN-EFFICIENT] Log saved to: {}", path);
                 writer = Some(Box::new(f) as Box<dyn Write>);
             }
         } else if let Some(path) = output_path {
@@ -193,19 +238,34 @@ impl OutputManager {
     }
 
     pub fn println(&mut self, text: &str) {
-        if let Some(w) = &mut self.writer {
-            let _ = writeln!(w, "{}", text);
+        if !self.is_json {
+            if let Some(w) = &mut self.writer {
+                let _ = writeln!(w, "{}", text);
+            }
         }
         
-        if !self.is_token_efficient || self.is_json {
+        if self.is_json {
+            eprintln!("{}", text);
+        } else if !self.is_token_efficient {
             println!("{}", text);
         }
     }
     
-    pub fn summary(&mut self, text: &str) {
-        println!("{}", text);
+    pub fn json(&mut self, text: &str) {
         if let Some(w) = &mut self.writer {
             let _ = writeln!(w, "{}", text);
+        }
+        println!("{}", text);
+    }
+    
+    pub fn summary(&mut self, text: &str) {
+        if self.is_json {
+            eprintln!("{}", text);
+        } else {
+            println!("{}", text);
+            if let Some(w) = &mut self.writer {
+                let _ = writeln!(w, "{}", text);
+            }
         }
     }
     
