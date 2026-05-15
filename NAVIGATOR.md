@@ -94,7 +94,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 
 | Tool Name | Scope | Description & Primary Usage |
 | :--- | :--- | :--- |
-| **`d2save_verify`** | Save | Validates checksum, file size, and basic JM marker structure. |
+| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating. |
 | **`d2save_batch`**  | Save | **Batch Runner**: Orchestrates `d2save_verify` and `SymmetryBitDiff` at scale with categorization. |
 | **`d2save_map`**    | Save | Dumps the memory map of a `.d2s` file (JM offsets, item counts). |
 | **`d2save_gap`**    | Save | **GAP Core**: Brute-forces header lengths and calculates alignment scores. |
@@ -136,6 +136,9 @@ cargo run --bin d2save_item_diff -- actual.d2s expected.d2s
 
 # 3. Inspect character status (attrs/skills)
 cargo run --bin d2save_status_inspect -- path/to/save.d2s
+
+# 4. Verify against established baseline (Regression Gate)
+cargo run --bin d2save_verify -- <fixture_path> --diff-baseline <baseline_json_path>
 ```
 
 ## 7. Navigation Routing Gate (Fast Classification)
