@@ -1,10 +1,18 @@
 use crate::item::{HuffmanTree, peek_item_header_at, is_plausible_item_header, verify_marker_lookahead};
+use serde::{Serialize, Deserialize};
 
 use rayon::prelude::*;
 
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
 
-pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64) -> Vec<u64> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemMarker {
+    pub offset: u64,
+    pub confidence: u32,
+    pub code: String,
+}
+
+pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64) -> Vec<ItemMarker> {
     if bytes.is_empty() {
         return Vec::new();
     }
@@ -191,7 +199,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             i += 1;
         }
     }
-    filtered.into_iter().map(|(off, _, _)| off).collect()
+    filtered.into_iter().map(|(offset, confidence, code)| ItemMarker { offset, confidence, code }).collect()
 }
 
 fn is_alpha_v105_slot_item(code: &str) -> bool {

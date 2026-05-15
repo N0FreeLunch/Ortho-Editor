@@ -3,7 +3,7 @@ use crate::error::{ParsingResult, ParsingError};
 use bitstream_io::BitRead;
 use serde::{Serialize, Deserialize};
 use crate::domain::item::quality::ItemQuality;
-use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
+use crate::domain::item::axiom_meta::{ForensicAudit};
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};

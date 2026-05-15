@@ -23,9 +23,10 @@ impl ParallelItemEngine {
         let limit_bits = (bytes.len() * 8) as u64;
 
         // Step 2: Tier 2 - Parallel Instance Hydration
-        markers.par_iter().enumerate().map(|(i, &start_bit)| {
+        markers.par_iter().enumerate().map(|(i, marker)| {
+            let start_bit = marker.offset;
             let end_bit = if i + 1 < markers.len() {
-                markers[i + 1]
+                markers[i + 1].offset
             } else {
                 limit_bits
             };

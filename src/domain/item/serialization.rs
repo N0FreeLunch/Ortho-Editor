@@ -181,6 +181,7 @@ pub fn classify_failure(err: &crate::error::ParsingError) -> crate::domain::item
         BitBudgetExceeded { .. } => Stat,
         Io(_) => Unknown,
         Generic(_) => Unknown,
+        SpeculativeRejection { .. } => Geometry,
     }
 }
 
@@ -703,33 +704,64 @@ impl Item {
         }
 
         let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset);
-        let mut start_offset = if alpha_mode { 48 } else { 48 }; // Default skip for JM + Count
+        let mut start_offset = if alpha_mode { 32 } else { 32 }; // Skip JM (16) + Count (16)
 
         if !markers.is_empty() {
-            start_offset = markers[0];
-
+            start_offset = markers[0].offset;
         }
 
-        for (i, &start) in markers.iter().enumerate() {
+        for (i, marker) in markers.iter().enumerate() {
+            let start = marker.offset;
             if items.len() >= top_level_count as usize {
                 break;
             }
             if start < start_offset {
                 continue;
             }
-            
-            // Forensic: Force alignment for v5 items before property block (1-bit nudge)
-            if alpha_mode {
-                if let Some((_, _, _, _, _, v, _, _, _, _)) = peek_item_header_at(section_bytes, start, huffman, alpha_mode) {
-                    if v == 5 {
-                        let mut nudge_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                        let _ = nudge_reader.skip(start as u32 + 88); // Offset 88 is post-header gap
-                        let _nudge = nudge_reader.read_bit()?;
+
+            // Slice 2: Capture residue between items
+            if start > start_offset {
+                let residue_len = start - start_offset;
+                let mut bits = Vec::new();
+                let mut fallback_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                if fallback_reader.skip(start_offset as u32).is_ok() {
+                    for _ in 0..residue_len {
+                        if let Ok(b) = fallback_reader.read_bit() {
+                            bits.push(b);
+                        } else {
+                            break;
+                        }
                     }
                 }
+                let mut residue = Item::default();
+                residue.expected_start_bit = start_offset;
+                residue.code = "    ".to_string();
+                residue.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                for (idx, b) in bits.iter().enumerate() {
+                    residue.bits.push(crate::domain::item::RecordedBit {
+                        bit: *b,
+                        offset: section_bit_offset + start_offset + idx as u64,
+                    });
+                }
+                residue.range.start = section_bit_offset + start_offset;
+                residue.range.end = section_bit_offset + start;
+                residue.total_bits = residue_len;
+                residue.forensic_audit.record(ForensicMetadata::new(
+                    Confidence::Fragile,
+                    Intentionality::Artifactual,
+                    "Residue preservation"
+                ));
+                items.push(residue);
             }
 
-            let next_marker = markers.get(i + 1).cloned().unwrap_or(section_bits);
+            // Slice 5: Acceptance Gate
+            // If confidence is low, degrade to Opaque isolation instead of attempting full parse.
+            let mut reject_candidate = false;
+            if alpha_mode && marker.confidence < 250 {
+                reject_candidate = true;
+            }
+
+            let next_marker = markers.get(i + 1).map(|m| m.offset).unwrap_or(section_bits);
             let limit = next_marker - start;
 
             let absolute_offset = section_bit_offset + start;
@@ -768,15 +800,30 @@ impl Item {
                 dynamic_limit += 128; // Safety buffer (Retail only)
             }
 
-            match parse_item_at_with_limit(
-                section_bytes,
-                start,
-                huffman,
-                items.len(),
-                alpha_mode,
-                Some(dynamic_limit),
-                if is_compact_final { Some(true) } else { None },
-            ) {
+            let parse_result = if reject_candidate {
+                Err(ParsingFailure {
+                    error: ParsingError::SpeculativeRejection { 
+                        bit_offset: start, 
+                        confidence: marker.confidence 
+                    },
+                    context_stack: vec!["AcceptanceGate".to_string()],
+                    bit_offset: section_bit_offset + start,
+                    context_relative_offset: 0,
+                    hint: Some("Candidate rejected due to low confidence score in noisy Alpha v105 segment.".to_string()),
+                })
+            } else {
+                parse_item_at_with_limit(
+                    section_bytes,
+                    start,
+                    huffman,
+                    items.len(),
+                    alpha_mode,
+                    Some(dynamic_limit),
+                    if is_compact_final { Some(true) } else { None },
+                ).map_err(|e| e) // Compatibility
+            };
+
+            match parse_result {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
                     let actual_consumed = if let Some(flen) = forced_length { flen } else { consumed_bits };
@@ -789,7 +836,7 @@ impl Item {
                     start_offset = start + actual_consumed;
                 }
                 Err(_e) => {
-                    // Marker was plausible but parsing failed. Capture raw bits as Opaque item.
+                    // Marker was plausible but parsing failed or was rejected. Capture raw bits as Opaque item.
                     // Slice 7: Dynamic Interval Capture. Scan for next JM to bound the Opaque block.
                     let mut actual_limit = limit;
                     let mut found_next = false;

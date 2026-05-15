@@ -59,6 +59,8 @@ pub enum ParsingError {
     Io(String), 
     #[error("Parsing error: {0}")]
     Generic(String),
+    #[error("Speculative rejection at bit {bit_offset} (confidence: {confidence})")]
+    SpeculativeRejection { bit_offset: u64, confidence: u32 },
 }
 
 #[derive(Debug, Clone, Error)]
