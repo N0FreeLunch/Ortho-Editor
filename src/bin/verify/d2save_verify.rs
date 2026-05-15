@@ -12,6 +12,8 @@ fn main() -> anyhow::Result<()> {
     parser.add_flag("fix", "Automatically fix checksums if mismatch is detected")
         .short('f')
         .long("fix");
+    parser.add_opt("diff-baseline", "Path to a baseline JSON report for regression checking")
+        .long("diff-baseline");
     parser.add_arg("files", "Save files to verify")
         .repeated();
 
@@ -28,6 +30,8 @@ fn main() -> anyhow::Result<()> {
     let fix_mode = parsed.is_set("fix");
     let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &parsed);
     let is_json = om.is_json();
+    let diff_baseline_path = parsed.get("diff-baseline");
+
 
     if let Some(bits_args) = parsed.get_vec("dump-bits") {
         if files.is_empty() {
@@ -139,12 +143,39 @@ fn main() -> anyhow::Result<()> {
 
     if all_ok {
         om.summary("Verification complete: OK");
-        Ok(())
     } else {
         om.summary("Verification complete: FAILED");
+    }
+
+    if let Some(baseline_path) = diff_baseline_path {
+        let baseline_json = fs::read_to_string(baseline_path).context("Failed to read baseline file")?;
+        let baseline_report: d2r_core::verify::Report<d2r_core::verify::save_integrity::D2SaveVerifyPayload> = serde_json::from_str(&baseline_json).context("Failed to parse baseline JSON")?;
+        
+        // We only support diffing the first file in this slice
+        if let Some(first_path) = files.first() {
+            let bytes = fs::read(first_path)?;
+            let (current_report, _) = verify_save_integrity(first_path, &bytes);
+            let delta = d2r_core::verify::delta::FidelityDelta::compare(&baseline_report, &current_report);
+            
+            om.summary("\n=== FIDELITY DELTA ===");
+            om.summary(&format!("  Status: {:?}", delta.status));
+            om.summary(&format!("  Score Change: {:.2}% -> {:.2}%", delta.prev_score * 100.0, delta.curr_score * 100.0));
+            om.summary(&format!("  Issues: Fixed={}, New={}", delta.fixed_issues.len(), delta.new_issues.len()));
+            
+            if delta.status == d2r_core::verify::delta::DeltaStatus::Regressed {
+                om.summary("  [REGRESSION DETECTED] Exiting with non-zero status.");
+                process::exit(1);
+            }
+        }
+    }
+
+    if all_ok {
+        process::exit(0);
+    } else {
         process::exit(1);
     }
 }
+
 
 fn dump_bits(om: &mut d2r_core::verify::OutputManager, path: &str, start_bit: u64, count: u64) -> anyhow::Result<()> {
     let bytes = fs::read(path)?;

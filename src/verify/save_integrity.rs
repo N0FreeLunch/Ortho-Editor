@@ -4,9 +4,11 @@ use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
 use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save};
 use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction};
 use crate::verify::v2::{DomainVerifier, header::HeaderVerifier, progression::ProgressionVerifier, item::ItemVerifier};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Serialize)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+
 pub struct D2SaveVerifyPayload {
     pub header_version: u32,
     pub alpha_mode: bool,

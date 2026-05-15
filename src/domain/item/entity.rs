@@ -475,21 +475,21 @@ impl Item {
         result
     }
 
-    pub fn to_bytes(&self, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {
+    pub fn to_bytes(&self, idx: usize, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {
         use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
-        self.to_emitter(&mut emitter, huffman, alpha_mode)?;
+        self.to_emitter(idx, &mut emitter, huffman, alpha_mode)?;
         Ok(emitter.into_bytes())
     }
 
-    pub fn to_bits(&self, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<bool>> {
+    pub fn to_bits(&self, idx: usize, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<bool>> {
         use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
-        self.to_emitter(&mut emitter, huffman, alpha_mode)?;
+        self.to_emitter(idx, &mut emitter, huffman, alpha_mode)?;
         Ok(emitter.into_bits())
     }
 
-    pub fn to_emitter(&self, emitter: &mut crate::domain::item::serialization::BitEmitter, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<()> {
+    pub fn to_emitter(&self, idx: usize, emitter: &mut crate::domain::item::serialization::BitEmitter, huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<()> {
         let start_bit = emitter.written_bits();
         // Slice 2: Opaque pass-through
         for module in &self.modules {
@@ -514,6 +514,7 @@ impl Item {
         emitter.write_bits(self.header.x as u32, 4)?;
         
         let s_axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+            .with_index(idx)
             .with_personalization(self.header.is_personalized)
             .with_code(&self.code)
             .with_compact(self.header.is_compact);

@@ -12,11 +12,17 @@ pub struct StatsAxiom {
     pub is_personalized: bool,
     pub is_compact: bool,
     pub code: String,
+    pub idx: usize,
 }
 
 impl StatsAxiom {
     pub fn new(version: u8, quality: ItemQuality, save_is_alpha: bool) -> Self {
-        Self { version, quality, save_is_alpha, is_personalized: false, is_compact: false, code: String::new() }
+        Self { version, quality, save_is_alpha, is_personalized: false, is_compact: false, code: String::new(), idx: 0 }
+    }
+
+    pub fn with_index(mut self, idx: usize) -> Self {
+        self.idx = idx;
+        self
     }
 
     pub fn with_personalization(mut self, is_personalized: bool) -> Self {
@@ -92,6 +98,12 @@ pub struct PropertyRhythm {
     pub value_bits: Option<u32>,
     pub has_terminal_bit: bool,
     pub has_extra_terminal_bit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactLayoutPolicy {
+    AlphaV105,
+    Retail,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +217,24 @@ impl StatsAxiom {
         0
     }
 
+    pub fn compact_layout_policy(&self) -> CompactLayoutPolicy {
+        if self.save_is_alpha && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2) {
+            CompactLayoutPolicy::AlphaV105
+        } else {
+            CompactLayoutPolicy::Retail
+        }
+    }
+
+    /// Resolve 72/73-bit repeating alignment patterns (Axiom 0340)
+    pub fn resolve_compact_rhythm(&self, current_len: u64) -> u64 {
+        if self.save_is_alpha && current_len == 72 && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
+             if self.idx % 2 != 0 {
+                 return 73;
+             }
+        }
+        current_len
+    }
+
     pub fn is_fragment(&self, flags: u32) -> bool {
         self.is_alpha() && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
     }
@@ -283,7 +313,15 @@ impl StatsAxiom {
                 }
             }
 
-            let apply_min_nudge = !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact);
+            // Slice 6: Isolate Alpha v105 compact layout policy.
+            // Suppress retail-style alignment nudges for Alpha v105 compact items.
+            let policy = self.compact_layout_policy();
+            
+            let apply_min_nudge = match policy {
+                CompactLayoutPolicy::AlphaV105 if self.is_compact => false, // Strictly bit-packed
+                _ => !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact),
+            };
+
             if apply_min_nudge && final_len < min_bits {
                 final_len = min_bits;
             }
@@ -292,7 +330,12 @@ impl StatsAxiom {
                 final_len += self.resolve_flag_padding(flags, is_socketed);
             }
 
-            if !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized {
+            let apply_32bit_align = match policy {
+                CompactLayoutPolicy::AlphaV105 if self.is_compact => false,
+                _ => !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized,
+            };
+
+            if apply_32bit_align {
                 if final_len % 32 != 0 {
                     final_len += 32 - (final_len % 32);
                 }
@@ -302,6 +345,8 @@ impl StatsAxiom {
                     final_len += 8 - (final_len % 8);
                 }
             }
+
+            final_len = self.resolve_compact_rhythm(final_len);
 
             if !self.save_is_alpha {
                 if final_len % 8 != 0 {

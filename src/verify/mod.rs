@@ -6,18 +6,22 @@ pub mod sba;
 pub mod save_integrity;
 pub mod symmetry;
 pub mod v2;
+pub mod delta;
+
 
 pub trait Verifier {
     fn verify(&self, fixture: &[u8], reproduced: &[u8]) -> VerificationReport;
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct VerificationReport {
     pub is_success: bool,
     pub issues: Vec<VerificationIssue>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct VerificationIssue {
     pub bit_offset: u64,
     pub bit_length: u64,
@@ -27,7 +31,8 @@ pub struct VerificationIssue {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct ForensicContext {
     pub args: Vec<String>,
     pub env: std::collections::HashMap<String, String>,
@@ -100,7 +105,8 @@ pub enum ReportStatus {
     Warn,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct ReportMetadata {
     pub tool: String,
     pub file: String,
@@ -108,21 +114,24 @@ pub struct ReportMetadata {
     pub timestamp: String,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct ReportIssue {
     pub kind: String,
     pub message: String,
     pub bit_offset: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct SuggestedAction {
     pub kind: String,
     pub command: String,
     pub confidence: f32,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct Report<T> {
     pub metadata: ReportMetadata,
     #[serde(skip_serializing_if = "Option::is_none")]

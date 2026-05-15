@@ -2,7 +2,8 @@
 ///
 /// The levels are ordered from lowest to highest confidence, allowing for
 /// range checks and minimum confidence propagation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+
 pub enum Confidence {
     /// Highly speculative or potentially flawed observation.
     Fragile = 0,
@@ -17,7 +18,8 @@ pub enum Confidence {
 }
 
 /// Represents the nature of the observed behavior or bitstream artifact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+
 pub enum Intentionality {
     /// A deliberate structural design by the game developers.
     Structural,
@@ -28,7 +30,8 @@ pub enum Intentionality {
 }
 
 /// Metadata associated with a forensic axiom.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+
 pub struct ForensicMetadata {
     /// The confidence level of the axiom.
     pub confidence: Confidence,
@@ -148,7 +151,8 @@ impl Confidence {
 }
 
 /// A numerical representation of the reliability of a parsed object.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+
 pub struct FidelityScore {
     /// The score value, ranging from 0.0 (completely unreliable) to 1.0 (verified truth).
     pub value: f32,
@@ -177,7 +181,8 @@ impl FidelityScore {
 }
 
 /// Cumulative record of forensic findings during a pipeline execution.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+
 pub struct ForensicAudit {
     /// The combined confidence level (minimum of all recorded findings).
     pub combined_confidence: Confidence,
