@@ -119,12 +119,12 @@ fn main() -> anyhow::Result<()> {
         }
         last_jm_pos = pos;
 
-        if item_count > 0 {
+        if item_count > 0 || section_size > 6 {
             use d2r_core::item::{Item, HuffmanTree};
             let huffman = HuffmanTree::new();
             let is_alpha = save.header.version == 105;
-            let section_data = &bytes[pos + 4..next_pos];
-            match Item::read_section(section_data, (pos as u64 + 4) * 8, item_count, &huffman, is_alpha) {
+            let section_data = &bytes[pos..next_pos];
+            match Item::read_section(section_data, pos as u64 * 8, item_count, &huffman, is_alpha) {
                 Ok(items) => {
                     println!("    Parsed {} items:", items.len());
                     for (item_idx, item) in items.iter().enumerate() {
@@ -136,6 +136,17 @@ fn main() -> anyhow::Result<()> {
                             item_idx, item.code.trim(), item.header.version, quality_str, item.mode, item.location, item.range.start);
                         if item.code == "Opaque" {
                             println!("        [Opaque] {} bits", item.total_bits);
+                        }
+                        for module in &item.modules {
+                            match module {
+                                d2r_core::item::ItemModule::SemiOpaque { reason, .. } => {
+                                    println!("        [SemiOpaque] {} bits | Reason: {}", item.total_bits, reason);
+                                }
+                                d2r_core::item::ItemModule::Residue(_) => {
+                                    println!("        [Residue] {} bits", item.total_bits);
+                                }
+                                _ => {}
+                            }
                         }
                     }
                 }
