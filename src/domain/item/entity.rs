@@ -589,7 +589,7 @@ impl Item {
             }
         }
 
-        if !s_axiom.is_compact || (alpha_mode && (self.header.version == 0 || self.header.version == 1)) {
+        if !s_axiom.is_compact || (alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2)) {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
 
@@ -903,9 +903,23 @@ pub fn parse_item_body<R: BitRead>(
                 code.push(ch as char);
             }
         } else {
-            for i in 0..4 {
-                match huff.decode_recorded(cursor) {
-                    Ok(ch) => code.push(ch),
+            if alpha_mode {
+                let saved_pos = cursor.pos();
+                if let Ok(bits) = cursor.read_bits_as_vec(24) {
+                    if let Some(stealth) = crate::domain::forensic::v105::axioms::V105StealthCodeAxiom::default().resolve_stealth_code(&bits) {
+                        code = stealth.to_string();
+                    } else {
+                        cursor.rollback(saved_pos);
+                    }
+                } else {
+                    cursor.rollback(saved_pos);
+                }
+            }
+
+            if code.is_empty() {
+                for i in 0..4 {
+                    match huff.decode_recorded(cursor) {
+                        Ok(ch) => code.push(ch),
                     Err(e) => {
                         if alpha_mode && i >= 1 {
                             // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
@@ -932,6 +946,7 @@ pub fn parse_item_body<R: BitRead>(
                 }
             }
         }
+    }
     let mut alpha_nudge = None;
     if alpha_mode {
         // Forensic: Apply 2-bit alignment nudge for Version 5 item bodies
@@ -988,11 +1003,6 @@ impl ExtendedStatsData {
                 let quality = ItemQuality::from(quality_raw);
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
-
-                // Forensic: Correct 3-bit alignment nudge for Version 5 stats
-                if version == 5 {
-                    let _nudge = cursor.read_bits::<u8>(3)?;
-                }
 
                 if (version == 5 || version == 6 || version == 7) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags)) {
                     data.v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);

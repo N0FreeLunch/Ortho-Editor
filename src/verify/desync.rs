@@ -68,7 +68,13 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
             peek_item_header_at(bytes, bit_idx, huffman, is_alpha)
         {
             if is_plausible_item_header(mode, location, &code, flags, version, is_alpha) {
-                if !is_alpha || version == 5 {
+                let is_summary = crate::domain::item::serialization::is_v105_summary_code(&code);
+                if !is_alpha || version == 5 || is_summary {
+                    // Check lookahead to avoid false positives in Oracle search
+                    if is_alpha && !crate::domain::item::verify_marker_lookahead(bytes, bit_idx + _header_bits, huffman, is_alpha) {
+                         bit_idx += 8;
+                         continue;
+                    }
                     oracle_starts.push((bit_idx, code.trim().to_string()));
                     found_count += 1;
                     bit_idx += 72; // Jump minimum item size

@@ -27,9 +27,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         }
     }
     
-    let chunk_count = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
-    
-    let markers: Vec<(u64, u32, String)> = (0..chunk_count)
+    let num_chunks = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
+    let markers: Vec<(u64, u32, String)> = (0..num_chunks)
         .into_par_iter()
         .flat_map(|chunk_idx| {
             let start_byte = chunk_idx * SCAN_CHUNK_SIZE;
@@ -40,9 +39,16 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
             
             let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
-            let mut probe = start_bit;
+            let mut probe = if alpha && chunk_idx == 0 { 
+                // Alpha v105 forensic: Try 0-bit and 32-bit (JM+Count) skips if needed,
+                // but for now start at 0 as section_bytes is already offset.
+                0 
+            } else { 
+                start_bit 
+            };
             
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
+
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
@@ -109,6 +115,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             local_markers
         })
         .collect();
+
 
 
     // Consolidate markers: sort and remove duplicates caused by overlapping scan

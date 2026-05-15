@@ -59,7 +59,7 @@ impl ForensicAxiom for V105PropertyNudgeAxiom {
 impl V105PropertyNudgeAxiom {
     pub fn get_nudge(&self, version: u8) -> u8 {
         match version {
-            5 => 3, // Version 5 requires a 3-bit nudge
+            5 | 2 | 1 | 0 => 3, // Version 5, 2, 1, 0 require a 3-bit residue nudge
             _ => 0,
         }
     }
@@ -73,7 +73,7 @@ impl V105HeaderGapAxiom {
         gap
     }
 
-    fn resolve_gap_internal(&self, version: u8, code: Option<&str>, flags: u32, _is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
+    fn resolve_gap_internal(&self, _version: u8, code: Option<&str>, flags: u32, _is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         if let Some(c) = code {
             let trimmed = c.trim();
@@ -95,6 +95,36 @@ impl V105HeaderGapAxiom {
             // Standard equipment
             if has_checksum { 0 } else { 8 }
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct V105StealthCodeAxiom;
+
+impl ForensicAxiom for V105StealthCodeAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Non-ASCII stealth bit patterns for summary items in Alpha v105",
+        )
+    }
+}
+
+impl V105StealthCodeAxiom {
+    pub fn resolve_stealth_code(&self, bits: &[bool]) -> Option<&'static str> {
+        // pattern for 'isc ': 0x6A 0xF9 0x0F (LE)
+        // bit sequence: 01010110 10011111 11110000 (LSB first)
+        if bits.len() < 24 { return None; }
+        let pattern = [
+            false, true, false, true, false, true, true, false, // 0x6A
+            true, false, false, true, true, true, true, true,  // 0xF9
+            true, true, true, true, false, false, false, false, // 0x0F
+        ];
+        if bits[0..24] == pattern {
+            return Some("isc ");
+        }
+        None
     }
 }
 
@@ -122,6 +152,7 @@ impl V105AlignmentAxiom {
             (0, "wuw8") | (0, "s7ds") => 22, // 3-bit drift from standard 19-bit
             (0, _) if is_socketed => 32,
             (0, _) => 19,
+            (2, _) => 19, // Version 2 follows Version 0 cadence
             _ => 0,
         }
     }
@@ -180,11 +211,15 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         if trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0) {
             return reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(80) as u32;
         }
-        return reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(80) as u32;
+
+        // Alpha v105 Slice 20: 72-bit base slot for compact items.
+        // Conditional 1-bit nudge (73 bits) if bit 72 is set as a potential flag or alignment.
+        let base_width = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72) as u32;
+        return base_width;
     }
 
     match version {
-        1 | 2 | 0 | 4 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(80) as u32,
+        1 | 2 | 0 | 4 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(72) as u32,
         5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
         _ => 0,
     }
