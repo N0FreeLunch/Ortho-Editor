@@ -59,7 +59,8 @@ impl ForensicAxiom for V105PropertyNudgeAxiom {
 impl V105PropertyNudgeAxiom {
     pub fn get_nudge(&self, version: u8) -> u8 {
         match version {
-            5 | 2 | 1 | 0 => 3, // Version 5, 2, 1, 0 require a 3-bit residue nudge
+            5 => 5, // Version 5 requires a 5-bit residue nudge (Slice 23)
+            2 | 1 | 0 => 3, // Version 2, 1, 0 require a 3-bit residue nudge
             _ => 0,
         }
     }

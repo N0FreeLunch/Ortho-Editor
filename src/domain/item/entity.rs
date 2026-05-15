@@ -548,7 +548,8 @@ impl Item {
         }
 
         // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
-        if s_axiom.is_header_only(self.header.flags, &self.code) {
+        // EXCEPT for Alpha equipment which might have property residue/nudges. (Axiom 0365)
+        if s_axiom.is_header_only(self.header.flags, &self.code) && !(alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2 || self.header.version == 5)) {
             let current_bits = emitter.written_bits();
             let mut final_bits = s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
             if self.total_bits > final_bits { final_bits = self.total_bits; }
@@ -662,7 +663,8 @@ impl Item {
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
-                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact) || !self.properties.is_empty() {
+                let is_summary = crate::domain::item::serialization::is_v105_summary_code(&self.code);
+                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
                     if gap_len > 0 {
@@ -1012,10 +1014,6 @@ impl ExtendedStatsData {
                     return Ok(data);
                 } else { 
                     data.id = Some(0); 
-                }
-                // Forensic: Apply 1-bit final property-stream alignment for V5
-                if version == 5 {
-                    let _padding = cursor.read_bit()?;
                 }
             } else { data.id = Some(0); }
         } else {

@@ -10,10 +10,7 @@ use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom, V105AlignmentAxiom};
 
 pub fn calculate_property_residue(version: u8) -> usize {
-    match version {
-        5 | 2 | 1 | 0 => 3,
-        _ => 0,
-    }
+    crate::domain::forensic::v105::axioms::V105PropertyNudgeAxiom::default().get_nudge(version) as usize
 }
 
 pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha: bool) -> Option<u64> {
