@@ -1,7 +1,7 @@
+use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use syn::{visit::{self, Visit}, Item, File};
-use pulldown_cmark::{Parser, Event, Tag, TagEnd};
+use syn::visit::{self, Visit};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Span {
@@ -23,26 +23,28 @@ struct SymbolEntry {
     summary: Option<String>,
 }
 
-struct RustSymbolVisitor<'a> {
+struct RustSymbolVisitor {
     repo: String,
     file_path: String,
     entries: Vec<SymbolEntry>,
-    source: &'a str,
 }
 
-impl<'a> Visit<'a> for RustSymbolVisitor<'a> {
+impl<'a> Visit<'a> for RustSymbolVisitor {
     fn visit_item_fn(&mut self, i: &'a syn::ItemFn) {
         let span = i.sig.ident.span();
         let start = span.start().line;
         let end = span.end().line;
-        
+
         self.entries.push(SymbolEntry {
             repo: self.repo.clone(),
             path: self.file_path.clone(),
             language: "rust".to_string(),
             symbol: i.sig.ident.to_string(),
             kind: "function".to_string(),
-            span: Span { start_line: start, end_line: end },
+            span: Span {
+                start_line: start,
+                end_line: end,
+            },
             container: None,
             summary: None,
         });
@@ -57,7 +59,10 @@ impl<'a> Visit<'a> for RustSymbolVisitor<'a> {
             language: "rust".to_string(),
             symbol: i.ident.to_string(),
             kind: "struct".to_string(),
-            span: Span { start_line: span.start().line, end_line: span.end().line },
+            span: Span {
+                start_line: span.start().line,
+                end_line: span.end().line,
+            },
             container: None,
             summary: None,
         });
@@ -72,7 +77,10 @@ impl<'a> Visit<'a> for RustSymbolVisitor<'a> {
             language: "rust".to_string(),
             symbol: i.ident.to_string(),
             kind: "enum".to_string(),
-            span: Span { start_line: span.start().line, end_line: span.end().line },
+            span: Span {
+                start_line: span.start().line,
+                end_line: span.end().line,
+            },
             container: None,
             summary: None,
         });
@@ -90,7 +98,10 @@ impl<'a> Visit<'a> for RustSymbolVisitor<'a> {
                     language: "rust".to_string(),
                     symbol: format!("impl {}", last.ident),
                     kind: "impl".to_string(),
-                    span: Span { start_line: span.start().line, end_line: span.end().line },
+                    span: Span {
+                        start_line: span.start().line,
+                        end_line: span.end().line,
+                    },
                     container: None,
                     summary: None,
                 });
@@ -107,7 +118,10 @@ impl<'a> Visit<'a> for RustSymbolVisitor<'a> {
             language: "rust".to_string(),
             symbol: i.ident.to_string(),
             kind: "trait".to_string(),
-            span: Span { start_line: span.start().line, end_line: span.end().line },
+            span: Span {
+                start_line: span.start().line,
+                end_line: span.end().line,
+            },
             container: None,
             summary: None,
         });
@@ -122,7 +136,10 @@ impl<'a> Visit<'a> for RustSymbolVisitor<'a> {
             language: "rust".to_string(),
             symbol: i.ident.to_string(),
             kind: "mod".to_string(),
-            span: Span { start_line: span.start().line, end_line: span.end().line },
+            span: Span {
+                start_line: span.start().line,
+                end_line: span.end().line,
+            },
             container: None,
             summary: None,
         });
@@ -136,7 +153,6 @@ fn extract_rust_symbols(repo: &str, file_path: &str, content: &str) -> Vec<Symbo
         repo: repo.to_string(),
         file_path: file_path.to_string(),
         entries: Vec::new(),
-        source: content,
     };
     visitor.visit_file(&file);
     visitor.entries
@@ -147,7 +163,7 @@ fn extract_markdown_symbols(repo: &str, file_path: &str, content: &str) -> Vec<S
     let mut entries = Vec::new();
     let mut current_heading = String::new();
     let mut is_in_heading = false;
-    
+
     // We need line numbers. pulldown-cmark doesn't give direct line numbers easily per event,
     // so we'll do a simple approximation or just capture the text for now.
     // For a better implementation, we could track offset to line mapping.
@@ -225,5 +241,6 @@ fn main() {
 
     let json = serde_json::to_string_pretty(&all_entries).unwrap();
     println!("{}", json);
-    fs::write("navigation-map.json", json).expect("Unable to write navigation-map.json");
+    fs::create_dir_all("tmp").expect("Unable to create tmp directory");
+    fs::write("tmp/navigation-map.json", json).expect("Unable to write tmp/navigation-map.json");
 }

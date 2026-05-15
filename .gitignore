@@ -16,6 +16,7 @@ Thumbs.db
 
 # Temporary files
 *.txt
+tmp_*.json
 tmp_*.md
 *_report.md
 tmp/
@@ -40,6 +41,7 @@ d2r-data/
 
 # AST Navigation Artifacts
 .agents/navigation/
+navigation-map.json
 
 # AI Forensic Cache
 antigravity/
