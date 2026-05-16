@@ -26,7 +26,7 @@ mod tests {
         assert!((parent.header.flags & (1 << 11)) != 0, "Socketed bit should be set in flags");
         
         let huffman = HuffmanTree::new();
-        let bytes = parent.to_bytes(&huffman, true).expect("Should serialize to bytes");
+        let bytes = parent.to_bytes(0, &huffman, true).expect("Should serialize to bytes");
         
         let item = Item::from_bytes(&bytes, &huffman, true).expect("Should parse back");
         
