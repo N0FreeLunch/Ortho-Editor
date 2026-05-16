@@ -409,6 +409,87 @@ impl V105SectionMarkerAxiom {
     }
 }
 
+/// Item property and base field bit widths in Alpha v105.
+#[derive(Debug, Clone, Default)]
+pub struct V105PropertyWidthAxiom;
+
+impl ForensicAxiom for V105PropertyWidthAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Item property and base stat bit widths in Alpha v105",
+        )
+    }
+}
+
+impl V105PropertyWidthAxiom {
+    pub fn quality_bits(&self, is_alpha: bool) -> u32 { if is_alpha { 3 } else { 4 } }
+    pub fn item_id_bits(&self) -> u32 { 32 }
+    pub fn item_level_bits(&self) -> u32 { 7 }
+    pub fn multi_graphics_bits(&self) -> u32 { 3 }
+    pub fn class_specific_bits(&self) -> u32 { 11 }
+    pub fn low_high_graphic_bits(&self) -> u32 { 3 }
+    pub fn magic_affix_bits(&self) -> u32 { 11 }
+    pub fn rare_name_bits(&self) -> u32 { 8 }
+    pub fn rare_affix_bits(&self) -> u32 { 11 }
+    pub fn unique_id_bits(&self) -> u32 { 12 }
+    pub fn runeword_id_bits(&self) -> u32 { 12 }
+    pub fn runeword_level_bits(&self) -> u32 { 4 }
+    pub fn quantity_bits(&self) -> u32 { 9 }
+    pub fn socket_bits(&self) -> u32 { 4 }
+    pub fn set_list_bits(&self) -> u32 { 5 }
+    pub fn teleport_bits(&self) -> u32 { 5 }
+    pub fn v5_runeword_extra_bits(&self) -> u32 { 2 }
+    pub fn ear_class_bits(&self) -> u32 { 3 }
+    pub fn ear_level_bits(&self) -> u32 { 7 }
+    
+    pub fn flags_bits(&self) -> u32 { 32 }
+    pub fn checksum_bits(&self) -> u32 { 8 }
+    pub fn version_bits(&self) -> u32 { 3 }
+    pub fn mode_bits(&self) -> u32 { 3 }
+    pub fn location_bits(&self) -> u32 { 3 }
+    pub fn x_bits(&self) -> u32 { 4 }
+    pub fn nudge_bits(&self) -> u32 { 2 }
+    
+    pub fn is_extended_stats_early_exit(&self, version: u8) -> bool {
+        version == 4 || version == 6 || version == 7
+    }
+    
+    pub fn has_v5_runeword_extra(&self, version: u8) -> bool {
+        version == 5 || version == 6 || version == 7
+    }
+    
+    pub fn is_player_name_alpha_style(&self, version: u8) -> bool {
+        version == 5 || version == 0 || version == 1
+    }
+    
+    pub fn needs_player_name_byte_alignment(&self, version: u8) -> bool {
+        version == 5 || version == 0 || version == 1
+    }
+    
+    pub fn is_ear_name_v5_style(&self, version: u8) -> bool {
+        version == 5
+    }
+    
+    pub fn needs_ear_name_byte_alignment(&self, version: u8) -> bool {
+        version == 5
+    }
+    
+    pub fn needs_post_body_byte_alignment(&self, version: u8, is_compact: bool) -> bool {
+        version == 5 && !is_compact
+    }
+    
+    pub fn stat_bits(&self, stat_id: u32) -> u32 {
+        match stat_id {
+            31 => crate::domain::stats::stat_save_bits(31).unwrap_or(11), // Defense
+            73 => crate::domain::stats::stat_save_bits(73).unwrap_or(8),  // Max Durability
+            72 => crate::domain::stats::stat_save_bits(72).unwrap_or(9),  // Current Durability
+            _ => 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
