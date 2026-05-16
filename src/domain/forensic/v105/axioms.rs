@@ -166,6 +166,20 @@ impl V105AlignmentAxiom {
     }
 }
 
+/// Active alignment nudge (Active Nudging) for rhythm-aware boundary correction.
+#[derive(Debug, Clone, Default)]
+pub struct V105RhythmicNudgeAxiom;
+
+impl ForensicAxiom for V105RhythmicNudgeAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Active rhythmic nudge applied to align parser with predicted scanner target (Axiom 0344)",
+        )
+    }
+}
+
 pub fn is_v105_summary_code(code: &str) -> bool {
     let trimmed = code.trim();
     if trimmed.is_empty() {

@@ -851,7 +851,37 @@ impl Item {
             match parse_result {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
-                    let actual_consumed = if let Some(flen) = forced_length { flen } else { consumed_bits };
+                    
+                    // Slice 9: Active Nudging (AlignmentSnapper)
+                    // If the parser consumed bits don't align with the next marker,
+                    // and we are within the drift threshold (1-3 bits), apply a nudge.
+                    let mut actual_consumed = consumed_bits;
+                    let current_end = start + consumed_bits;
+
+                    if alpha_mode {
+                        // Look ahead to find the next high-confidence marker that hasn't been subsumed
+                        let mut next_target = None;
+                        for next_m in markers.iter().skip(i + 1) {
+                            if next_m.confidence >= 500 { // High confidence threshold
+                                next_target = Some(next_m.offset);
+                                break;
+                            }
+                        }
+
+                        if let Some(target) = next_target {
+                            if current_end < target {
+                                let drift = target - current_end;
+                                if drift <= 3 {
+                                    // Axiom 0344: Snap to Grid. Consume the drift as alignment padding.
+                                    actual_consumed += drift;
+                                    final_item.body.alpha_alignment_padding.extend(vec![false; drift as usize]);
+                                    final_item.forensic_audit.record(crate::domain::forensic::v105::axioms::V105RhythmicNudgeAxiom::default().metadata());
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(flen) = forced_length { actual_consumed = flen; }
                     
                     final_item.expected_start_bit = start;
                     final_item.range.start = section_bit_offset + start;

@@ -239,7 +239,13 @@ impl HeaderAxiom {
                 crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code_str, flags)
             } else { 80 };
 
-            let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
+            let is_summary = if let Some(c) = code_hint {
+                crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
+            } else {
+                // Forensic Peek: In Alpha v105 (v0, v1, v2, v4, v6), compact items are almost always 
+                // summary items (potions, scrolls, etc.) which use 3-bit Y fields.
+                is_compact && (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6)
+            };
 
             if is_compact && self.alpha_mode {
                 // For compact items, target_width from axioms is the TOTAL width.

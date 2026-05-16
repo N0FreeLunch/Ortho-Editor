@@ -89,6 +89,7 @@ impl DomainVerifier for ProgressionVerifier {
             issues,
             audit: audit.clone(),
             fidelity_score: FidelityScore::from_audit(&audit).value,
+            rhythmic_fidelity: 1.0,
         }
     }
 }

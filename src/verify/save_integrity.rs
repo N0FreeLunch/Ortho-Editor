@@ -23,6 +23,7 @@ pub struct D2SaveVerifyPayload {
     pub expansion_flag: u8,
     pub issue_count: usize,
     pub fidelity_score: f32,
+    pub rhythmic_fidelity: f32,
     pub forensic_audit: ForensicAudit,
 }
 
@@ -62,6 +63,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
                 expansion_flag: 0,
                 issue_count: 1,
                 fidelity_score: 0.0,
+                rhythmic_fidelity: 0.0,
                 forensic_audit: ForensicAudit::new(),
             });
             return (report, true);
@@ -145,6 +147,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     forensic_audit.extend(item_report.audit);
 
     let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
+    let rhythmic_fidelity = item_report.rhythmic_fidelity;
     let hints = synthesize_hints(&issues);
     let actions = triage_actions(&issues);
     let issue_count = issues.len();
@@ -187,6 +190,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         },
         issue_count,
         fidelity_score,
+        rhythmic_fidelity,
         forensic_audit,
     });
 

@@ -22,6 +22,7 @@ impl DomainVerifier for HeaderVerifier {
                     issues,
                     audit,
                     fidelity_score: 0.0,
+                    rhythmic_fidelity: 0.0,
                 };
             }
         };
@@ -67,6 +68,7 @@ impl DomainVerifier for HeaderVerifier {
         DomainReport {
             issues,
             fidelity_score: FidelityScore::from_audit(&audit).value,
+            rhythmic_fidelity: 1.0,
             audit,
         }
     }

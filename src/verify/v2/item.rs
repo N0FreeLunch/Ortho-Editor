@@ -25,6 +25,7 @@ impl DomainVerifier for ItemVerifier {
                     issues,
                     audit: forensic_audit,
                     fidelity_score: 0.0,
+                    rhythmic_fidelity: 0.0,
                 };
             }
         };
@@ -119,10 +120,32 @@ impl DomainVerifier for ItemVerifier {
 
         let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;
 
+        // Calculate rhythmic_fidelity (Slice 9)
+        let mut aligned_count = 0;
+        let mut alpha_items_count = 0;
+        if alpha_mode {
+            for item in &items {
+                if item.is_residue() { continue; }
+                alpha_items_count += 1;
+                
+                // Check if the item was naturally aligned (no nudge recorded)
+                let has_nudge = item.forensic_audit.findings.iter().any(|f| f.rationale.contains("Active rhythmic nudge"));
+                if !has_nudge && !item.is_opaque() && !item.is_semi_opaque() {
+                    aligned_count += 1;
+                }
+            }
+        }
+        let rhythmic_fidelity = if alpha_items_count > 0 {
+            aligned_count as f32 / alpha_items_count as f32
+        } else {
+            1.0
+        };
+
         DomainReport {
             issues,
             audit: forensic_audit,
             fidelity_score,
+            rhythmic_fidelity,
         }
     }
 }

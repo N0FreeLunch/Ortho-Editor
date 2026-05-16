@@ -10,6 +10,7 @@ pub struct DomainReport {
     pub issues: Vec<ReportIssue>,
     pub audit: ForensicAudit,
     pub fidelity_score: f32,
+    pub rhythmic_fidelity: f32,
 }
 
 pub trait DomainVerifier {
