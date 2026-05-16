@@ -7,7 +7,7 @@ use crate::domain::item::axiom_meta::{ForensicAudit};
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
-use crate::domain::forensic::v105::V105HeaderGapAxiom;
+use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105PropertyWidthAxiom};
 use std::ops::{Deref, DerefMut};
 use std::io;
 
@@ -777,16 +777,17 @@ pub fn parse_item_header<R: BitRead>(
     is_first_item: bool,
     forced_compact: Option<bool>,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
+    let w_axiom = V105PropertyWidthAxiom::default();
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
-    let flags = cursor.read_bits::<u32>(32)?;
+    let flags = cursor.read_bits::<u32>(w_axiom.flags_bits() as u32)?;
     if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
     let (version, has_checksum) = if alpha_mode {
         let saved_pos = cursor.checkpoint();
-        let checksum_res = cursor.read_bits::<u8>(8);
-        let v_res = cursor.read_bits::<u8>(3);
+        let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
+        let v_res = cursor.read_bits::<u8>(w_axiom.version_bits() as u32);
 
         if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
             let expected = calculate_alpha_v105_checksum(flags, v);
@@ -794,20 +795,20 @@ pub fn parse_item_header<R: BitRead>(
                 (v, true)
             } else {
                 cursor.rollback(saved_pos);
-                let v = cursor.read_bits::<u8>(3)? as u8;
+                let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
                 // Forensic: Support Version 5 items without checksum (e.g. in amazon_empty.d2s)
                 (v, false)
             }
         } else {
             cursor.rollback(saved_pos);
-            (cursor.read_bits::<u8>(3)? as u8, false)
+            (cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8, false)
         }
     } else {
-        (cursor.read_bits::<u8>(3)? as u8, false)
+        (cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8, false)
     };
-    let mode = cursor.read_bits::<u8>(3)? as u8;
-    let location = cursor.read_bits::<u8>(3)? as u8;
-    let x = cursor.read_bits::<u8>(4)? as u8;
+    let mode = cursor.read_bits::<u8>(w_axiom.mode_bits() as u32)? as u8;
+    let location = cursor.read_bits::<u8>(w_axiom.location_bits() as u32)? as u8;
+    let x = cursor.read_bits::<u8>(w_axiom.x_bits() as u32)? as u8;
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
@@ -912,20 +913,22 @@ pub fn parse_item_body<R: BitRead>(
     header: &ItemHeader,
     alpha_mode: bool,
 ) -> ParsingResult<(ItemBody, Option<u8>, Option<u8>, Option<String>)> {
+    let w_axiom = V105PropertyWidthAxiom::default();
     let h_axiom = HeaderAxiom::new(header.version, alpha_mode);
     let is_ear = header.is_ear;
     let (code, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
+        let w_axiom = V105PropertyWidthAxiom::default();
         cursor.begin_segment(ItemSegmentType::Unknown);
-        let class = Some(cursor.read_bits::<u8>(3)? as u8);
-        let level = Some(cursor.read_bits::<u8>(7)? as u8);
-        let name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && header.version == 5)?);
-        if alpha_mode && header.version == 5 { cursor.byte_align()?; }
+        let class = Some(cursor.read_bits::<u8>(w_axiom.ear_class_bits() as u32)? as u8);
+        let level = Some(cursor.read_bits::<u8>(w_axiom.ear_level_bits() as u32)? as u8);
+        let name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && w_axiom.is_ear_name_v5_style(header.version))?);
+        if alpha_mode && w_axiom.needs_ear_name_byte_alignment(header.version) { cursor.byte_align()?; }
         cursor.end_segment();
         (String::new(), None, class, level, name)
     } else {
         cursor.begin_segment(ItemSegmentType::Code);
         let mut code = String::new();
-        let s_axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode).with_compact(header.is_compact);
+        let _s_axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode).with_compact(header.is_compact);
 
         if alpha_mode && header.is_compact {
             // Forensic (Axiom 0344): Compact items in Alpha v105 
@@ -983,7 +986,7 @@ pub fn parse_item_body<R: BitRead>(
                                 }
                                 // Try 2-bit nudge
                                 cursor.rollback(saved_pos);
-                                if let Ok(_) = cursor.read_bits::<u8>(2) {
+                                if let Ok(_) = cursor.read_bits::<u8>(w_axiom.nudge_bits() as u32) {
                                     if let Ok(ch) = huff.decode_recorded(cursor) {
                                         code.push(ch);
                                         continue;
@@ -1003,16 +1006,16 @@ pub fn parse_item_body<R: BitRead>(
             // Forensic: Apply 2-bit alignment nudge for item bodies in Alpha v105
             if h_axiom.is_alpha() && !header.is_compact {
                 if header.version == 5 {
-                    let nudge_val = cursor.read_bits::<u8>(2)?;
+                    let nudge_val = cursor.read_bits::<u8>(w_axiom.nudge_bits() as u32)?;
                     alpha_nudge = Some(nudge_val);
                 } else if header.version == 0 || header.version == 1 || header.version == 2 { 
-                    alpha_nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
+                    alpha_nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(w_axiom.nudge_bits() as u32))?); 
                 }
             }
         }
         
         // Forensic: Ensure byte-alignment after body properties for Version 5 to resolve drift
-        if header.version == 5 && !header.is_compact {
+        if w_axiom.needs_post_body_byte_alignment(header.version, header.is_compact) {
             cursor.byte_align()?;
         }
 
@@ -1045,17 +1048,18 @@ impl ExtendedStatsData {
         let is_runeword = header.is_runeword;
         let is_personalized = header.is_personalized;
         let h_axiom = HeaderAxiom::new(version, alpha_mode);
+        let w_axiom = V105PropertyWidthAxiom::default();
         let is_fragment = h_axiom.is_alpha() && (version == 5 || version == 2 || version == 1) && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0) ;
-        let is_alpha_early_exit = h_axiom.is_alpha() && (version == 4 || version == 6 || version == 7);
+        let is_alpha_early_exit = h_axiom.is_alpha() && w_axiom.is_extended_stats_early_exit(version);
         if axiom.is_alpha() {
             if !is_compact {
-                let quality_raw = cursor.read_bits::<u8>(3)?;
+                let quality_raw = cursor.read_bits::<u8>(w_axiom.quality_bits(true) as u32)?;
                 let quality = ItemQuality::from(quality_raw);
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
 
-                if (version == 5 || version == 6 || version == 7) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags)) {
-                    data.v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(2))?);
+                if w_axiom.has_v5_runeword_extra(version) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags)) {
+                    data.v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32))?);
                     data.id = Some(0);
                 } else if version == 5 && crate::domain::item::serialization::is_v105_summary_code(trimmed_code) {
                     cursor.end_segment();
@@ -1065,37 +1069,37 @@ impl ExtendedStatsData {
                 }
             } else { data.id = Some(0); }
         } else {
-            data.id = Some(cursor.read_bits::<u32>(32)?);
-            data.level = Some(cursor.read_bits::<u8>(7)?);
-            let quality_raw = cursor.read_bits::<u8>(4)?;
+            data.id = Some(cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)?);
+            data.level = Some(cursor.read_bits::<u8>(w_axiom.item_level_bits() as u32)?);
+            let quality_raw = cursor.read_bits::<u8>(w_axiom.quality_bits(false) as u32)?;
             data.quality = Some(ItemQuality::from(quality_raw));
         }
         // Version 2 remains as early exit for now if confirmed. 
         // Version 1 and 4 are removed from early exit to allow stats/sockets parsing.
         if is_alpha_early_exit { cursor.end_segment(); return Ok(data); }
-        if data.has_multiple_graphics { data.multi_graphics_bits = Some(cursor.read_bits::<u8>(3)? as u8); }
-        if data.has_class_specific_data { data.class_specific_bits = Some(cursor.read_bits::<u16>(11)? as u16); }
+        if data.has_multiple_graphics { data.multi_graphics_bits = Some(cursor.read_bits::<u8>(w_axiom.multi_graphics_bits() as u32)? as u8); }
+        if data.has_class_specific_data { data.class_specific_bits = Some(cursor.read_bits::<u16>(w_axiom.class_specific_bits() as u32)? as u16); }
         let quality_val = data.quality.unwrap_or(ItemQuality::Normal);
         match quality_val {
-            ItemQuality::Low | ItemQuality::High => { data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(3)? as u8); }
-            ItemQuality::Magic => { data.magic_prefix = Some(cursor.read_bits::<u16>(11)? as u16); data.magic_suffix = Some(cursor.read_bits::<u16>(11)? as u16); }
+            ItemQuality::Low | ItemQuality::High => { data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(w_axiom.low_high_graphic_bits() as u32)? as u8); }
+            ItemQuality::Magic => { data.magic_prefix = Some(cursor.read_bits::<u16>(w_axiom.magic_affix_bits() as u32)? as u16); data.magic_suffix = Some(cursor.read_bits::<u16>(w_axiom.magic_affix_bits() as u32)? as u16); }
             ItemQuality::Rare | ItemQuality::Crafted => {
-                data.rare_name_1 = Some(cursor.read_bits::<u8>(8)? as u8); data.rare_name_2 = Some(cursor.read_bits::<u8>(8)? as u8);
-                for i in 0..6 { if cursor.read_bit()? { data.rare_affixes[i] = Some(cursor.read_bits::<u16>(11)? as u16); } }
+                data.rare_name_1 = Some(cursor.read_bits::<u8>(w_axiom.rare_name_bits() as u32)? as u8); data.rare_name_2 = Some(cursor.read_bits::<u8>(w_axiom.rare_name_bits() as u32)? as u8);
+                for i in 0..6 { if cursor.read_bit()? { data.rare_affixes[i] = Some(cursor.read_bits::<u16>(w_axiom.rare_affix_bits() as u32)? as u16); } }
             }
             ItemQuality::Set | ItemQuality::Unique => { 
-                let uid = cursor.read_bits::<u16>(12)? as u16;
+                let uid = cursor.read_bits::<u16>(w_axiom.unique_id_bits() as u32)? as u16;
                 if alpha_mode { data.alpha_unique_id_raw = Some(uid); }
                 data.unique_id = Some(uid); 
             }
             _ => {}
         }
-        if is_runeword && !is_fragment && !axiom.is_alpha() && version != 5 { data.runeword_id = Some(cursor.read_bits::<u16>(12)? as u16); data.runeword_level = Some(cursor.read_bits::<u8>(4)? as u8); }
+        if is_runeword && !is_fragment && !axiom.is_alpha() && version != 5 { data.runeword_id = Some(cursor.read_bits::<u16>(w_axiom.runeword_id_bits() as u32)? as u16); data.runeword_level = Some(cursor.read_bits::<u8>(w_axiom.runeword_level_bits() as u32)? as u8); }
         if is_personalized { 
-            if alpha_mode && (version == 5 || version == 0 || version == 1) { cursor.byte_align()?; }
-            data.personalized_player_name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && (version == 5 || version == 0 || version == 1))?); 
+            if alpha_mode && w_axiom.needs_player_name_byte_alignment(version) { cursor.byte_align()?; }
+            data.personalized_player_name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && w_axiom.is_player_name_alpha_style(version))?); 
         }
-        if trimmed_code == "tbk" || trimmed_code == "ibk" { data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(5)? as u8) }
+        if trimmed_code == "tbk" || trimmed_code == "ibk" { data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(w_axiom.teleport_bits() as u32)? as u8) }
         data.timestamp_flag = cursor.read_bit()?;
         let template = crate::domain::item::serialization::item_template(trimmed_code);
         let (reads_defense, reads_durability, reads_quantity) = if let Some(template) = template { (template.is_armor, template.has_durability, template.is_stackable) } else {
@@ -1103,18 +1107,18 @@ impl ExtendedStatsData {
             let armor_like_unknown = data.has_class_specific_data || trimmed_code.contains(' ');
             (armor_like_unknown, armor_like_unknown, is_scroll)
         };
-        if reads_defense && axiom.reads_defense() { data.defense = Some(cursor.read_bits::<u32>(crate::domain::stats::stat_save_bits(31).unwrap_or(11))?); }
+        if reads_defense && axiom.reads_defense() { data.defense = Some(cursor.read_bits::<u32>(w_axiom.stat_bits(31) as u32)?); }
         if reads_durability && axiom.reads_durability() {
-            let max_bits = crate::domain::stats::stat_save_bits(73).unwrap_or(8);
-            let cur_bits = crate::domain::stats::stat_save_bits(72).unwrap_or(9);
-            let m_dur = cursor.read_bits::<u32>(max_bits)?;
+            let max_bits = w_axiom.stat_bits(73);
+            let cur_bits = w_axiom.stat_bits(72);
+            let m_dur = cursor.read_bits::<u32>(max_bits as u32)?;
             data.max_durability = Some(m_dur);
-            if m_dur > 0 { data.current_durability = Some(cursor.read_bits::<u32>(cur_bits)?); let _extra = cursor.read_bit()?; }
+            if m_dur > 0 { data.current_durability = Some(cursor.read_bits::<u32>(cur_bits as u32)?); let _extra = cursor.read_bit()?; }
         }
-        if reads_quantity && axiom.reads_quantity() { data.quantity = Some(cursor.read_bits::<u32>(9)?); }
-        if is_socketed_flag { data.sockets = Some(cursor.read_bits::<u8>(4)? as u8); }
+        if reads_quantity && axiom.reads_quantity() { data.quantity = Some(cursor.read_bits::<u32>(w_axiom.quantity_bits() as u32)?); }
+        if is_socketed_flag { data.sockets = Some(cursor.read_bits::<u8>(w_axiom.socket_bits() as u32)? as u8); }
         if quality_val == ItemQuality::Set {
-            let val = cursor.read_bits::<u8>(5)?;
+            let val = cursor.read_bits::<u8>(w_axiom.set_list_bits() as u32)?;
             data.alpha_set_list_val = Some(val);
             data.set_list_count = match val { 1 => 1, 3 => 2, 7 => 3, 15 => 4, 31 => 5, _ => 0 };
         }

@@ -733,7 +733,9 @@ impl Item {
         let mut subsumed_indices = std::collections::HashSet::new();
 
         for (i, marker) in markers.iter().enumerate() {
-            if subsumed_indices.contains(&i) { continue; }
+            if subsumed_indices.contains(&i) {
+                continue;
+            }
             let start = marker.offset; // marker.offset is relative to section_bytes
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
             if non_residue_count >= top_level_count as usize {
@@ -856,6 +858,7 @@ impl Item {
                     // If the parser consumed bits don't align with the next marker,
                     // and we are within the drift threshold (1-3 bits), apply a nudge.
                     let mut actual_consumed = consumed_bits;
+                    
                     let current_end = start + consumed_bits;
 
                     if alpha_mode {
@@ -902,7 +905,7 @@ impl Item {
                     items.push(final_item);
                     start_offset = start + actual_consumed;
                 }
-                Err(_e) => {
+                Err(e) => {
                     // Marker was plausible but parsing failed or was rejected. Capture raw bits as Opaque item.
                     // Slice 7: Dynamic Interval Capture. Scan for next JM to bound the Opaque block.
                     let mut actual_limit = limit;
@@ -983,7 +986,7 @@ impl Item {
                     opaque_item.forensic_audit.record(ForensicMetadata::new(
                         Confidence::Fragile,
                         Intentionality::Undetermined,
-                        format!("Opaque isolation: {}", _e)
+                        format!("Opaque isolation: {}", e)
                     ));
                     items.push(opaque_item);
                     start_offset = start + peek_limit;
@@ -1023,10 +1026,19 @@ impl Item {
                         }
                     }
 
+                    let mut is_missing_item = false;
+                    if items.len() < top_level_count as usize {
+                        is_missing_item = true;
+                    }
+
                     let mut opaque_item = Item::default();
                     opaque_item.expected_start_bit = start;
                     opaque_item.code = "    ".to_string();
-                    opaque_item.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                    if alpha_mode && is_missing_item {
+                        opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                    } else {
+                        opaque_item.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                    }
                     for (idx, b) in bits.iter().enumerate() {
                         opaque_item.bits.push(crate::domain::item::RecordedBit {
                             bit: *b,
@@ -1339,7 +1351,11 @@ impl Item {
                 for _ in 0..residue_len {
                     if let Ok(b) = cursor.read_bit() { residue_bits.push(b); }
                 }
-                item.modules.push(crate::domain::item::ItemModule::Residue(residue_bits));
+                if alpha_mode {
+                    item.modules.push(crate::domain::item::ItemModule::Opaque(residue_bits));
+                } else {
+                    item.modules.push(crate::domain::item::ItemModule::Residue(residue_bits));
+                }
             }
         }
 
