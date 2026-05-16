@@ -521,14 +521,17 @@ impl Item {
             .with_compact(self.header.is_compact);
 
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
+        let w_axiom = V105PropertyWidthAxiom::default();
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
         if alpha_mode && self.header.save_is_alpha {
             let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
             let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
 
-            // Alpha v105 Forensic: Always write geometry bits for standard Alpha items
-            if !is_v105_shadow && !is_rw && !geometry.skip_geometry {
+            // Alpha v105 Forensic (Slice 25): Mandatory geometry bits for summary items.
+            // Non-summary Alpha items use packed geometry in the gap.
+            let is_v105_summary = w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
+            if is_v105_summary && !is_v105_shadow && !is_rw && !geometry.skip_geometry {
                 emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
                 emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
                 emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
@@ -615,7 +618,7 @@ impl Item {
             }
         }
 
-        let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code);
+        let is_v105_summary = alpha_mode && w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
         if (!s_axiom.is_compact && !is_v105_summary) || (alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2) && !is_v105_summary) {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
@@ -689,7 +692,7 @@ impl Item {
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
-                let is_summary = crate::domain::item::serialization::is_v105_summary_code(&self.code);
+                let is_summary = w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
                 if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
@@ -711,11 +714,17 @@ impl Item {
         }
         if !alpha_mode && self.header.version != 5 && self.header.version != 7 { emitter.write_bit(false)?; }
         let current_bits = emitter.written_bits();
-        let mut final_bits = s_axiom.calculate_alignment(
-            current_bits - start_bit,
-            &self.code,
-            self.header.flags,
-        );
+        let is_v105_summary = alpha_mode && w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
+
+        let mut final_bits = if is_v105_summary {
+            w_axiom.summary_item_fixed_width() as u64
+        } else {
+            s_axiom.calculate_alignment(
+                current_bits - start_bit,
+                &self.code,
+                self.header.flags,
+            )
+        };
         
         // Slice 8: Targeted Length Oracle Support
         // If the item's recorded total_bits is greater than the calculated alignment (via D2R_FORCE_LENGTH),
@@ -837,14 +846,20 @@ pub fn parse_item_header<R: BitRead>(
                 }
             };
 
-            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
+            // Forensic (Slice 25): Summary item identification and mandatory geometry.
+            let is_v105_summary = if let Some(c) = code_hint {
+                crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
+            } else {
+                // Heuristic: Catch compact items and potential stealth-compact items (v0 bit 22)
+                is_compact || (version == 0 && (flags & (1 << 22)) != 0)
+            };
             
-            // Forensic (Slice 25): If no gap was read (checksum items), we still need to read 
-            // the 3-bit Y coordinate for summary items to maintain the 80-bit rhythm.
-            let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
-            if gap_bits == 0 && is_v105_summary && geometry.y_bits > 0 {
+            // Forensic (Slice 25): Mandatory Y coordinate for summary items with zero gap.
+            if is_v105_summary && !is_v105_shadow && !is_rw && !geometry.skip_geometry && gap_bits == 0 {
                 y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
             }
+
+            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
 
             // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
             if version == 5 {
@@ -858,15 +873,19 @@ pub fn parse_item_header<R: BitRead>(
             alpha_header_gap = Some(gap);
 
             // Alpha v105 Forensic: Equipment coordinates (y, page, socket_hint) 
-            // are packed into the header gap rather than being separate bitfields.
-            if (!is_compact || is_v105_summary) && gap_bits >= 8 {
+            // are packed into the header gap for non-summary items.
+            if !is_v105_summary && !is_v105_shadow && !is_rw && gap_bits >= 8 {
                 y = (gap & 0x0F) as u8; 
                 page = ((gap >> 4) & 0x07) as u8; 
                 socket_hint = ((gap >> 7) & 0x01) as u8; 
             }
         } else {
-            let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
-            if !is_compact || is_v105_summary { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
+            let is_v105_summary_local = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
+            if !is_compact || is_v105_summary_local { 
+                y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; 
+                page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; 
+                socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; 
+            }
             alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(8))?;
             let mut val = 0u32;
             for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { if bit { val |= 1 << i; } }
