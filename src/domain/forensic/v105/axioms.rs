@@ -168,11 +168,19 @@ pub fn is_v105_summary_code(code: &str) -> bool {
 
     // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
     // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04' 
-    let bytes = code.as_bytes();
+    // Forensic: Use raw u8 conversion to avoid UTF-8 mismatch for non-ASCII codes (Slice 24)
+    let bytes: Vec<u8> = code.chars().map(|c| c as u32 as u8).collect();
     if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
         return true;
     }
-    if bytes.len() == 2 && bytes[0] == b'H' && bytes[1] == 0x04 {
+    if bytes.len() >= 2 && bytes[0] == 0x48 && bytes[1] == 0x04 {
+        return true;
+    }
+    if bytes.len() >= 3 && bytes[0] == b'b' && bytes[1] == 0x48 && bytes[2] == 0x04 {
+        return true;
+    }
+    // Q€ Resolution: 0x51 0x80 pattern for Alpha v105
+    if bytes.len() >= 2 && bytes[0] == 0x51 && bytes[1] == 0x80 {
         return true;
     }
 

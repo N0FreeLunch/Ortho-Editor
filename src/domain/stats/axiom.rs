@@ -188,6 +188,13 @@ impl StatsAxiom {
 
     pub fn code_encoding(&self) -> CodeEncoding {
         if self.save_is_alpha && self.is_compact {
+            // Axiom 0391: Encoding Duality for Alpha v105 summary items.
+            // Items identified as summary codes (including non-ASCII stealth codes)
+            // use raw 3x8 bit ASCII encoding instead of Huffman.
+            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
+                return CodeEncoding::Ascii3x8;
+            }
+
             let reg = get_registry();
             if let Some(enc) = &reg.compact_code_encoding {
                 if enc == "ascii_3x8" { return CodeEncoding::Ascii3x8; }
@@ -196,14 +203,12 @@ impl StatsAxiom {
         CodeEncoding::Huffman
     }
 
-    pub fn is_header_only(&self, flags: u32, code: &str) -> bool {
-        let trimmed = code.trim();
-        let is_shadow = self.is_v105_shadow(flags);
+    pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
+        let is_shadow = self.is_v105_shadow(_flags);
         
-        // Alpha v105 forensic: Blank items are header-only markers.
-        let is_header_only = is_shadow || (self.save_is_alpha && trimmed.is_empty());
-        eprintln!("[DEBUG-SLICE13] is_header_only: code='{}', shadow={}, alpha={}, res={}", code, is_shadow, self.save_is_alpha, is_header_only);
-        is_header_only
+        // Alpha v105 forensic: Shadow items are header-only.
+        // Blank codes ('    ') in early Alpha can still have property residues if they are non-compact.
+        is_shadow
     }
 
     pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
@@ -293,37 +298,41 @@ impl StatsAxiom {
         if (flags & 0x00000040) != 0 { padding += 32; }
         padding
     }
+pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
+    let mut final_len = current_len;
+    let is_socketed = self.is_socketed(flags, self.is_compact);
+    let is_personalized = self.is_personalized(flags);
 
-    pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
-        let mut final_len = current_len;
-        let is_socketed = self.is_socketed(flags, self.is_compact);
-        let is_personalized = self.is_personalized(flags);
+    if self.save_is_alpha {
+        let reg = get_registry();
+        let trimmed = code.trim();
 
-        if self.save_is_alpha {
-            let reg = get_registry();
-            let trimmed = code.trim();
+        let mut min_bits = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
 
-            let mut min_bits = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
-
-            if let Some(overrides) = &reg.item_overrides {
-                if let Some(item_map) = overrides.get(trimmed) {
-                    if let Some(&f_width) = item_map.get("fixed_width") {
-                        min_bits = f_width as u64;
-                    }
+        if let Some(overrides) = &reg.item_overrides {
+            if let Some(item_map) = overrides.get(trimmed) {
+                if let Some(&f_width) = item_map.get("fixed_width") {
+                    min_bits = f_width as u64;
                 }
             }
-
-            // Axiom 0340: Institutional Rhythm Resolution
-            min_bits = self.resolve_compact_rhythm(min_bits);
+        }
 
             // Slice 6: Isolate Alpha v105 compact layout policy.
-            // Suppress retail-style alignment nudges for Alpha v105 compact items.
+            // Axiom 0340: Institutional Rhythm Resolution (72/73 bit pattern)
+            min_bits = self.resolve_compact_rhythm(min_bits);
+
             let policy = self.compact_layout_policy();
             
-            let apply_min_nudge = match policy {
-                CompactLayoutPolicy::AlphaV105 if self.is_compact => true, 
-                _ => !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact),
-            };
+            // Alpha v105 compact items are strictly bounded and do not accept retail-style alignment nudges.
+            if policy == CompactLayoutPolicy::AlphaV105 && self.is_compact {
+                if final_len < min_bits {
+                    final_len = min_bits;
+                }
+                // Suppress all further nudges/alignments for Alpha v105 compact
+                return self.resolve_compact_rhythm(final_len);
+            }
+
+            let apply_min_nudge = !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact);
 
             let alignment_nudge = V105AlignmentAxiom::default().get_alignment_nudge(self.version, &self.code, flags, self.is_compact);
             if alignment_nudge > 0 {
@@ -336,10 +345,7 @@ impl StatsAxiom {
                 final_len += self.resolve_flag_padding(flags, is_socketed);
             }
 
-            let apply_32bit_align = match policy {
-                CompactLayoutPolicy::AlphaV105 if self.is_compact => false,
-                _ => !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized,
-            };
+            let apply_32bit_align = !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized;
 
             if apply_32bit_align {
                 if final_len % 32 != 0 {
@@ -353,12 +359,6 @@ impl StatsAxiom {
             }
 
             final_len = self.resolve_compact_rhythm(final_len);
-
-            if !self.save_is_alpha {
-                if final_len % 8 != 0 {
-                    final_len += 8 - (final_len % 8);
-                }
-            }
 
             if let Ok(nudge_val) = std::env::var("D2R_ALIGNMENT_NUDGE") {
                 if let Ok(nudge_bits) = nudge_val.parse::<i64>() {
