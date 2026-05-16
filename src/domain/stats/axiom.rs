@@ -202,7 +202,7 @@ impl StatsAxiom {
         
         // Alpha v105 forensic: Blank items are header-only markers.
         let is_header_only = is_shadow || (self.save_is_alpha && trimmed.is_empty());
-        println!("[DEBUG-SLICE13] is_header_only: code='{}', shadow={}, alpha={}, res={}", code, is_shadow, self.save_is_alpha, is_header_only);
+        eprintln!("[DEBUG-SLICE13] is_header_only: code='{}', shadow={}, alpha={}, res={}", code, is_shadow, self.save_is_alpha, is_header_only);
         is_header_only
     }
 
@@ -218,7 +218,7 @@ impl StatsAxiom {
     }
 
     pub fn compact_layout_policy(&self) -> CompactLayoutPolicy {
-        if self.save_is_alpha && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2) {
+        if self.save_is_alpha && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) {
             CompactLayoutPolicy::AlphaV105
         } else {
             CompactLayoutPolicy::Retail
@@ -304,6 +304,7 @@ impl StatsAxiom {
             let trimmed = code.trim();
 
             let mut min_bits = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
+            println!("[DEBUG-ALIGN] version={}, code='{}', current={}, min={}", self.version, code, current_len, min_bits);
 
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(item_map) = overrides.get(trimmed) {
@@ -312,6 +313,9 @@ impl StatsAxiom {
                     }
                 }
             }
+
+            // Axiom 0340: Institutional Rhythm Resolution
+            min_bits = self.resolve_compact_rhythm(min_bits);
 
             // Slice 6: Isolate Alpha v105 compact layout policy.
             // Suppress retail-style alignment nudges for Alpha v105 compact items.

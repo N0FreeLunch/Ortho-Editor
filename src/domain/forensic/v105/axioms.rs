@@ -144,7 +144,8 @@ impl ForensicAxiom for V105AlignmentAxiom {
 }
 
 impl V105AlignmentAxiom {
-    pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, _is_compact: bool) -> usize {
+    pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, is_compact: bool) -> usize {
+        if is_compact { return 0; }
         let is_socketed = (flags & 0x00000008) != 0;
         let trimmed = code.trim();
         match (version, trimmed) {
@@ -182,9 +183,10 @@ pub fn is_v105_summary_code(code: &str) -> bool {
 
     // 3. Fallback to structural patterns (Potions/Runes) - Axiom 0078
     if (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
-       (trimmed.starts_with('h') && trimmed.len() == 3) ||
-       (trimmed.starts_with('m') && trimmed.len() == 3) ||
-       (trimmed.starts_with('v') && trimmed.len() == 3) // Rejuvenation potions
+       ((trimmed.starts_with('h') || trimmed.starts_with("wh")) && (trimmed.len() == 3 || trimmed.len() == 4)) ||
+       ((trimmed.starts_with('m') || trimmed.starts_with("wm")) && (trimmed.len() == 3 || trimmed.len() == 4)) ||
+       (trimmed.starts_with('v') && (trimmed.len() == 3 || trimmed.len() == 4)) || // Rejuvenation potions / Vials
+       (trimmed.starts_with('g') && trimmed.len() == 3) // Gems
     {
         return true;
     }

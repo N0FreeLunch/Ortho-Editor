@@ -175,6 +175,9 @@ impl HeaderAxiom {
         if self.alpha_mode {
             if let Some(c) = code {
                 let trimmed = c.trim();
+                if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+                    return false;
+                }
                 let reg = crate::domain::forensic::registry::get_registry();
                 
                 // 1. Check registry root list
@@ -211,6 +214,7 @@ impl HeaderAxiom {
     pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
         let is_compact = self.is_compact(flags, code_hint);
         let is_personalized = self.is_personalized(flags);
+        eprintln!("[DEBUG-GEOMETRY] version={}, alpha={}, compact={}, code='{:?}'", self.version, self.alpha_mode, is_compact, code_hint);
 
         if self.alpha_mode {
             let is_rw = self.is_runeword(flags, code_hint);
@@ -326,6 +330,7 @@ impl ItemHeader {
                 if is_rw || is_v105_shadow {
                     let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                     let gap_bits = if is_v105_shadow_local { 8 } else { 24 }; 
+                    eprintln!("[DEBUG-HEADER-BRANCH] RW/Shadow: gap_bits={}", gap_bits);
                     let gap = cursor.read_bits::<u32>(gap_bits)?;
                     alpha_header_gap = Some(gap);
 
@@ -340,7 +345,9 @@ impl ItemHeader {
                     socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
                     
                     if geometry.has_header_gap || !has_checksum {
-                        alpha_header_gap = Some(cursor.read_bits::<u32>(8)?);
+                        let gap = cursor.read_bits::<u32>(8)?;
+                        eprintln!("[DEBUG-HEADER-BRANCH] StandardAlpha: gap_bits=8, val={}", gap);
+                        alpha_header_gap = Some(gap);
                     }
                 }
             } else {
@@ -362,6 +369,7 @@ impl ItemHeader {
             let current_bits = (cursor.pos() - start_bit) as u32;
             if current_bits < geometry.target_width {
                 let to_read = geometry.target_width - current_bits;
+                eprintln!("[DEBUG-HEADER] current={}, target={}, to_read={}", current_bits, geometry.target_width, to_read);
                 alpha_header_gap = Some(cursor.read_bits::<u32>(to_read)?);
             }
         }
