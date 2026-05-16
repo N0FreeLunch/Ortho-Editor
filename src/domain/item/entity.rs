@@ -167,6 +167,7 @@ pub struct Item {
     pub modules: Vec<ItemModule>,
     pub range: ItemBitRange,
     pub total_bits: u64,
+    pub logical_width: Option<u64>,
     pub gap_bits: Vec<bool>,
     pub segments: Vec<BitSegment>,
     pub expected_start_bit: u64,
@@ -925,18 +926,33 @@ pub fn parse_item_body<R: BitRead>(
         cursor.begin_segment(ItemSegmentType::Code);
         let mut code = String::new();
         let s_axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode).with_compact(header.is_compact);
-        
-        if alpha_mode && header.is_compact && s_axiom.code_encoding() == crate::domain::stats::axiom::CodeEncoding::Ascii3x8 {
+
+        if alpha_mode && header.is_compact {
             // Forensic (Axiom 0344): Compact items in Alpha v105 
             // use 3x8-bit fixed width characters for the item code.
+            let saved_pos = cursor.pos();
+            let mut temp_code = String::new();
+            let mut success = true;
             for _ in 0..3 {
                 let mut ch = 0u8;
                 for bit in 0..8 {
-                    if cursor.read_bit()? { ch |= 1 << bit; }
+                    match cursor.read_bit() {
+                        Ok(b) => { if b { ch |= 1 << bit; } }
+                        Err(_) => { success = false; break; }
+                    }
                 }
-                code.push(ch as char);
+                if !success { break; }
+                temp_code.push(ch as char);
             }
-        } else {
+            
+            if success && crate::domain::forensic::v105::axioms::is_v105_summary_code(&temp_code) {
+                code = temp_code;
+            } else {
+                cursor.rollback(saved_pos);
+            }
+        }
+
+        if code.is_empty() {
             if alpha_mode {
                 let saved_pos = cursor.pos();
                 if let Ok(bits) = cursor.read_bits_as_vec(24) {
@@ -954,48 +970,47 @@ pub fn parse_item_body<R: BitRead>(
                 for i in 0..4 {
                     match huff.decode_recorded(cursor) {
                         Ok(ch) => code.push(ch),
-                    Err(e) => {
-                        if alpha_mode && i >= 1 {
-                            // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
-                            let saved_pos = cursor.pos();
-                            // Try 1-bit nudge
-                            if let Ok(_) = cursor.read_bit() {
-                                if let Ok(ch) = huff.decode_recorded(cursor) {
-                                    code.push(ch);
-                                    continue;
+                        Err(e) => {
+                            if alpha_mode && i >= 1 {
+                                // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
+                                let saved_pos = cursor.pos();
+                                // Try 1-bit nudge
+                                if let Ok(_) = cursor.read_bit() {
+                                    if let Ok(ch) = huff.decode_recorded(cursor) {
+                                        code.push(ch);
+                                        continue;
+                                    }
                                 }
-                            }
-                            // Try 2-bit nudge
-                            cursor.rollback(saved_pos);
-                            if let Ok(_) = cursor.read_bits::<u8>(2) {
-                                if let Ok(ch) = huff.decode_recorded(cursor) {
-                                    code.push(ch);
-                                    continue;
+                                // Try 2-bit nudge
+                                cursor.rollback(saved_pos);
+                                if let Ok(_) = cursor.read_bits::<u8>(2) {
+                                    if let Ok(ch) = huff.decode_recorded(cursor) {
+                                        code.push(ch);
+                                        continue;
+                                    }
                                 }
+                                cursor.rollback(saved_pos);
                             }
-                            cursor.rollback(saved_pos);
+                            return Err(e);
                         }
-                        return Err(e);
                     }
                 }
             }
         }
-    }
-    let mut alpha_nudge = None;
-    if alpha_mode {
-        // Forensic: Apply 2-bit alignment nudge for Version 5 item bodies
-        if h_axiom.is_alpha() && !header.is_compact {
-            if header.version == 5 {
-                let nudge_val = cursor.read_bits::<u8>(2)?;
-                alpha_nudge = Some(nudge_val);
-            } else if header.version == 0 || header.version == 1 { 
-                alpha_nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
+
+        let mut alpha_nudge = None;
+        if alpha_mode {
+            // Forensic: Apply 2-bit alignment nudge for item bodies in Alpha v105
+            if h_axiom.is_alpha() && !header.is_compact {
+                if header.version == 5 {
+                    let nudge_val = cursor.read_bits::<u8>(2)?;
+                    alpha_nudge = Some(nudge_val);
+                } else if header.version == 0 || header.version == 1 || header.version == 2 { 
+                    alpha_nudge = Some(cursor.with_context("AlphaNudge", |c| c.read_bits::<u8>(2))?); 
+                }
             }
         }
-    }
         
-        let _props_start = cursor.pos();
-
         // Forensic: Ensure byte-alignment after body properties for Version 5 to resolve drift
         if header.version == 5 && !header.is_compact {
             cursor.byte_align()?;
@@ -1004,13 +1019,14 @@ pub fn parse_item_body<R: BitRead>(
         cursor.end_segment();
         (code, alpha_nudge, None, None, None)
     };
-Ok((ItemBody {
-code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,
-defense: None, max_durability: None, current_durability: None, quantity: None, alpha_header_gap: None, 
-alpha_header_gap_bits: Vec::new(),
-v5_runeword_extra: None, v105_7mgw_payload: None, alpha_nudge, alpha_set_list_val: None, alpha_shadow_skip_bits: None, 
-alpha_body_gap_bits: Vec::new(), alpha_alignment_padding: Vec::new(),
-}, ear_class, ear_level, ear_player_name))
+
+    Ok((ItemBody {
+        code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,
+        defense: None, max_durability: None, current_durability: None, quantity: None, alpha_header_gap: None, 
+        alpha_header_gap_bits: Vec::new(),
+        v5_runeword_extra: None, v105_7mgw_payload: None, alpha_nudge, alpha_set_list_val: None, alpha_shadow_skip_bits: None, 
+        alpha_body_gap_bits: Vec::new(), alpha_alignment_padding: Vec::new(),
+    }, ear_class, ear_level, ear_player_name))
 }
 impl ExtendedStatsData {
     pub fn read_from_cursor<R: BitRead>(

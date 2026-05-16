@@ -857,6 +857,7 @@ impl Item {
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
                     final_item.total_bits = actual_consumed;
+                    final_item.logical_width = Some(actual_consumed);
                     
                     // Slice 7: Mark subsumed markers (Competitive Marker Resolution)
                     let end_bit = start + actual_consumed;
@@ -1202,6 +1203,7 @@ impl Item {
             modules: Vec::new(),
             range: crate::domain::item::ItemBitRange { start: start_bit, end: 0 },
             total_bits: 0,
+            logical_width: None,
             gap_bits: Vec::new(),
             segments: Vec::new(),
             expected_start_bit: 0,
