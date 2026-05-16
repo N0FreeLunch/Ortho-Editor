@@ -530,7 +530,7 @@ impl Item {
 
             // Alpha v105 Forensic (Slice 25): Mandatory geometry bits for summary items.
             // Non-summary Alpha items use packed geometry in the gap.
-            let is_v105_summary = w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
+            let is_v105_summary = w_axiom.is_summary_item(self.header.version, &self.code);
             if is_v105_summary && !is_v105_shadow && !is_rw && !geometry.skip_geometry {
                 emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
                 emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
@@ -618,7 +618,7 @@ impl Item {
             }
         }
 
-        let is_v105_summary = alpha_mode && w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
+        let is_v105_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
         if (!s_axiom.is_compact && !is_v105_summary) || (alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2) && !is_v105_summary) {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
@@ -692,7 +692,7 @@ impl Item {
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
-                let is_summary = w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
+                let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
                 if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);

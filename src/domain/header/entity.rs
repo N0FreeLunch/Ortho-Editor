@@ -92,7 +92,6 @@ impl HeaderAxiom {
         }
 
         if self.alpha_mode {
-            // Forensic: Alpha v105 follows standard mode/location boundaries.
             // mode <= 6 (standard), location <= 5 (standard).
             // version <= 7 (3-bit field).
             mode <= 6 && location <= 5 && self.version <= 7
@@ -217,7 +216,7 @@ impl HeaderAxiom {
     pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
         let is_compact = self.is_compact(flags, code_hint);
         let is_personalized = self.is_personalized(flags);
-        eprintln!("[DEBUG-GEOMETRY] version={}, alpha={}, compact={}, code='{:?}'", self.version, self.alpha_mode, is_compact, code_hint);
+        // eprintln!("[DEBUG-GEOMETRY] version={}, alpha={}, compact={}, code='{:?}'", self.version, self.alpha_mode, is_compact, code_hint);
 
         if self.alpha_mode {
             let is_rw = self.is_runeword(flags, code_hint);
@@ -260,6 +259,17 @@ impl HeaderAxiom {
                     socket_hint_bits: 0,
                     has_header_gap: true,
                     skip_geometry: false,
+                    target_width,
+                };
+            }
+
+            if is_compact {
+                return HeaderGeometry {
+                    y_bits: 0,
+                    page_bits: 0,
+                    socket_hint_bits: 0,
+                    has_header_gap: false,
+                    skip_geometry: true,
                     target_width,
                 };
             }

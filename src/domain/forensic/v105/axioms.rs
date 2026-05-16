@@ -181,72 +181,12 @@ impl ForensicAxiom for V105RhythmicNudgeAxiom {
 }
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    let trimmed = code.trim();
-    if trimmed.is_empty() {
-        return false; // Be conservative for empty codes to avoid scanner drift
-    }
-
-    // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
-    // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04'
-    // Forensic: Use raw u8 conversion to avoid UTF-8 mismatch for non-ASCII codes (Slice 24)
-    let bytes: Vec<u8> = code.chars().map(|c| c as u32 as u8).collect();
-
-    // Pattern: ÏO (0xCF 0x4F)
-    if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
-        return true;
-    }
-    // Pattern: H\x04 (0x48 0x04)
-    if bytes.len() >= 2 && bytes[0] == 0x48 && bytes[1] == 0x04 {
-        return true;
-    }
-    // Pattern: bH\x04 (0x62 0x48 0x04)
-    if bytes.len() >= 3 && bytes[0] == b'b' && bytes[1] == 0x48 && bytes[2] == 0x04 {
-        return true;
-    }
-    // Pattern: Q€ (0x51 0x80)
-    if bytes.len() >= 2 && bytes[0] == 0x51 && bytes[1] == 0x80 {
-        return true;
-    }
-    // Pattern: ~ (0x7E 0x02 0x80) observed in amazon_initial
-    if bytes.len() >= 2 && bytes[0] == 0x7E && bytes[1] == 0x02 {
-        return true;
-    }
-
-    // Pattern: "   9" (0x20 0x20 0x20 0x39)
-    if bytes.len() >= 4 && bytes[0] == 0x20 && bytes[1] == 0x20 && bytes[2] == 0x20 && bytes[3] == 0x39 {
-        return true;
-    }
-
-    // Þ. Resolution: 0xDE 0x2E pattern for Alpha v105
-    if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
-        return true;
-    }
-    // 2. Standard markers that are always compact
-    if trimmed == "tsc" || trimmed == "isc" {
-        return true;
-    }
-
-    // 3. Fallback to structural patterns (Potions/Runes) - Axiom 0078
-    if (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
-       ((trimmed.starts_with('h') || trimmed.starts_with("wh")) && (trimmed.len() == 3 || trimmed.len() == 4)) ||
-       ((trimmed.starts_with('m') || trimmed.starts_with("wm")) && (trimmed.len() == 3 || trimmed.len() == 4)) ||
-       (trimmed.starts_with('v') && (trimmed.len() == 3 || trimmed.len() == 4)) || // Rejuvenation potions / Vials
-       (trimmed.starts_with('g') && trimmed.len() == 3) // Gems
-    {
-        return true;
-    }
-
-    let reg = crate::domain::forensic::registry::get_registry();
-    // 4. Check registry for explicit forced compact
-    if let Some(codes) = &reg.forced_compact_codes {
-        if codes.iter().any(|c| c == trimmed) { return true; }
-    }
-
-    false
+    V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     let trimmed = code.trim();
-    let is_summary = is_v105_summary_code(code);
+    let w_axiom = V105PropertyWidthAxiom::default();
+    let is_summary = w_axiom.is_summary_rhythm_forced(version, code);
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
     let reg = crate::domain::forensic::registry::get_registry();
 
@@ -256,8 +196,9 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
                 if let Some(&width) = map.get("fixed_width") { return width; }
             }
         }
-        if trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0) {
-            return reg.axioms.get("scroll_fixed_width").cloned().unwrap_or(80) as u32;
+        
+        if is_summary {
+            return w_axiom.summary_item_fixed_width();
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
@@ -294,6 +235,10 @@ impl V105JmMarkerAxiom {
         Self::MARKER
     }
 
+    pub fn header_len(&self) -> usize {
+        4 // JM (2) + Count (2)
+    }
+
     pub fn scan(&self, bytes: &[u8]) -> Vec<usize> {
         let mut positions = Vec::new();
         for i in 0..bytes.len().saturating_sub(1) {
@@ -328,44 +273,109 @@ impl V105SectionMarkerAxiom {
     pub const V105_NPC_OFFSET: usize = 0x30E;
     pub const V105_NPC_LEN: usize = 51;
 
+    pub const MARKER_GF: [u8; 2] = *b"gf";
+    pub const MARKER_IF: [u8; 2] = *b"if";
+    pub const MARKER_WOO: [u8; 4] = *b"Woo!";
+    pub const MARKER_WS: [u8; 2] = *b"WS";
+    pub const MARKER_W4: [u8; 2] = *b"w4";
+    pub const MARKER_JF: [u8; 2] = *b"jf";
+    pub const MARKER_KF: [u8; 2] = *b"kf";
+    pub const MARKER_LF: [u8; 2] = *b"lf";
+
     pub fn find_gf(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'g', b'f')
+        self.find_marker(bytes, &Self::MARKER_GF)
     }
 
     pub fn find_if(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'i', b'f')
+        self.find_marker(bytes, &Self::MARKER_IF)
     }
 
     pub fn find_woo(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'W', b'o')
+        self.find_marker(bytes, &Self::MARKER_WOO)
     }
 
     pub fn find_ws(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'W', b'S')
+        self.find_marker(bytes, &Self::MARKER_WS)
     }
 
     pub fn find_w4(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'w', b'4')
+        self.find_marker(bytes, &Self::MARKER_W4)
     }
 
     pub fn find_jf(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'j', b'f')
+        self.find_marker(bytes, &Self::MARKER_JF)
     }
 
     pub fn find_kf(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'k', b'f')
+        self.find_marker(bytes, &Self::MARKER_KF)
     }
 
     pub fn find_lf(&self, bytes: &[u8]) -> Option<usize> {
-        self.find_marker(bytes, b'l', b'f')
+        self.find_marker(bytes, &Self::MARKER_LF)
     }
 
-    pub fn gf_bytes(&self) -> [u8; 2] {
-        [b'g', b'f']
+    pub fn gf_bytes(&self) -> &[u8] {
+        &Self::MARKER_GF
     }
 
-    pub fn if_bytes(&self) -> [u8; 2] {
-        [b'i', b'f']
+    pub fn if_bytes(&self) -> &[u8] {
+        &Self::MARKER_IF
+    }
+
+    pub fn woo_bytes(&self) -> &[u8] {
+        &Self::MARKER_WOO
+    }
+
+    pub fn ws_bytes(&self) -> &[u8] {
+        &Self::MARKER_WS
+    }
+
+    pub fn w4_bytes(&self) -> &[u8] {
+        &Self::MARKER_W4
+    }
+
+    pub fn jf_bytes(&self) -> &[u8] {
+        &Self::MARKER_JF
+    }
+
+    pub fn kf_bytes(&self) -> &[u8] {
+        &Self::MARKER_KF
+    }
+
+    pub fn lf_bytes(&self) -> &[u8] {
+        &Self::MARKER_LF
+    }
+
+    pub fn gf_len(&self) -> usize {
+        Self::MARKER_GF.len()
+    }
+
+    pub fn if_len(&self) -> usize {
+        Self::MARKER_IF.len()
+    }
+
+    pub fn woo_len(&self) -> usize {
+        Self::MARKER_WOO.len()
+    }
+
+    pub fn ws_len(&self) -> usize {
+        Self::MARKER_WS.len()
+    }
+
+    pub fn w4_len(&self) -> usize {
+        Self::MARKER_W4.len()
+    }
+
+    pub fn jf_len(&self) -> usize {
+        Self::MARKER_JF.len()
+    }
+
+    pub fn kf_len(&self) -> usize {
+        Self::MARKER_KF.len()
+    }
+
+    pub fn lf_len(&self) -> usize {
+        Self::MARKER_LF.len()
     }
 
     /// Synchronizes Alpha v105 quest data into the header.
@@ -408,9 +418,10 @@ impl V105SectionMarkerAxiom {
         }
     }
 
-    fn find_marker(&self, bytes: &[u8], first: u8, second: u8) -> Option<usize> {
-        (0..bytes.len().saturating_sub(1))
-            .find(|&i| bytes[i] == first && bytes[i + 1] == second)
+    fn find_marker(&self, bytes: &[u8], marker: &[u8]) -> Option<usize> {
+        if marker.is_empty() { return None; }
+        (0..bytes.len().saturating_sub(marker.len() - 1))
+            .find(|&i| &bytes[i..i + marker.len()] == marker)
     }
 }
 
@@ -429,6 +440,106 @@ impl ForensicAxiom for V105PropertyWidthAxiom {
 }
 
 impl V105PropertyWidthAxiom {
+    /// Returns true if the item code follows the 80-bit summary rhythm in Alpha v105 (Axiom 0344).
+    pub fn is_summary_rhythm_forced(&self, version: u8, code: &str) -> bool {
+        let trimmed = code.trim();
+        if trimmed.is_empty() { return false; }
+        
+        // Axiom 0344: Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
+        // are forced to an 80-bit rhythm in Alpha v105.
+        if trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0) {
+            return true;
+        }
+
+        // Stealth-Compact patterns also share the 80-bit rhythm (Axiom 0365/0384).
+        if self.matches_stealth_pattern(code) {
+            return true;
+        }
+
+        // Pattern: 'bwcw' (Town Portal Book) - shares summary geometry rhythm in Alpha v105
+        if trimmed == "bwcw" {
+            return true;
+        }
+
+        false
+    }
+
+    /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).
+    pub fn is_summary_item(&self, version: u8, code: &str) -> bool {
+        if self.is_summary_rhythm_forced(version, code) {
+            return true;
+        }
+
+        let trimmed = code.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        // 3. Fallback to structural patterns (Potions/Runes) - Axiom 0078
+        if (trimmed.starts_with('r') && (trimmed.len() == 3 || (trimmed.len() == 4 && trimmed[1..].chars().all(|c| c.is_ascii_digit())))) ||
+           ((trimmed.starts_with('h') || trimmed.starts_with("wh")) && (trimmed.len() == 3 || trimmed.len() == 4)) ||
+           ((trimmed.starts_with('m') || trimmed.starts_with("wm")) && (trimmed.len() == 3 || trimmed.len() == 4)) ||
+           (trimmed.starts_with('v') && (trimmed.len() == 3 || trimmed.len() == 4)) || // Rejuvenation potions / Vials
+           (trimmed.starts_with('g') && trimmed.len() == 3) // Gems
+        {
+            return true;
+        }
+
+        let reg = crate::domain::forensic::registry::get_registry();
+        // 4. Check registry for explicit forced compact
+        if let Some(codes) = &reg.forced_compact_codes {
+            if codes.iter().any(|c| c == trimmed) { return true; }
+        }
+
+        false
+    }
+
+    fn matches_stealth_pattern(&self, code: &str) -> bool {
+        // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
+        // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04'
+        // Forensic: Use raw u8 conversion to avoid UTF-8 mismatch for non-ASCII codes (Slice 24)
+        let bytes: Vec<u8> = code.chars().map(|c| c as u32 as u8).collect();
+
+        // Pattern: ÏO (0xCF 0x4F)
+        if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
+            return true;
+        }
+        // Pattern: H\x04 (0x48 0x04)
+        if bytes.len() >= 2 && bytes[0] == 0x48 && bytes[1] == 0x04 {
+            return true;
+        }
+        // Pattern: bH\x04 (0x62 0x48 0x04)
+        if bytes.len() >= 3 && bytes[0] == b'b' && bytes[1] == 0x48 && bytes[2] == 0x04 {
+            return true;
+        }
+        // Pattern: Q€ (0x51 0x80)
+        if bytes.len() >= 2 && bytes[0] == 0x51 && bytes[1] == 0x80 {
+            return true;
+        }
+        // Pattern: ~ (0x7E 0x02 0x80) observed in amazon_initial
+        if bytes.len() >= 2 && bytes[0] == 0x7E && bytes[1] == 0x02 {
+            return true;
+        }
+
+        // Pattern: "   9" (0x20 0x20 0x20 0x39)
+        if bytes.len() >= 4 && bytes[0] == 0x20 && bytes[1] == 0x20 && bytes[2] == 0x20 && bytes[3] == 0x39 {
+            return true;
+        }
+
+        // Þ. Resolution: 0xDE 0x2E pattern for Alpha v105
+        if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
+            return true;
+        }
+
+        false
+    }
+
+
+    /// The fixed width for summary items in Alpha v105 (80 bits).
+    pub fn summary_item_fixed_width(&self) -> u32 {
+        80
+    }
+
     pub fn quality_bits(&self, is_alpha: bool) -> u32 { if is_alpha { 3 } else { 4 } }
     pub fn item_id_bits(&self) -> u32 { 32 }
     pub fn item_level_bits(&self) -> u32 { 7 }
