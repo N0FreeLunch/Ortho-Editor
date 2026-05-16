@@ -145,7 +145,7 @@ impl ForensicAxiom for V105AlignmentAxiom {
 
 impl V105AlignmentAxiom {
     pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, is_compact: bool) -> usize {
-        if is_compact { return 0; }
+        if is_compact || code.trim().is_empty() { return 0; }
         let is_socketed = (flags & 0x00000008) != 0;
         let trimmed = code.trim();
         match (version, trimmed) {
