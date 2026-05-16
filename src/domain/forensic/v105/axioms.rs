@@ -300,6 +300,67 @@ impl V105JmMarkerAxiom {
     }
 }
 
+/// Section marker scanning axiom for Alpha v105.
+#[derive(Debug, Clone, Default)]
+pub struct V105SectionMarkerAxiom;
+
+impl ForensicAxiom for V105SectionMarkerAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Alpha v105 Section Marker (gf, if, Woo!, WS, w4, jf, kf, lf) scanning and validation",
+        )
+    }
+}
+
+impl V105SectionMarkerAxiom {
+    pub fn find_gf(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'g', b'f')
+    }
+
+    pub fn find_if(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'i', b'f')
+    }
+
+    pub fn find_woo(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'W', b'o')
+    }
+
+    pub fn find_ws(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'W', b'S')
+    }
+
+    pub fn find_w4(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'w', b'4')
+    }
+
+    pub fn find_jf(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'j', b'f')
+    }
+
+    pub fn find_kf(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'k', b'f')
+    }
+
+    pub fn find_lf(&self, bytes: &[u8]) -> Option<usize> {
+        self.find_marker(bytes, b'l', b'f')
+    }
+
+    pub fn gf_bytes(&self) -> [u8; 2] {
+        [b'g', b'f']
+    }
+
+    pub fn if_bytes(&self) -> [u8; 2] {
+        [b'i', b'f']
+    }
+
+    fn find_marker(&self, bytes: &[u8], first: u8, second: u8) -> Option<usize> {
+        (0..bytes.len().saturating_sub(1))
+            .find(|&i| bytes[i] == first && bytes[i + 1] == second)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +378,8 @@ mod tests {
 
         let rhythm = V105PropertyNudgeAxiom;
         assert_eq!(rhythm.metadata().confidence, Confidence::VerifiedTruth);
+
+        let section = V105SectionMarkerAxiom;
+        assert_eq!(section.metadata().confidence, Confidence::VerifiedTruth);
     }
 }

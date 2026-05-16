@@ -16,12 +16,8 @@ pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 pub use crate::domain::progression::{QuestSection, WaypointSection};
 use std::io;
 use std::mem;
-use crate::domain::forensic::v105::V105JmMarkerAxiom;
+use crate::domain::forensic::v105::{V105JmMarkerAxiom, V105SectionMarkerAxiom};
 
-fn find_marker(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
-    (0..bytes.len().saturating_sub(1))
-        .find(|&i| bytes[i] == first && bytes[i + 1] == second)
-}
 
 #[derive(Debug, Clone)]
 pub struct Header {
@@ -118,14 +114,15 @@ pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
         0
     };
 
-    let gf_pos = find_marker(bytes, b'g', b'f').ok_or_else(|| {
+    let section_axiom = V105SectionMarkerAxiom::default();
+    let gf_pos = section_axiom.find_gf(bytes).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "gf marker not found in save file")
     })?;
-    let if_pos = find_marker(bytes, b'i', b'f').ok_or_else(|| {
+    let if_pos = section_axiom.find_if(bytes).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "if marker not found in save file")
     })?;
-    let axiom = V105JmMarkerAxiom::default();
-    let jm_positions = axiom.scan(bytes);
+    let jm_axiom = V105JmMarkerAxiom::default();
+    let jm_positions = jm_axiom.scan(bytes);
     if jm_positions.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -141,12 +138,12 @@ pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
 
     let (woo_pos, ws_pos, w4_pos, jf_pos, kf_pos, lf_pos) = if version == 105 {
         (
-            find_marker(bytes, b'W', b'o'), // 'Woo!'
-            find_marker(bytes, b'W', b'S'), // 'WS'
-            find_marker(bytes, b'w', b'4'), // 'w4'
-            find_marker(bytes, b'j', b'f'), // Mercenary marker
-            find_marker(bytes, b'k', b'f'), // Mercenary data marker 1
-            find_marker(bytes, b'l', b'f'), // Mercenary data marker 2
+            section_axiom.find_woo(bytes), // 'Woo!'
+            section_axiom.find_ws(bytes),  // 'WS'
+            section_axiom.find_w4(bytes),  // 'w4'
+            section_axiom.find_jf(bytes),  // Mercenary marker
+            section_axiom.find_kf(bytes),  // Mercenary data marker 1
+            section_axiom.find_lf(bytes),  // Mercenary data marker 2
         )
     } else {
         (None, None, None, None, None, None)
@@ -299,8 +296,9 @@ pub fn rebuild_status_and_player_items(
     }
 
     // 3. IF Section (Marker + skills)
+    let section_axiom = V105SectionMarkerAxiom::default();
     if let Some(skills) = skills {
-        result.extend_from_slice(b"if");
+        result.extend_from_slice(&section_axiom.if_bytes());
         result.extend_from_slice(skills.as_slice());
     } else {
         let skill_end = if version == 105 {
