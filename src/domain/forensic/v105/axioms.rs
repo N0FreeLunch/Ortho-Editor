@@ -443,25 +443,9 @@ impl V105PropertyWidthAxiom {
     /// Returns true if the item code follows the 80-bit summary rhythm in Alpha v105 (Axiom 0344).
     pub fn is_summary_rhythm_forced(&self, version: u8, code: &str) -> bool {
         let trimmed = code.trim();
-        if trimmed.is_empty() { return false; }
-        
         // Axiom 0344: Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
         // are forced to an 80-bit rhythm in Alpha v105.
-        if trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0) {
-            return true;
-        }
-
-        // Stealth-Compact patterns also share the 80-bit rhythm (Axiom 0365/0384).
-        if self.matches_stealth_pattern(code) {
-            return true;
-        }
-
-        // Pattern: 'bwcw' (Town Portal Book) - shares summary geometry rhythm in Alpha v105
-        if trimmed == "bwcw" {
-            return true;
-        }
-
-        false
+        trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0)
     }
 
     /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).
@@ -473,6 +457,17 @@ impl V105PropertyWidthAxiom {
         let trimmed = code.trim();
         if trimmed.is_empty() {
             return false;
+        }
+
+        // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
+        // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04'
+        if self.matches_stealth_pattern(code) {
+            return true;
+        }
+
+        // Pattern: 'bwcw' (Town Portal Book) - shares summary geometry rhythm in Alpha v105
+        if trimmed == "bwcw" {
+            return true;
         }
 
         // 3. Fallback to structural patterns (Potions/Runes) - Axiom 0078

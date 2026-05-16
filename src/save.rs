@@ -160,7 +160,8 @@ pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
 }
 
 pub fn gf_payload_range(map: &SaveSectionMap) -> std::ops::Range<usize> {
-    let start = map.gf_pos + 2;
+    let section_axiom = V105SectionMarkerAxiom::default();
+    let start = map.gf_pos + section_axiom.gf_len();
     start..map.if_pos
 }
 
@@ -274,13 +275,13 @@ pub fn rebuild_status_and_player_items(
     // 3. IF Section (Marker + skills)
     let section_axiom = V105SectionMarkerAxiom::default();
     if let Some(skills) = skills {
-        result.extend_from_slice(&section_axiom.if_bytes());
+        result.extend_from_slice(section_axiom.if_bytes());
         result.extend_from_slice(skills.as_slice());
     } else {
         let skill_end = if version == 105 {
-            map.jm_positions[0].min(map.if_pos + 2 + SKILL_SECTION_LEN)
+            map.jm_positions[0].min(map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN)
         } else {
-            map.if_pos + 2 + SKILL_SECTION_LEN
+            map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN
         };
         result.extend_from_slice(&bytes[map.if_pos..skill_end]);
     }
@@ -288,9 +289,9 @@ pub fn rebuild_status_and_player_items(
     // 4. Quest/Progression Section (Gap between IF end and first JM)
     let jm0 = map.jm_positions[0];
     let skill_end_original = if version == 105 {
-        jm0.min(map.if_pos + 2 + SKILL_SECTION_LEN)
+        jm0.min(map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN)
     } else {
-        map.if_pos + 2 + SKILL_SECTION_LEN
+        map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN
     };
 
     if let Some(q) = quests {
@@ -348,7 +349,8 @@ pub fn patch_skill_section(
     map: &SaveSectionMap,
     skills: &SkillSection,
 ) -> io::Result<Vec<u8>> {
-    let start = map.if_pos + 2;
+    let section_axiom = V105SectionMarkerAxiom::default();
+    let start = map.if_pos + section_axiom.if_len();
     let end = start + SKILL_SECTION_LEN;
     if end > bytes.len() {
         return Err(io::Error::new(
@@ -412,7 +414,8 @@ impl ExpansionSection {
 }
 
 pub fn parse_quest_section(bytes: &[u8], map: &SaveSectionMap) -> io::Result<QuestSection> {
-    let skill_end = map.if_pos + 2 + SKILL_SECTION_LEN;
+    let section_axiom = V105SectionMarkerAxiom::default();
+    let skill_end = map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN;
     let jm0 = map.jm_positions[0];
     if jm0 < skill_end {
         return Err(io::Error::new(
@@ -681,17 +684,18 @@ pub fn rebuild_item_section(
 
     let jm1 = jm_positions[0];
     let count_u16 = items.len() as u16;
+    let jm_axiom = V105JmMarkerAxiom::default();
 
     // Find the end of the item section based on the next marker to preserve boundary integrity
     let section_end = if jm_positions.len() > 1 {
         jm_positions[1]
     } else if let Some(last_item) = items.last() {
-        jm1 + 4 + (last_item.range.end as usize + 7) / 8
+        jm1 + jm_axiom.header_len() + (last_item.range.end as usize + 7) / 8
     } else {
-        jm1 + 4
+        jm1 + jm_axiom.header_len()
     };
 
-    let section_start = jm1 + 4;
+    let section_start = jm1 + jm_axiom.header_len();
     let original_section_len = section_end - section_start;
     
     if crate::item::item_trace_enabled() {
@@ -703,7 +707,7 @@ pub fn rebuild_item_section(
 
     let mut serialized_section = Item::serialize_section(items, huffman, alpha_mode)?;
 
-    let section_start = jm1 + 4;
+    let section_start = jm1 + jm_axiom.header_len();
     let original_section_len = section_end - section_start;
     let _original_section = &bytes[section_start..section_end];
     let serialized_len_before_padding = serialized_section.len();
