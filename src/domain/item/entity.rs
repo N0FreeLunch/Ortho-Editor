@@ -546,15 +546,11 @@ impl Item {
             } else if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
                 if !self.body.alpha_header_gap_bits.is_empty() {
                     for &bit in &self.body.alpha_header_gap_bits { emitter.write_bit(bit)?; }
-                } else if let Some(gap_val) = self.body.alpha_header_gap {
-                    if is_v105_shadow || is_rw {
-                        let bits = if (self.header.flags & (1 << 26)) != 0 || (self.header.flags & (1 << 27)) != 0 { 8 } else { 24 };
-                        emitter.write_bits(gap_val, bits as u32)?;
-                    } else if gap_val > 0 {
-                        emitter.write_bits(gap_val, 8)?;
+                } else {
+                    let gap_len = V105HeaderGapAxiom::default().resolve_gap(self.header.version, Some(&self.code), self.header.flags, idx == 0, self.header.is_compact, self.header.has_checksum);
+                    if gap_len > 0 {
+                        emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), gap_len as u32)?;
                     }
-                } else if !is_v105_shadow && !is_rw && !self.header.has_checksum {
-                    emitter.write_bits(0, 8)?;
                 }
             }
         } else {

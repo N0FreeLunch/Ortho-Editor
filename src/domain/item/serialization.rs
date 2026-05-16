@@ -280,7 +280,7 @@ pub fn peek_item_header_at(
         }
     }
 
-    let s_axiom = StatsAxiom::new(version, crate::domain::item::ItemQuality::Normal, alpha_mode)
+    let _s_axiom = StatsAxiom::new(version, crate::domain::item::ItemQuality::Normal, alpha_mode)
         .with_compact(is_compact);
     let _is_personalized = h_axiom.is_personalized(flags);
     
@@ -309,17 +309,11 @@ pub fn peek_item_header_at(
     if alpha_mode && geometry.target_width > 0 {
         total_skip = geometry.target_width;
     } else if geometry.has_header_gap && alpha_mode {
-        let is_v105_shadow = s_axiom.is_v105_shadow(flags);
-        let is_rw = trial_is_rw || s_axiom.is_runeword(flags);
-        if is_rw || is_v105_shadow {
-            let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-            total_skip += if is_v105_shadow_local { 8 } else { 24 };
-        } else {
-            if !is_compact {
-                total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
-            }
-            total_skip += if has_checksum { 0 } else { 8 }; // Standard Alpha v105 items are 80-bit aligned
+        let gap_bits = V105HeaderGapAxiom::default().resolve_gap(version, None, flags, false, is_compact, has_checksum);
+        if !is_compact {
+             total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
         }
+        total_skip += gap_bits as u32;
     } else if !geometry.skip_geometry {
          total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
     }
@@ -705,10 +699,15 @@ impl Item {
         }
 
         let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset);
-        let mut start_offset = if alpha_mode { 32 } else { 32 }; // Skip JM (16) + Count (16)
+        eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
+        let mut start_offset = section_bit_offset + if alpha_mode { 32 } else { 32 }; // Absolute skip JM (16) + Count (16)
 
-        if !markers.is_empty() {
-            start_offset = markers[0].offset;
+        if !markers.is_empty() && markers[0].offset < start_offset {
+             // In Alpha v105, the first item might start AT the JM marker (bit 0 relative)
+             start_offset = markers[0].offset;
+        } else if !markers.is_empty() {
+             // If markers start later, keep the first marker as the processing start
+             start_offset = markers[0].offset;
         }
 
         for (i, marker) in markers.iter().enumerate() {
@@ -830,6 +829,10 @@ impl Item {
                     let mut final_item = item.clone();
                     let actual_consumed = if let Some(flen) = forced_length { flen } else { consumed_bits };
                     
+                    if crate::item::item_trace_enabled() {
+                        eprintln!("[DEBUG-SLICE21] Item parsed: code='{}', start={}, end={}, bits={}", final_item.code, section_bit_offset + start, section_bit_offset + start + actual_consumed, actual_consumed);
+                    }
+
                     final_item.expected_start_bit = start;
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
@@ -1225,19 +1228,13 @@ impl Item {
         }
 
         let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+            .with_index(idx)
             .with_personalization(item.header.is_personalized)
             .with_compact(item.header.is_compact)
             .with_code(&item.code);
         let consumed_bits = cursor.pos() - start_bit;
-        let mut final_consumed = axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
+        let final_consumed = axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
         
-        // Alpha v105 Slice 20: Resolve 72/73-bit repeating alignment patterns (Axiom 0340)
-        // Oracle observes [72, 73, 72, 73] for compact summary items in amazon_initial.d2s.
-        if alpha_mode && final_consumed == 72 && is_v105_summary_code(&item.code) {
-             if idx % 2 != 0 {
-                 final_consumed = 73;
-             }
-        }
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;
             let padding = cursor.with_context("AlphaAlignmentPadding", |c| {

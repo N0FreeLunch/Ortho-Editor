@@ -206,9 +206,15 @@ impl StatsAxiom {
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
         let is_shadow = self.is_v105_shadow(_flags);
         
-        // Alpha v105 forensic: Shadow items are header-only.
+        // Alpha v105 forensic: Shadow items and summary items are header-only.
         // Blank codes ('    ') in early Alpha can still have property residues if they are non-compact.
-        is_shadow
+        if is_shadow { return true; }
+        
+        if self.save_is_alpha && crate::domain::forensic::v105::axioms::is_v105_summary_code(_code) {
+            return true;
+        }
+        
+        false
     }
 
     pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
