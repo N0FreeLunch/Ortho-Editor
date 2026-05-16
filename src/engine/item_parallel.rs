@@ -15,7 +15,8 @@ impl ParallelItemEngine {
 
     pub fn deserialize_all(&self, bytes: &[u8]) -> Vec<ParsedResult<Item>> {
         // Step 1: Tier 1 - Parallel Marker Scan
-        let markers = scan_item_markers(bytes, &self.huffman, self.alpha, 0, None);
+        let markers = scan_item_markers(bytes, &self.huffman, self.alpha, 0, None, false);
+
         if markers.is_empty() {
             return Vec::new();
         }

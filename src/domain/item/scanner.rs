@@ -5,14 +5,23 @@ use rayon::prelude::*;
 
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarkerStatus {
+    Accepted,
+    Rejected,
+    Phantom,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemMarker {
     pub offset: u64,
     pub confidence: u32,
     pub code: String,
+    pub score: i32,
+    pub status: MarkerStatus,
 }
 
-pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64, expected_count: Option<u16>) -> Vec<ItemMarker> {
+pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64, expected_count: Option<u16>, verbose: bool) -> Vec<ItemMarker> {
     if bytes.is_empty() {
         return Vec::new();
     }
@@ -135,19 +144,22 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     // Slice 14.1: Slot-Aligned Competitive Advancement.
     // We use a lookahead window to pick the highest confidence marker,
     // prioritizing those that align with the previous item's slot boundary.
-    let mut filtered: Vec<(u64, u32, String)> = Vec::new();
+    let mut all_markers: Vec<ItemMarker> = Vec::new();
+    let mut filtered_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    
     let mut i = 0;
     let mut last_offset = 0;
     let mut last_code = String::new();
+    let mut accepted_count = 0;
     
     while i < final_markers.len() {
-        let (offset, confidence, code) = &final_markers[i];
+        let (offset, confidence, _code) = &final_markers[i];
         
         // Find the best candidate in a lookahead window
         let mut best_idx = i;
         let mut max_score = *confidence as i32;
 
-        if alpha && !filtered.is_empty() {
+        if alpha && accepted_count > 0 {
             let diff = offset - last_offset;
             if is_alpha_v105_slot_item(&last_code) {
                 if diff == 80 { max_score += 350; }
@@ -158,7 +170,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             }
 
             if let Some(expected) = expected_count {
-                if filtered.len() >= expected as usize {
+                if accepted_count >= expected as usize {
                     if !is_v105_aligned(diff) {
                         max_score -= 500;
                     }
@@ -170,10 +182,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         let lookahead_limit = if alpha { offset + 64 } else { offset + 120 };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
-            let (o_offset, o_conf, o_code) = &final_markers[j];
+            let (o_offset, o_conf, _o_code) = &final_markers[j];
             let mut score = *o_conf as i32;
             
-            if alpha && !filtered.is_empty() {
+            if alpha && accepted_count > 0 {
                 let diff = o_offset - last_offset;
                 let mut alignment_bonus = 0;
                 if is_alpha_v105_slot_item(&last_code) {
@@ -210,8 +222,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             // If we have an expected_count and we are over it, be more aggressive 
             // in suppressing low-confidence non-aligned markers.
             if let Some(expected) = expected_count {
-                if filtered.len() >= expected as usize {
-                    let is_aligned = if filtered.is_empty() { false } else { is_v105_aligned(o_offset - last_offset) };
+                if accepted_count >= expected as usize {
+                    let is_aligned = if accepted_count == 0 { false } else { is_v105_aligned(o_offset - last_offset) };
                     if !is_aligned {
                         score -= 500; // Even higher penalty for extra unaligned markers
                     }
@@ -225,37 +237,71 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             j += 1;
         }
 
-            let best = &final_markers[best_idx];
+            let (best_offset, best_confidence, best_code_str) = &final_markers[best_idx];
+            let mut status = MarkerStatus::Accepted;
 
             // Competitive Stopgate: if even the best score is too low or inconsistent, 
             // stop and defer to isolation.
             if alpha && max_score < 150 {
              if let Some(expected) = expected_count {
-                 if filtered.len() < expected as usize {
+                 if accepted_count < expected as usize {
                      // Still keep it if we really need items, but with fragile confidence
                  } else {
-                     i = best_idx + 1;
-                     continue;
+                     status = MarkerStatus::Phantom;
                  }
              }
             }
 
         if crate::item::item_trace_enabled() {
-            eprintln!("[DEBUG-SLICE13] marker accepted: offset={}, code='{}', confidence={}, score={}", best.0, best.2, best.1, max_score);
+            eprintln!("[DEBUG-SLICE13] marker processed: offset={}, code='{}', confidence={}, score={}, status={:?}", best_offset, best_code_str, best_confidence, max_score, status);
         }
         
-        last_offset = best.0;
-        last_code = best.2.clone();
-        filtered.push((best.0, max_score as u32, best.2.clone()));
+        if status == MarkerStatus::Accepted {
+            last_offset = *best_offset;
+            last_code = best_code_str.clone();
+            accepted_count += 1;
+            filtered_indices.insert(best_idx);
+            all_markers.push(ItemMarker {
+                offset: *best_offset,
+                confidence: *best_confidence,
+                code: best_code_str.clone(),
+                score: max_score,
+                status: MarkerStatus::Accepted,
+            });
+        } else if verbose {
+            all_markers.push(ItemMarker {
+                offset: *best_offset,
+                confidence: *best_confidence,
+                code: best_code_str.clone(),
+                score: max_score,
+                status: status,
+            });
+        }
         
         // Advance i to after the lookahead window and skip the rest of this item's space
-        let skip_until = best.0 + 72;
+        let skip_until = best_offset + 72;
         i = best_idx + 1;
         while i < final_markers.len() && final_markers[i].0 < skip_until {
+            if verbose && !filtered_indices.contains(&i) {
+                let (o_offset, o_conf, o_code) = &final_markers[i];
+                all_markers.push(ItemMarker {
+                    offset: *o_offset,
+                    confidence: *o_conf,
+                    code: o_code.clone(),
+                    score: *o_conf as i32, // Raw score for skipped
+                    status: MarkerStatus::Rejected,
+                });
+            }
             i += 1;
         }
     }
-    filtered.into_iter().map(|(offset, confidence, code)| ItemMarker { offset, confidence, code }).collect()
+
+    if verbose {
+        all_markers.sort_unstable_by_key(|m| m.offset);
+        all_markers
+    } else {
+        all_markers.into_iter().filter(|m| m.status == MarkerStatus::Accepted).collect()
+    }
 }
 
 fn is_alpha_v105_slot_item(code: &str) -> bool {

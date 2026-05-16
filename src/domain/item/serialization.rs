@@ -322,7 +322,8 @@ pub fn peek_item_header_at(
     let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     
     // Trial peek for code to determine adaptive alignment nudge (Slice 14)
-    let trial_nudge = if alpha_mode && version == 0 { 19 } else { 0 };
+    let is_compact_peek = HeaderAxiom::new(version, alpha_mode).is_compact(flags, None);
+    let trial_nudge = if alpha_mode && version == 0 && !is_compact_peek { 19 } else { 0 };
     let mut trial_code = String::new();
     let mut trial_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     if trial_reader.skip(start_bit as u32 + total_skip + trial_nudge).is_ok() {
@@ -353,7 +354,7 @@ pub fn peek_item_header_at(
                     break;
                 }
             }
-            if trial_ok && (is_compact_peek || is_v105_summary_code(&trial_code)) {
+            if trial_ok && is_v105_summary_code(&trial_code) {
                 code = trial_code;
                 is_compact_detected = true;
                 let _ = n_cursor.read_bits_as_vec(24);
@@ -522,7 +523,7 @@ pub fn peek_item_header_at_specific_gap(
                     break;
                 }
             }
-            if trial_ok && (is_compact_peek || is_v105_summary_code(&trial_code)) {
+            if trial_ok && is_v105_summary_code(&trial_code) {
                 code = trial_code;
                 is_compact_detected = true;
                 let _ = n_cursor.read_bits_as_vec(24);
@@ -643,7 +644,7 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
         let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
         let section_bytes = &bytes[pos..next_pos];
 
-        match Item::read_section(section_bytes, (pos as u64) * 8, count, huffman, alpha) {
+        match Item::read_section(section_bytes, (pos as u64) * 8, count, huffman, alpha, false) {
             Ok(items) => {
                 all_items.extend(items);
             }
@@ -671,9 +672,23 @@ impl Item {
         read_player_items(bytes, huffman, alpha)
     }
 
-    pub fn read_section_ext(section_bytes: &[u8], section_bit_offset: u64, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool, preserve_unparsed: bool) -> ParsingResult<Vec<Item>> {
+    pub fn read_section_ext(
+        section_bytes: &[u8],
+        section_bit_offset: u64,
+        top_level_count: u16,
+        huffman: &HuffmanTree,
+        alpha_mode: bool,
+        preserve_unparsed: bool,
+    ) -> ParsingResult<Vec<Item>> {
         let _ = preserve_unparsed;
-        Self::read_section(section_bytes, section_bit_offset, top_level_count, huffman, alpha_mode)
+        Self::read_section(
+            section_bytes,
+            section_bit_offset,
+            top_level_count,
+            huffman,
+            alpha_mode,
+            false,
+        )
     }
 
     pub fn parse_at_bit_offset(bytes: &[u8], bit_offset: u64, huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
@@ -681,7 +696,14 @@ impl Item {
         Ok(item)
     }
 
-    pub fn read_section(section_bytes: &[u8], section_bit_offset: u64, top_level_count: u16, huffman: &HuffmanTree, alpha_mode: bool) -> ParsingResult<Vec<Item>> {
+    pub fn read_section(
+        section_bytes: &[u8],
+        section_bit_offset: u64,
+        top_level_count: u16,
+        huffman: &HuffmanTree,
+        alpha_mode: bool,
+        verbose: bool,
+    ) -> ParsingResult<Vec<Item>> {
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
@@ -698,7 +720,14 @@ impl Item {
             }
         }
 
-        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset, Some(top_level_count));
+        let markers = crate::domain::item::scanner::scan_item_markers(
+            section_bytes,
+            huffman,
+            alpha_mode,
+            section_bit_offset,
+            Some(top_level_count),
+            verbose,
+        );
         eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
         let mut start_offset = 32; // Relative skip JM (16) + Count (16) inside section_bytes
         let mut subsumed_indices = std::collections::HashSet::new();
@@ -1712,7 +1741,7 @@ mod tests {
         // Truncate to force parsing failure but keep enough for scanner
         let truncated_bytes = if bytes.len() > 13 { &bytes[0..13] } else { &bytes }; 
         
-        let items = Item::read_section(truncated_bytes, section_bit_offset, 1, &huffman, false).expect("Should not fail");
+        let items = Item::read_section(truncated_bytes, section_bit_offset, 1, &huffman, false, false).expect("Should not fail");
         
         if !items.is_empty() {
             assert_eq!(items[0].code, "Opaque");
@@ -1792,7 +1821,7 @@ mod tests {
         
         let bytes = emitter.into_bytes();
         let section_bit_offset = 100;
-        let items = Item::read_section(&bytes, section_bit_offset, 1, &huffman, false).expect("Should parse");
+        let items = Item::read_section(&bytes, section_bit_offset, 1, &huffman, false, false).expect("Should parse");
         
         if !items.is_empty() {
             // Marker should be found at bit 0

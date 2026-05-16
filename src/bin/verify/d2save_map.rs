@@ -12,6 +12,8 @@ fn main() -> anyhow::Result<()> {
         .description("Maps and summarizes the major sections and JM markers of a D2R save file");
 
     parser.add_arg("save_file", "path to the save file (.d2s)");
+    parser.add_flag("alpha-rhythm-grid", "display 72/80-bit rhythmic grid for Alpha v105").long("alpha-rhythm-grid");
+    parser.add_flag("verbose-markers", "display internal scanner confidence scores and rejected markers").long("verbose-markers");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -26,6 +28,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     let path = parsed.get("save_file").unwrap();
+    let alpha_grid = parsed.is_set("alpha-rhythm-grid");
+    let verbose_markers = parsed.is_set("verbose-markers");
     let bytes = fs::read(path).map_err(|e| anyhow::anyhow!("Cannot read '{}': {}", path, e))?;
 
     println!("=== Section Map: {} ({} bytes) ===", path, bytes.len());
@@ -124,7 +128,7 @@ fn main() -> anyhow::Result<()> {
             let huffman = HuffmanTree::new();
             let is_alpha = save.header.version == 105;
             let section_data = &bytes[pos..next_pos];
-            match Item::read_section(section_data, pos as u64 * 8, item_count, &huffman, is_alpha) {
+            match Item::read_section(section_data, pos as u64 * 8, item_count, &huffman, is_alpha, verbose_markers) {
                 Ok(items) => {
                     println!("    Parsed {} items:", items.len());
                     for (item_idx, item) in items.iter().enumerate() {
@@ -149,6 +153,10 @@ fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
+
+                    if alpha_grid || verbose_markers {
+                        render_heatmap(section_data, &items, pos as u64 * 8, is_alpha, alpha_grid, verbose_markers);
+                    }
                 }
                 Err(e) => {
                     println!("    [ERROR] Failed to parse items: {}", e);
@@ -169,4 +177,91 @@ fn main() -> anyhow::Result<()> {
     }
     
     Ok(())
+}
+
+fn render_heatmap(
+    data: &[u8], 
+    items: &[d2r_core::item::Item], 
+    section_bit_offset: u64, 
+    alpha: bool, 
+    show_grid: bool, 
+    show_markers: bool
+) {
+    use d2r_core::item::ItemModule;
+    use colored::Colorize;
+
+    println!("\n    [BIT HEATMAP]");
+    
+    // 1. Display expected vs parsed count
+    let expected_count = if data.len() >= 4 { u16::from_le_bytes([data[2], data[3]]) } else { 0 };
+    let parsed_count = items.iter().filter(|it| !it.is_residue()).count();
+    println!("      JM Expected: {} | Parsed: {} | Delta: {}", 
+        expected_count, 
+        parsed_count, 
+        (parsed_count as i32 - expected_count as i32)
+    );
+
+    // 2. Display Forensic Markers if requested
+    if show_markers && alpha {
+        println!("      Forensic Markers (Scanner Scores):");
+        // Re-run scanner in verbose mode to get all markers
+        use d2r_core::domain::item::scanner::{self, MarkerStatus};
+        let huffman = d2r_core::item::HuffmanTree::new();
+        let markers = scanner::scan_item_markers(data, &huffman, true, section_bit_offset, Some(expected_count), true);
+        for marker in markers {
+            let status_str = format!("{:?}", marker.status);
+            let status_colored = match marker.status {
+                MarkerStatus::Accepted => status_str.green(),
+                MarkerStatus::Rejected => status_str.yellow(),
+                MarkerStatus::Phantom => status_str.red(),
+            };
+            println!("        - Bit {:5}: [{:<4}] Score: {:4} | Status: {}", 
+                marker.offset, marker.code, marker.score, status_colored
+            );
+        }
+    }
+
+    // 3. Render Bitstream with Rhythmic Grid
+    if show_grid && alpha {
+        println!("      Bitstream (80-bit periodic grid):");
+        let total_bits = (data.len() * 8) as u64;
+        let mut bit_pos = 0;
+        
+        while bit_pos < total_bits {
+            if bit_pos % 80 == 0 {
+                print!("{}", "|".bright_black());
+            } else if bit_pos % 8 == 0 {
+                print!("{}", ".".bright_black());
+            }
+
+            // Find item covering this bit
+            let item = items.iter().find(|it| {
+                let rel_start = it.range.start - section_bit_offset;
+                let rel_end = it.range.end - section_bit_offset;
+                bit_pos >= rel_start && bit_pos < rel_end
+            });
+
+            let bit_val = if (data[(bit_pos / 8) as usize] & (1 << (bit_pos % 8))) != 0 { "1" } else { "0" };
+            
+            if let Some(it) = item {
+                if it.is_residue() {
+                    print!("{}", bit_val.truecolor(80, 80, 80)); // Dark Gray for residue
+                } else if it.modules.iter().any(|m| matches!(m, ItemModule::SemiOpaque { .. })) {
+                    print!("{}", bit_val.yellow()); // Yellow for SemiOpaque
+                } else if it.is_opaque() {
+                    print!("{}", bit_val.red()); // Red for Opaque
+                } else {
+                    print!("{}", bit_val.green()); // Green for normal
+                }
+            } else {
+                print!("{}", bit_val.bright_black());
+            }
+
+            bit_pos += 1;
+            if bit_pos % 80 == 0 {
+                println!(" (Bit {})", bit_pos);
+            }
+        }
+        println!();
+    }
 }
