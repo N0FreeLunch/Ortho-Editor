@@ -212,6 +212,11 @@ pub fn is_v105_summary_code(code: &str) -> bool {
         return true;
     }
 
+    // Pattern: "   9" (0x20 0x20 0x20 0x39)
+    if bytes.len() >= 4 && bytes[0] == 0x20 && bytes[1] == 0x20 && bytes[2] == 0x20 && bytes[3] == 0x39 {
+        return true;
+    }
+
     // Þ. Resolution: 0xDE 0x2E pattern for Alpha v105
     if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
         return true;
