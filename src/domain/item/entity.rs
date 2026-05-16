@@ -714,17 +714,11 @@ impl Item {
         }
         if !alpha_mode && self.header.version != 5 && self.header.version != 7 { emitter.write_bit(false)?; }
         let current_bits = emitter.written_bits();
-        let is_v105_summary = alpha_mode && w_axiom.is_summary_rhythm_forced(self.header.version, &self.code);
-
-        let mut final_bits = if is_v105_summary {
-            w_axiom.summary_item_fixed_width() as u64
-        } else {
-            s_axiom.calculate_alignment(
-                current_bits - start_bit,
-                &self.code,
-                self.header.flags,
-            )
-        };
+        let mut final_bits = s_axiom.calculate_alignment(
+            current_bits - start_bit,
+            &self.code,
+            self.header.flags,
+        );
         
         // Slice 8: Targeted Length Oracle Support
         // If the item's recorded total_bits is greater than the calculated alignment (via D2R_FORCE_LENGTH),
@@ -847,8 +841,9 @@ pub fn parse_item_header<R: BitRead>(
             };
 
             // Forensic (Slice 25): Summary item identification and mandatory geometry.
+            let w_axiom = V105PropertyWidthAxiom::default();
             let is_v105_summary = if let Some(c) = code_hint {
-                crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
+                w_axiom.is_summary_item(version, c)
             } else {
                 // Heuristic: Catch compact items and potential stealth-compact items (v0 bit 22)
                 is_compact || (version == 0 && (flags & (1 << 22)) != 0)
@@ -880,7 +875,7 @@ pub fn parse_item_header<R: BitRead>(
                 socket_hint = ((gap >> 7) & 0x01) as u8; 
             }
         } else {
-            let is_v105_summary_local = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
+            let is_v105_summary_local = alpha_mode && w_axiom.is_summary_item(version, code_hint.unwrap_or(""));
             if !is_compact || is_v105_summary_local { 
                 y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; 
                 page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; 
@@ -967,7 +962,7 @@ pub fn parse_item_body<R: BitRead>(
                 temp_code.push(ch as char);
             }
             
-            if success && crate::domain::forensic::v105::axioms::is_v105_summary_code(&temp_code) {
+            if success && w_axiom.is_summary_item(header.version, &temp_code) {
                 code = temp_code;
             } else {
                 cursor.rollback(saved_pos);
@@ -1080,7 +1075,7 @@ impl ExtendedStatsData {
                 if w_axiom.has_v5_runeword_extra(version) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags)) {
                     data.v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32))?);
                     data.id = Some(0);
-                } else if version == 5 && crate::domain::item::serialization::is_v105_summary_code(trimmed_code) {
+                } else if version == 5 && w_axiom.is_summary_item(version, trimmed_code) {
                     cursor.end_segment();
                     return Ok(data);
                 } else { 
