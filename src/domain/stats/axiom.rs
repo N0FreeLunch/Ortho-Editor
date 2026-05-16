@@ -357,6 +357,12 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
                 if final_len % 32 != 0 {
                     final_len += 32 - (final_len % 32);
                 }
+            } else if self.is_alpha() && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) && !self.is_compact {
+                // Alpha v105 non-compact property blocks require byte-level alignment (8-bit)
+                let align = reg.axioms.get("property_alignment").copied().unwrap_or(8);
+                if final_len % align != 0 {
+                    final_len += align - (final_len % align);
+                }
             } else if self.version == 5 && self.is_runeword(flags) {
                 // Alpha v105 Runewords require byte-level alignment (8-bit)
                 if final_len % 8 != 0 {

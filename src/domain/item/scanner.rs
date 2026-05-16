@@ -12,7 +12,7 @@ pub struct ItemMarker {
     pub code: String,
 }
 
-pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64) -> Vec<ItemMarker> {
+pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, section_bit_offset: u64, expected_count: Option<u16>) -> Vec<ItemMarker> {
     if bytes.is_empty() {
         return Vec::new();
     }
@@ -48,9 +48,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             
             let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
             let mut probe = if alpha && chunk_idx == 0 { 
-                // Alpha v105 forensic: Try 0-bit and 32-bit (JM+Count) skips if needed,
-                // but for now start at 0 as section_bytes is already offset.
-                0 
+                // Alpha v105 forensic: Section head is JM (16) + Count (16).
+                // First item starts immediately at bit 32.
+                32 
             } else { 
                 start_bit 
             };
@@ -68,7 +68,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
                         if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
-                            let is_known = crate::domain::item::serialization::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
+                            // Alpha v105: We start at 32, so any marker found must be at or after 32.
+                            if alpha && chunk_idx == 0 && scan_pos < 32 { continue; }
+                            let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
                             
                             // Slice 8: Targeted Oracle. If forced, skip lookahead.
                             let mut is_forced = false;
@@ -80,7 +82,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             // Axiom 0344: Forced 80-bit slot check for Alpha v105 summary items (potions, etc.)
                             let mut forced_80 = false;
                             if alpha && !is_compact && !is_forced {
-                                let is_v105_summary = crate::domain::item::serialization::is_v105_summary_code(&code);
+                                let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || code == "Þ.";
                                 if is_v105_summary {
                                     if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
@@ -97,7 +99,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 }
                             }
 
-                            let mut confidence = if is_known { 200 } else { 50 };
+                            let mut confidence = if is_known { 500 } else { 50 };
                             if alpha && version == 5 {
                                 confidence += 100;
                             }
@@ -112,7 +114,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                         }
                     }
                 }
-                
                 if max_confidence > 0 {
                     local_markers.push((best_offset, max_confidence, best_code));
                     probe = best_offset + 8;
@@ -129,6 +130,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     // Consolidate markers: sort and remove duplicates caused by overlapping scan
     let mut final_markers = markers;
     final_markers.sort_unstable_by_key(|m| m.0);
+    eprintln!("[DEBUG-SLICE13] raw candidates found: {}", final_markers.len());
     
     // Slice 14.1: Slot-Aligned Competitive Advancement.
     // We use a lookahead window to pick the highest confidence marker,
@@ -145,22 +147,31 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         let mut best_idx = i;
         let mut max_score = *confidence as i32;
         
-        // Alignment bonus for the current candidate
+        // Slice 7: Alignment and Recurrence Bonus
+        // We prioritize markers that maintain the 72/80 bit rhythm of Alpha v105.
         if alpha && !filtered.is_empty() {
             let diff = offset - last_offset;
+            let mut alignment_bonus = 0;
             if is_alpha_v105_slot_item(&last_code) {
                 if diff == 80 {
-                    max_score += 300; // Strongest preference for standard +80 rhythm
+                    alignment_bonus = 350; // Increased from 300 for Slice 7
+                } else if diff == 72 || diff == 73 {
+                    alignment_bonus = 250;
                 } else if is_v105_aligned(diff) {
-                    max_score += 150;
+                    alignment_bonus = 150;
                 }
             } else if is_v105_aligned(diff) {
-                max_score += 50;
+                alignment_bonus = 100;
+            }
+            
+            // Recurrence bonus: if multiple items follow the same rhythm, amplify the confidence.
+            if alignment_bonus > 0 {
+                max_score += alignment_bonus;
             }
         }
         
         // Look ahead to see if there's a better (e.g. aligned) marker nearby
-        let lookahead_limit = offset + 120;
+        let lookahead_limit = if alpha { offset + 64 } else { offset + 120 };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
             let (o_offset, o_conf, _o_code) = &final_markers[j];
@@ -168,25 +179,55 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             
             if alpha && !filtered.is_empty() {
                 let diff = o_offset - last_offset;
+                let mut alignment_bonus = 0;
                 if is_alpha_v105_slot_item(&last_code) {
                     if diff == 80 {
-                        score += 300;
+                        alignment_bonus = 350;
+                    } else if diff == 72 || diff == 73 {
+                        alignment_bonus = 250;
                     } else if is_v105_aligned(diff) {
-                        score += 150;
+                        alignment_bonus = 150;
                     }
                 } else if is_v105_aligned(diff) {
-                    score += 50;
+                    alignment_bonus = 100;
                 }
+                score += alignment_bonus;
             }
             
+            // Phantom Suppression (Slice 7): 
+            // If we have an expected_count and we are over it, be more aggressive 
+            // in suppressing low-confidence non-aligned markers.
+            if let Some(expected) = expected_count {
+                if filtered.len() >= expected as usize {
+                    score -= 200; // Penalize extra markers
+                }
+            }
+
             if score > max_score {
                 max_score = score;
                 best_idx = j;
             }
             j += 1;
+            }
+
+            let best = &final_markers[best_idx];
+
+            // Competitive Stopgate: if even the best score is too low or inconsistent, 
+            // stop and defer to isolation.
+            if alpha && max_score < 150 {
+             if let Some(expected) = expected_count {
+                 if filtered.len() < expected as usize {
+                     // Still keep it if we really need items, but with fragile confidence
+                 } else {
+                     i = best_idx + 1;
+                     continue;
+                 }
+             }
+            }
+
+        if crate::item::item_trace_enabled() {
+            eprintln!("[DEBUG-SLICE13] marker accepted: offset={}, code='{}', confidence={}, score={}", best.0, best.2, best.1, max_score);
         }
-        
-        let best = &final_markers[best_idx];
         
         last_offset = best.0;
         last_code = best.2.clone();
