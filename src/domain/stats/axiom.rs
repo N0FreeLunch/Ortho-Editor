@@ -35,7 +35,7 @@ impl StatsAxiom {
         let trimmed = self.code.trim();
         if self.save_is_alpha {
             let reg = get_registry();
-            let mut is_compact = crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
+            let mut is_compact = self.is_compact || crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
             
             if trimmed.is_empty() { 
                 is_compact = true; 

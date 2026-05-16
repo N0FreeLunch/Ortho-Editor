@@ -52,7 +52,7 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
     let section_base_bit = ((jm_pos + 4) * 8) as u64;
 
     // 2. Standard Parsing
-    let parsed_items = match Item::read_section(section_payload, 0, count, huffman, is_alpha) {
+    let parsed_items = match Item::read_section(section_payload, 0, count, huffman, is_alpha, false) {
         Ok(items) => items,
         Err(_) => Vec::new() 
     };
