@@ -98,18 +98,23 @@ impl DomainVerifier for ItemVerifier {
             });
         }
 
-        if let Some(&jm0) = jm_markers.first() {
-            if jm0 + 3 < bytes.len() {
-                let expected = u16::from_le_bytes([bytes[jm0 + 2], bytes[jm0 + 3]]) as usize;
-                let semantic_count = items.iter().filter(|it| !it.is_residue()).count();
-                if expected != semantic_count {
-                    issues.push(ReportIssue {
-                        kind: "jm_coherence".into(),
-                        message: format!("JM header count ({}) != parsed items ({})", expected, semantic_count),
-                        bit_offset: Some((jm0 + 2) as u64 * 8),
-                    });
-                }
+        let mut total_expected = 0;
+        for &jm_pos in &jm_markers {
+            if jm_pos + 3 < bytes.len() {
+                let count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]) as usize;
+                // Forensic: In Alpha v105, JM markers with count 0 are often just padding or empty Corpse sections.
+                // We sum all non-zero counts to get the total expected items.
+                total_expected += count;
             }
+        }
+
+        let semantic_count = items.iter().filter(|it| !it.is_residue()).count();
+        if total_expected != semantic_count {
+            issues.push(ReportIssue {
+                kind: "jm_coherence".into(),
+                message: format!("Total JM header count ({}) != parsed items ({})", total_expected, semantic_count),
+                bit_offset: jm_markers.first().map(|&pos| (pos + 2) as u64 * 8),
+            });
         }
 
         let fidelity_score = FidelityScore::from_audit(&forensic_audit).value;

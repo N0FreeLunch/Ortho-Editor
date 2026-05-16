@@ -92,8 +92,10 @@ impl HeaderAxiom {
         }
 
         if self.alpha_mode {
-            // Forensic: Alpha v105 follows standard mode/location boundaries
-            return mode <= 6 && location <= 5;
+            // Forensic: Alpha v105 follows standard mode/location boundaries.
+            // mode <= 6 (standard), location <= 5 (standard).
+            // version <= 7 (3-bit field).
+            mode <= 6 && location <= 5 && self.version <= 7
         } else {
             if mode > 6 || location > 15 { return false; }
             true
@@ -402,14 +404,6 @@ impl ItemHeader {
             save_is_alpha: alpha_mode,
         }, alpha_header_gap))
     }
-}
-
-pub fn parse_item_header<R: BitRead>(
-    cursor: &mut BitCursor<R>,
-    alpha_mode: bool,
-    code: Option<&str>,
-) -> ParsingResult<(ItemHeader, Option<u32>)> {
-    ItemHeader::read_from_cursor(cursor, alpha_mode, code)
 }
 
 pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {

@@ -701,8 +701,10 @@ impl Item {
         let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset, Some(top_level_count));
         eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
         let mut start_offset = 32; // Relative skip JM (16) + Count (16) inside section_bytes
+        let mut subsumed_indices = std::collections::HashSet::new();
 
         for (i, marker) in markers.iter().enumerate() {
+            if subsumed_indices.contains(&i) { continue; }
             let start = marker.offset; // marker.offset is relative to section_bytes
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
             if non_residue_count >= top_level_count as usize {
@@ -826,6 +828,17 @@ impl Item {
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
                     final_item.total_bits = actual_consumed;
+                    
+                    // Slice 7: Mark subsumed markers (Competitive Marker Resolution)
+                    let end_bit = start + actual_consumed;
+                    for (next_idx, next_marker) in markers.iter().enumerate().skip(i + 1) {
+                        if next_marker.offset < end_bit {
+                            subsumed_indices.insert(next_idx);
+                        } else {
+                            break;
+                        }
+                    }
+
                     items.push(final_item);
                     start_offset = start + actual_consumed;
                 }
@@ -1006,8 +1019,9 @@ impl Item {
         let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
         let _has_checksum_peek = peek.as_ref().map(|p| p.9);
+        let is_compact_peek = peek.as_ref().map(|p| p.6);
 
-        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact)?;
+        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(is_compact_peek))?;
 
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {

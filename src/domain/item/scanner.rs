@@ -141,32 +141,28 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     let mut last_code = String::new();
     
     while i < final_markers.len() {
-        let (offset, confidence, _code) = &final_markers[i];
+        let (offset, confidence, code) = &final_markers[i];
         
         // Find the best candidate in a lookahead window
         let mut best_idx = i;
         let mut max_score = *confidence as i32;
-        
-        // Slice 7: Alignment and Recurrence Bonus
-        // We prioritize markers that maintain the 72/80 bit rhythm of Alpha v105.
+
         if alpha && !filtered.is_empty() {
             let diff = offset - last_offset;
-            let mut alignment_bonus = 0;
             if is_alpha_v105_slot_item(&last_code) {
-                if diff == 80 {
-                    alignment_bonus = 350; // Increased from 300 for Slice 7
-                } else if diff == 72 || diff == 73 {
-                    alignment_bonus = 250;
-                } else if is_v105_aligned(diff) {
-                    alignment_bonus = 150;
-                }
+                if diff == 80 { max_score += 350; }
+                else if diff == 72 || diff == 73 { max_score += 250; }
+                else if is_v105_aligned(diff) { max_score += 150; }
             } else if is_v105_aligned(diff) {
-                alignment_bonus = 100;
+                max_score += 100;
             }
-            
-            // Recurrence bonus: if multiple items follow the same rhythm, amplify the confidence.
-            if alignment_bonus > 0 {
-                max_score += alignment_bonus;
+
+            if let Some(expected) = expected_count {
+                if filtered.len() >= expected as usize {
+                    if !is_v105_aligned(diff) {
+                        max_score -= 500;
+                    }
+                }
             }
         }
         
@@ -217,7 +213,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 if filtered.len() >= expected as usize {
                     let is_aligned = if filtered.is_empty() { false } else { is_v105_aligned(o_offset - last_offset) };
                     if !is_aligned {
-                        score -= 300; // Increased penalty for extra unaligned markers
+                        score -= 500; // Even higher penalty for extra unaligned markers
                     }
                 }
             }

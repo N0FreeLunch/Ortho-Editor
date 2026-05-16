@@ -85,6 +85,12 @@ impl V105HeaderGapAxiom {
                     }
                 }
             }
+            
+            // Axiom 0392: Summary items in Alpha v105 are structurally compact 
+            // but still preserve the JM-to-Body gap to maintain the 80-bit rhythm.
+            if is_v105_summary_code(trimmed) {
+                return if has_checksum { 0 } else { 8 };
+            }
         }
 
         // Runeword/Shadow Items (Bit 26/27)
@@ -163,32 +169,39 @@ impl V105AlignmentAxiom {
 pub fn is_v105_summary_code(code: &str) -> bool {
     let trimmed = code.trim();
     if trimmed.is_empty() {
-        return true; // Blank items are compact markers
+        return false; // Be conservative for empty codes to avoid scanner drift
     }
 
     // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
-    // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04' 
+    // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04'
     // Forensic: Use raw u8 conversion to avoid UTF-8 mismatch for non-ASCII codes (Slice 24)
     let bytes: Vec<u8> = code.chars().map(|c| c as u32 as u8).collect();
+
+    // Pattern: ÏO (0xCF 0x4F)
     if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
         return true;
     }
+    // Pattern: H\x04 (0x48 0x04)
     if bytes.len() >= 2 && bytes[0] == 0x48 && bytes[1] == 0x04 {
         return true;
     }
+    // Pattern: bH\x04 (0x62 0x48 0x04)
     if bytes.len() >= 3 && bytes[0] == b'b' && bytes[1] == 0x48 && bytes[2] == 0x04 {
         return true;
     }
-    // Q€ Resolution: 0x51 0x80 pattern for Alpha v105
+    // Pattern: Q€ (0x51 0x80)
     if bytes.len() >= 2 && bytes[0] == 0x51 && bytes[1] == 0x80 {
         return true;
     }
-    
+    // Pattern: ~ (0x7E 0x02 0x80) observed in amazon_initial
+    if bytes.len() >= 2 && bytes[0] == 0x7E && bytes[1] == 0x02 {
+        return true;
+    }
+
     // Þ. Resolution: 0xDE 0x2E pattern for Alpha v105
     if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
         return true;
     }
-
     // 2. Standard markers that are always compact
     if trimmed == "tsc" || trimmed == "isc" {
         return true;
