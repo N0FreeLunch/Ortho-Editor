@@ -38,7 +38,7 @@ fn get_all_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Vec
         let section_bit_offset = (pos as u64 + 4) * 8;
         let markers = d2r_core::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha, section_bit_offset);
         for m in markers {
-            all_markers.push((pos as u64 + 4) * 8 + m);
+            all_markers.push((pos as u64 + 4) * 8 + m.offset);
         }
     }
     all_markers.sort();

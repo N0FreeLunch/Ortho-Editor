@@ -30,7 +30,7 @@ impl DomainVerifier for ItemVerifier {
         };
 
         // 2. Round-trip validation
-        for item in &items {
+        for (idx, item) in items.iter().enumerate() {
             forensic_audit.extend(item.forensic_audit.clone());
             
             // Slice 4: Opaque/SemiOpaque items are preserved as-is; skip round-trip parse check 
@@ -39,7 +39,7 @@ impl DomainVerifier for ItemVerifier {
                 continue;
             }
 
-            let item_bits_vec = match item.to_bits(&huffman, alpha_mode) {
+            let item_bits_vec = match item.to_bits(idx, &huffman, alpha_mode) {
                 Ok(b) => b,
                 Err(e) => {
                     issues.push(ReportIssue {
@@ -50,7 +50,7 @@ impl DomainVerifier for ItemVerifier {
                     continue;
                 }
             };
-            if let Err(e) = Item::from_bytes(&item.to_bytes(&huffman, alpha_mode).unwrap(), &huffman, alpha_mode) {
+            if let Err(e) = Item::from_bytes(&item.to_bytes(idx, &huffman, alpha_mode).unwrap(), &huffman, alpha_mode) {
                 issues.push(ReportIssue {
                     kind: "item_parse".to_string(),
                     message: format!("Item round-trip parse failure ({}): {}", item.code, e),

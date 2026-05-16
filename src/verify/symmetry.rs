@@ -103,6 +103,7 @@ pub fn calculate_symmetry_diff(
             let mut results = Vec::new();
             for (i, item) in filtered_items {
                 let diff = compare_item_with_reserialized(
+                    i,
                     item,
                     &huffman,
                     is_alpha_a,
@@ -121,6 +122,7 @@ pub fn calculate_symmetry_diff(
                 .into_par_iter()
                 .map(|(i, item)| {
                     compare_item_with_reserialized(
+                        i,
                         item,
                         &huffman,
                         is_alpha_a,
@@ -202,10 +204,10 @@ fn is_alpha(bytes: &[u8]) -> bool {
     version == 105 || version == 6
 }
 
-fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
+fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
     let mut strict_item = item.clone();
     strict_item.bits.clear();
-    let reserialized_bytes = strict_item.to_bytes(huffman, alpha_mode).unwrap_or_default();
+    let reserialized_bytes = strict_item.to_bytes(idx, huffman, alpha_mode).unwrap_or_default();
     let original_bits = &item.bits;
 
     let mut rebuilt_bits = Vec::new();
@@ -276,6 +278,7 @@ fn compare_item_with_reserialized(item: &Item, huffman: &HuffmanTree, alpha_mode
 
     for (i, child) in item.socketed_items.iter().enumerate() {
         item_diff.children.push(compare_item_with_reserialized(
+            0,
             child,
             huffman,
             alpha_mode,

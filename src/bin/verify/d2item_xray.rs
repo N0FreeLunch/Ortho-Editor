@@ -121,7 +121,7 @@ fn main() -> Result<()> {
                 idx, item.code, item.range.start, item.range.end, item.range.end - item.range.start);
             
             // Re-serialize to check for symmetry
-            let _reserialized = item.to_bytes(&huffman, is_alpha).map_err(|e| anyhow::anyhow!("{}", e))?;
+            let _reserialized = item.to_bytes(0, &huffman, is_alpha).map_err(|e| anyhow::anyhow!("{}", e))?;
             
             println!("  Segments ({}):", item.segments.len());
             for seg in &item.segments {

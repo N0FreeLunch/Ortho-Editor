@@ -580,7 +580,6 @@ impl Item {
             let mut final_bits = s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
             if self.total_bits > final_bits { final_bits = self.total_bits; }
             
-            println!("[DEBUG-SLICE13] to_emitter (header-only): code='{}', current={}, final={}", self.code, current_bits - start_bit, final_bits);
 
             if final_bits > (current_bits - start_bit) {
                 let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
@@ -735,17 +734,17 @@ impl Item {
     pub fn serialize_section(items: &[Item], huffman: &crate::domain::item::serialization::HuffmanTree, alpha_mode: bool) -> io::Result<Vec<u8>> {
         use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
-        for item in items {
+        for (i, item) in items.iter().enumerate() {
             if !alpha_mode {
                 emitter.extend_bits(item.gap_bits.iter().cloned())?;
             }
             if alpha_mode {
                 // Alpha v105 Forensic: Items are bit-packed without byte alignment between them.
                 // The gap bits are already included in the item's own bitstream via to_emitter.
-                let item_bits = item.to_bits(huffman, alpha_mode)?;
+                let item_bits = item.to_bits(i, huffman, alpha_mode)?;
                 emitter.extend_bits(item_bits)?;
             } else {
-                let item_bytes = item.to_bytes(huffman, alpha_mode)?;
+                let item_bytes = item.to_bytes(i, huffman, alpha_mode)?;
                 for byte in item_bytes { emitter.write_bits(byte as u32, 8)?; }
             }
             let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode);
@@ -757,10 +756,10 @@ impl Item {
                 }
                 if alpha_mode { 
                     emitter.write_bits(2, 2)?; 
-                    let child_bits = child.to_bits(huffman, alpha_mode)?;
+                    let child_bits = child.to_bits(0, huffman, alpha_mode)?; // Sockets use idx 0 as per parsing
                     emitter.extend_bits(child_bits)?;
                 } else {
-                    let child_bytes = child.to_bytes(huffman, alpha_mode)?;
+                    let child_bytes = child.to_bytes(0, huffman, alpha_mode)?;
                     for byte in child_bytes { emitter.write_bits(byte as u32, 8)?; }
                 }
             }
@@ -814,7 +813,6 @@ pub fn parse_item_header<R: BitRead>(
     let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags);
     let is_rw_initial = h_axiom.is_runeword(flags, code_hint);
-    println!("[DEBUG-SLICE13] parse_item_header: version={}, compact={}, rw={}, pos={}", version, is_compact, is_rw_initial, cursor.pos());
     
     let mut y = 0; let mut page = 0; let mut socket_hint = 0;
     let geometry = h_axiom.header_geometry(flags, code_hint);

@@ -1445,7 +1445,7 @@ pub fn write_property_list(
                  let is_stat_320 = raw_id == 320 || axiom.map_alpha_id(raw_id) == 320;
 
                  if is_stat_320 {
-                     let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
+                     let child_bits_vec = child.to_bits(0, huffman, axiom.save_is_alpha)?;
                      let child_bits = child_bits_vec.len();
                      let registry_width = axiom.stat_bit_width(320, 0);
 
@@ -1459,7 +1459,7 @@ pub fn write_property_list(
                      }
                  } else {
                      // Variable budget (Stat 317)
-                     let child_bits_vec = child.to_bits(huffman, axiom.save_is_alpha)?;
+                     let child_bits_vec = child.to_bits(0, huffman, axiom.save_is_alpha)?;
                      emitter.extend_bits(child_bits_vec)?;
                  }
 

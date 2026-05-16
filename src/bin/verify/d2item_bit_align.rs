@@ -59,7 +59,7 @@ fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree) ->
     // Strategy A: Re-serialize and re-parse to get "Expected Bits"
     let mut expected_item = item.clone();
     expected_item.bits.clear(); // Force re-encoding
-    let expected_encoded_bytes = expected_item.to_bytes(&huffman, false)?;
+    let expected_encoded_bytes = expected_item.to_bytes(0, &huffman, false)?;
 
     let mut reader = BitReader::endian(Cursor::new(&expected_encoded_bytes), LittleEndian);
     let mut cursor = BitCursor::new(reader);
