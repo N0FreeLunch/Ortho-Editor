@@ -575,7 +575,10 @@ impl Item {
 
         // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
         // EXCEPT for Alpha equipment which might have property residue/nudges. (Axiom 0365)
-        if s_axiom.is_header_only(self.header.flags, &self.code) && !(alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2 || self.header.version == 5)) {
+        let is_header_only = s_axiom.is_header_only(self.header.flags, &self.code);
+        let is_v105_blank = alpha_mode && self.code.trim().is_empty();
+
+        if is_header_only && (is_v105_blank || !(alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2 || self.header.version == 5))) {
             let current_bits = emitter.written_bits();
             let mut final_bits = s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
             if self.total_bits > final_bits { final_bits = self.total_bits; }

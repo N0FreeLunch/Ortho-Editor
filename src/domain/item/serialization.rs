@@ -1026,6 +1026,7 @@ impl Item {
         }
 
         let s_axiom = StatsAxiom::new(header.version, header.quality.unwrap_or(crate::domain::item::ItemQuality::Normal), alpha_mode)
+            .with_index(idx)
             .with_compact(header.is_compact)
             .with_code(code_peek.unwrap_or(""));
 
@@ -1267,6 +1268,18 @@ impl Item {
             .collect();
 
         cursor.end_segment();
+        
+        if let Some(l) = cursor.limit() {
+            if cursor.pos() < l {
+                let residue_len = l - cursor.pos();
+                let mut residue_bits = Vec::new();
+                for _ in 0..residue_len {
+                    if let Ok(b) = cursor.read_bit() { residue_bits.push(b); }
+                }
+                item.modules.push(crate::domain::item::ItemModule::Residue(residue_bits));
+            }
+        }
+
         Ok(item)
     }
 }

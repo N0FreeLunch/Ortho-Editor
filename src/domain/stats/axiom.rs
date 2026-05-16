@@ -1,6 +1,6 @@
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
-use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105AlignmentAxiom};
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
 use crate::domain::header::entity::{HeaderAxiom, HeaderGeometry};
 
@@ -304,7 +304,6 @@ impl StatsAxiom {
             let trimmed = code.trim();
 
             let mut min_bits = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
-            println!("[DEBUG-ALIGN] version={}, code='{}', current={}, min={}", self.version, code, current_len, min_bits);
 
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(item_map) = overrides.get(trimmed) {
@@ -322,11 +321,14 @@ impl StatsAxiom {
             let policy = self.compact_layout_policy();
             
             let apply_min_nudge = match policy {
-                CompactLayoutPolicy::AlphaV105 if self.is_compact => false, // Strictly bit-packed
+                CompactLayoutPolicy::AlphaV105 if self.is_compact => true, 
                 _ => !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact),
             };
 
-            if apply_min_nudge && final_len < min_bits {
+            let alignment_nudge = V105AlignmentAxiom::default().get_alignment_nudge(self.version, &self.code, flags, self.is_compact);
+            if alignment_nudge > 0 {
+                final_len = (current_len + alignment_nudge as u64).max(min_bits);
+            } else if apply_min_nudge && final_len < min_bits {
                 final_len = min_bits;
             }
 
