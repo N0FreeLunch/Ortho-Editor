@@ -18,7 +18,7 @@ fn main() {
     let section_bytes = &bytes[pos..];
     let section_bit_offset = (pos as u64) * 8;
     
-    let markers = d2r_core::domain::item::scanner::scan_item_markers(section_bytes, &huffman, is_alpha, section_bit_offset);
+    let markers = d2r_core::domain::item::scanner::scan_item_markers(section_bytes, &huffman, is_alpha, section_bit_offset, None);
     
     println!("Markers found in amazon_initial.d2s (starting at bit {}):", section_bit_offset);
     for (i, m) in markers.iter().enumerate() {

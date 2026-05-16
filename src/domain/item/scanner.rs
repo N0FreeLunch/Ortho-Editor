@@ -174,7 +174,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         let lookahead_limit = if alpha { offset + 64 } else { offset + 120 };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
-            let (o_offset, o_conf, _o_code) = &final_markers[j];
+            let (o_offset, o_conf, o_code) = &final_markers[j];
             let mut score = *o_conf as i32;
             
             if alpha && !filtered.is_empty() {
@@ -192,6 +192,22 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     alignment_bonus = 100;
                 }
                 score += alignment_bonus;
+
+                // Recursive Alignment Check (Slice 7): 
+                // Check if THIS lookahead candidate itself has an aligned successor.
+                if alignment_bonus > 0 {
+                    let next_window = o_offset + 96;
+                    let mut k = j + 1;
+                    while k < final_markers.len() && final_markers[k].0 < next_window {
+                        let k_offset = final_markers[k].0;
+                        let k_diff = k_offset - o_offset;
+                        if is_v105_aligned(k_diff) {
+                            score += 100; // Multi-hop alignment bonus
+                            break;
+                        }
+                        k += 1;
+                    }
+                }
             }
             
             // Phantom Suppression (Slice 7): 
@@ -199,7 +215,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             // in suppressing low-confidence non-aligned markers.
             if let Some(expected) = expected_count {
                 if filtered.len() >= expected as usize {
-                    score -= 200; // Penalize extra markers
+                    let is_aligned = if filtered.is_empty() { false } else { is_v105_aligned(o_offset - last_offset) };
+                    if !is_aligned {
+                        score -= 300; // Increased penalty for extra unaligned markers
+                    }
                 }
             }
 
@@ -208,7 +227,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 best_idx = j;
             }
             j += 1;
-            }
+        }
 
             let best = &final_markers[best_idx];
 

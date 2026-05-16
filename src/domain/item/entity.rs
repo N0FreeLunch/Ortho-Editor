@@ -614,7 +614,8 @@ impl Item {
             }
         }
 
-        if !s_axiom.is_compact || (alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2)) {
+        let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code);
+        if (!s_axiom.is_compact && !is_v105_summary) || (alpha_mode && (self.header.version == 0 || self.header.version == 1 || self.header.version == 2) && !is_v105_summary) {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
 
@@ -811,7 +812,7 @@ pub fn parse_item_header<R: BitRead>(
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags);
-    let is_rw_initial = h_axiom.is_runeword(flags, code_hint);
+    let _is_rw_initial = h_axiom.is_runeword(flags, code_hint);
     
     let mut y = 0; let mut page = 0; let mut socket_hint = 0;
     let geometry = h_axiom.header_geometry(flags, code_hint);
@@ -836,6 +837,13 @@ pub fn parse_item_header<R: BitRead>(
 
             alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
             
+            // Forensic (Slice 25): If no gap was read (checksum items), we still need to read 
+            // the 3-bit Y coordinate for summary items to maintain the 80-bit rhythm.
+            let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
+            if gap_bits == 0 && is_v105_summary && geometry.y_bits > 0 {
+                y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
+            }
+
             // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
             if version == 5 {
                 cursor.byte_align()?;
@@ -849,13 +857,14 @@ pub fn parse_item_header<R: BitRead>(
 
             // Alpha v105 Forensic: Equipment coordinates (y, page, socket_hint) 
             // are packed into the header gap rather than being separate bitfields.
-            if !is_compact && gap_bits >= 8 {
+            if (!is_compact || is_v105_summary) && gap_bits >= 8 {
                 y = (gap & 0x0F) as u8; 
                 page = ((gap >> 4) & 0x07) as u8; 
                 socket_hint = ((gap >> 7) & 0x01) as u8; 
             }
         } else {
-            if !is_compact { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
+            let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(code_hint.unwrap_or(""));
+            if !is_compact || is_v105_summary { y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; }
             alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(8))?;
             let mut val = 0u32;
             for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { if bit { val |= 1 << i; } }

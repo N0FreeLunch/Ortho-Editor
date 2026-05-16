@@ -1172,7 +1172,9 @@ impl Item {
 
         // Slice 1: Force stats reading for Alpha v105 items even if compact, 
         // to detect residue Defense/Durability as per mini-spec.
-        if !item.header.is_compact || (alpha_mode && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2)) {
+        // EXCEPT for summary items (Axiom 0392) which never have stats.
+        let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
+        if (!item.header.is_compact && !is_v105_summary) || (alpha_mode && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2) && !is_v105_summary) {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
 
             // Slice 11: Handle JM-to-Body alignment gap
