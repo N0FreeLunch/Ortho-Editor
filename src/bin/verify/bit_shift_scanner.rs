@@ -44,7 +44,7 @@ fn main() {
         let _ = reader.skip(bit_start as u32);
         let mut cursor = BitCursor::new(reader);
 
-        match Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, bit_start as u64)), is_alpha, 0, None) {
+        match Item::from_reader_with_context(&mut cursor, &huffman, Some((&bytes, bit_start as u64)), is_alpha, 0, None, None) {
             Ok(item) => {
                 println!("  [Shift {:+3}] SUCCESS: '{}' (len={} bits, flags=0x{:08X}, compact={})",
                     shift, item.code, cursor.pos(), item.flags, item.is_compact);

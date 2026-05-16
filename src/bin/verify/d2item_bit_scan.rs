@@ -49,6 +49,7 @@ fn main() {
             is_alpha,
             0,
             None,
+            None,
         ) {
             if recorder.pos() >= 32 {
                 starts.push((bit_pos, item.code.clone()));
