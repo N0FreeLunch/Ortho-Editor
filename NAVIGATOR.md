@@ -106,13 +106,19 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2item_extract`** | Item | Extracts a raw item bit-payload from a save into a `.d2i` file. |
 | **`d2save_inject`** | Item | Injects a raw `.d2i` item into a specific save file. |
 | **`d2save_status_inspect`**| Status | Dumps character attributes and skills (v105/v1 compatible). |
+| **`d2save_status_diff`** | Status | **Status Diff**: Compares character attributes and skills between two save files. |
 | **`dump_character`** | Save | **Comprehensive**: Dumps full character status, skills, and item map. |
 | **`d2save_inventory_check`**| Logic | Verifies inventory grid integrity (no overlaps, valid coordinates). |
 | **`v105_unlocker`** | Save | CLI example for unlocking progression bits in Alpha v105. |
+| **`v105_attribute_search`** | Status | **Attribute Search**: Scans Alpha v105 saves for specific attribute bit-patterns. |
+| **`v105_lab`** | Save | **v105 Experimental**: Sandbox tool for Alpha v105 progression and bit-archaeology experiments. |
 | **`d2save_progression_audit`** | Save | **Progression Master**: Semantic state audit and mutation exporter (Quest/WP). |
 | **`d2save_poison`** | Save | **Forensic XOR**: Flips a single bit at a given offset (LSB-first) for corruption testing. |
 | **`d2save_arch`**   | Save | **Bit Archaeologist**: Unified bit-level `dump` and `diff` for deep forensic exploration. |
+| **`d2save_section_bits`** | Save | **Section Analyzer**: Dumps the bit layout and offsets for each save section (Header, Attrs, Skills, Items). |
+| **`d2save_structural_diff`** | Save | **Structural Diff**: Compares structural metadata between two saves to detect layout shifts. |
 | **`d2item_serialization_audit`** | Item | **Fidelity Master**: Visual bitstream alignment and forensic audit report. |
+| **`d2item_xray`** | Item | **Bit X-Ray**: Detailed bit-level visualization and decomposition of item property streams. |
 | **`d2item_global_audit`** | Item | **Batch Auditor**: Scans directories for serialization parity mismatches. |
 | **`d2save_taxonomy`** | Save | **Structural Auditor**: Categorizes fixtures by version and bitstream shape. |
 | **`d2item_rhythm_oracle`** | Item | **Rhythm Oracle**: Validates 9-bit property stream rhythms and terminators. |
