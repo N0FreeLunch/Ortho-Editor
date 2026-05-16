@@ -2,10 +2,7 @@
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
 use crate::item::{HuffmanTree, Item};
-pub use crate::domain::progression::axiom::{
-    V105_HEADER_LEN, V105_NPC_LEN, V105_NPC_OFFSET, V105_QUEST_LEN, V105_QUEST_OFFSET,
-    V105_WAYPOINT_LEN, V105_WAYPOINT_OFFSET,
-};
+pub use crate::domain::progression::axiom::PROG_START_FILE;
 pub use crate::domain::header::axiom::{
     ACTIVE_ACT_OFFSET, ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET,
     CHAR_NAME_LEN, CHAR_NAME_OFFSET, CHECKSUM_OFFSET, D2S_MAGIC, FILE_SIZE_OFFSET,
@@ -234,54 +231,33 @@ pub fn rebuild_status_and_player_items(
     // Detect version from header_bytes
     let version = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap_or([0; 4]));
 
+    let section_axiom = V105SectionMarkerAxiom::default();
+
     // Update QUESTS if present (Alpha v105)
     if version == 105 {
         if let Some(qs) = quests {
-            let start = map.woo_pos.unwrap_or(V105_QUEST_OFFSET);
-            let end = map.ws_pos.unwrap_or(V105_WAYPOINT_OFFSET);
-            let slice = qs.as_slice();
-            let max_len = end.saturating_sub(start);
-            let len = slice.len().min(max_len);
-            if header_bytes.len() >= start + len {
-                header_bytes[start..start + len].copy_from_slice(&slice[..len]);
-            }
+            section_axiom.sync_quests(&mut header_bytes, map.woo_pos, map.ws_pos, qs.as_slice());
         }
     }
 
     // Update WAYPOINTS if present (Alpha v105)
     if version == 105 {
         if let Some(wps) = waypoints {
-            let start = map.ws_pos.unwrap_or(V105_WAYPOINT_OFFSET);
-            let end = map.w4_pos.unwrap_or(V105_NPC_OFFSET);
-            let slice = wps.as_slice();
-            let max_len = end.saturating_sub(start);
-            let len = slice.len().min(max_len);
-            if header_bytes.len() >= start + len {
-                header_bytes[start..start + len].copy_from_slice(&slice[..len]);
-            }
+            section_axiom.sync_waypoints(&mut header_bytes, map.ws_pos, map.w4_pos, wps.as_slice());
         }
     }
 
     // Update NPC Section if present (Alpha v105)
     if version == 105 {
         if let Some(npc) = expansion {
-            let start = map.w4_pos.unwrap_or(V105_NPC_OFFSET);
-            let end = V105_HEADER_LEN;
-            let slice = npc.as_slice();
-            let max_len = end.saturating_sub(start);
-            let len = slice.len().min(max_len);
-            if header_bytes.len() >= start + len {
-                header_bytes[start..start + len].copy_from_slice(&slice[..len]);
-            }
+            section_axiom.sync_npc_section(&mut header_bytes, map.w4_pos, npc.as_slice());
         }
     }
 
     // Synchronize Header Level with Stat Section (id 12) to prevent engine-level reset.
     if let Some(attr) = attributes {
         if let Some(lv) = attr.actual_value(12, version == 105) {
-            if header_bytes.len() > CHAR_LEVEL_OFFSET {
-                header_bytes[CHAR_LEVEL_OFFSET] = lv as u8;
-            }
+            section_axiom.sync_char_level(&mut header_bytes, lv as u8, CHAR_LEVEL_OFFSET);
         }
     }
     
@@ -567,15 +543,15 @@ impl Save {
             progress_flag,
             last_played,
             raw_prefix: bytes[..match version {
-                105 => V105_HEADER_LEN, // Alpha v105 Fixed Header
+                105 => V105SectionMarkerAxiom::V105_HEADER_LEN, // Alpha v105 Fixed Header
                 _ => MIN_HEADER_LEN,
             }
             .min(bytes.len())]
                 .to_vec(),
             quests: if version == 105 {
                 let map = map_core_sections(bytes).ok();
-                let start = map.as_ref().and_then(|m| m.woo_pos).unwrap_or(V105_QUEST_OFFSET);
-                let end = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105_WAYPOINT_OFFSET);
+                let start = map.as_ref().and_then(|m| m.woo_pos).unwrap_or(V105SectionMarkerAxiom::V105_QUEST_OFFSET);
+                let end = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
                 if bytes.len() >= start + 12 {
                     Some(QuestSection::from_slice(&bytes[start..end.min(bytes.len())]))
                 } else {
@@ -586,8 +562,8 @@ impl Save {
             },
             waypoints: if version == 105 {
                 let map = map_core_sections(bytes).ok();
-                let start = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105_WAYPOINT_OFFSET);
-                let end = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105_NPC_OFFSET);
+                let start = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
+                let end = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
                 if bytes.len() >= start + 2 {
                     Some(WaypointSection::from_slice(&bytes[start..end.min(bytes.len())]))
                 } else {
@@ -598,8 +574,8 @@ impl Save {
             },
             expansion: if version == 105 {
                 let map = map_core_sections(bytes).ok();
-                let start = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105_NPC_OFFSET);
-                let end = V105_HEADER_LEN;
+                let start = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
+                let end = V105SectionMarkerAxiom::V105_HEADER_LEN;
                 if bytes.len() >= start + 2 {
                     Some(ExpansionSection::from_slice(&bytes[start..end.min(bytes.len())]))
                 } else {
@@ -617,38 +593,21 @@ impl Save {
 impl Header {
     pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
         let mut bytes = self.raw_prefix.clone();
+        let section_axiom = V105SectionMarkerAxiom::default();
 
         // Update QUESTS if present (Alpha v105)
         if let Some(ref qs) = self.quests {
-            let offset = V105_QUEST_OFFSET;
-            let slice = qs.as_slice();
-            let max_len = V105_QUEST_LEN;
-            let len = slice.len().min(max_len);
-            if bytes.len() >= offset + len {
-                bytes[offset..offset + len].copy_from_slice(&slice[..len]);
-            }
+            section_axiom.sync_quests(&mut bytes, None, None, qs.as_slice());
         }
 
         // Update WAYPOINTS if present (Alpha v105)
         if let Some(ref wps) = self.waypoints {
-            let offset = V105_WAYPOINT_OFFSET;
-            let slice = wps.as_slice();
-            let max_len = V105_WAYPOINT_LEN;
-            let len = slice.len().min(max_len);
-            if bytes.len() >= offset + len {
-                bytes[offset..offset + len].copy_from_slice(&slice[..len]);
-            }
+            section_axiom.sync_waypoints(&mut bytes, None, None, wps.as_slice());
         }
 
         // Update EXPANSION (NPC) if present (Alpha v105)
         if let Some(ref ex) = self.expansion {
-            let offset = V105_NPC_OFFSET;
-            let slice = ex.as_slice();
-            let max_len = V105_NPC_LEN;
-            let len = slice.len().min(max_len);
-            if bytes.len() >= offset + len {
-                bytes[offset..offset + len].copy_from_slice(&slice[..len]);
-            }
+            section_axiom.sync_npc_section(&mut bytes, None, ex.as_slice());
         }
 
         if bytes.len() < MIN_HEADER_LEN {

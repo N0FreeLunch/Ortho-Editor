@@ -315,6 +315,14 @@ impl ForensicAxiom for V105SectionMarkerAxiom {
 }
 
 impl V105SectionMarkerAxiom {
+    pub const V105_HEADER_LEN: usize = 833;
+    pub const V105_QUEST_OFFSET: usize = 0x193;
+    pub const V105_QUEST_LEN: usize = 298;
+    pub const V105_WAYPOINT_OFFSET: usize = 0x2BD;
+    pub const V105_WAYPOINT_LEN: usize = 81;
+    pub const V105_NPC_OFFSET: usize = 0x30E;
+    pub const V105_NPC_LEN: usize = 51;
+
     pub fn find_gf(&self, bytes: &[u8]) -> Option<usize> {
         self.find_marker(bytes, b'g', b'f')
     }
@@ -353,6 +361,46 @@ impl V105SectionMarkerAxiom {
 
     pub fn if_bytes(&self) -> [u8; 2] {
         [b'i', b'f']
+    }
+
+    /// Synchronizes Alpha v105 quest data into the header.
+    pub fn sync_quests(&self, header: &mut [u8], woo_pos: Option<usize>, ws_pos: Option<usize>, data: &[u8]) {
+        let start = woo_pos.unwrap_or(Self::V105_QUEST_OFFSET);
+        let end = ws_pos.unwrap_or(Self::V105_WAYPOINT_OFFSET);
+        let max_len = end.saturating_sub(start);
+        let len = data.len().min(max_len);
+        if header.len() >= start + len {
+            header[start..start + len].copy_from_slice(&data[..len]);
+        }
+    }
+
+    /// Synchronizes Alpha v105 waypoint data into the header.
+    pub fn sync_waypoints(&self, header: &mut [u8], ws_pos: Option<usize>, w4_pos: Option<usize>, data: &[u8]) {
+        let start = ws_pos.unwrap_or(Self::V105_WAYPOINT_OFFSET);
+        let end = w4_pos.unwrap_or(Self::V105_NPC_OFFSET);
+        let max_len = end.saturating_sub(start);
+        let len = data.len().min(max_len);
+        if header.len() >= start + len {
+            header[start..start + len].copy_from_slice(&data[..len]);
+        }
+    }
+
+    /// Synchronizes Alpha v105 NPC section (Expansion) data into the header.
+    pub fn sync_npc_section(&self, header: &mut [u8], w4_pos: Option<usize>, data: &[u8]) {
+        let start = w4_pos.unwrap_or(Self::V105_NPC_OFFSET);
+        let end = Self::V105_HEADER_LEN;
+        let max_len = end.saturating_sub(start);
+        let len = data.len().min(max_len);
+        if header.len() >= start + len {
+            header[start..start + len].copy_from_slice(&data[..len]);
+        }
+    }
+
+    /// Synchronizes character level in the header based on stat section value.
+    pub fn sync_char_level(&self, header: &mut [u8], level: u8, offset: usize) {
+        if header.len() > offset {
+            header[offset] = level;
+        }
     }
 
     fn find_marker(&self, bytes: &[u8], first: u8, second: u8) -> Option<usize> {
