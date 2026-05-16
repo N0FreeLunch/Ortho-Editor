@@ -183,6 +183,11 @@ pub fn is_v105_summary_code(code: &str) -> bool {
     if bytes.len() >= 2 && bytes[0] == 0x51 && bytes[1] == 0x80 {
         return true;
     }
+    
+    // Þ. Resolution: 0xDE 0x2E pattern for Alpha v105
+    if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
+        return true;
+    }
 
     // 2. Standard markers that are always compact
     if trimmed == "tsc" || trimmed == "isc" {

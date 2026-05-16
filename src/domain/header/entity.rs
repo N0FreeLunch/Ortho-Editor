@@ -86,7 +86,8 @@ impl HeaderAxiom {
         }
 
         // Strictly reject non-alphanumeric codes to avoid bit-shifted ghost items
-        if trimmed.chars().any(|c| !c.is_alphanumeric() && c != ' ') {
+        // Forensic: Alpha v105 summary items use non-ASCII patterns (ÏO, etc.)
+        if !self.alpha_mode && trimmed.chars().any(|c| !c.is_alphanumeric() && c != ' ') {
             return false;
         }
 

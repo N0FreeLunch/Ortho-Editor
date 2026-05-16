@@ -698,21 +698,14 @@ impl Item {
             }
         }
 
-        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset);
+        let markers = crate::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset, Some(top_level_count));
         eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
-        let mut start_offset = section_bit_offset + if alpha_mode { 32 } else { 32 }; // Absolute skip JM (16) + Count (16)
-
-        if !markers.is_empty() && markers[0].offset < start_offset {
-             // In Alpha v105, the first item might start AT the JM marker (bit 0 relative)
-             start_offset = markers[0].offset;
-        } else if !markers.is_empty() {
-             // If markers start later, keep the first marker as the processing start
-             start_offset = markers[0].offset;
-        }
+        let mut start_offset = 32; // Relative skip JM (16) + Count (16) inside section_bytes
 
         for (i, marker) in markers.iter().enumerate() {
-            let start = marker.offset;
-            if items.len() >= top_level_count as usize {
+            let start = marker.offset; // marker.offset is relative to section_bytes
+            let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
+            if non_residue_count >= top_level_count as usize {
                 break;
             }
             if start < start_offset {
@@ -829,10 +822,6 @@ impl Item {
                     let mut final_item = item.clone();
                     let actual_consumed = if let Some(flen) = forced_length { flen } else { consumed_bits };
                     
-                    if crate::item::item_trace_enabled() {
-                        eprintln!("[DEBUG-SLICE21] Item parsed: code='{}', start={}, end={}, bits={}", final_item.code, section_bit_offset + start, section_bit_offset + start + actual_consumed, actual_consumed);
-                    }
-
                     final_item.expected_start_bit = start;
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
