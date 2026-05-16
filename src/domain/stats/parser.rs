@@ -65,7 +65,7 @@ pub fn read_item_stats<R: BitRead>(
     }
     let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |bytes, pos, huff, idx, alpha| {
         // println!("[DEBUG-SLICE12] Property read attempt at bit {}", pos);
-        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None, None)
+        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None, None, None)
     })?;
     
     if alpha_mode && version == 5 && is_runeword {

@@ -614,6 +614,7 @@ pub fn parse_item_at_with_limit(
     alpha: bool,
     limit: Option<u64>,
     forced_compact: Option<bool>,
+    code_hint: Option<&str>,
 ) -> ParsingResult<(Item, u64)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
@@ -621,7 +622,7 @@ pub fn parse_item_at_with_limit(
     if let Some(l) = limit {
         cursor.set_limit(l);
     }
-    let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx, forced_compact)?;
+    let item = Item::from_reader_with_context(&mut cursor, huffman, Some((bytes, bit)), alpha, idx, forced_compact, code_hint)?;
     Ok((item, cursor.pos()))
 }
 
@@ -663,7 +664,7 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
 }
 
 pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
-    let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None, None)?;
+    let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None, None, None)?;
     Ok(item)
 }
 
@@ -682,7 +683,7 @@ impl Item {
     }
 
     pub fn parse_at_bit_offset(bytes: &[u8], bit_offset: u64, huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
-        let (item, _) = parse_item_at_with_limit(bytes, bit_offset, huffman, 0, alpha, None, None)?;
+        let (item, _) = parse_item_at_with_limit(bytes, bit_offset, huffman, 0, alpha, None, None, None)?;
         Ok(item)
     }
 
@@ -820,6 +821,7 @@ impl Item {
                     alpha_mode,
                     Some(dynamic_limit),
                     if is_compact_final { Some(true) } else { None },
+                    Some(&marker.code),
                 ).map_err(|e| e) // Compatibility
             };
 
@@ -988,7 +990,7 @@ impl Item {
         alpha: bool,
     ) -> ParsingResult<Item> {
         let mut cursor = BitCursor::new(reader);
-        Self::from_reader_with_context(&mut cursor, huffman, None, alpha, 0, None)
+        Self::from_reader_with_context(&mut cursor, huffman, None, alpha, 0, None, None)
     }
 
     pub fn from_reader_with_context<R: BitRead>(
@@ -998,6 +1000,7 @@ impl Item {
         alpha_mode: bool,
         idx: usize,
         forced_compact: Option<bool>,
+        code_hint: Option<&str>,
     ) -> ParsingResult<Item> {
         let is_first_item = idx == 0;
         cursor.set_trace(crate::item::item_trace_enabled());
@@ -1008,7 +1011,7 @@ impl Item {
             let (bytes, start_bit) = ctx.unwrap();
             peek_item_header_at(bytes, start_bit, huff, true)
         } else { None };
-        let code_peek = peek.as_ref().map(|p| p.3.as_str());
+        let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
         let _has_checksum_peek = peek.as_ref().map(|p| p.9);
 
@@ -1295,7 +1298,7 @@ pub fn scan_socket_children(
             if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);
-                    if let Ok((item, consumed)) = parse_item_at_with_limit(bytes, current_pos, huffman, 0, alpha, Some(remaining), None) {
+                    if let Ok((item, consumed)) = parse_item_at_with_limit(bytes, current_pos, huffman, 0, alpha, Some(remaining), None, None) {
                         let mut item_end = current_pos + consumed;
                         if alpha {
                             if let Some(next_start) = find_next_item_match(bytes, current_pos + 64, huffman, alpha) {

@@ -205,16 +205,21 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 fn is_alpha_v105_slot_item(code: &str) -> bool {
     let trimmed = code.trim();
     // Potions, Scrolls, and other common inventory slot items in Alpha v105.
-    matches!(trimmed, 
+    // Also include 'w' prefixed versions common in Alpha.
+    if matches!(trimmed, 
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
+        "whp1"|"whp2"|"whp3"|"whp4"|"whp5"|"wmp1"|"wmp2"|"wmp3"|"wmp4"|"wmp5"|
         "rvs"|"rvl"|"vps"|"tsc"|"isc"|"yps"|"wps"|"us g"|"w8cs"|"w88w"|"xrs"|
         "6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|"mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|
         "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"|"swsp"
-    )
+    ) { return true; }
+    
+    // Check if it's a summary code from axioms
+    crate::domain::forensic::v105::axioms::is_v105_summary_code(code)
 }
 
 fn is_v105_aligned(diff: u64) -> bool {
-    // Standard Alpha v105 slot sizes are 72, 80, 88.
-    // We also allow sums of these (e.g., 144, 152, 160) for empty slots.
-    matches!(diff, 72 | 80 | 88 | 144 | 152 | 160 | 168 | 176 | 216 | 224 | 232 | 240)
+    // Standard Alpha v105 slot sizes are 72, 73, 80, 88.
+    // We also allow sums of these for empty slots.
+    matches!(diff, 72 | 73 | 80 | 88 | 144 | 145 | 152 | 153 | 160 | 161 | 168 | 176 | 216 | 224 | 232 | 240)
 }
