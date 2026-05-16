@@ -267,6 +267,39 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         _ => 0,
     }
 }
+
+/// JM Marker scanning axiom for Alpha v105.
+#[derive(Debug, Clone, Default)]
+pub struct V105JmMarkerAxiom;
+
+impl ForensicAxiom for V105JmMarkerAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "JM Marker (0x4D4A) scanning and validation in Alpha v105",
+        )
+    }
+}
+
+impl V105JmMarkerAxiom {
+    pub const MARKER: u16 = 0x4D4A;
+
+    pub fn jm_marker(&self) -> u16 {
+        Self::MARKER
+    }
+
+    pub fn scan(&self, bytes: &[u8]) -> Vec<usize> {
+        let mut positions = Vec::new();
+        for i in 0..bytes.len().saturating_sub(1) {
+            if bytes[i] == b'J' && bytes[i + 1] == b'M' {
+                positions.push(i);
+            }
+        }
+        positions
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

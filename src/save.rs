@@ -16,6 +16,7 @@ pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 pub use crate::domain::progression::{QuestSection, WaypointSection};
 use std::io;
 use std::mem;
+use crate::domain::forensic::v105::V105JmMarkerAxiom;
 
 fn find_marker(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
     (0..bytes.len().saturating_sub(1))
@@ -85,13 +86,8 @@ pub fn get_skill_level_by_class(skills: &SkillSection, class_id: u8, skill_id: u
 }
 
 pub fn find_jm_markers(bytes: &[u8]) -> Vec<usize> {
-    let mut jm_positions = Vec::new();
-    for i in 0..bytes.len().saturating_sub(1) {
-        if bytes[i] == b'J' && bytes[i + 1] == b'M' {
-            jm_positions.push(i);
-        }
-    }
-    jm_positions
+    let axiom = V105JmMarkerAxiom::default();
+    axiom.scan(bytes)
 }
 
 #[derive(Debug, Clone)]
@@ -128,7 +124,8 @@ pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
     let if_pos = find_marker(bytes, b'i', b'f').ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "if marker not found in save file")
     })?;
-    let jm_positions = find_jm_markers(bytes);
+    let axiom = V105JmMarkerAxiom::default();
+    let jm_positions = axiom.scan(bytes);
     if jm_positions.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -716,7 +713,8 @@ pub fn rebuild_item_section(
     huffman: &HuffmanTree,
     alpha_mode: bool,
 ) -> io::Result<Vec<u8>> {
-    let jm_positions = find_jm_markers(bytes);
+    let axiom = V105JmMarkerAxiom::default();
+    let jm_positions = axiom.scan(bytes);
     if jm_positions.len() < 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -771,7 +769,8 @@ pub fn rebuild_item_section(
     
     let mut item_header_emitter = crate::domain::item::serialization::BitEmitter::new();
     // Write "JM" marker (16 bits)
-    item_header_emitter.write_bits(0x4D4A, 16).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let axiom = V105JmMarkerAxiom::default();
+    item_header_emitter.write_bits(axiom.jm_marker() as u32, 16).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     
     // Both Alpha v105 and Retail use 16-bit item count in these fixtures.
     item_header_emitter.write_bits(count_u16 as u32, 16).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
