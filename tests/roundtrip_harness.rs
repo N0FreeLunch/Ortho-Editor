@@ -27,11 +27,11 @@ mod roundtrip_tests {
         let items =
             Item::read_player_items(&bytes, &huffman, version == 105).expect("items should parse");
 
-        for item in &items {
+        for (i, item) in items.iter().enumerate() {
             // 2. Re-serialize each item
             let alpha_mode = version == 105;
             let reserialized = item
-                .to_bytes(&huffman, alpha_mode)
+                .to_bytes(i, &huffman, alpha_mode)
                 .expect("should re-serialize");
 
             // 3. Compare bits if the item wasn't recovered/modified during parse
@@ -144,7 +144,7 @@ mod roundtrip_tests {
         // Re-serialize and verify
         let alpha_mode = version == 105;
         let reserialized = authority
-            .to_bytes(&huffman, alpha_mode)
+            .to_bytes(0, &huffman, alpha_mode)
             .expect("should re-serialize modified item");
 
         // Parse back and verify new value
@@ -182,9 +182,9 @@ mod roundtrip_tests {
             "Should have recovered all 16 items from 10-scrolls fixture"
         );
 
-        for item in &items {
+        for (i, item) in items.iter().enumerate() {
             // 2. Re-serialize
-            let reserialized = item.to_bytes(&huffman, true).expect("should re-serialize");
+            let reserialized = item.to_bytes(i, &huffman, true).expect("should re-serialize");
 
             // 3. Parse back and verify basic identity
             let item_back =
