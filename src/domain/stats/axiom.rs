@@ -232,8 +232,13 @@ impl StatsAxiom {
         }
     }
 
-    /// Resolve 72/73-bit repeating alignment patterns (Axiom 0340)
+    /// Resolve rhythmic alignment patterns (Axiom 0340/0344)
     pub fn resolve_compact_rhythm(&self, current_len: u64) -> u64 {
+        let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
+        if self.save_is_alpha && w_axiom.is_summary_rhythm_forced(self.version, &self.code) {
+             return w_axiom.summary_item_fixed_width() as u64;
+        }
+
         if self.save_is_alpha && current_len == 72 && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
              if self.idx % 2 != 0 {
                  return 73;
