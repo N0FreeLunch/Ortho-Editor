@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 license-file = "LICENSE"
 
-[[example]]
-name = "item_xray"
-path = "tmp/item_xray.rs"
-
-[[example]]
-name = "debug_item0"
-path = "tmp/debug_item0.rs"
+# [[example]]
+# name = "item_xray"
+# path = "tmp/item_xray.rs"
+# 
+# [[example]]
+# name = "debug_item0"
+# path = "tmp/debug_item0.rs"
 
 [[example]]
 name = "scan_all_headers"
