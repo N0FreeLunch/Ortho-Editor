@@ -1,3 +1,5 @@
+use crate::engine::checksum::{ChecksumStrategy, StandardRollingSum};
+
 /// Stable D2S Header Constants
 /// 
 /// These constants define the physical layout of the standard D2S save game header.
@@ -20,3 +22,24 @@ pub const EXPANSION_FLAG_OFFSET: usize = 271;
 
 /// Minimum header length required to reach the end of the character name field.
 pub const MIN_HEADER_LEN: usize = CHAR_NAME_OFFSET + CHAR_NAME_LEN;
+
+/// Axiomatic authority for D2S save header behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeaderAxiom {
+    pub version: u32,
+}
+
+impl HeaderAxiom {
+    pub fn new(version: u32) -> Self {
+        Self { version }
+    }
+
+    /// Returns the appropriate checksum strategy for this version.
+    pub fn checksum_strategy(&self) -> Box<dyn ChecksumStrategy> {
+        match self.version {
+            // Alpha v105 and Retail (v1.10+) currently use the same rolling sum.
+            105 => Box::new(StandardRollingSum),
+            _ => Box::new(StandardRollingSum),
+        }
+    }
+}

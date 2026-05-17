@@ -824,4 +824,23 @@ mod tests {
         assert_eq!(reparsed.header.checksum, recalculated);
         Ok(())
     }
+
+    #[test]
+    fn alpha_v105_header_round_trip_integrity() -> io::Result<()> {
+        let mut bytes = fixture_bytes("tests/fixtures/savegames/original/amazon_initial.d2s");
+        let mut save = Save::from_bytes(&bytes)?;
+        assert_eq!(save.header.version, 105);
+        
+        // Modify level
+        save.header.char_level = 2;
+        save.apply_header_to_bytes(&mut bytes)?;
+
+        let reparsed = Save::from_bytes(&bytes)?;
+        assert_eq!(reparsed.header.char_level, 2);
+        let recalculated = recalculate_checksum(&bytes)?;
+        assert_eq!(reparsed.header.checksum, recalculated);
+        
+        // Check if FTI logging worked (manually verified if running with tracing)
+        Ok(())
+    }
 }
