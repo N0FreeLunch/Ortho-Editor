@@ -318,7 +318,7 @@ impl ItemHeader {
             let v = cursor.read_bits::<u8>(3)? as u8;
             let expected = calculate_alpha_v105_checksum(flags, v);
             
-            if checksum == expected {
+            if checksum == expected && v >= 5 {
                 (v, true)
             } else {
                 cursor.rollback(saved_pos);

@@ -445,7 +445,7 @@ impl V105PropertyWidthAxiom {
         let trimmed = code.trim();
         // Axiom 0344: Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
         // are forced to an 80-bit rhythm in Alpha v105.
-        trimmed == "tsc" || trimmed == "isc" || (trimmed == "wuw8" && version == 0)
+        (version == 5 && (trimmed == "tsc" || trimmed == "isc")) || (trimmed == "wuw8" && version == 0)
     }
 
     /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).

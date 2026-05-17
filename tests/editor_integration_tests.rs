@@ -38,7 +38,7 @@ fn test_editor_end_to_end_mutation() {
     assert_eq!(items[0].defense(), Some(target_defense));
     
     // 3. Re-serialize the item and check basic bit-level consistency
-    let mutated_bits = items[0].to_bits(&huffman, is_alpha).expect("serialization should succeed");
+    let mutated_bits = items[0].to_bits(0, &huffman, is_alpha).expect("serialization should succeed");
     assert!(!mutated_bits.is_empty());
     
     // Note: Full save injection and d2save_verify check is omitted in this unit test 

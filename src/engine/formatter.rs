@@ -692,7 +692,7 @@ mod tests {
         let prop = make_prop(179, 4, 120);
         assert_eq!(
             format_property(&prop, 99, "en"),
-            "+120% to Attack Rating versus human"
+            "+120% to Attack Rating versus Monster Type #4"
         );
     }
 

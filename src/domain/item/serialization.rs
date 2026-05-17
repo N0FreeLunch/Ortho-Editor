@@ -206,32 +206,75 @@ pub fn peek_item_header_at(
     huffman: &HuffmanTree,
     alpha_mode: bool,
 ) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
+    if start_bit == 32 {
+        println!("[DEBUG-PEEK-32] start, bytes.len()={}", section_bytes.len());
+    }
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if reader.skip(start_bit as u32).is_err() { return None; }
+    if reader.skip(start_bit as u32).is_err() {
+        if start_bit == 32 { println!("[DEBUG-PEEK-32] skip failed"); }
+        return None;
+    }
 
     // Read header structure
-    let flags = reader.read::<32, u32>().ok()?;
+    let flags = reader.read::<32, u32>().ok();
+    if flags.is_none() {
+        if start_bit == 32 { println!("[DEBUG-PEEK-32] flags read failed"); }
+        return None;
+    }
+    let flags = flags.unwrap();
+    if start_bit == 32 {
+        println!("[DEBUG-PEEK-32] flags = 0x{:X}", flags);
+    }
     
     let mut alpha_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    alpha_reader.skip(start_bit as u32 + 32).ok()?;
-    let checksum = alpha_reader.read::<8, u8>().ok()?;
-    let v = alpha_reader.read::<3, u8>().ok()?;
+    if alpha_reader.skip(start_bit as u32 + 32).is_err() {
+        if start_bit == 32 { println!("[DEBUG-PEEK-32] alpha_reader skip failed"); }
+        return None;
+    }
+    let checksum = alpha_reader.read::<8, u8>().ok();
+    let v = alpha_reader.read::<3, u8>().ok();
+    if checksum.is_none() || v.is_none() {
+        if start_bit == 32 { println!("[DEBUG-PEEK-32] checksum or v read failed"); }
+        return None;
+    }
+    let checksum = checksum.unwrap();
+    let v = v.unwrap();
     let calculated = calculate_alpha_v105_checksum(flags, v);
+    if start_bit == 32 {
+        println!("[DEBUG-PEEK-32] checksum={}, v={}, calculated={}", checksum, v, calculated);
+    }
     
     let (version, mode, loc, _x_val, base_header_len, has_checksum) = if calculated == checksum {
-        let m = alpha_reader.read::<3, u8>().ok()?;
-        let l = alpha_reader.read::<3, u8>().ok()?;
-        let x = alpha_reader.read::<4, u8>().ok()?;
-        (v, m, l, x, 32 + 8 + 3 + 3 + 3 + 4, true)
+        let m = alpha_reader.read::<3, u8>().ok();
+        let l = alpha_reader.read::<3, u8>().ok();
+        let x = alpha_reader.read::<4, u8>().ok();
+        if m.is_none() || l.is_none() || x.is_none() {
+            if start_bit == 32 { println!("[DEBUG-PEEK-32] m, l, or x read failed"); }
+            return None;
+        }
+        (v, m.unwrap(), l.unwrap(), x.unwrap(), 32 + 8 + 3 + 3 + 3 + 4, true)
     } else {
+        if start_bit == 32 {
+            println!("[DEBUG-PEEK] Checksum mismatch: flags=0x{:X}, v={}, calculated={}, checksum={}", flags, v, calculated, checksum);
+        }
         let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-        retail_reader.skip(start_bit as u32 + 32).ok()?;
-        let v = retail_reader.read::<3, u8>().ok()?;
-        let m = retail_reader.read::<3, u8>().ok()?;
-        let l = retail_reader.read::<3, u8>().ok()?;
-        let x = retail_reader.read::<4, u8>().ok()?;
-        (v, m, l, x, 32 + 3 + 3 + 3 + 4, false)
+        if retail_reader.skip(start_bit as u32 + 32).is_err() {
+            if start_bit == 32 { println!("[DEBUG-PEEK-32] retail_reader skip failed"); }
+            return None;
+        }
+        let v = retail_reader.read::<3, u8>().ok();
+        let m = retail_reader.read::<3, u8>().ok();
+        let l = retail_reader.read::<3, u8>().ok();
+        let x = retail_reader.read::<4, u8>().ok();
+        if v.is_none() || m.is_none() || l.is_none() || x.is_none() {
+            if start_bit == 32 { println!("[DEBUG-PEEK-32] retail v, m, l, or x read failed"); }
+            return None;
+        }
+        (v.unwrap(), m.unwrap(), l.unwrap(), x.unwrap(), 32 + 3 + 3 + 3 + 4, false)
     };
+    if start_bit == 32 {
+        println!("[DEBUG-PEEK-32] version={}, mode={}, loc={}, base_header_len={}", version, mode, loc, base_header_len);
+    }
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
     let mut is_compact = h_axiom.is_compact(flags, None);
@@ -337,7 +380,13 @@ pub fn peek_item_header_at(
     let alignment_nudge = if alpha_mode { 
         V105AlignmentAxiom::default().get_alignment_nudge(version, &trial_code, flags, is_compact)
     } else { 0 };
-    if n_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_err() { return None; }
+    if start_bit == 32 {
+        println!("[DEBUG-PEEK-32] trial_code='{}', alignment_nudge={}", trial_code, alignment_nudge);
+    }
+    if n_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_err() { 
+        if start_bit == 32 { println!("[DEBUG-PEEK-32] n_reader skip failed"); }
+        return None; 
+    }
     let mut n_cursor = BitCursor::new(n_reader);
     let is_compact_peek = HeaderAxiom::new(version, alpha_mode).is_compact(flags, None);
     let mut is_compact_detected = is_compact_peek;
@@ -365,8 +414,10 @@ pub fn peek_item_header_at(
     if code.is_empty() {
         for i in 0..4 {
             match huffman.decode_recorded(&mut n_cursor) {
-                Ok(ch) => code.push(ch),
-                Err(_) => {
+                Ok(ch) => {
+                    code.push(ch);
+                }
+                Err(e) => {
                     if alpha_mode && i >= 2 {
                         if n_cursor.read_bit().is_ok() {
                             if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
@@ -375,6 +426,7 @@ pub fn peek_item_header_at(
                             }
                         }
                     }
+                    let _ = e;
                     return None;
                 }
             }
@@ -384,7 +436,8 @@ pub fn peek_item_header_at(
     let _is_compact = is_compact_detected;
 
     let axiom = HeaderAxiom::new(version, alpha_mode);
-    if !axiom.is_plausible(mode, loc, &code, flags) {
+    let plausible = axiom.is_plausible(mode, loc, &code, flags);
+    if !plausible {
         return None;
     }
 
@@ -443,9 +496,10 @@ pub fn peek_item_header_at(
     let mut best_is_known = false;
 
     for gap in possible_gaps {
-        if let Some(candidate) = peek_item_header_at_specific_gap(
+        let res = peek_item_header_at_specific_gap(
             section_bytes, start_bit, huffman, alpha_mode, gap
-        ) {
+        );
+        if let Some(candidate) = res {
             let code = &candidate.3;
             let is_known = is_v105_summary_code(code) || item_template(code).is_some();
             
@@ -1033,7 +1087,7 @@ impl Item {
 
                     let mut opaque_item = Item::default();
                     opaque_item.expected_start_bit = start;
-                    opaque_item.code = "    ".to_string();
+                    opaque_item.code = if is_missing_item { "Opaque".to_string() } else { "    ".to_string() };
                     if alpha_mode && is_missing_item {
                         opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
                     } else {
@@ -1759,37 +1813,66 @@ mod tests {
     #[test]
     fn test_read_section_captures_opaque_on_failure() {
         let huffman = HuffmanTree::new();
-        // Construct a plausible header: JM marker, non-compact.
         let mut emitter = BitEmitter::new();
-        emitter.write_bits(0x00004D4A, 32).unwrap();
-        emitter.write_bits(6, 3).unwrap(); // version
+        // Section Header: JM + Count = 1
+        emitter.write_bits(0x00014D4A, 32).unwrap();
+        
+        // Non-compact Alpha v105 item
+        let flags = 0x00004D4A; // non-compact
+        let v = 0u8;
+        let checksum = crate::domain::header::entity::calculate_alpha_v105_checksum(flags, v);
+        
+        emitter.write_bits(flags, 32).unwrap();
+        emitter.write_bits(checksum as u32, 8).unwrap();
+        emitter.write_bits(v as u32, 3).unwrap();
         emitter.write_bits(1, 3).unwrap(); // mode
         emitter.write_bits(1, 3).unwrap(); // loc
         emitter.write_bits(0, 4).unwrap(); // x
+        emitter.write_bits(0, 4).unwrap(); // y (4 bits for non-compact version 0)
+        emitter.write_bits(0, 3).unwrap(); // page (3 bits for non-compact version 0)
+        emitter.write_bits(0, 4).unwrap(); // socket_hint (4 bits)
+        emitter.write_bits(0, 16).unwrap(); // 16-bit header gap (64 + 16 = 80 bits total header)
         
-        // Add Huffman bits for "cap "
+        // Huffman bits for "cap "
         let cap_bits = huffman.encode("cap ").unwrap();
-        for b in cap_bits { emitter.write_bit(b).unwrap(); }
+        for bit in cap_bits {
+            emitter.write_bit(bit).unwrap();
+        }
         
-        // Non-compact unique item reads ExtendedStatsData: ID(32), Level(7), Quality(4), UniqueID(12)
-        emitter.write_bits(0x12345678, 32).unwrap(); // id
-        emitter.write_bits(10, 7).unwrap(); // level
-        emitter.write_bits(7, 4).unwrap(); // quality (Unique)
-        // Only provide 5 bits of the 12-bit Unique ID
-        emitter.write_bits(0, 5).unwrap();
-        
-        // Pad heavily to satisfy scan_item_markers limit check
-        while emitter.written_bits() < 160 {
+        // Pad heavily
+        while emitter.written_bits() < 256 {
             emitter.write_bit(false).unwrap();
         }
         
         let bytes = emitter.into_bytes();
+        println!("Generated bytes in test: {:?}", bytes);
+        
         let section_bit_offset = 1234;
         
-        // Truncate to force parsing failure but keep enough for scanner
-        let truncated_bytes = if bytes.len() > 13 { &bytes[0..13] } else { &bytes }; 
+        // Truncate to 16 bytes (exactly 128 bits). 
+        // This keeps the full header and the Huffman code but drops the stats, forcing a parse failure.
+        let truncated_bytes = &bytes[0..16];
         
-        let items = Item::read_section(truncated_bytes, section_bit_offset, 1, &huffman, false, false).expect("Should not fail");
+        let peek_res = crate::domain::item::serialization::peek_item_header_at(
+            truncated_bytes,
+            32,
+            &huffman,
+            true,
+        );
+        println!("peek_item_header_at result in test: {:?}", peek_res);
+        
+        let markers = crate::domain::item::scanner::scan_item_markers(
+            truncated_bytes,
+            &huffman,
+            true,
+            section_bit_offset,
+            Some(1),
+            false,
+        );
+        println!("Markers found in test: {:?}", markers);
+        
+        let items = Item::read_section(truncated_bytes, section_bit_offset, 1, &huffman, true, false).expect("Should not fail");
+        println!("Parsed Items: {:?}", items);
         
         if !items.is_empty() {
             assert_eq!(items[0].code, "Opaque");
@@ -1800,7 +1883,7 @@ mod tests {
                 }
             }
             assert!(has_opaque);
-            assert_eq!(items[0].range.start, section_bit_offset);
+            assert_eq!(items[0].range.start, section_bit_offset + 32);
         }
     }
 
@@ -1814,7 +1897,7 @@ mod tests {
         let v = 5u8;
         let checksum = crate::domain::header::entity::calculate_alpha_v105_checksum(flags, v);
 
-        emitter.write_bits(flags, 32).unwrap();
+        emitter.write_bits(0x00014D4A, 32).unwrap();
         emitter.write_bits(checksum as u32, 8).unwrap();
         emitter.write_bits(v as u32, 3).unwrap();
         emitter.write_bits(1, 3).unwrap(); // mode
@@ -1853,7 +1936,8 @@ mod tests {
     fn test_read_section_bit_range_accuracy() {
         let huffman = HuffmanTree::new();
         let mut emitter = BitEmitter::new();
-        // No padding at the start to ensure marker is found at 0
+        // Section Header: JM + Count
+        emitter.write_bits(0x00014D4A, 32).unwrap();
         
         // Valid compact item (cap)
         emitter.write_bits(0x00004D4A | (1 << 21), 32).unwrap(); // flags (compact)
@@ -1872,8 +1956,8 @@ mod tests {
         let items = Item::read_section(&bytes, section_bit_offset, 1, &huffman, false, false).expect("Should parse");
         
         if !items.is_empty() {
-            // Marker should be found at bit 0
-            assert_eq!(items[0].range.start, section_bit_offset);
+            // Marker should be found at bit 32
+            assert_eq!(items[0].range.start, section_bit_offset + 32);
             // Verify that range.end and total_bits are consistent
             assert_eq!(items[0].range.end, items[0].range.start + items[0].total_bits);
         }

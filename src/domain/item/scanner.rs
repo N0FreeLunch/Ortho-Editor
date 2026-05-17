@@ -70,16 +70,20 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
 
-                // Try 8 possible bit-alignments within a byte (0-7)
                 for offset in 0..8 {
                     let scan_pos = probe + offset;
-                    if scan_pos + 128 > limit_bits { continue; }
+                    let safety_margin = 72;
+                    if scan_pos + safety_margin > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
                         if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+                            let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
+                            
+                            // Slice S3: Stricter parity. Alpha v105 items must have a valid checksum unless they are known summary/templated items.
+                            if alpha && !has_checksum && !is_known { continue; }
+                            
                             // Alpha v105: We start at 32, so any marker found must be at or after 32.
                             if alpha && chunk_idx == 0 && scan_pos < 32 { continue; }
-                            let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
                             
                             // Slice 8: Targeted Oracle. If forced, skip lookahead.
                             let mut is_forced = false;
@@ -125,7 +129,13 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 }
                 if max_confidence > 0 {
                     local_markers.push((best_offset, max_confidence, best_code));
-                    probe = best_offset + 8;
+                    // Slice S3: Safe algorithmic jump. If we are highly confident (is_known),
+                    // we can safely skip the known minimum item length (72 bits) to avoid phantoms.
+                    if max_confidence >= 500 {
+                        probe = best_offset + 72;
+                    } else {
+                        probe = best_offset + 8;
+                    }
                 } else {
                     probe += 8;
                 }
@@ -139,7 +149,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     // Consolidate markers: sort and remove duplicates caused by overlapping scan
     let mut final_markers = markers;
     final_markers.sort_unstable_by_key(|m| m.0);
-    eprintln!("[DEBUG-SLICE13] raw candidates found: {}", final_markers.len());
+    // eprintln!("[DEBUG-SLICE13] raw candidates found: {}", final_markers.len());
     
     // Slice 14.1: Slot-Aligned Competitive Advancement.
     // We use a lookahead window to pick the highest confidence marker,
@@ -249,6 +259,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                  } else {
                      status = MarkerStatus::Phantom;
                  }
+             } else {
+                 status = MarkerStatus::Phantom;
              }
             }
 
@@ -256,18 +268,28 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             eprintln!("[DEBUG-SLICE13] marker processed: offset={}, code='{}', confidence={}, score={}, status={:?}", best_offset, best_code_str, best_confidence, max_score, status);
         }
         
-        if status == MarkerStatus::Accepted {
+        if status == MarkerStatus::Accepted || status == MarkerStatus::Phantom {
             last_offset = *best_offset;
             last_code = best_code_str.clone();
-            accepted_count += 1;
-            filtered_indices.insert(best_idx);
-            all_markers.push(ItemMarker {
-                offset: *best_offset,
-                confidence: *best_confidence,
-                code: best_code_str.clone(),
-                score: max_score,
-                status: MarkerStatus::Accepted,
-            });
+            if status == MarkerStatus::Accepted {
+                accepted_count += 1;
+                filtered_indices.insert(best_idx);
+                all_markers.push(ItemMarker {
+                    offset: *best_offset,
+                    confidence: *best_confidence,
+                    code: best_code_str.clone(),
+                    score: max_score,
+                    status: MarkerStatus::Accepted,
+                });
+            } else if verbose {
+                all_markers.push(ItemMarker {
+                    offset: *best_offset,
+                    confidence: *best_confidence,
+                    code: best_code_str.clone(),
+                    score: max_score,
+                    status: status,
+                });
+            }
         } else if verbose {
             all_markers.push(ItemMarker {
                 offset: *best_offset,
