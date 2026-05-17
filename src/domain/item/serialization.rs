@@ -1321,7 +1321,7 @@ impl Item {
         // to detect residue Defense/Durability as per mini-spec.
         // EXCEPT for summary items (Axiom 0392) which never have stats.
         let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
-        if (!item.header.is_compact && !is_v105_summary) || (alpha_mode && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2) && !is_v105_summary) {
+        if (!item.header.is_compact && !is_v105_summary) || (alpha_mode && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2 || item.header.version == 5)) {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
 
             // Slice 11: Handle JM-to-Body alignment gap
@@ -1571,14 +1571,6 @@ pub fn write_property_list(
     axiom: &StatsAxiom,
 ) -> io::Result<()> {
     let _start_bits = emitter.written_bits();
-
-    // Slice 23: Apply residue nudge (symbolic anchor)
-    if axiom.save_is_alpha && !is_v105_shadow && properties_complete {
-        let p_nudge = calculate_property_residue(version);
-        if p_nudge > 0 {
-             emitter.write_bits(0, p_nudge as u32)?;
-        }
-    }
 
     // Axiom 0344: Explicit header signal is primary, but blank items in Alpha v105 
     // often lack the compact flag despite being structurally compact (80-bit slot).

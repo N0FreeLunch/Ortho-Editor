@@ -264,11 +264,12 @@ impl HeaderAxiom {
             }
 
             if is_compact {
+                let has_header_gap = self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6;
                 return HeaderGeometry {
                     y_bits: 0,
                     page_bits: 0,
                     socket_hint_bits: 0,
-                    has_header_gap: false,
+                    has_header_gap,
                     skip_geometry: true,
                     target_width,
                 };

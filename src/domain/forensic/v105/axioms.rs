@@ -74,34 +74,48 @@ impl V105HeaderGapAxiom {
         gap
     }
 
-    fn resolve_gap_internal(&self, _version: u8, code: Option<&str>, flags: u32, _is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
+    fn resolve_gap_internal(&self, version: u8, code: Option<&str>, flags: u32, _is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
+        let mut base_gap = 0;
+
         if let Some(c) = code {
             let trimmed = c.trim();
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(item_map) = overrides.get(trimmed) {
                     if let Some(&gap) = item_map.get("header_gap") {
-                        return gap as usize;
+                        base_gap = gap as usize;
                     }
                 }
             }
             
             // Axiom 0392: Summary items in Alpha v105 are structurally compact 
             // but still preserve the JM-to-Body gap to maintain the 80-bit rhythm.
-            if is_v105_summary_code(trimmed) {
-                return if has_checksum { 0 } else { 8 };
+            if base_gap == 0 && is_v105_summary_code(trimmed) {
+                base_gap = if has_checksum { 0 } else { 8 };
             }
         }
 
-        // Runeword/Shadow Items (Bit 26/27)
-        if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
-            8
-        } else if is_compact {
-            0
-        } else {
-            // Standard equipment
-            if has_checksum { 0 } else { 8 }
+        if base_gap == 0 {
+            // Runeword/Shadow Items (Bit 26/27)
+            if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
+                base_gap = 8;
+            } else if is_compact {
+                base_gap = 0;
+            } else {
+                // Standard equipment
+                base_gap = if has_checksum { 0 } else { 8 };
+            }
         }
+
+        // Alpha v105 Forensic: Add version-specific residue nudge to the gap (Axiom 0340)
+        let residue = match version {
+            5 => 5,
+            0 | 1 | 2 => 3,
+            4 => 1, // Observed 1-bit drift in version 4 (Item 13)
+            _ => 0,
+        };
+
+        base_gap + residue
     }
 }
 
@@ -463,7 +477,7 @@ impl V105PropertyWidthAxiom {
 
         let trimmed = code.trim();
         if trimmed.is_empty() {
-            return false;
+            return true;
         }
 
         // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
