@@ -43,8 +43,9 @@ d2r-data/
 .agents/navigation/
 navigation-map.json
 
-# AI Forensic Cache
-antigravity/
+# Agent Artifacts (Large tool outputs, traces, logs)
+agent_artifacts/
+!agent_artifacts/.gitkeep
 
 # Forensic dataset outputs must live under d2r-spec/research/forensics.
 audit_results_v105_rupture.json
