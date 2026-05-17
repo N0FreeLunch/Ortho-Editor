@@ -39,6 +39,7 @@ Use this section when working on `d2r-core` from a wider `d2r` workspace where S
 - Before non-trivial core edits, read the relevant Strategy Hub entrypoint and task context when available: `GEMINI.md`, `AGENTS.md`, `AI_WORKFLOW.md`, and active `.agents/tasks/*.md`.
 - For quick recent-delta context, prefer `<D2R_SPEC_PATH>/.agents/navigation/active-context.md` or `d2map-query context` when those tools/files are available; do not duplicate detailed indexing rules here.
 - Use verifier JSON output (`--json`) when supported, and trust structured `hints`/`metadata` over guesses.
+- **High-Volume Output Redirection [MANDATORY]**: To prevent "JavaScript heap out of memory" crashes and token budget exhaustion, always use `--token-efficient` or redirect large tool outputs (>100 lines) to `agent_artifacts/`. Analyze results via surgical `read_file` instead of direct terminal capture.
 - On Windows/Gemini CLI, follow the workspace `GEMINI.md` `Gemini CLI Encoding Floor` to prevent terminal mojibake:
   - **Mandatory Preamble**: Prefix ALL `run_shell_command` calls with:
     ```powershell

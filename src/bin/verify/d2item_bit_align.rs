@@ -29,6 +29,7 @@ fn main() {
 
     let path = parsed.get("save_file").unwrap();
     let target_idx = parsed.get("item_index").and_then(|s| s.parse::<usize>().ok());
+    let mut om = d2r_core::verify::OutputManager::new("d2item_bit_align", &parsed);
 
     let bytes = fs::read(path).expect("failed to read save file");
 
@@ -37,15 +38,15 @@ fn main() {
     let items = Item::read_player_items(&bytes, &huffman, is_alpha).expect("failed to parse items");
 
     if let Some(idx) = target_idx {
-        let _ = run_align_report(&items, idx, &huffman);
+        let _ = run_align_report(&items, idx, &huffman, &mut om);
     } else {
         for i in 0..items.len() {
-            let _ = run_align_report(&items, i, &huffman);
+            let _ = run_align_report(&items, i, &huffman, &mut om);
         }
     }
 }
 
-fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree) -> io::Result<()> {
+fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree, om: &mut d2r_core::verify::OutputManager) -> io::Result<()> {
     let item = &items[item_index];
     let actual: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
 
@@ -69,7 +70,7 @@ fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree) ->
     let aligner = BitAligner::new(2, -1, -3, -1);
     let result = aligner.align(&actual, &expected);
 
-    println!("Item {} [{}]: Similarity {}%", item_index, item.code.trim(), result.similarity_pct());
+    om.summary(&format!("Item {} [{}]: Similarity {}%", item_index, item.code.trim(), result.similarity_pct()));
     Ok(())
 }
 

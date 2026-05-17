@@ -281,7 +281,12 @@ impl OutputManager {
         if self.is_json {
             eprintln!("{}", text);
         } else {
-            println!("{}", text);
+            let formatted = if self.is_token_efficient {
+                format!("[TOKEN-EFFICIENT] {}", text)
+            } else {
+                text.to_string()
+            };
+            println!("{}", formatted);
             if let Some(w) = &mut self.writer {
                 let _ = writeln!(w, "{}", text);
             }
@@ -290,6 +295,10 @@ impl OutputManager {
     
     pub fn is_json(&self) -> bool {
         self.is_json
+    }
+
+    pub fn is_token_efficient(&self) -> bool {
+        self.is_token_efficient
     }
 }
 

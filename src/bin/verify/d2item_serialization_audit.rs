@@ -52,6 +52,7 @@ fn main() {
         .get("target")
         .and_then(|s| s.parse::<usize>().ok());
     let fail_fast = parsed.is_set("fail-fast");
+    let mut om = d2r_core::verify::OutputManager::new("d2item_serialization_audit", &parsed);
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -70,41 +71,40 @@ fn main() {
     match calculate_symmetry_diff(&bytes, None, options) {
         Ok(report) => {
             if use_json {
-                println!("{}", serde_json::to_string_pretty(&report).unwrap());
+                om.json(&serde_json::to_string_pretty(&report).unwrap());
             } else if let Some(out_path) = visual_out {
                 generate_html_visual_report(&report, path, &out_path);
+                om.summary(&format!("Visual diff report generated at {}", out_path));
             } else {
-                println!("Serialization Audit for: {}", path);
+                om.summary(&format!("Serialization Audit for: {}", path));
                 if let Some(target) = target_idx {
-                    println!("Targeting item index: {}", target);
+                    om.summary(&format!("Targeting item index: {}", target));
                 }
-                println!("{:-<80}", "");
-                println!(
+                om.summary(&format!("{:-<80}", ""));
+                om.summary(&format!(
                     "{:>5} | {:<10} | {:>8} | {:>8} | {:>5} | {:<5}",
                     "Idx", "Code", "OrigLen", "SerLen", "Match", "Fid"
-                );
-                println!("{:-<90}", "");
+                ));
+                om.summary(&format!("{:-<90}", ""));
 
                 for item in &report.items {
-                    // When targeting, the index in the report might not be the actual index if we filtered.
-                    // But our implementation currently preserves the "Item N" label.
                     let idx_from_label = item
                         .label
                         .strip_prefix("Item ")
                         .and_then(|s| s.parse::<usize>().ok());
 
-                    print_item_diff(idx_from_label, item, 0, use_visual);
+                    print_item_diff(idx_from_label, item, 0, use_visual, &mut om);
                 }
-                println!("{:-<90}", "");
+                om.summary(&format!("{:-<90}", ""));
 
                 if report.success {
                     if target_idx.is_some() {
-                        println!("MATCH: Target item matches with 100% fidelity");
+                        om.summary("MATCH: Target item matches with 100% fidelity");
                     } else {
-                        println!("MATCH: 100% fidelity");
+                        om.summary("MATCH: 100% fidelity");
                     }
                 } else {
-                    println!("FAIL: Mismatches detected.");
+                    om.summary("FAIL: Mismatches detected.");
                     std::process::exit(1);
                 }
             }
@@ -345,12 +345,12 @@ fn get_segment_color(segment: Option<&str>) -> &'static str {
     }
 }
 
-fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use_visual: bool) {
+fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use_visual: bool, om: &mut d2r_core::verify::OutputManager) {
     let indent = "  ".repeat(indent_level);
     let prefix = if indent_level > 0 { "|-- " } else { "" };
     let idx_str = idx.map(|i| i.to_string()).unwrap_or_default();
 
-    println!(
+    om.println(&format!(
         "{:indent$}{:<5} | {:<10} | {:>8} | {:>8} | {:>5} | {:.2} | V:{} F:0x{:08X}",
         prefix,
         idx_str,
@@ -362,21 +362,21 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
         item.version,
         item.flags,
         indent = indent.len()
-    );
+    ));
 
     if !item.is_match || item.fidelity_score < 1.0 {
         if let Some(m_type) = &item.mismatch_type {
-            println!("{:indent$}      [REASON] {}", "", m_type, indent = indent.len());
+            om.println(&format!("{:indent$}      [REASON] {}", "", m_type, indent = indent.len()));
         }
         if let Some(seg) = &item.segment {
-            println!("{:indent$}      [SEGMENT] {}", "", seg, indent = indent.len());
+            om.println(&format!("{:indent$}      [SEGMENT] {}", "", seg, indent = indent.len()));
         }
         if let Some(offset) = item.first_mismatch_offset {
-            println!("{:indent$}      [OFFSET] bit {}", "", offset, indent = indent.len());
+            om.println(&format!("{:indent$}      [OFFSET] bit {}", "", offset, indent = indent.len()));
             if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
                 let start = (offset as usize).saturating_sub(10);
                 let end = (offset as usize + 20).min(orig.len()).min(target.len());
-                println!("{:indent$}      [BITS]  ...", "", indent = indent.len());
+                om.println(&format!("{:indent$}      [BITS]  ...", "", indent = indent.len()));
                 
                 let seg_color = get_segment_color(item.segment.as_deref());
                 let mut o_bits = String::new();
@@ -391,57 +391,57 @@ fn print_item_diff(idx: Option<usize>, item: &ItemDiff, indent_level: usize, use
                     t_bits.push_str(&format!("{}{}{}", color, t_chars[i], ANSI_RESET));
                 }
 
-                println!("{:indent$}      ORIG:   {}", "", o_bits, indent = indent.len());
-                println!("{:indent$}      TARG:   {}", "", t_bits, indent = indent.len());
+                om.println(&format!("{:indent$}      ORIG:   {}", "", o_bits, indent = indent.len()));
+                om.println(&format!("{:indent$}      TARG:   {}", "", t_bits, indent = indent.len()));
                 let mut markers = String::new();
                 for i in start..end {
                     if i == offset as usize { markers.push_str(&format!("{}^{}", ANSI_BOLD_RED, ANSI_RESET)); }
-                    else { markers.push(' '); }
+                    else { markers.push_str(" "); }
                 }
-                println!("{:indent$}              {}", "", markers, indent = indent.len());
+                om.println(&format!("{:indent$}              {}", "", markers, indent = indent.len()));
             }
         }
         if let Some(gap) = item.discovered_alpha_header_gap {
-            println!("{:indent$}      [DISC GAP] {} bits", "", gap, indent = indent.len());
+            om.println(&format!("{:indent$}      [DISC GAP] {} bits", "", gap, indent = indent.len()));
         }
         if let Some(gap) = item.parsed_alpha_header_gap {
-            println!("{:indent$}      [PARS GAP] {} bits", "", gap, indent = indent.len());
+            om.println(&format!("{:indent$}      [PARS GAP] {} bits", "", gap, indent = indent.len()));
         }
         if item.alpha_alignment_padding_len > 0 {
-            println!("{:indent$}      [ALIGNMENT PAD] {} bits", "", item.alpha_alignment_padding_len, indent = indent.len());
+            om.println(&format!("{:indent$}      [ALIGNMENT PAD] {} bits", "", item.alpha_alignment_padding_len, indent = indent.len()));
         }
         if item.alpha_body_gap_len > 0 {
-            println!("{:indent$}      [BODY GAP] {} bits", "", item.alpha_body_gap_len, indent = indent.len());
+            om.println(&format!("{:indent$}      [BODY GAP] {} bits", "", item.alpha_body_gap_len, indent = indent.len()));
         }
         if item.fidelity_score < 1.0 {
-            println!("{:indent$}      [FORENSIC RATIONALE]", "", indent = indent.len());
+            om.println(&format!("{:indent$}      [FORENSIC RATIONALE]", "", indent = indent.len()));
             for finding in &item.forensic_audit.findings {
                 if finding.confidence
                     < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth
                 {
-                    println!(
+                    om.println(&format!(
                         "{:indent$}        - [{:?}] {}",
                         "",
                         finding.confidence, finding.rationale,
                         indent = indent.len()
-                    );
+                    ));
                 }
             }
         }
         if use_visual {
             if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
-                println!("{:indent$}      [BITSTREAM ALIGNMENT]", "", indent = indent.len());
-                print_visual_diff(orig, target, indent_level, item.segment.as_deref());
+                om.println(&format!("{:indent$}      [BITSTREAM ALIGNMENT]", "", indent = indent.len()));
+                print_visual_diff(orig, target, indent_level, item.segment.as_deref(), om);
             }
         }
     }
 
     for child in &item.children {
-        print_item_diff(None, child, indent_level + 1, use_visual);
+        print_item_diff(None, child, indent_level + 1, use_visual, om);
     }
 }
 
-fn print_visual_diff(orig: &str, target: &str, indent_level: usize, segment: Option<&str>) {
+fn print_visual_diff(orig: &str, target: &str, indent_level: usize, segment: Option<&str>, om: &mut d2r_core::verify::OutputManager) {
     let indent = "  ".repeat(indent_level);
     let mut i = 0;
     let mut j = 0;
@@ -522,10 +522,10 @@ fn print_visual_diff(orig: &str, target: &str, indent_level: usize, segment: Opt
     let chunk_size = 80usize.saturating_sub(indent_level.saturating_mul(2)).max(24);
     for k in (0..o_out.len()).step_by(chunk_size) {
         let end = (k + chunk_size).min(o_out.len());
-        println!("{:indent$}      Orig:   {}", "", o_out[k..end].join(""), indent = indent.len());
-        println!("{:indent$}      Target: {}", "", t_out[k..end].join(""), indent = indent.len());
-        println!("{:indent$}      Diff:   {}", "", m_out[k..end].join(""), indent = indent.len());
-        println!();
+        om.println(&format!("{:indent$}      Orig:   {}", "", o_out[k..end].join(""), indent = indent.len()));
+        om.println(&format!("{:indent$}      Target: {}", "", t_out[k..end].join(""), indent = indent.len()));
+        om.println(&format!("{:indent$}      Diff:   {}", "", m_out[k..end].join(""), indent = indent.len()));
+        om.println("");
     }
 }
 
