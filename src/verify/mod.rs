@@ -204,6 +204,7 @@ impl<T> Report<T> {
 
 use std::fs::{self, File};
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct OutputManager {
@@ -226,11 +227,20 @@ impl OutputManager {
                 .unwrap_or_default()
                 .as_secs();
             
-            let _ = fs::create_dir_all("antigravity/outputs");
+            let root = std::env::var("AGENT_ARTIFACTS_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    let base = std::env::var("D2R_CORE_PATH")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|_| PathBuf::from("."));
+                    base.join("agent_artifacts")
+                });
+
+            let _ = fs::create_dir_all(&root);
             
-            let path = format!("antigravity/outputs/{}_{}.txt", tool_name, timestamp);
+            let path = root.join(format!("{}_{}.txt", tool_name, timestamp));
             if let Ok(f) = File::create(&path) {
-                eprintln!("[TOKEN-EFFICIENT] Log saved to: {}", path);
+                eprintln!("[TOKEN-EFFICIENT] Detail saved to: {}", path.display());
                 writer = Some(Box::new(f) as Box<dyn Write>);
             }
         } else if let Some(path) = output_path {

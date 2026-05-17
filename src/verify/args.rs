@@ -390,7 +390,7 @@ impl ArgParser {
         options_txt.push_str("  -h, --help           Show this help message\n");
         options_txt.push_str("      --json           Output in machine-readable JSON format\n");
         options_txt.push_str("  -o, --output <PATH>  Save execution output to a file\n");
-        options_txt.push_str("  -te, --token-efficient AI mode: save to antigravity/outputs/ and summarize\n");
+        options_txt.push_str("  -te, --token-efficient AI mode: save to agent_artifacts/ and summarize\n");
 
         usage.push_str(&options_txt);
         usage
