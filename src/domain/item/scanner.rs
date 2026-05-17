@@ -56,10 +56,18 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
             
             let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
+            let section_header_bits = if alpha && chunk_idx == 0 {
+                let mut p = 32;
+                if let Some((_, _, _, _, _, version, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha) {
+                    p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
+                }
+                p
+            } else {
+                0
+            };
+
             let mut probe = if alpha && chunk_idx == 0 { 
-                // Alpha v105 forensic: Section head is JM (16) + Count (16).
-                // First item starts immediately at bit 32.
-                32 
+                section_header_bits
             } else { 
                 start_bit 
             };
@@ -82,8 +90,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             // Slice S3: Stricter parity. Alpha v105 items must have a valid checksum unless they are known summary/templated items.
                             if alpha && !has_checksum && !is_known { continue; }
                             
-                            // Alpha v105: We start at 32, so any marker found must be at or after 32.
-                            if alpha && chunk_idx == 0 && scan_pos < 32 { continue; }
+                            // Alpha v105: We start at section_header_bits, so any marker found must be at or after it.
+                            if alpha && chunk_idx == 0 && scan_pos < section_header_bits { continue; }
                             
                             // Slice 8: Targeted Oracle. If forced, skip lookahead.
                             let mut is_forced = false;

@@ -14,6 +14,7 @@ pub use crate::domain::progression::{QuestSection, WaypointSection};
 use std::io;
 use std::mem;
 use crate::domain::forensic::v105::{V105JmMarkerAxiom, V105SectionMarkerAxiom};
+use bitstream_io::BitRead;
 
 
 #[derive(Debug, Clone)]
@@ -683,7 +684,7 @@ pub fn rebuild_item_section(
     }
 
     let jm1 = jm_positions[0];
-    let count_u16 = items.len() as u16;
+    let count_u16 = items.iter().filter(|it| !it.is_residue()).count() as u16;
     let jm_axiom = V105JmMarkerAxiom::default();
 
     // Find the end of the item section based on the next marker to preserve boundary integrity
@@ -736,6 +737,26 @@ pub fn rebuild_item_section(
     // Both Alpha v105 and Retail use 16-bit item count in these fixtures.
     item_header_emitter.write_bits(count_u16 as u32, 16).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     
+    if alpha_mode {
+        let version = items.iter().find(|it| !it.is_residue()).map(|it| it.version).unwrap_or(0);
+        let header_bits = jm_axiom.header_bits(version);
+        if header_bits > 32 {
+            let residue_bits = header_bits - 32;
+            let mut r_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(bytes), bitstream_io::LittleEndian);
+            if r_reader.skip(jm1 as u32 * 8 + 32).is_ok() {
+                let mut bits: u32 = 0;
+                for i in 0..residue_bits {
+                    if let Ok(b) = r_reader.read_bit() {
+                        if b {
+                            bits |= 1 << i;
+                        }
+                    }
+                }
+                item_header_emitter.write_bits(bits as u32, residue_bits).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            }
+        }
+    }
+
     // Write serialized items. Since Item::serialize_section now returns bit-perfect data,
     // we just need to append it bit-by-bit or byte-by-byte if it's already aligned.
     for byte in serialized_section {

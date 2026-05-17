@@ -783,7 +783,13 @@ impl Item {
             verbose,
         );
         eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
-        let mut start_offset = 32; // Relative skip JM (16) + Count (16) inside section_bytes
+        let mut section_header_bits = 32;
+        if alpha_mode {
+            if let Some((_, _, _, _, _, version, _, _, _, _)) = peek_item_header_at(section_bytes, 32, huffman, alpha_mode) {
+                section_header_bits = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
+            }
+        }
+        let mut start_offset = section_header_bits;
         let mut subsumed_indices = std::collections::HashSet::new();
 
         for (i, marker) in markers.iter().enumerate() {

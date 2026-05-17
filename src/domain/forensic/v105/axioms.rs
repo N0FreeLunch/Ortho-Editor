@@ -239,6 +239,13 @@ impl V105JmMarkerAxiom {
         4 // JM (2) + Count (2)
     }
 
+    pub fn header_bits(&self, version: u8) -> u32 {
+        match version {
+            5 => 38, // 32 (JM + Count) + 6 bits residue (observed in 10scrolls/amazon_initial)
+            _ => 32,
+        }
+    }
+
     pub fn scan(&self, bytes: &[u8]) -> Vec<usize> {
         let mut positions = Vec::new();
         for i in 0..bytes.len().saturating_sub(1) {

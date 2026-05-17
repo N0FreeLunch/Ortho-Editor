@@ -60,10 +60,11 @@ mod tests {
     fn test_runeword_socket_children_are_recovered() {
         let items =
             load_player_items("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
 
-        assert_eq!(items.len(), 6);
+        assert_eq!(real_items.len(), 6);
 
-        let authority = items
+        let authority = real_items
             .iter()
             .find(|item| item.code.trim() == "xrs" && item.is_runeword)
             .expect("authority base item (xrs) should be present");
@@ -80,23 +81,25 @@ mod tests {
     #[test]
     fn test_plain_inventory_fixture_does_not_gain_socket_children() {
         let items = load_player_items("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
+        let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
 
-        assert_eq!(items.len(), 16);
-        assert!(items.iter().all(|item| item.socketed_items.is_empty()));
+        assert_eq!(real_items.len(), 16);
+        assert!(real_items.iter().all(|item| item.socketed_items.is_empty()));
     }
 
     #[test]
     fn test_authority_runeword_children_stay_nested_with_expected_modes() {
         let items =
             load_player_items("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
 
-        let top_level_codes: Vec<&str> = items.iter().map(|item| item.code.trim()).collect();
+        let top_level_codes: Vec<&str> = real_items.iter().map(|item| item.code.trim()).collect();
         assert_eq!(
             top_level_codes,
             vec!["hp1", "hp1", "hp1", "hp1", "xrs", "xrs"]
         );
 
-        let authority = items.last().expect("authority base item should be last");
+        let authority = real_items.last().expect("authority base item should be last");
         assert_eq!(authority.code.trim(), "xrs");
 
         let child_summaries: Vec<(&str, u8)> = authority
@@ -136,13 +139,14 @@ mod tests {
     #[test]
     fn test_authority_properties_match_fuzzer_truth() {
         let items = load_player_items("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
         let truth_json = fs::read_to_string(repo_path("tests/fixtures/savegames/original/amazon_authority_runeword_truth.json"))
             .expect("truth file should exist");
         
         let truth: serde_json::Value = serde_json::from_str(&truth_json).expect("truth should be valid JSON");
         
         // Find the xrs item (Authority base)
-        let xrs = items.iter().find(|it| it.code.trim() == "xrs" && it.is_runeword).expect("xrs item should be present");
+        let xrs = real_items.iter().find(|it| it.code.trim() == "xrs" && it.is_runeword).expect("xrs item should be present");
         
         let truth_props = truth["properties"].as_array().expect("properties should be array");
         
