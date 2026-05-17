@@ -40,7 +40,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
                 continue;
             }
 
-            if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+            if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                 // Look-ahead verification (Slice 4): Prevent swallowing by verifying the candidate body
                 let is_blank = alpha && code.trim().is_empty();
                 
@@ -188,12 +188,12 @@ pub fn classify_failure(err: &crate::error::ParsingError) -> crate::domain::item
 pub fn is_plausible_item_header(
     mode: u8,
     location: u8,
-    code: &str,
+    code: &[u8],
     _flags: u32,
     version: u8,
     alpha_mode: bool,
 ) -> bool {
-    if alpha_mode && code.trim().is_empty() {
+    if alpha_mode && code.is_empty() {
          return mode <= 6 && location <= 5;
     }
     let axiom = HeaderAxiom::new(version, alpha_mode);
@@ -361,7 +361,6 @@ pub fn peek_item_header_at(
          total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
     }
 
-    let mut code = String::new();
     let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     
     // Trial peek for code to determine adaptive alignment nudge (Slice 14)
@@ -389,39 +388,47 @@ pub fn peek_item_header_at(
     }
     let mut n_cursor = BitCursor::new(n_reader);
     let is_compact_peek = HeaderAxiom::new(version, alpha_mode).is_compact(flags, None);
+    let mut code_bytes = [0u8; 4];
+    let mut code_len = 0;
     let mut is_compact_detected = is_compact_peek;
+
     if alpha_mode {
         let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
         if trial_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_ok() {
-            let mut trial_code = String::new();
+            let mut trial_bytes = [0u8; 3];
             let mut trial_ok = true;
-            for _ in 0..3 {
+            for i in 0..3 {
                 if let Ok(ch) = trial_reader.read::<8, u8>() {
-                    if ch != 0 { trial_code.push(ch as char); }
+                    if ch != 0 { trial_bytes[i] = ch; }
                 } else {
                     trial_ok = false;
                     break;
                 }
             }
+            
+            let trial_code = String::from_utf8_lossy(&trial_bytes).trim_end_matches('\0').to_string();
             if trial_ok && is_v105_summary_code(&trial_code) {
-                code = trial_code;
+                code_bytes[..3].copy_from_slice(&trial_bytes);
+                code_len = 3;
                 is_compact_detected = true;
                 let _ = n_cursor.read_bits_as_vec(24);
             }
         }
     }
 
-    if code.is_empty() {
+    if code_len == 0 {
         for i in 0..4 {
             match huffman.decode_recorded(&mut n_cursor) {
                 Ok(ch) => {
-                    code.push(ch);
+                    code_bytes[i] = ch as u8;
+                    code_len = i + 1;
                 }
                 Err(e) => {
                     if alpha_mode && i >= 2 {
                         if n_cursor.read_bit().is_ok() {
                             if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
-                                code.push(ch);
+                                code_bytes[i] = ch as u8;
+                                code_len = i + 1;
                                 continue;
                             }
                         }
@@ -436,10 +443,11 @@ pub fn peek_item_header_at(
     let _is_compact = is_compact_detected;
 
     let axiom = HeaderAxiom::new(version, alpha_mode);
-    let plausible = axiom.is_plausible(mode, loc, &code, flags);
-    if !plausible {
+    if !axiom.is_plausible(mode, loc, &code_bytes[..code_len], flags) {
         return None;
     }
+    
+    let code = String::from_utf8_lossy(&code_bytes[..code_len]).trim_end_matches('\0').to_string();
 
     let is_compact = is_compact_detected;
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
@@ -558,38 +566,45 @@ pub fn peek_item_header_at_specific_gap(
     let is_compact_peek = s_axiom.is_compact(flags);
     let mut is_compact_detected = is_compact_peek;
 
-    let mut code = String::new();
     let mut n_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
     if n_reader.skip(start_bit as u32 + base_header_len as u32 + gap as u32).is_err() { return None; }
     let mut n_cursor = BitCursor::new(n_reader);
     let mut ok = true;
+    let mut code_bytes = [0u8; 4];
+    let mut code_len = 0;
 
     if alpha_mode {
         let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
         if trial_reader.skip(start_bit as u32 + base_header_len as u32 + gap as u32).is_ok() {
-            let mut trial_code = String::new();
+            let mut trial_bytes = [0u8; 3];
             let mut trial_ok = true;
-            for _ in 0..3 {
+            for i in 0..3 {
                 if let Ok(ch) = trial_reader.read::<8, u8>() {
-                    if ch != 0 { trial_code.push(ch as char); }
+                    if ch != 0 { trial_bytes[i] = ch; }
                 } else {
                     trial_ok = false;
                     break;
                 }
             }
+            let trial_code = String::from_utf8_lossy(&trial_bytes).trim_end_matches('\0').to_string();
             if trial_ok && is_v105_summary_code(&trial_code) {
-                code = trial_code;
+                code_bytes[..3].copy_from_slice(&trial_bytes);
+                code_len = 3;
                 is_compact_detected = true;
                 let _ = n_cursor.read_bits_as_vec(24);
             }
         }
     }
 
-    if code.is_empty() && alpha_mode {
+    if code_len == 0 && alpha_mode {
         let saved_pos = n_cursor.pos();
         if let Ok(bits) = n_cursor.read_bits_as_vec(24) {
+            let bits: Vec<bool> = bits;
             if let Some(stealth) = crate::domain::forensic::v105::axioms::V105StealthCodeAxiom::default().resolve_stealth_code(&bits) {
-                code = stealth.to_string();
+                let stealth_bytes = stealth.as_bytes();
+                let len = stealth_bytes.len().min(4);
+                code_bytes[..len].copy_from_slice(&stealth_bytes[..len]);
+                code_len = len;
                 is_compact_detected = true;
             } else {
                 n_cursor.rollback(saved_pos);
@@ -599,19 +614,23 @@ pub fn peek_item_header_at_specific_gap(
         }
     }
 
-    if code.is_empty() {
+    if code_len == 0 {
         for i in 0..4 {
             match huffman.decode_recorded(&mut n_cursor) {
-                Ok(ch) => code.push(ch),
+                Ok(ch) => {
+                    code_bytes[i] = ch as u8;
+                    code_len = i + 1;
+                },
                 Err(_) => {
                 if alpha_mode && i >= 1 {
                     let current_cursor_pos = n_cursor.pos();
                     let relative_pos = base_header_len as u64 + gap as u64 + current_cursor_pos;
-                    if relative_pos == 69 && (code.starts_with('h') || code.starts_with('m')) {
+                    if relative_pos == 69 && (code_bytes[0] == b'h' || code_bytes[0] == b'm') {
                         // Surgical 1-bit nudge for Opaque items at bit 69 (Axiom 0340)
                         if n_cursor.read_bit().is_ok() {
                             if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
-                                code.push(ch);
+                                code_bytes[i] = ch as u8;
+                                code_len = i + 1;
                                 continue;
                             }
                         }
@@ -622,7 +641,8 @@ pub fn peek_item_header_at_specific_gap(
                     // Try 1-bit nudge
                     if n_cursor.read_bit().is_ok() {
                         if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
-                            code.push(ch);
+                            code_bytes[i] = ch as u8;
+                            code_len = i + 1;
                             continue;
                         }
                     }
@@ -631,7 +651,8 @@ pub fn peek_item_header_at_specific_gap(
                     if let Ok(bits) = n_cursor.read_bits_as_vec(2) {
                         if bits.len() == 2 {
                             if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
-                                code.push(ch);
+                                code_bytes[i] = ch as u8;
+                                code_len = i + 1;
                                 continue;
                             }
                         }
@@ -646,8 +667,8 @@ pub fn peek_item_header_at_specific_gap(
     
     let is_compact = is_compact_detected;
     if ok {
-        // eprintln!("[DEBUG] specific_gap: gap={}, code='{}', plausible={}", gap, code, is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode));
-        if is_plausible_item_header(mode, loc, &code, flags, version, alpha_mode) {
+        if is_plausible_item_header(mode, loc, &code_bytes[..code_len], flags, version, alpha_mode) {
+            let code = String::from_utf8_lossy(&code_bytes[..code_len]).trim_end_matches('\0').to_string();
             return Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
         }
     }
@@ -870,7 +891,7 @@ impl Item {
                     let min_interval = if alpha_mode { 72 } else { 80 };
                     if let Some(next_header) = peek_item_header_at(section_bytes, start + min_interval, huffman, alpha_mode) {
                          let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
-                         if is_plausible_item_header(n_mode, n_loc, &n_code, n_flags, n_ver, alpha_mode) {
+                         if is_plausible_item_header(n_mode, n_loc, n_code.as_bytes(), n_flags, n_ver, alpha_mode) {
                              is_compact_final = true;
                          }
                     }
@@ -1447,7 +1468,7 @@ pub fn scan_socket_children(
 
     while current_pos < max_pos && current_pos < section_bits {
         if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
-            if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+            if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);
                     if let Ok((item, consumed)) = parse_item_at_with_limit(bytes, current_pos, huffman, 0, alpha, Some(remaining), None, None) {

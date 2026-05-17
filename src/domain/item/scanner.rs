@@ -84,7 +84,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     if scan_pos + safety_margin > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
-                        if is_plausible_item_header(mode, location, &code, flags, version, alpha) {
+                        if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
                             
                             // Slice S3: Stricter parity. Alpha v105 items must have a valid checksum unless they are known summary/templated items.
@@ -107,7 +107,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 if is_v105_summary {
                                     if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
-                                        if is_plausible_item_header(n_mode, n_loc, &n_code, n_flags, n_ver, alpha) {
+                                        if is_plausible_item_header(n_mode, n_loc, n_code.as_bytes(), n_flags, n_ver, alpha) {
                                             forced_80 = true;
                                         }
                                     }

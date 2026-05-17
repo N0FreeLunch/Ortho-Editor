@@ -284,7 +284,7 @@ fn main() {
                         )) = d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true)
                         {
                             if d2r_core::item::is_plausible_item_header(
-                                mode, location, &code, flags, version, true,
+                                mode, location, code.as_bytes(), flags, version, true,
                             ) {
                                 let gap_from_start = probe as i64 - bit_start as i64;
                                 println!(

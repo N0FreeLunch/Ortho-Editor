@@ -46,7 +46,7 @@ fn main() -> Result<()> {
         if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, nudge_val, _has_checksum)) =
             peek_item_header_at_specific_gap(&bytes, offset, &huffman, alpha_mode, gap as u64)
         {
-            if is_plausible_item_header(mode, location, &code, flags, version, alpha_mode) {
+            if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha_mode) {
                 println!("Candidate at bit {} (Gap {}):", offset, gap);
                 println!("  Flags:    0x{:08X}", flags);
                 println!("  Version:  {}", version);

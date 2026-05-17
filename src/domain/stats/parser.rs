@@ -314,7 +314,7 @@ where
                 let probe_pos = entry_pos + offset;
                 if let Some(header_info) = crate::item::peek_item_header_at(reader_ctx.bytes, probe_pos, huffman, axiom.save_is_alpha) {
                     let (mode, loc, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
-                    if crate::item::is_plausible_item_header(mode, loc, &code, flags, version, axiom.save_is_alpha) {
+                    if crate::item::is_plausible_item_header(mode, loc, code.as_bytes(), flags, version, axiom.save_is_alpha) {
                         found_pos = probe_pos;
                         break;
                     }

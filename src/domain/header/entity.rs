@@ -62,6 +62,25 @@ pub struct HeaderGeometry {
     pub target_width: u32,
 }
 
+use std::sync::LazyLock;
+use std::collections::HashSet;
+
+static VALID_CODES: LazyLock<HashSet<&'static [u8]>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    for t in crate::data::item_codes::ITEM_TEMPLATES {
+        set.insert(t.code.as_bytes());
+    }
+    // Axiom 0365: Explicit Alpha/Legacy white-listed codes (Forensic markers & Quest items)
+    set.insert(b"wuw8");
+    set.insert(b"\xCF\x4F"); // ÏO
+    set.insert(b"\x48\x04"); // H\x04
+    set.insert(b"acww");  // Shadow Item placeholder
+    set.insert(b"bwcw");  // Tome
+    set.insert(b"isc");   // Identify Scroll
+    set.insert(b"tsc");   // Town Portal Scroll
+    set
+});
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeaderAxiom {
     pub version: u8,
@@ -77,18 +96,26 @@ impl HeaderAxiom {
         self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
     }
 
-    pub fn is_plausible(&self, mode: u8, location: u8, code: &str, _flags: u32) -> bool {
-        let trimmed = code.trim();
-        if trimmed.is_empty() { return false; }
-        
-        if code.starts_with(' ') {
-            return false;
-        }
+    pub fn is_plausible(&self, mode: u8, location: u8, code: &[u8], _flags: u32) -> bool {
+        if code.is_empty() { return false; }
 
-        // Strictly reject non-alphanumeric codes to avoid bit-shifted ghost items
-        // Forensic: Alpha v105 summary items use non-ASCII patterns (ÏO, etc.)
-        if !self.alpha_mode && trimmed.chars().any(|c| !c.is_alphanumeric() && c != ' ') {
-            return false;
+        // Zero-allocation plausible check: Registry lookup (O(1))
+        if !VALID_CODES.contains(code) {
+            // Forensic: Some Alpha v105 items use 3-char codes with trailing null/space.
+            // Try trimmed version only if it's not a direct match.
+            let trimmed = if code.len() > 0 && (code[code.len()-1] == 0 || code[code.len()-1] == b' ') {
+                let mut end = code.len();
+                while end > 0 && (code[end-1] == 0 || code[end-1] == b' ') {
+                    end -= 1;
+                }
+                &code[..end]
+            } else {
+                code
+            };
+
+            if !VALID_CODES.contains(trimmed) {
+                return false;
+            }
         }
 
         if self.alpha_mode {
@@ -100,7 +127,6 @@ impl HeaderAxiom {
             true
         }
     }
-
     pub fn is_compact(&self, flags: u32, code: Option<&str>) -> bool {
         if self.is_runeword(flags, code) {
             return false;

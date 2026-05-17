@@ -85,7 +85,7 @@ fn main() {
                 alpha_mode: true,
             };
 
-            if !fail && axiom.is_plausible(mode as u8, loc as u8, &code, flags) {
+            if !fail && axiom.is_plausible(mode as u8, loc as u8, code.as_bytes(), flags) {
                 println!("  [Bit {}] Potential Item: '{}' (mode={}, loc={}, x={}, flags=0x{:08X}, gap={})",     
                     bit, code, mode, loc, x, flags, gap);
             }

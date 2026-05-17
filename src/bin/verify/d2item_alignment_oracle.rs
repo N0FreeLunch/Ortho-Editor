@@ -90,7 +90,7 @@ fn main() {
         if let Some((mode, location, _, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) =
             peek_item_header_at(&bytes, bit_idx, &huffman, is_alpha)
         {
-            if is_plausible_item_header(mode, location, &code, flags, version, is_alpha) {
+            if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, is_alpha) {
                 // Heuristic: v105 items should be version 5 or similar
                 if !is_alpha || version == 5 {
                     if found_count > 0 {
