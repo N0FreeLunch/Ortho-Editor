@@ -794,7 +794,7 @@ pub fn parse_item_header<R: BitRead>(
 
         if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
             let expected = calculate_alpha_v105_checksum(flags, v);
-            if checksum == expected {
+            if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2) {
                 (v, true)
             } else {
                 cursor.rollback(saved_pos);
@@ -813,8 +813,9 @@ pub fn parse_item_header<R: BitRead>(
     let location = cursor.read_bits::<u8>(w_axiom.location_bits() as u32)? as u8;
     let x = cursor.read_bits::<u8>(w_axiom.x_bits() as u32)? as u8;
 
-    let h_axiom = HeaderAxiom::new(version, alpha_mode);
-    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+    let item_alpha_mode = alpha_mode && has_checksum;
+    let h_axiom = HeaderAxiom::new(version, item_alpha_mode);
+    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, item_alpha_mode);
     let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags);
     let _is_rw_initial = h_axiom.is_runeword(flags, code_hint);
@@ -875,7 +876,7 @@ pub fn parse_item_header<R: BitRead>(
                 socket_hint = ((gap >> 7) & 0x01) as u8; 
             }
         } else {
-            let is_v105_summary_local = alpha_mode && w_axiom.is_summary_item(version, code_hint.unwrap_or(""));
+            let is_v105_summary_local = item_alpha_mode && w_axiom.is_summary_item(version, code_hint.unwrap_or(""));
             if !is_compact || is_v105_summary_local { 
                 y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; 
                 page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; 
@@ -890,7 +891,7 @@ pub fn parse_item_header<R: BitRead>(
         y = cursor.read_bits::<u8>(geometry.y_bits)? as u8; page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
     }
 
-    if alpha_mode && geometry.target_width > 0 {
+    if item_alpha_mode && geometry.target_width > 0 {
         let current_bits = (cursor.pos() - start_bit) as u32;
         if current_bits < geometry.target_width {
             let to_read = geometry.target_width - current_bits;
@@ -914,10 +915,10 @@ pub fn parse_item_header<R: BitRead>(
     Ok((ItemHeader {
         flags, version, mode, location, x, y, page, socket_hint, id: None, level: None, quality: None, is_compact,
         is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact), is_personalized,
-        is_runeword: s_axiom.is_runeword(flags), is_ethereal: s_axiom.is_ethereal(flags), is_ear: (flags & (1 << 24)) != 0,
+        is_runeword: s_axiom.is_runeword(flags), is_ethereal: s_axiom.is_ethereal(flags), is_ear: !alpha_mode && (flags & (1 << 24)) != 0,
         has_checksum,
         alpha_quality_raw: None, alpha_v5_runeword_extra: None, alpha_unique_id_raw: None,
-        save_is_alpha: alpha_mode,
+        save_is_alpha: item_alpha_mode,
     }, alpha_header_gap, alpha_header_gap_bits))
 }
 

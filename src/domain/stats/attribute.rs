@@ -137,15 +137,9 @@ impl AttributeSection {
                 written_bits += 9;
 
                 // Get stat-specific bit widths for Alpha v105
-                let (bits, param_bits) = match entry.stat_id {
-                    0..=11 => (10, 0), // Base stats
-                    12 => (7, 0),     // Level
-                    13 => (32, 0),    // Experience
-                    14 => (25, 0),    // Gold
-                    15 => (25, 0),    // GoldBank
-                    85 => (9, 0),     // item_addexperience (Alpha v105 verified width)
-                    _ => (12, 0),     // Default for unknown Alpha stats
-                };
+                let bits = char_stat_save_bits(entry.stat_id, true);
+                let cost = stat_cost(entry.stat_id);
+                let param_bits = cost.map(|c| c.save_param_bits as u32).unwrap_or(0);
 
                 // Write parameter if present
                 if param_bits > 0 {

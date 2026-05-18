@@ -236,7 +236,7 @@ impl HeaderAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 2) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
+        self.alpha_mode && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
     }
 
     pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
@@ -259,18 +259,21 @@ impl HeaderAxiom {
                 };
             }
 
-            let mut target_width = if self.is_alpha() {
-                let code_str = code_hint.unwrap_or("");
-                crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code_str, flags)
-            } else { 80 };
-
             let is_summary = if let Some(c) = code_hint {
                 crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
             } else {
-                // Forensic Peek: In Alpha v105 (v0, v1, v2, v4, v6), compact items are almost always 
+                // Forensic Peek: In Alpha v105 (v0, v1, v2, v4, v5, v6), compact items are almost always 
                 // summary items (potions, scrolls, etc.) which use 3-bit Y fields.
-                is_compact && (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6)
+                is_compact && (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 5 || self.version == 6)
             };
+
+            let mut target_width = if self.is_alpha() {
+                if let Some(c) = code_hint {
+                    crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, c, flags)
+                } else {
+                    0
+                }
+            } else { 80 };
 
             if is_compact && self.alpha_mode {
                 // For compact items, target_width from axioms is the TOTAL width.
@@ -450,12 +453,16 @@ impl ItemHeader {
 }
 
 pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
-    let b1 = (flags >> 24) & 0xFF;
-    let b2 = (flags >> 16) & 0xFF;
-    let b3 = (flags >> 8) & 0xFF;
-    let b4 = flags & 0xFF;
-    let v = (version & 0x07) as u32;
-    (b1 ^ b2 ^ b3 ^ b4 ^ v ^ 0x87) as u8
+    if version == 0 {
+        ((flags ^ (flags >> 21)) & 0xFF) as u8
+    } else {
+        let b1 = (flags >> 24) & 0xFF;
+        let b2 = (flags >> 16) & 0xFF;
+        let b3 = (flags >> 8) & 0xFF;
+        let b4 = flags & 0xFF;
+        let v = (version & 0x07) as u32;
+        (b1 ^ b2 ^ b3 ^ b4 ^ v ^ 0x87) as u8
+    }
 }
 
 #[cfg(test)]
@@ -464,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_alpha_v105_checksum_known_vector() {
-        assert_eq!(calculate_alpha_v105_checksum(0, 0), 0x87);
+        assert_eq!(calculate_alpha_v105_checksum(0, 0), 0);
         assert_eq!(calculate_alpha_v105_checksum(0x01020304, 5), 0x86);
         assert_eq!(calculate_alpha_v105_checksum(0xFFFFFFFF, 7), 0x80);
     }

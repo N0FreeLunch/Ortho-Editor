@@ -46,7 +46,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     
     let num_chunks = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
     let markers: Vec<(u64, u32, String)> = (0..num_chunks)
-        .into_par_iter()
+        .into_iter()
         .flat_map(|chunk_idx| {
             let start_byte = chunk_idx * SCAN_CHUNK_SIZE;
             let end_byte = ((chunk_idx + 1) * SCAN_CHUNK_SIZE).min(bytes.len());
@@ -58,7 +58,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
             let section_header_bits = if alpha && chunk_idx == 0 {
                 let mut p = 32;
-                if let Some((_, _, _, _, _, version, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha) {
+                if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha) {
                     p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
                 }
                 p
@@ -73,7 +73,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             };
             
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
-
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
@@ -85,10 +84,13 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
-                            let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || crate::domain::item::serialization::item_template(&code).is_some();
+                            let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
+                                || crate::domain::item::serialization::item_template(&code).is_some()
+                                || code == "acww"
+                                || code == "bcww";
                             
-                            // Slice S3: Stricter parity. Alpha v105 items must have a valid checksum unless they are known summary/templated items.
-                            if alpha && !has_checksum && !is_known { continue; }
+                            // Slice S3: Stricter parity. Alpha v105 version 5 items must have a valid checksum unless they are known summary/templated items.
+                            if alpha && version == 5 && !has_checksum && !is_known { continue; }
                             
                             // Alpha v105: We start at section_header_bits, so any marker found must be at or after it.
                             if alpha && chunk_idx == 0 && scan_pos < section_header_bits { continue; }
@@ -157,7 +159,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     // Consolidate markers: sort and remove duplicates caused by overlapping scan
     let mut final_markers = markers;
     final_markers.sort_unstable_by_key(|m| m.0);
-    // eprintln!("[DEBUG-SLICE13] raw candidates found: {}", final_markers.len());
     
     // Slice 14.1: Slot-Aligned Competitive Advancement.
     // We use a lookahead window to pick the highest confidence marker,

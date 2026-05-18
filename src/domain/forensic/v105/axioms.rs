@@ -91,7 +91,7 @@ impl V105HeaderGapAxiom {
             // Axiom 0392: Summary items in Alpha v105 are structurally compact 
             // but still preserve the JM-to-Body gap to maintain the 80-bit rhythm.
             if base_gap == 0 && is_v105_summary_code(trimmed) {
-                base_gap = if has_checksum { 0 } else { 8 };
+                base_gap = if has_checksum || version == 5 { 0 } else { 8 };
             }
         }
 
@@ -165,10 +165,14 @@ impl ForensicAxiom for V105AlignmentAxiom {
 
 impl V105AlignmentAxiom {
     pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, is_compact: bool) -> usize {
-        if is_compact || code.trim().is_empty() { return 0; }
+        if is_compact { return 0; }
+        if code.trim().is_empty() { return 0; }
         let is_socketed = (flags & 0x00000008) != 0;
         let trimmed = code.trim();
-        match (version, trimmed) {
+        if trimmed == "hp1" {
+            println!("[DEBUG-NUDGE] trimmed='{}', version={}, is_socketed={}, is_compact={}", trimmed, version, is_socketed, is_compact);
+        }
+        let res = match (version, trimmed) {
             (5, "wuw8") => 176,
             (5, "w8cs") => 96,
             (0, "wuw8") | (0, "s7ds") => 22, // 3-bit drift from standard 19-bit
@@ -176,7 +180,11 @@ impl V105AlignmentAxiom {
             (0, _) => 19,
             (2, _) => 19, // Version 2 follows Version 0 cadence
             _ => 0,
+        };
+        if trimmed == "hp1" {
+            println!("[DEBUG-NUDGE] result={}", res);
         }
+        res
     }
 }
 
@@ -195,6 +203,10 @@ impl ForensicAxiom for V105RhythmicNudgeAxiom {
 }
 
 pub fn is_v105_summary_code(code: &str) -> bool {
+    let trimmed = code.trim();
+    if trimmed == "tsc" || trimmed == "isc" {
+        return true;
+    }
     V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
@@ -202,6 +214,7 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_rhythm_forced(version, code);
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
+    let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
     let reg = crate::domain::forensic::registry::get_registry();
 
     if is_summary || is_compact_flag {
@@ -210,7 +223,7 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
                 if let Some(&width) = map.get("fixed_width") { return width; }
             }
         }
-        
+
         if is_summary {
             return w_axiom.summary_item_fixed_width();
         }
@@ -221,13 +234,16 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         return base_width;
     }
 
+    if is_shadow {
+        return 80;
+    }
+
     match version {
         1 | 2 | 0 | 4 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(72) as u32,
         5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
         _ => 0,
     }
 }
-
 /// JM Marker scanning axiom for Alpha v105.
 #[derive(Debug, Clone, Default)]
 pub struct V105JmMarkerAxiom;
@@ -480,13 +496,18 @@ impl V105PropertyWidthAxiom {
             return false;
         }
 
-        // 1. Check hardened plausibility (O(1)) - Axiom 0365
+        // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
+        if self.matches_stealth_pattern(code) {
+            return true;
+        }
+
+        // 2. Check hardened plausibility (O(1)) - Axiom 0365
         let h_axiom = crate::domain::header::entity::HeaderAxiom::new(5, true);
         if !h_axiom.is_plausible(0, 0, trimmed.as_bytes(), 0) {
             return false;
         }
 
-        // 2. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
+        // 3. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
         match trimmed {
             // Potions
             "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
@@ -498,11 +519,6 @@ impl V105PropertyWidthAxiom {
             // Quest/Marker
             "wuw8" | "bwcw" => return true,
             _ => {}
-        }
-
-        // 3. Known Stealth-Compact patterns (Markers without bit 23 set)
-        if self.matches_stealth_pattern(code) {
-            return true;
         }
 
         let reg = crate::domain::forensic::registry::get_registry();

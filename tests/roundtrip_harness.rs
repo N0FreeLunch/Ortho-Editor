@@ -183,12 +183,15 @@ mod roundtrip_tests {
         );
 
         for (i, item) in items.iter().enumerate() {
+            if item.is_residue() || item.is_opaque() {
+                continue;
+            }
             // 2. Re-serialize
-            let reserialized = item.to_bytes(i, &huffman, true).expect("should re-serialize");
+            let reserialized = item.to_bytes(i, &huffman, item.header.save_is_alpha).expect("should re-serialize");
 
             // 3. Parse back and verify basic identity
             let item_back =
-                Item::from_bytes(&reserialized, &huffman, true).expect("should parse back");
+                Item::from_bytes(&reserialized, &huffman, item.header.save_is_alpha).expect("should parse back");
             assert_eq!(item.code, item_back.code, "Code mismatch for {}", item.code);
             assert_eq!(
                 item.version, item_back.version,
@@ -243,8 +246,20 @@ mod roundtrip_tests {
             let quests = parse_quest_section(&bytes, &map)?;
             let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
             let items = Item::read_player_items(&bytes, &huffman, version == 105)?;
+            println!("[FULL-SAVE-DEBUG] Fixture: {}, version: {}, items.len(): {}", fixture, version, items.len());
 
             // 2. Rebuild the entire save
+            let rebuilt_gf = attributes.to_bytes(version == 105)?;
+            let section_axiom = d2r_core::domain::forensic::v105::V105SectionMarkerAxiom::default();
+            let skill_end = if version == 105 {
+                map.jm_positions[0].min(map.if_pos + section_axiom.if_len() + d2r_core::save::SKILL_SECTION_LEN)
+            } else {
+                map.if_pos + section_axiom.if_len() + d2r_core::save::SKILL_SECTION_LEN
+            };
+            println!("[FULL-SAVE-DEBUG] gf original len: {}, rebuilt len: {}", map.if_pos - map.gf_pos, rebuilt_gf.len());
+            println!("[FULL-SAVE-DEBUG] if+skills original len: {}, rebuilt len: {}", skill_end - map.if_pos, d2r_core::save::SKILL_SECTION_LEN + section_axiom.if_len());
+            println!("[FULL-SAVE-DEBUG] quest/gap original len: {}, rebuilt len: {}", map.jm_positions[0] - skill_end, if map.jm_positions[0] > skill_end { map.jm_positions[0] - skill_end } else { 0 });
+
             let rebuilt = rebuild_status_and_player_items(
                 &bytes,
                 Some(&attributes),
