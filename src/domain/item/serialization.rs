@@ -1572,7 +1572,8 @@ impl BitEmitter {
         self.written
     }
 
-    pub fn into_bytes(self) -> Vec<u8> {
+    pub fn into_bytes(mut self) -> Vec<u8> {
+        let _ = self.byte_align();
         self.writer.into_writer()
     }
 }
