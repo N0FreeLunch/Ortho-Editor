@@ -1,4 +1,41 @@
 use crate::domain::item::axiom_meta::{Confidence, ForensicAxiom, ForensicMetadata, Intentionality};
+use std::fmt;
+
+#[derive(Debug, Clone)]
+pub enum AxiomError {
+    BufferTooSmall {
+        expected: usize,
+        actual: usize,
+        context: String,
+    },
+    MarkerNotFound {
+        marker: String,
+    },
+    ValidationFailure {
+        expected: Vec<u8>,
+        actual: Vec<u8>,
+        offset: usize,
+        context: String,
+    },
+}
+
+impl fmt::Display for AxiomError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BufferTooSmall { expected, actual, context } => {
+                write!(f, "Axiom Error: Buffer too small for {context}. Expected at least {expected} bytes, but got {actual}.")
+            }
+            Self::MarkerNotFound { marker } => {
+                write!(f, "Axiom Error: Required marker '{marker}' not found in bitstream.")
+            }
+            Self::ValidationFailure { expected, actual, offset, context } => {
+                write!(f, "Axiom Error: Validation failed at offset {offset} during {context}. Expected {expected:?}, but found {actual:?}.")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AxiomError {}
 
 /// 2-bit nudge logic (Item Flags and Stats gap) in Alpha v105.
 #[derive(Debug, Clone, Default)]
@@ -287,6 +324,48 @@ impl V105JmMarkerAxiom {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum V105Mutation {
+    Write { offset: usize, data: Vec<u8>, context: String },
+    WriteByte { offset: usize, value: u8, context: String },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct V105RebuildPlan {
+    pub mutations: Vec<V105Mutation>,
+}
+
+impl V105RebuildPlan {
+    pub fn execute(&self, header: &mut [u8]) -> Result<(), AxiomError> {
+        for m in &self.mutations {
+            match m {
+                V105Mutation::Write { offset, data, context } => {
+                    let end = offset + data.len();
+                    if header.len() < end {
+                        return Err(AxiomError::BufferTooSmall {
+                            expected: end,
+                            actual: header.len(),
+                            context: context.clone(),
+                        });
+                    }
+                    header[*offset..end].copy_from_slice(data);
+                }
+                V105Mutation::WriteByte { offset, value, context } => {
+                    if header.len() <= *offset {
+                        return Err(AxiomError::BufferTooSmall {
+                            expected: *offset + 1,
+                            actual: header.len(),
+                            context: context.clone(),
+                        });
+                    }
+                    header[*offset] = *value;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Section marker scanning axiom for Alpha v105.
 #[derive(Debug, Clone, Default)]
 pub struct V105SectionMarkerAxiom;
@@ -415,44 +494,65 @@ impl V105SectionMarkerAxiom {
         Self::MARKER_LF.len()
     }
 
-    /// Synchronizes Alpha v105 quest data into the header.
-    pub fn sync_quests(&self, header: &mut [u8], woo_pos: Option<usize>, ws_pos: Option<usize>, data: &[u8]) {
-        let start = woo_pos.unwrap_or(Self::V105_QUEST_OFFSET);
-        let end = ws_pos.unwrap_or(Self::V105_WAYPOINT_OFFSET);
-        let max_len = end.saturating_sub(start);
-        let len = data.len().min(max_len);
-        if header.len() >= start + len {
-            header[start..start + len].copy_from_slice(&data[..len]);
-        }
-    }
+    /// Creates a rebuild plan for Alpha v105 header synchronization.
+    pub fn plan_rebuild(
+        &self,
+        woo_pos: Option<usize>,
+        ws_pos: Option<usize>,
+        w4_pos: Option<usize>,
+        quests: Option<&[u8]>,
+        waypoints: Option<&[u8]>,
+        npc: Option<&[u8]>,
+        attr_level: Option<u8>,
+        char_level_offset: usize,
+    ) -> V105RebuildPlan {
+        let mut plan = V105RebuildPlan::default();
 
-    /// Synchronizes Alpha v105 waypoint data into the header.
-    pub fn sync_waypoints(&self, header: &mut [u8], ws_pos: Option<usize>, w4_pos: Option<usize>, data: &[u8]) {
-        let start = ws_pos.unwrap_or(Self::V105_WAYPOINT_OFFSET);
-        let end = w4_pos.unwrap_or(Self::V105_NPC_OFFSET);
-        let max_len = end.saturating_sub(start);
-        let len = data.len().min(max_len);
-        if header.len() >= start + len {
-            header[start..start + len].copy_from_slice(&data[..len]);
+        if let Some(data) = quests {
+            let start = woo_pos.unwrap_or(Self::V105_QUEST_OFFSET);
+            let end = ws_pos.unwrap_or(Self::V105_WAYPOINT_OFFSET);
+            let max_len = end.saturating_sub(start);
+            let len = data.len().min(max_len);
+            plan.mutations.push(V105Mutation::Write {
+                offset: start,
+                data: data[..len].to_vec(),
+                context: "Quests".to_string(),
+            });
         }
-    }
 
-    /// Synchronizes Alpha v105 NPC section (Expansion) data into the header.
-    pub fn sync_npc_section(&self, header: &mut [u8], w4_pos: Option<usize>, data: &[u8]) {
-        let start = w4_pos.unwrap_or(Self::V105_NPC_OFFSET);
-        let end = Self::V105_HEADER_LEN;
-        let max_len = end.saturating_sub(start);
-        let len = data.len().min(max_len);
-        if header.len() >= start + len {
-            header[start..start + len].copy_from_slice(&data[..len]);
+        if let Some(data) = waypoints {
+            let start = ws_pos.unwrap_or(Self::V105_WAYPOINT_OFFSET);
+            let end = w4_pos.unwrap_or(Self::V105_NPC_OFFSET);
+            let max_len = end.saturating_sub(start);
+            let len = data.len().min(max_len);
+            plan.mutations.push(V105Mutation::Write {
+                offset: start,
+                data: data[..len].to_vec(),
+                context: "Waypoints".to_string(),
+            });
         }
-    }
 
-    /// Synchronizes character level in the header based on stat section value.
-    pub fn sync_char_level(&self, header: &mut [u8], level: u8, offset: usize) {
-        if header.len() > offset {
-            header[offset] = level;
+        if let Some(data) = npc {
+            let start = w4_pos.unwrap_or(Self::V105_NPC_OFFSET);
+            let end = Self::V105_HEADER_LEN;
+            let max_len = end.saturating_sub(start);
+            let len = data.len().min(max_len);
+            plan.mutations.push(V105Mutation::Write {
+                offset: start,
+                data: data[..len].to_vec(),
+                context: "NPC Section".to_string(),
+            });
         }
+
+        if let Some(lv) = attr_level {
+            plan.mutations.push(V105Mutation::WriteByte {
+                offset: char_level_offset,
+                value: lv,
+                context: "Character Level".to_string(),
+            });
+        }
+
+        plan
     }
 
     fn find_marker(&self, bytes: &[u8], marker: &[u8]) -> Option<usize> {

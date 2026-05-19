@@ -235,31 +235,27 @@ pub fn rebuild_status_and_player_items(
 
     let section_axiom = V105SectionMarkerAxiom::default();
 
-    // Update QUESTS if present (Alpha v105)
     if version == 105 {
-        if let Some(qs) = quests {
-            section_axiom.sync_quests(&mut header_bytes, map.woo_pos, map.ws_pos, qs.as_slice());
-        }
-    }
-
-    // Update WAYPOINTS if present (Alpha v105)
-    if version == 105 {
-        if let Some(wps) = waypoints {
-            section_axiom.sync_waypoints(&mut header_bytes, map.ws_pos, map.w4_pos, wps.as_slice());
-        }
-    }
-
-    // Update NPC Section if present (Alpha v105)
-    if version == 105 {
-        if let Some(npc) = expansion {
-            section_axiom.sync_npc_section(&mut header_bytes, map.w4_pos, npc.as_slice());
-        }
-    }
-
-    // Synchronize Header Level with Stat Section (id 12) to prevent engine-level reset.
-    if let Some(attr) = attributes {
-        if let Some(lv) = attr.actual_value(12, version == 105) {
-            section_axiom.sync_char_level(&mut header_bytes, lv as u8, CHAR_LEVEL_OFFSET);
+        let attr_level = attributes.and_then(|a| a.actual_value(12, true)).map(|v| v as u8);
+        let plan = section_axiom.plan_rebuild(
+            map.woo_pos,
+            map.ws_pos,
+            map.w4_pos,
+            quests.map(|q| q.as_slice()),
+            waypoints.map(|w| w.as_slice()),
+            expansion.map(|e| e.as_slice()),
+            attr_level,
+            CHAR_LEVEL_OFFSET,
+        );
+        plan.execute(&mut header_bytes).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    } else {
+        // Synchronize Header Level with Stat Section (id 12) for Retail
+        if let Some(attr) = attributes {
+            if let Some(lv) = attr.actual_value(12, false) {
+                if header_bytes.len() > CHAR_LEVEL_OFFSET {
+                    header_bytes[CHAR_LEVEL_OFFSET] = lv as u8;
+                }
+            }
         }
     }
     
@@ -599,19 +595,19 @@ impl Header {
         let mut bytes = self.raw_prefix.clone();
         let section_axiom = V105SectionMarkerAxiom::default();
 
-        // Update QUESTS if present (Alpha v105)
-        if let Some(ref qs) = self.quests {
-            section_axiom.sync_quests(&mut bytes, None, None, qs.as_slice());
-        }
-
-        // Update WAYPOINTS if present (Alpha v105)
-        if let Some(ref wps) = self.waypoints {
-            section_axiom.sync_waypoints(&mut bytes, None, None, wps.as_slice());
-        }
-
-        // Update EXPANSION (NPC) if present (Alpha v105)
-        if let Some(ref ex) = self.expansion {
-            section_axiom.sync_npc_section(&mut bytes, None, ex.as_slice());
+        if self.version == 105 {
+            let plan = section_axiom.plan_rebuild(
+                None,
+                None,
+                None,
+                self.quests.as_ref().map(|qs| qs.as_slice()),
+                self.waypoints.as_ref().map(|wps| wps.as_slice()),
+                self.expansion.as_ref().map(|ex| ex.as_slice()),
+                None,
+                CHAR_LEVEL_OFFSET,
+            );
+            plan.execute(&mut bytes)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         }
 
         if bytes.len() < MIN_HEADER_LEN {
