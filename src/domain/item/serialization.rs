@@ -946,7 +946,11 @@ impl Item {
                 let mut residue = Item::default();
                 residue.expected_start_bit = start_offset;
                 residue.code = "    ".to_string();
-                residue.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                if alpha_mode {
+                    residue.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                } else {
+                    residue.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                }
                 for (idx, b) in bits.iter().enumerate() {
                     residue.bits.push(crate::domain::item::RecordedBit {
                         bit: *b,
@@ -956,11 +960,19 @@ impl Item {
                 residue.range.start = section_bit_offset + start_offset;
                 residue.range.end = section_bit_offset + start;
                 residue.total_bits = residue_len;
-                residue.forensic_audit.record(ForensicMetadata::new(
-                    Confidence::Fragile,
-                    Intentionality::Artifactual,
-                    "Residue preservation"
-                ));
+                if alpha_mode {
+                    residue.forensic_audit.record(ForensicMetadata::new(
+                        Confidence::Speculative,
+                        Intentionality::Artifactual,
+                        "Alpha v105 item preservation"
+                    ));
+                } else {
+                    residue.forensic_audit.record(ForensicMetadata::new(
+                        Confidence::Fragile,
+                        Intentionality::Artifactual,
+                        "Residue preservation"
+                    ));
+                }
                 items.push(residue);
             }
 
@@ -1218,10 +1230,20 @@ impl Item {
                     let mut opaque_item = Item::default();
                     opaque_item.expected_start_bit = start;
                     opaque_item.code = if is_missing_item { "Opaque".to_string() } else { "    ".to_string() };
-                    if alpha_mode && is_missing_item {
+                    if alpha_mode {
                         opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                        opaque_item.forensic_audit.record(ForensicMetadata::new(
+                            Confidence::Speculative,
+                            Intentionality::Artifactual,
+                            "Alpha v105 item preservation"
+                        ));
                     } else {
                         opaque_item.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                        opaque_item.forensic_audit.record(ForensicMetadata::new(
+                            Confidence::Fragile,
+                            Intentionality::Artifactual,
+                            "Residue preservation"
+                        ));
                     }
                     for (idx, b) in bits.iter().enumerate() {
                         opaque_item.bits.push(crate::domain::item::RecordedBit {
@@ -1232,11 +1254,6 @@ impl Item {
                     opaque_item.range.start = section_bit_offset + start;
                     opaque_item.range.end = section_bit_offset + end;
                     opaque_item.total_bits = len;
-                    opaque_item.forensic_audit.record(ForensicMetadata::new(
-                        Confidence::Fragile,
-                        Intentionality::Artifactual,
-                        "Residue preservation"
-                    ));
                     items.push(opaque_item);
                 }
             }
@@ -1447,7 +1464,7 @@ impl Item {
         // to detect residue Defense/Durability as per mini-spec.
         // EXCEPT for summary items (Axiom 0392) which never have stats.
         let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
-        if !is_v105_summary && (!item.header.is_compact || (item.header.save_is_alpha && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2 || item.header.version == 5))) {
+        if !is_v105_summary && (!item.header.is_compact || (item.header.save_is_alpha && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2 || item.header.version == 4 || item.header.version == 5))) {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
 
             // Slice 11: Handle JM-to-Body alignment gap

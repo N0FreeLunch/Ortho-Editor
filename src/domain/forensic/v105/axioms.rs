@@ -594,7 +594,9 @@ impl V105PropertyWidthAxiom {
 
         let trimmed = code.trim();
         if trimmed.is_empty() {
-            return false;
+            // Axiom 0344: Blank codes ("    ") are classified as summary items in Alpha v105 
+            // to preserve the 80-bit rhythm and item count parity.
+            return true;
         }
 
         // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
