@@ -126,6 +126,10 @@ impl V105HeaderGapAxiom {
                 }
             }
             
+            if trimmed == "xrs" {
+                base_gap = 24; // Authority Runeword gap (Axiom-aligned)
+            }
+            
             // Axiom 0392: Summary items in Alpha v105 are structurally compact 
             // but still preserve the JM-to-Body gap to maintain the 80-bit rhythm.
             if base_gap == 0 && is_v105_summary_code(trimmed) {
@@ -269,6 +273,9 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
         // Conditional 1-bit nudge (73 bits) if bit 72 is set as a potential flag or alignment.
         let base_width = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72) as u32;
+        if version == 4 {
+            return base_width + 1; // Alpha v105 Version 4 compact items require 1-bit nudge (Slice 5)
+        }
         return base_width;
     }
 
@@ -277,7 +284,8 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     }
 
     match version {
-        1 | 2 | 0 | 4 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(72) as u32,
+        1 | 2 | 0 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(72) as u32,
+        4 => 73, // Version 4 requires a 1-bit residue nudge (Slice 5)
         5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
         _ => 0,
     }
@@ -593,6 +601,9 @@ impl V105PropertyWidthAxiom {
         }
 
         let trimmed = code.trim();
+        if trimmed == "xrs" {
+            return false; // Authority Runeword is NOT summary (Slice 7)
+        }
         if trimmed.is_empty() {
             // Axiom 0344: Blank codes ("    ") are classified as summary items in Alpha v105 
             // to preserve the 80-bit rhythm and item count parity.
