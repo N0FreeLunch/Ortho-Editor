@@ -97,6 +97,7 @@ impl V105PropertyNudgeAxiom {
     pub fn get_nudge(&self, version: u8) -> u8 {
         match version {
             5 => 5, // Version 5 requires a 5-bit residue nudge (Slice 23)
+            4 => 1, // Version 4 requires a 1-bit residue nudge (Slice 5)
             2 | 1 | 0 => 3, // Version 2, 1, 0 require a 3-bit residue nudge
             _ => 0,
         }
@@ -601,13 +602,7 @@ impl V105PropertyWidthAxiom {
             return true;
         }
 
-        // 2. Check hardened plausibility (O(1)) - Axiom 0365
-        let h_axiom = crate::domain::header::entity::HeaderAxiom::new(5, true);
-        if !h_axiom.is_plausible(0, 0, trimmed.as_bytes(), 0) {
-            return false;
-        }
-
-        // 3. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
+        // 2. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
         match trimmed {
             // Potions
             "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
@@ -617,8 +612,14 @@ impl V105PropertyWidthAxiom {
             "r01" | "r02" | "r03" | "r04" | "r05" | "r06" | "r07" | "r08" | "r09" | "r10" |
             "gcv" | "gcw" | "gcg" | "gcr" | "gcb" | "gcy" | "gcz" => return true,
             // Quest/Marker
-            "wuw8" | "bwcw" => return true,
+            "wuw8" | "bwcw" | "acww" | "bcww" | "tsc" | "isc" | "tsc " | "isc " => return true,
             _ => {}
+        }
+
+        // 3. Check hardened plausibility (O(1)) - Axiom 0365
+        let h_axiom = crate::domain::header::entity::HeaderAxiom::new(5, true);
+        if !h_axiom.is_plausible(0, 0, trimmed.as_bytes(), 0) {
+            return false;
         }
 
         let reg = crate::domain::forensic::registry::get_registry();
@@ -705,7 +706,7 @@ impl V105PropertyWidthAxiom {
     pub fn nudge_bits(&self) -> u32 { 2 }
     
     pub fn is_extended_stats_early_exit(&self, version: u8) -> bool {
-        version == 4 || version == 6 || version == 7
+        version == 6 || version == 7
     }
     
     pub fn has_v5_runeword_extra(&self, version: u8) -> bool {
