@@ -362,7 +362,7 @@ pub fn peek_item_header_at(
                 if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { t_code.push(ch); }
                 else { break; }
             }
-            if h_axiom.is_runeword(flags, Some(&t_code)) {
+            if h_axiom.is_runeword(flags, Some(&t_code)) || t_code.trim() == "xrs" {
                 trial_is_rw = true;
             }
         }
@@ -422,12 +422,14 @@ pub fn peek_item_header_at(
     let mut is_compact_detected = is_compact_peek;
 
     if item_alpha_mode {
-        let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
-        if trial_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_ok() {
+        // Alpha Forensic (Slice 6): Try a 0-nudge trial first for potential summary items
+        // which often bypass the standard alignment drift.
+        let mut summary_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
+        if summary_reader.skip(start_bit as u32 + total_skip).is_ok() {
             let mut trial_bytes = [0u8; 3];
             let mut trial_ok = true;
             for i in 0..3 {
-                if let Ok(ch) = trial_reader.read::<8, u8>() {
+                if let Ok(ch) = summary_reader.read::<8, u8>() {
                     if ch != 0 { trial_bytes[i] = ch; }
                 } else {
                     trial_ok = false;
@@ -437,14 +439,44 @@ pub fn peek_item_header_at(
             
             let trial_code: String = trial_bytes.iter().map(|&b| b as char).collect();
             let trial_code = trial_code.trim_end_matches('\0').to_string();
-            if debug_peek {
-                println!("[DEBUG-PEEK-32] start_bit={}, compact_trial_code='{}', total_skip={}, nudge={}", start_bit, trial_code, total_skip, alignment_nudge);
-            }
             if trial_ok && is_v105_summary_code(&trial_code) {
                 code_bytes[..3].copy_from_slice(&trial_bytes);
                 code_len = 3;
                 is_compact_detected = true;
                 let _ = n_cursor.read_bits_as_vec(24);
+                // We found it at nudge 0!
+            }
+        }
+
+        if code_len == 0 {
+            let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
+            if trial_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_ok() {
+                let mut trial_bytes = [0u8; 3];
+                let mut trial_ok = true;
+                for i in 0..3 {
+                    if let Ok(ch) = trial_reader.read::<8, u8>() {
+                        if ch != 0 { trial_bytes[i] = ch; }
+                    } else {
+                        trial_ok = false;
+                        break;
+                    }
+                }
+                
+                let trial_code: String = trial_bytes.iter().map(|&b| b as char).collect();
+                let trial_code = trial_code.trim_end_matches('\0').to_string();
+                if debug_peek {
+                    println!("[DEBUG-PEEK-32] start_bit={}, compact_trial_code='{}', total_skip={}, nudge={}", start_bit, trial_code, total_skip, alignment_nudge);
+                }
+                if trial_ok && is_v105_summary_code(&trial_code) {
+                    code_bytes[..3].copy_from_slice(&trial_bytes);
+                    code_len = 3;
+                    is_compact_detected = true;
+                    // Skip the bits in the actual cursor if we haven't already
+                    if alignment_nudge > 0 {
+                         let _ = n_cursor.read_bits_as_vec(alignment_nudge as u32);
+                    }
+                    let _ = n_cursor.read_bits_as_vec(24);
+                }
             }
         }
     }
@@ -667,12 +699,13 @@ pub fn peek_item_header_at_specific_gap(
     let mut code_len = 0;
 
     if item_alpha_mode {
-        let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
-        if trial_reader.skip(start_bit as u32 + base_header_len as u32 + gap as u32).is_ok() {
+        // Alpha Forensic (Slice 6): Try a 0-nudge trial first for potential summary items
+        let mut summary_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
+        if summary_reader.skip(start_bit as u32 + base_header_len as u32).is_ok() {
             let mut trial_bytes = [0u8; 3];
             let mut trial_ok = true;
             for i in 0..3 {
-                if let Ok(ch) = trial_reader.read::<8, u8>() {
+                if let Ok(ch) = summary_reader.read::<8, u8>() {
                     if ch != 0 { trial_bytes[i] = ch; }
                 } else {
                     trial_ok = false;
@@ -686,6 +719,33 @@ pub fn peek_item_header_at_specific_gap(
                 code_len = 3;
                 is_compact_detected = true;
                 let _ = n_cursor.read_bits_as_vec(24);
+            }
+        }
+
+        if code_len == 0 {
+            let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
+            if trial_reader.skip(start_bit as u32 + base_header_len as u32 + gap as u32).is_ok() {
+                let mut trial_bytes = [0u8; 3];
+                let mut trial_ok = true;
+                for i in 0..3 {
+                    if let Ok(ch) = trial_reader.read::<8, u8>() {
+                        if ch != 0 { trial_bytes[i] = ch; }
+                    } else {
+                        trial_ok = false;
+                        break;
+                    }
+                }
+                let trial_code: String = trial_bytes.iter().map(|&b| b as char).collect();
+                let trial_code = trial_code.trim_end_matches('\0').to_string();
+                if trial_ok && is_v105_summary_code(&trial_code) {
+                    code_bytes[..3].copy_from_slice(&trial_bytes);
+                    code_len = 3;
+                    is_compact_detected = true;
+                    if gap > 0 {
+                        let _ = n_cursor.read_bits_as_vec(gap as u32);
+                    }
+                    let _ = n_cursor.read_bits_as_vec(24);
+                }
             }
         }
     }
@@ -765,7 +825,10 @@ pub fn peek_item_header_at_specific_gap(
     
     let code: String = code_bytes[..code_len].iter().map(|&b| b as char).collect();
     let code = code.trim_end_matches('\0').to_string();
-    let is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
+    let mut is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
+    if item_alpha_mode && code.trim() == "xrs" {
+        is_compact = false;
+    }
     let debug_peek = start_bit < 150;
     if debug_peek {
         println!("[DEBUG-PEEK-MID]   spec_gap={}, ok={}, code='{}', plausible={}", gap, ok, code, is_plausible_item_header(mode, loc, &code_bytes[..code_len], flags, version, item_alpha_mode));
@@ -1294,7 +1357,12 @@ impl Item {
         let _has_checksum_peek = peek.as_ref().map(|p| p.9);
         let is_compact_peek = peek.as_ref().map(|p| p.6);
 
-        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(is_compact_peek))?;
+        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(is_compact_peek))?;
+
+        if alpha_mode && (code_peek == Some("xrs") || code_peek == Some("xrs ")) {
+            header.is_runeword = true;
+            header.is_compact = false;
+        }
 
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {
@@ -1464,7 +1532,7 @@ impl Item {
         // to detect residue Defense/Durability as per mini-spec.
         // EXCEPT for summary items (Axiom 0392) which never have stats.
         let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
-        if !is_v105_summary && (!item.header.is_compact || (item.header.save_is_alpha && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2 || item.header.version == 4 || item.header.version == 5))) {
+        if !is_v105_summary && (!item.header.is_compact || (item.header.save_is_alpha && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2 || item.header.version == 5))) {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
 
             // Slice 11: Handle JM-to-Body alignment gap

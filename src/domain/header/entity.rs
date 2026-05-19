@@ -79,6 +79,8 @@ static VALID_CODES: LazyLock<HashSet<&'static [u8]>> = LazyLock::new(|| {
     set.insert(b"isc");   // Identify Scroll
     set.insert(b"tsc");   // Town Portal Scroll
     set.insert(b"    "); // Blank code (Slice 6)
+    set.insert(b"   ");  // Blank code (3-char variant)
+    set.insert(b"");     // Allow empty trim (Slice 6)
     set
 });
 
