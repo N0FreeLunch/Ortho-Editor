@@ -1,6 +1,7 @@
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use d2r_core::verify::OutputManager;
 use d2r_core::item::{HuffmanTree, peek_item_header_at};
+use d2r_core::verify::desync::dump_bits_at;
 use serde::Serialize;
 use std::env;
 use std::path::PathBuf;
@@ -65,6 +66,8 @@ pub struct BoundaryReport {
     pub verdict: Verdict,
     pub allowed_next_action: String,
     pub hint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visual_dump: Option<String>,
 }
 
 fn main() {
@@ -72,6 +75,7 @@ fn main() {
     parser.add_spec(ArgSpec::option("fixture", None, Some("fixture"), "Path to save file (d2s)"));
     parser.add_spec(ArgSpec::option("domain", None, Some("domain"), "Domain to isolate (e.g. item.compact, item.summary, item.stats.huffman)"));
     parser.add_spec(ArgSpec::option("item-index", None, Some("item-index"), "Index of the item in the save").optional());
+    parser.add_spec(ArgSpec::flag("dump-span", None, Some("dump-span"), "Dump the bitstream of the target span"));
     
     use d2r_core::verify::args::ArgError;
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -93,6 +97,7 @@ fn main() {
     let fixture_path = PathBuf::from(&fixture_str);
     let domain = parsed.get("domain").cloned().unwrap_or_else(|| "unknown".to_string());
     let item_index = parsed.get("item-index").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    let dump_span = parsed.is_set("dump-span");
 
     let bytes = match std::fs::read(&fixture_path) {
         Ok(b) => b,
@@ -176,6 +181,33 @@ fn main() {
         (left, right, v, refined_hint, refined_start)
     };
 
+    let start_bit = refined_start.unwrap_or(left_bit);
+    let end_bit = right_bit;
+
+    let mut visual_dump = None;
+    if dump_span {
+        if start_bit < end_bit && start_bit < (bytes.len() as u64 * 8) {
+            let count = (end_bit - start_bit).min(1024 * 1024) as u32; // Limit to 1Mb bits
+            let dump = dump_bits_at(&bytes, start_bit, count);
+            
+            if count > 2048 {
+                let artifact_dir = PathBuf::from("agent_artifacts");
+                if !artifact_dir.exists() {
+                    let _ = std::fs::create_dir_all(&artifact_dir);
+                }
+                let file_name = format!("oracle_dump_{}_{}.bits", item_index, domain.replace(".", "_"));
+                let file_path = artifact_dir.join(file_name);
+                if std::fs::write(&file_path, &dump).is_ok() {
+                    visual_dump = Some(format!("artifact:{}", file_path.display()));
+                } else {
+                    visual_dump = Some(dump);
+                }
+            } else {
+                visual_dump = Some(dump);
+            }
+        }
+    }
+
     let report = BoundaryReport {
         fixture: fixture_path,
         domain: domain.clone(),
@@ -187,8 +219,8 @@ fn main() {
             resynced: None,
         },
         target_span: TargetSpan {
-            start_bit: refined_start.unwrap_or(left_bit),
-            end_bit: right_bit,
+            start_bit,
+            end_bit,
             policy: "same_budget_patch_only".to_string(),
         },
         right_anchor: Anchor {
@@ -202,6 +234,7 @@ fn main() {
         verdict,
         allowed_next_action: "fix_target_span_only".to_string(),
         hint,
+        visual_dump,
     };
 
     if out.is_json() {
@@ -215,6 +248,16 @@ fn main() {
         out.println(&format!("  Right Anchor (bit): {}", right_bit));
         out.println(&format!("  Verdict: {:?}", report.verdict));
         out.println(&format!("  Hint: {}", report.hint));
+        
+        if let Some(dump) = &report.visual_dump {
+            if dump.starts_with("artifact:") {
+                out.println(&format!("  Visual Dump: (saved to {})", &dump[9..]));
+            } else {
+                out.println("  Visual Dump:");
+                out.println(&format!("    {}", dump));
+            }
+        }
+
         out.println("\n  (Use --json for machine-readable bitstream isolation boundaries)");
     }
 }
