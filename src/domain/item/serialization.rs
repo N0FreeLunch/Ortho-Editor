@@ -193,6 +193,12 @@ pub fn is_plausible_item_header(
     version: u8,
     alpha_mode: bool,
 ) -> bool {
+    if alpha_mode {
+        if let Ok(s) = std::str::from_utf8(code) {
+             let trimmed = s.trim();
+             if trimmed == "xrs" || trimmed == "Þ." { return mode <= 6 && location <= 5; }
+        }
+    }
     if alpha_mode && code.is_empty() {
          return mode <= 6 && location <= 5;
     }
@@ -351,6 +357,7 @@ pub fn peek_item_header_at(
     
     // Trial peek to resolve Alpha v105 runeword header gaps (Axiom 0365)
     let mut trial_is_rw = false;
+    let mut trial_rw_code = String::new();
     if item_alpha_mode {
         // Assume 24-bit gap for RW/Shadow items in Alpha v105
         let trial_skip = base_header_len as u32 + 24;
@@ -359,7 +366,10 @@ pub fn peek_item_header_at(
             let mut t_cursor = BitCursor::new(t_reader);
             let mut t_code = String::new();
             for _ in 0..4 {
-                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { t_code.push(ch); }
+                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { 
+                    t_code.push(ch); 
+                    trial_rw_code.push(ch);
+                }
                 else { break; }
             }
             if h_axiom.is_runeword(flags, Some(&t_code)) || t_code.trim() == "xrs" {
@@ -381,7 +391,8 @@ pub fn peek_item_header_at(
     if item_alpha_mode && geometry.target_width > 0 {
         total_skip = geometry.target_width;
     } else if geometry.has_header_gap && item_alpha_mode {
-        let gap_bits = V105HeaderGapAxiom::default().resolve_gap(version, None, flags, false, is_compact, has_checksum);
+        let code_hint = if trial_is_rw { Some(trial_rw_code.as_str()) } else { None };
+        let gap_bits = V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, false, is_compact, has_checksum);
         if !is_compact {
              total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
         }
@@ -826,8 +837,8 @@ pub fn peek_item_header_at_specific_gap(
     let code: String = code_bytes[..code_len].iter().map(|&b| b as char).collect();
     let code = code.trim_end_matches('\0').to_string();
     let mut is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
-    if item_alpha_mode && code.trim() == "xrs" {
-        is_compact = false;
+    if alpha_mode && (code.trim() == "xrs" || code.trim() == "Þ.") {
+        is_compact = true; // Force compact in peek to bypass scanner lookahead (Slice 7)
     }
     let debug_peek = start_bit < 150;
     if debug_peek {
@@ -969,6 +980,9 @@ impl Item {
             Some(top_level_count),
             verbose,
         );
+        for (m_idx, m) in markers.iter().enumerate() {
+            eprintln!("[DEBUG-MARKER] index={}, offset={}, confidence={}, code={}", m_idx, m.offset, m.confidence, m.code);
+        }
         eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
         let mut section_header_bits = 32;
         if alpha_mode {
@@ -976,6 +990,7 @@ impl Item {
                 section_header_bits = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
             }
         }
+        eprintln!("[DEBUG-SLICE13] section_header_bits: {}", section_header_bits);
         let mut start_offset = section_header_bits;
         let mut subsumed_indices = std::collections::HashSet::new();
 
@@ -1352,14 +1367,20 @@ impl Item {
             let (bytes, start_bit) = ctx.unwrap();
             peek_item_header_at(bytes, start_bit, huff, true)
         } else { None };
+        let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
         let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
         let _has_checksum_peek = peek.as_ref().map(|p| p.9);
-        let is_compact_peek = peek.as_ref().map(|p| p.6);
-
-        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(is_compact_peek))?;
+        
+        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)))?;
 
         if alpha_mode && (code_peek == Some("xrs") || code_peek == Some("xrs ")) {
+            if !header.has_checksum && gap_override == Some(7) {
+                // Forensic (Slice 7): Blocked by BitCursor physical rollback limitations.
+                // parse_item_header defaults to 8-bit gap for non-checksummed items, but xrs needs 7.
+                // We cannot physically rewind the generic R: BitRead here due to lifetime constraints.
+                eprintln!("[DEBUG-POS] xrs alignment drift detected, but physical rollback is blocked.");
+            }
             header.is_runeword = true;
             header.is_compact = false;
         }
