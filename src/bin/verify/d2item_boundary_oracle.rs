@@ -1,5 +1,6 @@
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use d2r_core::verify::OutputManager;
+use d2r_core::item::{HuffmanTree, peek_item_header_at};
 use serde::Serialize;
 use std::env;
 use std::path::PathBuf;
@@ -69,7 +70,7 @@ pub struct BoundaryReport {
 fn main() {
     let mut parser = ArgParser::new("d2item_boundary_oracle");
     parser.add_spec(ArgSpec::option("fixture", None, Some("fixture"), "Path to save file (d2s)"));
-    parser.add_spec(ArgSpec::option("domain", None, Some("domain"), "Domain to isolate (e.g. item.compact, item.summary)"));
+    parser.add_spec(ArgSpec::option("domain", None, Some("domain"), "Domain to isolate (e.g. item.compact, item.summary, item.stats.huffman)"));
     parser.add_spec(ArgSpec::option("item-index", None, Some("item-index"), "Index of the item in the save").optional());
     
     use d2r_core::verify::args::ArgError;
@@ -113,22 +114,21 @@ fn main() {
         }
     }
 
-    let (left_bit, right_bit, verdict, hint) = if jm_offsets.is_empty() {
-        (0, 0, Verdict::UnsafeNoRightAnchor, "No JM markers found in file.".to_string())
+    let (left_bit, right_bit, verdict, hint, refined_start) = if jm_offsets.is_empty() {
+        (0, 0, Verdict::UnsafeNoRightAnchor, "No JM markers found in file.".to_string(), None)
     } else if item_index >= jm_offsets.len() {
         (
             jm_offsets.last().copied().unwrap_or(0),
             (bytes.len() as u64 * 8),
             Verdict::UnsafeNoRightAnchor,
-            format!("Item index {} out of range (found {} markers).", item_index, jm_offsets.len())
+            format!("Item index {} out of range (found {} markers).", item_index, jm_offsets.len()),
+            None
         )
     } else {
         let left = jm_offsets[item_index];
         let right = if item_index + 1 < jm_offsets.len() {
             jm_offsets[item_index + 1]
         } else {
-            // If it's the last item, we look for the end of the file or some other terminator.
-            // For the oracle, we'll mark it as UnsafeNoRightAnchor if we can't find a definitive end marker.
             bytes.len() as u64 * 8
         };
         
@@ -138,7 +138,42 @@ fn main() {
             Verdict::UnsafeNoRightAnchor
         };
 
-        (left, right, v, format!("Isolated item {} using byte-aligned JM markers.", item_index))
+        let mut refined_start = None;
+        let mut refined_hint = format!("Isolated item {} using byte-aligned JM markers.", item_index);
+
+        if domain == "item.stats.huffman" {
+            let huffman = HuffmanTree::new();
+            let version_le = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+            let is_alpha = version_le == 6 || version_le == 105;
+
+            // Try brute-forcing the item start within a small window after the JM marker.
+            // This accounts for various section header lengths (32, 38, etc.) and potential alignment drifts.
+            let mut found_res = None;
+            let mut used_left = left;
+
+            for offset in 0..64 {
+                if let Some(res) = peek_item_header_at(&bytes, left + offset, &huffman, is_alpha) {
+                    found_res = Some(res);
+                    used_left = left + offset;
+                    break;
+                }
+            }
+
+            if let Some(res) = found_res {
+                let is_compact = res.6;
+                let header_len = res.7;
+                if !is_compact {
+                    refined_start = Some(used_left + header_len);
+                    refined_hint = format!("Isolated item {} (header_len={}, offset_from_jm={}) and refined target_span for stats.", item_index, header_len, used_left - left);
+                } else {
+                    refined_hint = format!("Isolated item {} (compact, no stats payload). Coarse start retained.", item_index);
+                }
+            } else {
+                refined_hint = format!("Isolated item {} (header parse failed at JM and section offsets). Coarse start retained.", item_index);
+            }
+        }
+
+        (left, right, v, refined_hint, refined_start)
     };
 
     let report = BoundaryReport {
@@ -152,7 +187,7 @@ fn main() {
             resynced: None,
         },
         target_span: TargetSpan {
-            start_bit: left_bit,
+            start_bit: refined_start.unwrap_or(left_bit),
             end_bit: right_bit,
             policy: "same_budget_patch_only".to_string(),
         },
@@ -176,6 +211,7 @@ fn main() {
         out.println(&format!("Boundary Oracle Report for domain: {}", report.domain));
         out.println(&format!("  Item Index: {}", item_index));
         out.println(&format!("  Left Anchor (bit):  {}", left_bit));
+        out.println(&format!("  Target Span Start:  {}", report.target_span.start_bit));
         out.println(&format!("  Right Anchor (bit): {}", right_bit));
         out.println(&format!("  Verdict: {:?}", report.verdict));
         out.println(&format!("  Hint: {}", report.hint));
