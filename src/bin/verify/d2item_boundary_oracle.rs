@@ -69,10 +69,8 @@ pub struct BoundaryReport {
 fn main() {
     let mut parser = ArgParser::new("d2item_boundary_oracle");
     parser.add_spec(ArgSpec::option("fixture", None, Some("fixture"), "Path to save file (d2s)"));
-    parser.add_spec(ArgSpec::option("domain", None, Some("domain"), "Domain to isolate (e.g. item.compact, item.stats.huffman)"));
+    parser.add_spec(ArgSpec::option("domain", None, Some("domain"), "Domain to isolate (e.g. item.compact, item.summary)"));
     parser.add_spec(ArgSpec::option("item-index", None, Some("item-index"), "Index of the item in the save").optional());
-    
-    // Note: --json and --output are handled automatically by OutputManager if present in args
     
     use d2r_core::verify::args::ArgError;
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -90,36 +88,85 @@ fn main() {
 
     let mut out = OutputManager::new("d2item_boundary_oracle", &parsed);
 
-    let fixture = PathBuf::from(parsed.get("fixture").unwrap_or(&"dummy.d2s".to_string()));
+    let fixture_str = parsed.get("fixture").cloned().unwrap_or_else(|| "dummy.d2s".to_string());
+    let fixture_path = PathBuf::from(&fixture_str);
     let domain = parsed.get("domain").cloned().unwrap_or_else(|| "unknown".to_string());
-    let item_index = parsed.get("item-index").and_then(|s| s.parse::<usize>().ok());
+    let item_index = parsed.get("item-index").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+
+    let bytes = match std::fs::read(&fixture_path) {
+        Ok(b) => b,
+        Err(e) => {
+            if out.is_json() {
+                out.json(&format!("{{\"error\": \"Failed to read fixture: {}\"}}", e));
+            } else {
+                out.println(&format!("Error: Failed to read fixture '{}': {}", fixture_str, e));
+            }
+            std::process::exit(1);
+        }
+    };
+
+    // Simple byte-aligned JM marker search
+    let mut jm_offsets = Vec::new();
+    for i in 0..(bytes.len().saturating_sub(1)) {
+        if bytes[i] == 0x4A && bytes[i+1] == 0x4D { // 'J', 'M'
+            jm_offsets.push(i as u64 * 8);
+        }
+    }
+
+    let (left_bit, right_bit, verdict, hint) = if jm_offsets.is_empty() {
+        (0, 0, Verdict::UnsafeNoRightAnchor, "No JM markers found in file.".to_string())
+    } else if item_index >= jm_offsets.len() {
+        (
+            jm_offsets.last().copied().unwrap_or(0),
+            (bytes.len() as u64 * 8),
+            Verdict::UnsafeNoRightAnchor,
+            format!("Item index {} out of range (found {} markers).", item_index, jm_offsets.len())
+        )
+    } else {
+        let left = jm_offsets[item_index];
+        let right = if item_index + 1 < jm_offsets.len() {
+            jm_offsets[item_index + 1]
+        } else {
+            // If it's the last item, we look for the end of the file or some other terminator.
+            // For the oracle, we'll mark it as UnsafeNoRightAnchor if we can't find a definitive end marker.
+            bytes.len() as u64 * 8
+        };
+        
+        let v = if item_index + 1 < jm_offsets.len() {
+            Verdict::LocalOpen
+        } else {
+            Verdict::UnsafeNoRightAnchor
+        };
+
+        (left, right, v, format!("Isolated item {} using byte-aligned JM markers.", item_index))
+    };
 
     let report = BoundaryReport {
-        fixture,
-        domain,
-        item_index,
+        fixture: fixture_path,
+        domain: domain.clone(),
+        item_index: Some(item_index),
         left_anchor: Anchor {
             kind: AnchorKind::PreviousJm,
-            bit_offset: 0,
+            bit_offset: left_bit,
             confidence: Some(1.0),
             resynced: None,
         },
         target_span: TargetSpan {
-            start_bit: 0,
-            end_bit: 0,
+            start_bit: left_bit,
+            end_bit: right_bit,
             policy: "same_budget_patch_only".to_string(),
         },
         right_anchor: Anchor {
             kind: AnchorKind::NextJm,
-            bit_offset: 0,
-            confidence: None,
+            bit_offset: right_bit,
+            confidence: if right_bit < (bytes.len() as u64 * 8) { Some(1.0) } else { Some(0.5) },
             resynced: Some(false),
         },
         local_closure: LocalClosure::Failed,
         downstream_status: DownstreamStatus::Quarantined,
-        verdict: Verdict::LocalOpen,
+        verdict,
         allowed_next_action: "fix_target_span_only".to_string(),
-        hint: "Mock output (Skeleton)".to_string(),
+        hint,
     };
 
     if out.is_json() {
@@ -127,8 +174,11 @@ fn main() {
         out.json(&json);
     } else {
         out.println(&format!("Boundary Oracle Report for domain: {}", report.domain));
+        out.println(&format!("  Item Index: {}", item_index));
+        out.println(&format!("  Left Anchor (bit):  {}", left_bit));
+        out.println(&format!("  Right Anchor (bit): {}", right_bit));
         out.println(&format!("  Verdict: {:?}", report.verdict));
         out.println(&format!("  Hint: {}", report.hint));
-        out.println("  (Use --json for detailed bitstream isolation boundaries)");
+        out.println("\n  (Use --json for machine-readable bitstream isolation boundaries)");
     }
 }
