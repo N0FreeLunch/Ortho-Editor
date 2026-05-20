@@ -779,6 +779,7 @@ pub fn parse_item_header<R: BitRead>(
     gap_override: Option<usize>,
     is_first_item: bool,
     forced_compact: Option<bool>,
+    has_checksum_hint: Option<bool>,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let w_axiom = V105PropertyWidthAxiom::default();
     let start_bit = cursor.pos();
@@ -789,22 +790,28 @@ pub fn parse_item_header<R: BitRead>(
     }
     let (version, has_checksum) = if alpha_mode {
         let saved_pos = cursor.checkpoint();
-        let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
-        let v_res = cursor.read_bits::<u8>(w_axiom.version_bits() as u32);
+        
+        if has_checksum_hint == Some(false) {
+            let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+            (v, false)
+        } else {
+            let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
+            let v_res = cursor.read_bits::<u8>(w_axiom.version_bits() as u32);
 
-        if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
-            let expected = calculate_alpha_v105_checksum(flags, v);
-            if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2) {
-                (v, true)
+            if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
+                let expected = calculate_alpha_v105_checksum(flags, v);
+                if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2) {
+                    (v, true)
+                } else {
+                    cursor.rollback(saved_pos);
+                    let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+                    // Forensic: Support Version 5 items without checksum (e.g. in amazon_empty.d2s)
+                    (v, false)
+                }
             } else {
                 cursor.rollback(saved_pos);
-                let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
-                // Forensic: Support Version 5 items without checksum (e.g. in amazon_empty.d2s)
-                (v, false)
+                (cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8, false)
             }
-        } else {
-            cursor.rollback(saved_pos);
-            (cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8, false)
         }
     } else {
         (cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8, false)
@@ -829,16 +836,14 @@ pub fn parse_item_header<R: BitRead>(
             let is_v105_shadow = h_axiom.is_v105_shadow(flags);
             let is_rw = h_axiom.is_runeword(flags, code_hint);
             
-            let gap_bits = if is_rw || is_v105_shadow {
+            let gap_bits = if let Some(go) = gap_override {
+                let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize;
+                if go >= geom_bits { go - geom_bits } else { go }
+            } else if is_rw || is_v105_shadow {
                 let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 if is_v105_shadow_local { 8 } else { 24 }
             } else {
-                let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize;
-                if let Some(go) = gap_override {
-                    if go >= geom_bits { go - geom_bits } else { 8 }
-                } else {
-                    V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum)
-                }
+                V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum)
             };
 
             // Forensic (Slice 25): Summary item identification and mandatory geometry.
@@ -882,7 +887,24 @@ pub fn parse_item_header<R: BitRead>(
                 page = cursor.read_bits::<u8>(geometry.page_bits)? as u8; 
                 socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8; 
             }
-            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(8))?;
+            
+            let gap_bits = if alpha_mode {
+                if let Some(go) = gap_override {
+                    let read_geom = !is_compact || is_v105_summary_local;
+                    let geom_bits = if read_geom {
+                        (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize
+                    } else {
+                        0
+                    };
+                    if go >= geom_bits { go - geom_bits } else { 8 }
+                } else {
+                    8
+                }
+            } else {
+                8
+            };
+
+            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
             let mut val = 0u32;
             for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { if bit { val |= 1 << i; } }
             alpha_header_gap = Some(val);

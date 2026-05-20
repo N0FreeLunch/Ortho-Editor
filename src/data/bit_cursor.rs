@@ -61,6 +61,10 @@ impl<R: BitRead> BitCursor<R> {
         Err(self.fail(error))
     }
 
+    pub fn set_pos(&mut self, pos: u64) {
+        self.bit_pos = pos;
+    }
+
     /// Returns the current bit position.
     pub fn pos(&self) -> u64 {
         self.bit_pos
@@ -204,6 +208,11 @@ impl<R: BitRead> BitCursor<R> {
         &self.recorded_bits
     }
 
+    /// Returns all recorded bits as a Vec.
+    pub fn recorded_bits_vec(&self) -> Vec<RecordedBit> {
+        self.recorded_bits.clone()
+    }
+
     /// Creates a checkpoint of the current state.
     pub fn checkpoint(&self) -> u64 {
         self.bit_pos
@@ -224,17 +233,23 @@ impl<R: BitRead> BitCursor<R> {
         Ok(())
     }
 
-    /// Forensic utility to peek at next bits as a string without advancing the cursor.
-    /// This only works if the underlying reader supports rollback, which might be tricky.
-    /// Actually, BitCursor doesn't support easy reader-level rollback if it's a generic BitRead.
-    /// But for our purposes, we can try to read and then we'd need to rollback.
-    /// However, our BitRead might not support it.
-    /// BETTER: Just return empty or error if not available.
     pub fn peek_bits_string(&mut self, _count: u32) -> ParsingResult<String> {
-         // Since we can't easily rollback the underlying reader without knowing its type,
-         // we might just return empty or implement it if possible later.
-         // For now, let's skip this and use a manual dump in the parser.
          Ok("peek_not_implemented".to_string())
+    }
+}
+
+/// Forensic Implementation (Slice 7)
+impl<'a> BitCursor<bitstream_io::BitReader<std::io::Cursor<&'a [u8]>, bitstream_io::LittleEndian>> {
+    /// Creates a fresh BitCursor aligned to an absolute bit.
+    /// This bypasses logical rollback limitations by physically seeking a new BitRead.
+    pub fn from_raw_at(bytes: &'a [u8], bit_offset: u64) -> Self {
+        use bitstream_io::{BitReader, LittleEndian};
+        use std::io::Cursor;
+        let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+        let _ = reader.skip(bit_offset as u32);
+        let mut cursor = BitCursor::new(reader);
+        cursor.bit_pos = bit_offset;
+        cursor
     }
 }
 

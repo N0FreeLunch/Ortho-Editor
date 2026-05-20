@@ -1370,16 +1370,44 @@ impl Item {
         let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
         let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
-        let _has_checksum_peek = peek.as_ref().map(|p| p.9);
+        let has_checksum_peek = peek.as_ref().map(|p| p.9);
         
-        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)))?;
+        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)), has_checksum_peek)?;
 
         if alpha_mode && (code_peek == Some("xrs") || code_peek == Some("xrs ")) {
-            if !header.has_checksum && gap_override == Some(7) {
-                // Forensic (Slice 7): Blocked by BitCursor physical rollback limitations.
-                // parse_item_header defaults to 8-bit gap for non-checksummed items, but xrs needs 7.
-                // We cannot physically rewind the generic R: BitRead here due to lifetime constraints.
-                eprintln!("[DEBUG-POS] xrs alignment drift detected, but physical rollback is blocked.");
+            if !header.has_checksum {
+                header.save_is_alpha = true;
+                if let (Some(go), Some((bytes, abs_start_bit))) = (gap_override, ctx) {
+                    let header_bits = cursor.pos() - start_bit;
+                    let expected_header_bits = 45 + go as u64;
+                    if header_bits != expected_header_bits {
+                        eprintln!("[DEBUG-POS] xrs physical realignment: {} -> {} bits", header_bits, expected_header_bits);
+                        let mut realigned = crate::data::bit_cursor::BitCursor::from_raw_at(bytes, abs_start_bit + expected_header_bits);
+                        realigned.set_trace(cursor.trace_enabled);
+                        
+                        // We must parse the body with the realigned cursor
+                        let (body, ear_class, ear_level, ear_player_name) = 
+                            crate::domain::item::entity::parse_item_body(&mut realigned, huff, &header, header.save_is_alpha)?;
+                        
+                        // Sync the original cursor's position for the caller
+                        cursor.set_pos(realigned.pos() - abs_start_bit);
+                        
+                        let peeked_code = code_peek.unwrap_or("").to_string();
+                        cursor.end_segment(); // Root
+                        return Ok(Item {
+                            header,
+                            body,
+                            code: peeked_code,
+                            bits: realigned.recorded_bits_vec(),
+                            range: crate::domain::item::ItemBitRange { start: abs_start_bit, end: realigned.pos() },
+                            total_bits: realigned.pos() - abs_start_bit,
+                            ear_class,
+                            ear_level,
+                            ear_player_name,
+                            ..Default::default()
+                        });
+                    }
+                }
             }
             header.is_runeword = true;
             header.is_compact = false;
