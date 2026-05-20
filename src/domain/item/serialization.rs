@@ -382,7 +382,7 @@ pub fn peek_item_header_at(
     if start_bit == 32 {
         println!("[DEBUG-PEEK-32] start, bytes.len()={}", section_bytes.len());
         println!("[DEBUG-PEEK-32] flags = 0x{:X}", flags);
-        println!("[DEBUG-PEEK-32] checksum={}, v={}, calculated={}", has_checksum, version, V105HeaderGapAxiom::default().resolve_gap(version, None, flags, false, is_compact, has_checksum));
+        println!("[DEBUG-PEEK-32] checksum={}, v={}, calculated={}", has_checksum, version, V105HeaderGapAxiom::default().resolve_gap(version, None, flags, false, is_compact, has_checksum, None));
         println!("[DEBUG-PEEK-32] version={}, mode={}, loc={}, base_header_len={}", version, mode, loc, base_header_len);
         println!("[DEBUG-PEEK-32] is_compact={}, is_rw={}, geometry={:?}", is_compact, trial_is_rw, geometry);
     }
@@ -392,7 +392,7 @@ pub fn peek_item_header_at(
         total_skip = geometry.target_width;
     } else if geometry.has_header_gap && item_alpha_mode {
         let code_hint = if trial_is_rw { Some(trial_rw_code.as_str()) } else { None };
-        let gap_bits = V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, false, is_compact, has_checksum);
+        let gap_bits = V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, false, is_compact, has_checksum, None);
         if !is_compact {
              total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
         }
@@ -554,7 +554,7 @@ pub fn peek_item_header_at(
 
         // 2. Prioritize the gap resolved using the decoded code (Axiom 0340)
         let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64;
-        let resolved_gap = V105HeaderGapAxiom::default().resolve_gap(version, Some(&code), flags, false, is_compact, has_checksum);
+        let resolved_gap = V105HeaderGapAxiom::default().resolve_gap(version, Some(&code), flags, false, is_compact, has_checksum, None);
         let resolved_gap_val = geom_bits + resolved_gap as u64;
         if Some(resolved_gap_val) != specific_override_gap {
             possible_gaps.push(resolved_gap_val);
@@ -1074,9 +1074,9 @@ impl Item {
             if let Some(flen) = forced_length {
                 dynamic_limit = flen;
                 is_compact_final = true;
-            } else if let Some((_, _, _, code, flags, _, is_compact, _, _, _)) =
-                peek_item_header_at(section_bytes, start, huffman, alpha_mode)
-            {
+            } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
+                            peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                        {
                 is_compact_final = is_compact;
                 // Slice 6/9: Axiom 0344 inference for blank items and summary codes missing the compact flag
                 if alpha_mode && !is_compact && (code.trim().is_empty() || is_v105_summary_code(&code)) {
@@ -1215,8 +1215,8 @@ impl Item {
                     let (peek_code, peek_limit) = if let Some(flen) = forced_length {
                         ("    ".to_string(), flen)
                     } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
-                        peek_item_header_at(section_bytes, start, huffman, alpha_mode)
-                    {
+                                    peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                                {
                         let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode)
                             .with_compact(is_compact)
                             .with_code(&code);
@@ -1371,48 +1371,9 @@ impl Item {
         let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
         let gap_override = peek.as_ref().map(|p| p.8 as usize);
         let has_checksum_peek = peek.as_ref().map(|p| p.9);
-        
-        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)), has_checksum_peek)?;
 
-        if alpha_mode && (code_peek == Some("xrs") || code_peek == Some("xrs ")) {
-            if !header.has_checksum {
-                header.save_is_alpha = true;
-                if let (Some(go), Some((bytes, abs_start_bit))) = (gap_override, ctx) {
-                    let header_bits = cursor.pos() - start_bit;
-                    let expected_header_bits = 45 + go as u64;
-                    if header_bits != expected_header_bits {
-                        eprintln!("[DEBUG-POS] xrs physical realignment: {} -> {} bits", header_bits, expected_header_bits);
-                        let mut realigned = crate::data::bit_cursor::BitCursor::from_raw_at(bytes, abs_start_bit + expected_header_bits);
-                        realigned.set_trace(cursor.trace_enabled);
-                        
-                        // We must parse the body with the realigned cursor
-                        let (body, ear_class, ear_level, ear_player_name) = 
-                            crate::domain::item::entity::parse_item_body(&mut realigned, huff, &header, header.save_is_alpha)?;
-                        
-                        // Sync the original cursor's position for the caller
-                        cursor.set_pos(realigned.pos() - abs_start_bit);
-                        
-                        let peeked_code = code_peek.unwrap_or("").to_string();
-                        cursor.end_segment(); // Root
-                        return Ok(Item {
-                            header,
-                            body,
-                            code: peeked_code,
-                            bits: realigned.recorded_bits_vec(),
-                            range: crate::domain::item::ItemBitRange { start: abs_start_bit, end: realigned.pos() },
-                            total_bits: realigned.pos() - abs_start_bit,
-                            ear_class,
-                            ear_level,
-                            ear_player_name,
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-            header.is_runeword = true;
-            header.is_compact = false;
-        }
-
+        let abs_start_bit = ctx.as_ref().map(|c| c.1);
+        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)), has_checksum_peek, abs_start_bit)?;
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {
             cursor.push_context("AlphaHeaderGap");
@@ -1582,7 +1543,7 @@ impl Item {
         // EXCEPT for summary items (Axiom 0392) which never have stats.
         let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
         if !is_v105_summary && (!item.header.is_compact || (item.header.save_is_alpha && (item.header.version == 0 || item.header.version == 1 || item.header.version == 2 || item.header.version == 5))) {
-            let is_v105_shadow = axiom.is_v105_shadow(item.header.flags);
+            let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code));
 
             // Slice 11: Handle JM-to-Body alignment gap
             let gap_len = axiom.header_gap(&item.code, item.header.flags);
