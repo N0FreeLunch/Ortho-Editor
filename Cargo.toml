@@ -377,5 +377,9 @@ name = "d2item_boundary_oracle"
 path = "src/bin/verify/d2item_boundary_oracle.rs"
 
 [[bin]]
+name = "d2item_rhythm_enforcer"
+path = "src/bin/verify/d2item_rhythm_enforcer.rs"
+
+[[bin]]
 name = "d2item_code_fuzzer"
 path = "src/bin/verify/d2item_code_fuzzer.rs"

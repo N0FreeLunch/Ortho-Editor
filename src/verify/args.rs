@@ -233,7 +233,7 @@ impl ArgParser {
                                     return Err(ArgError::Error(format!("Option --{} requires {} value(s)", long_name, spec.value_count)));
                                 }
                             }
-                            values.insert(spec.name.clone(), collected);
+                            values.entry(spec.name.clone()).or_insert_with(Vec::new).extend(collected);
                         }
                         ArgType::Positional | ArgType::RepeatedPositional => unreachable!(),
                     }
@@ -245,7 +245,7 @@ impl ArgParser {
                     flags.insert("token-efficient".to_string(), true);
                 } else if long_name == "output" {
                     if let Some(val) = it.next() {
-                        values.insert("output".to_string(), vec![val.to_string_lossy().to_string()]);
+                        values.entry("output".to_string()).or_insert_with(Vec::new).push(val.to_string_lossy().to_string());
                     } else {
                         return Err(ArgError::Error("Option --output requires 1 value".to_string()));
                     }
@@ -268,7 +268,7 @@ impl ArgParser {
                                     return Err(ArgError::Error(format!("Option -{} requires {} value(s)", short_name, spec.value_count)));
                                 }
                             }
-                            values.insert(spec.name.clone(), collected);
+                            values.entry(spec.name.clone()).or_insert_with(Vec::new).extend(collected);
                         }
                         ArgType::Positional | ArgType::RepeatedPositional => unreachable!(),
                     }
@@ -276,7 +276,7 @@ impl ArgParser {
                     return Err(ArgError::Help(self.usage()));
                 } else if short_name == 'o' {
                     if let Some(val) = it.next() {
-                        values.insert("output".to_string(), vec![val.to_string_lossy().to_string()]);
+                        values.entry("output".to_string()).or_insert_with(Vec::new).push(val.to_string_lossy().to_string());
                     } else {
                         return Err(ArgError::Error("Option -o requires 1 value".to_string()));
                     }
@@ -403,6 +403,10 @@ impl ParsedArgs {
     }
 
     pub fn get_vec(&self, name: &str) -> Option<&Vec<String>> {
+        self.values.get(name)
+    }
+
+    pub fn get_all(&self, name: &str) -> Option<&Vec<String>> {
         self.values.get(name)
     }
 
