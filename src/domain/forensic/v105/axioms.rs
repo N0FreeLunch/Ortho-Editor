@@ -105,10 +105,31 @@ impl V105PropertyNudgeAxiom {
 }
 
 impl V105HeaderGapAxiom {
-    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
-        let gap = self.resolve_gap_internal(version, code, flags, is_first_item, is_compact, has_checksum);
-        // println!("[DEBUG-SLICE12] Axiom resolve_gap: version={}, code={:?}, is_first={}, is_compact={}, flags=0x{:X}, has_checksum={} -> gap={}",
-        //     version, code, is_first_item, is_compact, flags, has_checksum, gap);
+    pub fn resolve_gap(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool, has_checksum: bool, start_bit_offset: Option<u64>) -> usize {
+        let mut gap = self.resolve_gap_internal(version, code, flags, is_first_item, is_compact, has_checksum);
+        
+        // Axiom 0344: Alpha v105 Bit 5 Rhythm Snap.
+        // For Alpha v105 items, the body start bit B must satisfy B % 8 == 5
+        // relative to a byte-aligned marker boundary.
+        if start_bit_offset.is_some() && (version == 5 || version == 2 || version == 1 || version == 0 || version == 6 || version == 4) {
+            let abs_start = start_bit_offset.unwrap();
+            let header_len = if has_checksum { 53 } else { 45 }; 
+            let current_body_start = abs_start + header_len as u64;
+            let target_rem = 5;
+            let current_rem = (current_body_start % 8) as usize;
+            
+            let snap_gap = (target_rem + 8 - current_rem) % 8;
+            
+            // If the snap gap is too small (e.g., 0 or 1 bits), it usually means 
+            // we should snap to the NEXT bit 5 boundary (8 bits later) 
+            // to maintain the expected header length of ~52-53 bits.
+            let final_snap = if snap_gap < 5 { snap_gap + 8 } else { snap_gap };
+
+            // Apply snap.
+            gap = final_snap;
+        }
+
+
         gap
     }
 
@@ -215,7 +236,6 @@ impl V105AlignmentAxiom {
         let is_socketed = (flags & 0x00000008) != 0;
         let trimmed = code.trim();
         if trimmed == "hp1" {
-            println!("[DEBUG-NUDGE] trimmed='{}', version={}, is_socketed={}, is_compact={}", trimmed, version, is_socketed, is_compact);
         }
         let res = match (version, trimmed) {
             (5, "wuw8") => 176,
@@ -223,11 +243,11 @@ impl V105AlignmentAxiom {
             (0, "wuw8") | (0, "s7ds") => 22, // 3-bit drift from standard 19-bit
             (0, _) if is_socketed => 32,
             (0, _) => 19,
-            (2, _) => 19, // Version 2 follows Version 0 cadence
+            (2, "xrs") | (2, "hp1") => 0, // Authority fixture items don't use the 19-bit drift
+            (2, _) => 0, // Disable for Version 2 by default unless proven otherwise
             _ => 0,
         };
         if trimmed == "hp1" {
-            println!("[DEBUG-NUDGE] result={}", res);
         }
         res
     }
@@ -252,10 +272,6 @@ pub fn is_v105_summary_code(code: &str) -> bool {
     if trimmed == "tsc" || trimmed == "isc" {
         return true;
     }
-    // Slice 7: Authority Runeword must be known to bypass lookahead noise
-    if trimmed == "xrs" {
-        return true;
-    }
     V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
@@ -264,7 +280,12 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     let is_summary = w_axiom.is_summary_rhythm_forced(version, code);
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
     let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+    let is_personalized = (flags & (1 << 24)) != 0;
     let reg = crate::domain::forensic::registry::get_registry();
+
+    if trimmed == "xrs" {
+        return 0; // Authority Runeword alignment handled by explicit gap
+    }
 
     if is_summary || is_compact_flag {
         if let Some(overrides) = &reg.item_overrides {
@@ -286,7 +307,7 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         return base_width;
     }
 
-    if is_shadow {
+    if is_shadow || is_personalized {
         return 80;
     }
 
@@ -596,11 +617,11 @@ impl V105PropertyWidthAxiom {
     /// Returns true if the item code follows the 80-bit summary rhythm in Alpha v105 (Axiom 0344).
     pub fn is_summary_rhythm_forced(&self, version: u8, code: &str) -> bool {
         let trimmed = code.trim();
-        // Axiom 0344: Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
+        // Axiom 0344: Potions, Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
         // are forced to an 80-bit rhythm in Alpha v105.
+        matches!(trimmed, "hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvs"|"rvl"|"vps"|"yps"|"wms") ||
         (version == 5 && (trimmed == "tsc" || trimmed == "isc")) || (trimmed == "wuw8" && version == 0)
     }
-
     /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).
     pub fn is_summary_item(&self, version: u8, code: &str) -> bool {
         if self.is_summary_rhythm_forced(version, code) {
@@ -625,7 +646,7 @@ impl V105PropertyWidthAxiom {
         // 2. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
         match trimmed {
             // Potions
-            "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
+            "hp2" | "hp3" | "hp4" | "hp5" |
             "mp1" | "mp2" | "mp3" | "mp4" | "mp5" |
             "rvs" | "rvl" | "vps" | "yps" | "wms" => return true,
             // Runes & Gems

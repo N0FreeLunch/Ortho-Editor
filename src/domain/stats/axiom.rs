@@ -182,8 +182,8 @@ impl StatsAxiom {
         self.header_axiom().is_personalized(flags)
     }
 
-    pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        self.header_axiom().is_v105_shadow(flags)
+    pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
+        self.header_axiom().is_v105_shadow(flags, code_hint)
     }
 
     pub fn code_encoding(&self) -> CodeEncoding {
@@ -205,14 +205,16 @@ impl StatsAxiom {
 
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
         // Alpha v105 forensic: Shadow items are truly header-only (no code, no stats).
-        if self.is_v105_shadow(_flags) { return true; }
-        
-        // Note (Slice 25): Summary items must not be marked header-only here 
-        // because they require their 3x8 bit ASCII code segment to be written.
-        
+        if self.is_v105_shadow(_flags, Some(_code)) { return true; }
+
+        // Axiom 0344: Compact summary items are header-only in Alpha v105.
+        // Alignment is handled dynamically by the section snapper.
+        if self.is_alpha() && self.is_compact && crate::domain::forensic::v105::axioms::is_v105_summary_code(_code) {
+            return true;
+        }
+
         false
     }
-
     pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
         if !self.is_alpha() {
             return 0;
@@ -314,14 +316,27 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
         let reg = get_registry();
         let trimmed = code.trim();
 
-        let mut min_bits = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
+        // Note (Axiom 0344): In Alpha v105, summary items often follow an 80-bit rhythm,
+        // but this is best handled dynamically by the AlignmentSnapper in read_section
+        // to accommodate 81/79 bit oscillation.
+        
+        let mut min_bits = if self.save_is_alpha { 0 } else { crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64 };
 
-        if let Some(overrides) = &reg.item_overrides {
-            if let Some(item_map) = overrides.get(trimmed) {
-                if let Some(&f_width) = item_map.get("fixed_width") {
-                    min_bits = f_width as u64;
+        if self.save_is_alpha {
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(item_map) = overrides.get(trimmed) {
+                    if let Some(&f_width) = item_map.get("fixed_width") {
+                        if crate::item::item_trace_enabled() {
+                            eprintln!("[DEBUG-ALIGN] override found: code='{}', fixed_width={}", trimmed, f_width);
+                        }
+                        min_bits = f_width as u64;
+                    }
                 }
             }
+        }
+        
+        if crate::item::item_trace_enabled() && self.save_is_alpha {
+            eprintln!("[DEBUG-ALIGN] code='{}', current={}, min_bits={}", code, current_len, min_bits);
         }
 
             // Slice 6: Isolate Alpha v105 compact layout policy.
