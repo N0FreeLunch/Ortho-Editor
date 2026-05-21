@@ -59,6 +59,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             let section_header_bits = if alpha && chunk_idx == 0 {
                 let mut p = 32;
                 if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha) {
+
                     p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
                 }
                 p
@@ -83,6 +84,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     if scan_pos + safety_margin > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
+
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
                                 || crate::domain::item::serialization::item_template(&code).is_some()
@@ -109,6 +111,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 if is_v105_summary {
                                     if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
+
                                         if is_plausible_item_header(n_mode, n_loc, n_code.as_bytes(), n_flags, n_ver, alpha) {
                                             forced_80 = true;
                                         }

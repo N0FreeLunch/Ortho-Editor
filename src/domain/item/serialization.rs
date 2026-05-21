@@ -223,46 +223,18 @@ pub fn peek_item_header_at(
     huffman: &HuffmanTree,
     alpha_mode: bool,
 ) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
-    let debug_peek = start_bit < 500;
-    if debug_peek {
-        println!("[DEBUG-PEEK-MID] start start_bit={}, bytes.len()={}", start_bit, section_bytes.len());
-    }
+    let _debug_peek = start_bit < 1200;
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if reader.skip(start_bit as u32).is_err() {
-        if debug_peek { println!("[DEBUG-PEEK-MID] skip failed"); }
-        return None;
-    }
+    if reader.skip(start_bit as u32).is_err() { return None; }
 
     // Read header structure
-    let flags = reader.read::<32, u32>().ok();
-    if flags.is_none() {
-        if debug_peek { println!("[DEBUG-PEEK-MID] flags read failed"); }
-        return None;
-    }
-    let flags = flags.unwrap();
-    if debug_peek {
-        println!("[DEBUG-PEEK-MID] start_bit={}, flags = 0x{:X}", start_bit, flags);
-    }
+    let flags = reader.read::<32, u32>().ok()?;
     
     let mut alpha_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if alpha_reader.skip(start_bit as u32 + 32).is_err() {
-        if debug_peek { println!("[DEBUG-PEEK-MID] alpha_reader skip failed"); }
-        return None;
-    }
-    let checksum = alpha_reader.read::<8, u8>().ok();
-    let v = alpha_reader.read::<3, u8>().ok();
-    if checksum.is_none() || v.is_none() {
-        if debug_peek { println!("[DEBUG-PEEK-MID] checksum or v read failed"); }
-        return None;
-    }
-    let checksum = checksum.unwrap();
-    let v = v.unwrap();
+    let _ = alpha_reader.skip(start_bit as u32 + 32);
+    let checksum = alpha_reader.read::<8, u8>().unwrap_or(0);
+    let v = alpha_reader.read::<3, u8>().unwrap_or(0);
     let calculated = calculate_alpha_v105_checksum(flags, v);
-    if debug_peek {
-        println!("[DEBUG-PEEK-MID] start_bit={}, checksum={}, v={}, calculated={}", start_bit, checksum, v, calculated);
-    }
-    
-    let is_compact_flag = (flags & 0x00200000) != 0;
     
     let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     let mut v_retail = 0;
@@ -272,393 +244,74 @@ pub fn peek_item_header_at(
         retail_skip_ok = true;
     }
 
-    // Alpha Forensic (Axiom 0365): Some summary items use 0 as a checksum sentinel, or have corrupted checksums when stacked.
-    let (version, mode, loc, _x_val, base_header_len, has_checksum) = if alpha_mode && (v == 5 || v == 0 || v == 1 || v == 2) && (calculated == checksum || checksum == 0 || (is_compact_flag && v_retail == 5)) {
+    let mut best_res: Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> = None;
+    let mut max_confidence = 0;
+
+    let mut trial_configs = Vec::new();
+    if alpha_mode && (v <= 6) && (calculated == checksum) {
         let m = alpha_reader.read::<3, u8>().ok();
         let l = alpha_reader.read::<3, u8>().ok();
         let x = alpha_reader.read::<4, u8>().ok();
-        if m.is_none() || l.is_none() || x.is_none() {
-            if debug_peek { println!("[DEBUG-PEEK-MID] m, l, or x read failed"); }
-            return None;
+        if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
+             trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 3 + 4, true));
         }
-        (v, m.unwrap(), l.unwrap(), x.unwrap(), 32 + 8 + 3 + 3 + 3 + 4, true)
-    } else {
-        if debug_peek {
-            println!("[DEBUG-PEEK-MID] start_bit={}, Checksum mismatch: flags=0x{:X}, v={}, calculated={}, checksum={}", start_bit, flags, v, calculated, checksum);
-        }
-        if !retail_skip_ok {
-            if debug_peek { println!("[DEBUG-PEEK-MID] retail_reader skip failed"); }
-            return None;
-        }
+    }
+    if retail_skip_ok {
         let m = retail_reader.read::<3, u8>().ok();
         let l = retail_reader.read::<3, u8>().ok();
         let x = retail_reader.read::<4, u8>().ok();
-        if m.is_none() || l.is_none() || x.is_none() {
-            if debug_peek { println!("[DEBUG-PEEK-MID] retail m, l, or x read failed"); }
-            return None;
-        }
-        (v_retail, m.unwrap(), l.unwrap(), x.unwrap(), 32 + 3 + 3 + 3 + 4, false)
-    };
-    if debug_peek {
-        println!("[DEBUG-PEEK-MID] start_bit={}, version={}, mode={}, loc={}, base_header_len={}", start_bit, version, mode, loc, base_header_len);
-    }
-
-    let item_alpha_mode = alpha_mode && has_checksum;
-    let h_axiom = HeaderAxiom::new(version, item_alpha_mode);
-    let mut is_compact = h_axiom.is_compact(flags, None);
-    
-    // Axiom 0344: In Alpha v105, blank items and certain compact types 
-    // often lack the is_compact flag but are strictly interval-aligned.
-    // Use physical interval sniffing to force compact mode.
-    if item_alpha_mode && !is_compact {
-        for &interval in &[72, 80, 88] {
-            let next_bit = start_bit + interval;
-            if next_bit + 64 <= (section_bytes.len() * 8) as u64 {
-                 let mut jm_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                 if jm_reader.skip(next_bit as u32).is_ok() {
-                     if let Ok(next_flags) = jm_reader.read::<32, u32>() {
-                         // Check for JM marker or Alpha plausibility
-                         if (next_flags & 0xFFFF) == 0x4D4A {
-                             is_compact = true;
-                             break;
-                         }
-                         
-                         let mut p_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                         if p_reader.skip(next_bit as u32 + 32).is_ok() {
-                             // Check for version 5 checksum or plausible mode/loc
-                             let ck_res = p_reader.read::<8, u8>();
-                             let nv_res = p_reader.read::<3, u8>();
-                             if let (Ok(ck), Ok(nv)) = (ck_res, nv_res) {
-                                 if ck == calculate_alpha_v105_checksum(next_flags, nv) {
-                                     is_compact = true;
-                                     break;
-                                 }
-                             }
-                             
-                             // Manual retry with fresh reader instead of rollback
-                             let mut b_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                             let _ = b_reader.skip(next_bit as u32 + 32);
-                             if let (Ok(nv), Ok(nm), Ok(nl)) = (b_reader.read::<3, u8>(), b_reader.read::<3, u8>(), b_reader.read::<3, u8>()) {
-                                 if nv <= 7 && nm <= 6 && nl <= 6 && (next_flags != 0 || nv != 0) {
-                                     is_compact = true;
-                                     break;
-                                 }
-                             }
-                         }
-                     }
-                 }
-            }
+        if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
+             trial_configs.push((v_retail, mode, loc, x_val, 32 + 3 + 3 + 3 + 4 + 3, false));
+             trial_configs.push((v_retail, mode, loc, x_val, 32 + 3 + 3 + 3 + 4, false));
         }
     }
-
-    let _s_axiom = StatsAxiom::new(version, crate::domain::item::ItemQuality::Normal, item_alpha_mode)
-        .with_compact(is_compact);
-    let _is_personalized = h_axiom.is_personalized(flags);
     
-    // Trial peek to resolve Alpha v105 runeword header gaps (Axiom 0365)
-    let mut trial_is_rw = false;
-    let mut trial_rw_code = String::new();
-    if item_alpha_mode {
-        // Assume 24-bit gap for RW/Shadow items in Alpha v105
-        let trial_skip = base_header_len as u32 + 24;
-        let mut t_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-        if t_reader.skip(start_bit as u32 + trial_skip).is_ok() {
+    for (version, mode, loc, _x_val, base_header_len, has_checksum) in trial_configs {
+        let h_axiom = HeaderAxiom::new(version, alpha_mode);
+        let mut trial_possible_gaps = Vec::new();
+        let rhythm_gap = V105HeaderGapAxiom::default().resolve_gap(version, None, flags, false, false, has_checksum, Some(start_bit));
+        trial_possible_gaps.push(rhythm_gap);
+        for &g in &[0, 8, 16, 24, 32] {
+            if !trial_possible_gaps.contains(&g) { trial_possible_gaps.push(g); }
+        }
+
+        let geom_bits = if !alpha_mode { 4 } else { 0 }; 
+
+        for gap in trial_possible_gaps {
+            let trial_total_skip = base_header_len as u32 + geom_bits + gap as u32;
+            let mut t_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+            if t_reader.skip(start_bit as u32 + trial_total_skip).is_err() { continue; }
             let mut t_cursor = BitCursor::new(t_reader);
             let mut t_code = String::new();
             for _ in 0..4 {
-                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { 
-                    t_code.push(ch); 
-                    trial_rw_code.push(ch);
-                }
+                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { t_code.push(ch); }
                 else { break; }
             }
-            if h_axiom.is_runeword(flags, Some(&t_code)) || t_code.trim() == "xrs" {
-                trial_is_rw = true;
-            }
-        }
-    }
-
-    let geometry = h_axiom.header_geometry(flags, if trial_is_rw { Some("acww") } else { None });
-    if start_bit == 32 {
-        println!("[DEBUG-PEEK-32] start, bytes.len()={}", section_bytes.len());
-        println!("[DEBUG-PEEK-32] flags = 0x{:X}", flags);
-        println!("[DEBUG-PEEK-32] checksum={}, v={}, calculated={}", has_checksum, version, V105HeaderGapAxiom::default().resolve_gap(version, None, flags, false, is_compact, has_checksum, None));
-        println!("[DEBUG-PEEK-32] version={}, mode={}, loc={}, base_header_len={}", version, mode, loc, base_header_len);
-        println!("[DEBUG-PEEK-32] is_compact={}, is_rw={}, geometry={:?}", is_compact, trial_is_rw, geometry);
-    }
-    
-    let mut total_skip = base_header_len as u32;
-    if item_alpha_mode && geometry.target_width > 0 {
-        total_skip = geometry.target_width;
-    } else if geometry.has_header_gap && item_alpha_mode {
-        let code_hint = if trial_is_rw { Some(trial_rw_code.as_str()) } else { None };
-        let gap_bits = V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, false, is_compact, has_checksum, None);
-        if !is_compact {
-             total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
-        }
-        total_skip += gap_bits as u32;
-    } else if !geometry.skip_geometry {
-         total_skip += (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u32;
-    }
-
-    let mut n_reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    
-    // Trial peek for code to determine adaptive alignment nudge (Slice 14)
-    let is_compact_peek = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, None);
-    let trial_nudge = if item_alpha_mode && version == 0 && !is_compact_peek { 19 } else { 0 };
-    let mut trial_code = String::new();
-    let mut trial_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-    if trial_reader.skip(start_bit as u32 + total_skip + trial_nudge).is_ok() {
-        let mut t_cursor = BitCursor::new(trial_reader);
-        for _ in 0..4 {
-            if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { trial_code.push(ch); }
-            else { break; }
-        }
-    }
-
-    let alignment_nudge = if item_alpha_mode { 
-        V105AlignmentAxiom::default().get_alignment_nudge(version, &trial_code, flags, is_compact)
-    } else { 0 };
-    if debug_peek {
-        println!("[DEBUG-PEEK-MID] start_bit={}, trial_code='{}', alignment_nudge={}", start_bit, trial_code, alignment_nudge);
-    }
-    if n_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_err() { 
-        if debug_peek { println!("[DEBUG-PEEK-MID] n_reader skip failed"); }
-        return None; 
-    }
-    let mut n_cursor = BitCursor::new(n_reader);
-    let is_compact_peek = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, None);
-    let mut code_bytes = [0u8; 4];
-    let mut code_len = 0;
-    let mut is_compact_detected = is_compact_peek;
-
-    if item_alpha_mode {
-        // Alpha Forensic (Slice 6): Try a 0-nudge trial first for potential summary items
-        // which often bypass the standard alignment drift.
-        let mut summary_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
-        if summary_reader.skip(start_bit as u32 + total_skip).is_ok() {
-            let mut trial_bytes = [0u8; 3];
-            let mut trial_ok = true;
-            for i in 0..3 {
-                if let Ok(ch) = summary_reader.read::<8, u8>() {
-                    if ch != 0 { trial_bytes[i] = ch; }
-                } else {
-                    trial_ok = false;
-                    break;
-                }
-            }
             
-            let trial_code: String = trial_bytes.iter().map(|&b| b as char).collect();
-            let trial_code = trial_code.trim_end_matches('\0').to_string();
-            if trial_ok && is_v105_summary_code(&trial_code) {
-                code_bytes[..3].copy_from_slice(&trial_bytes);
-                code_len = 3;
-                is_compact_detected = true;
-                let _ = n_cursor.read_bits_as_vec(24);
-                // We found it at nudge 0!
-            }
-        }
+            let trimmed = t_code.trim();
+            if trimmed.len() >= 2 {
+                let mut confidence = 100;
+                let reg = crate::domain::forensic::registry::get_registry();
+                let is_known = reg.forced_compact_codes.as_ref().map(|codes| codes.iter().any(|c| c == trimmed)).unwrap_or(false)
+                    || reg.forced_runeword_codes.as_ref().map(|codes| codes.iter().any(|c| c == trimmed)).unwrap_or(false)
+                    || trimmed == "acww" || trimmed == "bcww";
 
-        if code_len == 0 {
-            let mut trial_reader = bitstream_io::BitReader::endian(std::io::Cursor::new(section_bytes), bitstream_io::LittleEndian);
-            if trial_reader.skip(start_bit as u32 + total_skip + alignment_nudge as u32).is_ok() {
-                let mut trial_bytes = [0u8; 3];
-                let mut trial_ok = true;
-                for i in 0..3 {
-                    if let Ok(ch) = trial_reader.read::<8, u8>() {
-                        if ch != 0 { trial_bytes[i] = ch; }
-                    } else {
-                        trial_ok = false;
-                        break;
-                    }
+                if is_known { confidence += 400; }
+                if trimmed == "hp1" || trimmed == "xrs" { 
+                    confidence += 50; 
+                    if trimmed == "xrs" && (flags & (1 << 26)) != 0 { confidence += 200; }
                 }
+                if has_checksum { confidence += 100; }
                 
-                let trial_code: String = trial_bytes.iter().map(|&b| b as char).collect();
-                let trial_code = trial_code.trim_end_matches('\0').to_string();
-                if debug_peek {
-                    println!("[DEBUG-PEEK-32] start_bit={}, compact_trial_code='{}', total_skip={}, nudge={}", start_bit, trial_code, total_skip, alignment_nudge);
-                }
-                if trial_ok && is_v105_summary_code(&trial_code) {
-                    code_bytes[..3].copy_from_slice(&trial_bytes);
-                    code_len = 3;
-                    is_compact_detected = true;
-                    // Skip the bits in the actual cursor if we haven't already
-                    if alignment_nudge > 0 {
-                         let _ = n_cursor.read_bits_as_vec(alignment_nudge as u32);
-                    }
-                    let _ = n_cursor.read_bits_as_vec(24);
+                let is_compact_trial = h_axiom.is_compact(flags, Some(trimmed));
+                if confidence > max_confidence {
+                    max_confidence = confidence;
+                    best_res = Some((mode, loc, _x_val, t_code.clone(), flags, version, is_compact_trial, trial_total_skip as u64, gap as i8, has_checksum));
                 }
             }
         }
     }
-
-    if code_len == 0 {
-        for i in 0..4 {
-            match huffman.decode_recorded(&mut n_cursor) {
-                Ok(ch) => {
-                    code_bytes[i] = ch as u8;
-                    code_len = i + 1;
-                }
-                Err(e) => {
-                    if item_alpha_mode && i >= 2 {
-                        if n_cursor.read_bit().is_ok() {
-                            if let Ok(ch) = huffman.decode_recorded(&mut n_cursor) {
-                                code_bytes[i] = ch as u8;
-                                code_len = i + 1;
-                                continue;
-                            }
-                        }
-                    }
-                    if debug_peek {
-                        println!("[DEBUG-PEEK-MID] Huffman decode failed at i={}: {:?}", i, e);
-                    }
-                    return None;
-                }
-            }
-        }
-    }
-
-    let _is_compact = is_compact_detected;
-
-    let axiom = HeaderAxiom::new(version, item_alpha_mode);
-    if !axiom.is_plausible(mode, loc, &code_bytes[..code_len], flags) {
-        if debug_peek {
-            println!("[DEBUG-PEEK-MID] start_bit={}, Plausibility check failed: code='{}', mode={}, loc={}", start_bit, String::from_utf8_lossy(&code_bytes[..code_len]), mode, loc);
-        }
-        return None;
-    }
-    
-    let code: String = code_bytes[..code_len].iter().map(|&b| b as char).collect();
-    let code = code.trim_end_matches('\0').to_string();
-
-    let is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
-    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, item_alpha_mode);
-    let s_axiom = s_axiom.with_compact(is_compact);
-    let _is_personalized = s_axiom.is_personalized(flags);
-    let geometry = axiom.header_geometry(flags, Some(&code));
-
-    let mut possible_gaps = Vec::new();
-    if item_alpha_mode {
-        let reg = crate::domain::forensic::registry::get_registry();
-        let mut specific_override_gap = None;
-
-        // 1. Prioritize specific registry override for the decoded trial code first (Axiom 0340)
-        if let Some(overrides) = &reg.item_overrides {
-            if let Some(item_map) = overrides.get(code.trim()) {
-                if let Some(&gap) = item_map.get("header_gap") {
-                    specific_override_gap = Some(gap as u64);
-                    possible_gaps.push(gap as u64);
-                }
-            }
-        }
-
-        // 2. Prioritize the gap resolved using the decoded code (Axiom 0340)
-        let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64;
-        let resolved_gap = V105HeaderGapAxiom::default().resolve_gap(version, Some(&code), flags, false, is_compact, has_checksum, None);
-        let resolved_gap_val = geom_bits + resolved_gap as u64;
-        if Some(resolved_gap_val) != specific_override_gap {
-            possible_gaps.push(resolved_gap_val);
-        }
-
-        // 3. Fallback to standard Alpha increments
-        for &g in &[0, 8, 16, 24, 32] {
-            let val = geom_bits + g;
-            if !possible_gaps.contains(&val) {
-                possible_gaps.push(val);
-            }
-        }
-
-        // 4. Include the adaptive alignment nudge (Slice 14)
-        if alignment_nudge > 0 {
-            let base_geom_gap = (total_skip as i32 - base_header_len as i32) as i32;
-            let nudge_gap = base_geom_gap + alignment_nudge as i32;
-            if nudge_gap >= 0 {
-                let val = nudge_gap as u64;
-                if !possible_gaps.contains(&val) {
-                    possible_gaps.push(val);
-                }
-            }
-        }
-
-        // 5. Try 1-bit and 2-bit nudges (Axiom 0340)
-        for &g in &[1, 2, 9, 10] {
-            let val = geom_bits + g;
-            if !possible_gaps.contains(&val) {
-                possible_gaps.push(val);
-            }
-        }
-
-        // 6. As a last resort, try all other global overrides gaps (to prevent shadowing)
-        if let Some(overrides) = &reg.item_overrides {
-            for item_map in overrides.values() {
-                if let Some(&gap) = item_map.get("header_gap") {
-                    let val = gap as u64;
-                    if !possible_gaps.contains(&val) {
-                        possible_gaps.push(val);
-                    }
-                }
-            }
-        }
-    } else {
-        if geometry.has_header_gap {
-            possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64 + 8);
-        } else if !geometry.skip_geometry {
-            possible_gaps.push((geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as u64);
-        } else {
-            possible_gaps.push(0);
-        }
-    }
-
-    // Do NOT sort or dedup here for Alpha v105 to maintain prioritization of byte-aligned gaps.
-    // (Axiom 0340)
-
-    let mut best_candidate: Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> = None;
-    let mut best_is_known = false;
-
-    if debug_peek {
-        println!("[DEBUG-PEEK-MID] possible_gaps={:?}", possible_gaps);
-    }
-
-    for gap in possible_gaps {
-        let res = peek_item_header_at_specific_gap(
-            section_bytes, start_bit, huffman, alpha_mode, gap
-        );
-        if debug_peek {
-            println!("[DEBUG-PEEK-MID]   gap={}, res={:?}", gap, res);
-        }
-        if let Some(candidate) = res {
-            let code = &candidate.3;
-            let candidate_is_compact = candidate.6;
-            let is_known = is_v105_summary_code(code)
-                || item_template(code).is_some()
-                || code == "acww"
-                || code == "bwcw";
-            
-            // Forensic: Prioritize compactness matching, checksums, and known item codes to stop false positives (Axiom 0340)
-            let is_matching_compactness = candidate_is_compact == is_compact;
-            let best_matching_compactness = best_candidate.as_ref().map(|c| c.6 == is_compact).unwrap_or(false);
-            let best_has_checksum = if let Some(c) = &best_candidate { c.9 } else { false };
-            let has_checksum = candidate.9;
-
-            let should_update = if best_candidate.is_none() {
-                true
-            } else if !best_matching_compactness && is_matching_compactness {
-                true
-            } else if best_matching_compactness && !is_matching_compactness {
-                false
-            } else {
-                // Both match or both mismatch compactness, use standard checksum and known-code rules
-                (!best_has_checksum && has_checksum)
-                    || (!best_is_known && is_known && (!best_has_checksum || has_checksum))
-            };
-
-            if should_update {
-                best_candidate = Some(candidate);
-                best_is_known = is_known;
-            }
-        }
-    }
-    best_candidate
+    best_res
 }
 
 pub fn peek_item_header_at_specific_gap(
@@ -1075,7 +728,8 @@ impl Item {
                 dynamic_limit = flen;
                 is_compact_final = true;
             } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
-                            peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+
                         {
                 is_compact_final = is_compact;
                 // Slice 6/9: Axiom 0344 inference for blank items and summary codes missing the compact flag
@@ -1214,10 +868,11 @@ impl Item {
 
                     let (peek_code, peek_limit) = if let Some(flen) = forced_length {
                         ("    ".to_string(), flen)
-                    } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
-                                    peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                    } else if let Some((_version, _, _, code, flags, _, is_compact, _, _, _)) =
+                        peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+
                                 {
-                        let axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode)
+                        let axiom = StatsAxiom::new(_version, ItemQuality::Normal, alpha_mode)
                             .with_compact(is_compact)
                             .with_code(&code);
                         let l = if alpha_mode && axiom.is_compact { 
@@ -1373,7 +1028,7 @@ impl Item {
         let has_checksum_peek = peek.as_ref().map(|p| p.9);
 
         let abs_start_bit = ctx.as_ref().map(|c| c.1);
-        let (mut header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)), has_checksum_peek, abs_start_bit)?;
+        let (header, alpha_header_gap, alpha_header_gap_bits) = crate::domain::item::entity::parse_item_header(cursor, alpha_mode, code_peek, gap_override, is_first_item, forced_compact.or(Some(is_compact_peek)), has_checksum_peek, abs_start_bit)?;
         // Log gap for analysis
         if let Some(_gap) = alpha_header_gap {
             cursor.push_context("AlphaHeaderGap");
