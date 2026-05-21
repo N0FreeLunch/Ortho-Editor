@@ -142,7 +142,11 @@ impl HeaderAxiom {
                 
                 let reg = crate::domain::forensic::registry::get_registry();
                 if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
-                    is_compact = true;
+                    // Axiom 0365: Summary items in Alpha v105 follow the 80-bit rhythm
+                    // but can be either Huffman or 3x8 encoded.
+                    // If the flag is not set, don't force it to true here,
+                    // as it might be a Huffman-encoded summary item (like in Authority fixture).
+                    // is_compact = true; 
                 }
                 if let Some(overrides) = &reg.item_overrides {
                     if let Some(map) = overrides.get(trimmed) {
@@ -194,14 +198,21 @@ impl HeaderAxiom {
 
     pub fn is_personalized(&self, flags: u32) -> bool {
         if self.alpha_mode {
-            // Forensic (Axiom 0337): Personalization bit is 28 across most Alpha v105 variants.
-            (flags & (1 << 28)) != 0
+            // Forensic (Axiom 0337): Personalization bit is 24 across most Alpha v105 variants.
+            (flags & (1 << 24)) != 0
         } else {
             (flags & (1 << 28)) != 0
         }
     }
 
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
+        if let Some(c) = code {
+            let trimmed = c.trim();
+            if trimmed == "xrs" || trimmed == "xrs " { return true; }
+            if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+                return false;
+            }
+        }
         if (flags & (1 << 26)) != 0 { return true; }
         if self.alpha_mode {
             if let Some(c) = code {
@@ -238,18 +249,30 @@ impl HeaderAxiom {
         (flags & (1 << 26)) != 0
     }
 
-    pub fn is_v105_shadow(&self, flags: u32) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1) && ((flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0)
+    pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
+        if self.is_runeword(flags, code_hint) { return false; }
+        if self.alpha_mode && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1) {
+            if (flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0 {
+                 return true; 
+            }
+        }
+        false
     }
 
     pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
         let is_compact = self.is_compact(flags, code_hint);
         let is_personalized = self.is_personalized(flags);
-        // eprintln!("[DEBUG-GEOMETRY] version={}, alpha={}, compact={}, code='{:?}'", self.version, self.alpha_mode, is_compact, code_hint);
 
-        if self.alpha_mode {
-            let is_rw = self.is_runeword(flags, code_hint);
-            let is_v105_shadow = self.is_v105_shadow(flags);
+        if self.alpha_mode {            let is_rw = self.is_runeword(flags, code_hint);
+            let is_v105_shadow = self.is_v105_shadow(flags, code_hint);
+
+            let target_width = if self.is_alpha() {
+                if let Some(c) = code_hint {
+                    crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, c, flags)
+                } else {
+                    0
+                }
+            } else { 80 };
 
             if is_rw || is_v105_shadow || is_personalized {
                 return HeaderGeometry {
@@ -258,7 +281,7 @@ impl HeaderAxiom {
                     socket_hint_bits: 0,
                     has_header_gap: true,
                     skip_geometry: true,
-                    target_width: 80,
+                    target_width: 0,
                 };
             }
 
@@ -270,28 +293,14 @@ impl HeaderAxiom {
                 is_compact && (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 5 || self.version == 6)
             };
 
-            let mut target_width = if self.is_alpha() {
-                if let Some(c) = code_hint {
-                    crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, c, flags)
-                } else {
-                    0
-                }
-            } else { 80 };
-
-            if is_compact && self.alpha_mode {
-                // For compact items, target_width from axioms is the TOTAL width.
-                // Subtract 24 bits for the fixed-width code to get the header target.
-                target_width = target_width.saturating_sub(24);
-            }
-
             if is_summary {
                 return HeaderGeometry {
-                    y_bits: 3,
+                    y_bits: 0,
                     page_bits: 0,
                     socket_hint_bits: 0,
                     has_header_gap: true,
                     skip_geometry: false,
-                    target_width,
+                    target_width: 0,
                 };
             }
 
@@ -377,12 +386,11 @@ impl ItemHeader {
         let mut alpha_header_gap = None;
         if geometry.has_header_gap {
             if axiom.is_alpha() {
-                let is_v105_shadow = s_axiom.is_v105_shadow(flags);
+                let is_v105_shadow = s_axiom.is_v105_shadow(flags, code);
                 let is_rw = s_axiom.is_runeword(flags);
                 if is_rw || is_v105_shadow {
                     let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                     let gap_bits = if is_v105_shadow_local { 8 } else { 24 }; 
-                    eprintln!("[DEBUG-HEADER-BRANCH] RW/Shadow: gap_bits={}", gap_bits);
                     let gap = cursor.read_bits::<u32>(gap_bits)?;
                     alpha_header_gap = Some(gap);
 
@@ -398,7 +406,6 @@ impl ItemHeader {
                     
                     if geometry.has_header_gap || !has_checksum {
                         let gap = cursor.read_bits::<u32>(8)?;
-                        eprintln!("[DEBUG-HEADER-BRANCH] StandardAlpha: gap_bits=8, val={}", gap);
                         alpha_header_gap = Some(gap);
                     }
                 }
@@ -421,7 +428,6 @@ impl ItemHeader {
             let current_bits = (cursor.pos() - start_bit) as u32;
             if current_bits < geometry.target_width {
                 let to_read = geometry.target_width - current_bits;
-                eprintln!("[DEBUG-HEADER] current={}, target={}, to_read={}", current_bits, geometry.target_width, to_read);
                 alpha_header_gap = Some(cursor.read_bits::<u32>(to_read)?);
             }
         }

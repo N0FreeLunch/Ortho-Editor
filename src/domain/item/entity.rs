@@ -196,7 +196,7 @@ impl Item {
         self.modules.iter().any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
     }
     pub fn is_residue(&self) -> bool {
-        self.modules.iter().any(|m| matches!(m, ItemModule::Residue(_)))
+        self.code.trim().is_empty() || self.modules.iter().any(|m| matches!(m, ItemModule::Residue(_)))
     }
     pub fn defense(&self) -> Option<u32> { 
         if let Some(d) = self.body.defense { return Some(d); }
@@ -525,7 +525,7 @@ impl Item {
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
         if alpha_mode && self.header.save_is_alpha {
-            let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags);
+            let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags, Some(&self.code));
             let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
 
             // Alpha v105 Forensic (Slice 25): Mandatory geometry bits for summary items.
@@ -551,7 +551,8 @@ impl Item {
                 if !self.body.alpha_header_gap_bits.is_empty() {
                     for &bit in &self.body.alpha_header_gap_bits { emitter.write_bit(bit)?; }
                 } else {
-                    let gap_len = V105HeaderGapAxiom::default().resolve_gap(self.header.version, Some(&self.code), self.header.flags, idx == 0, self.header.is_compact, self.header.has_checksum);
+                    let gap_len = V105HeaderGapAxiom::default().resolve_gap(self.header.version, Some(&self.code), self.header.flags, idx == 0, self.header.is_compact, self.header.has_checksum, None);
+
                     if gap_len > 0 {
                         emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), gap_len as u32)?;
                     }
@@ -626,7 +627,7 @@ impl Item {
             if is_item_alpha && !s_axiom.is_compact {
                 let quality_to_write = self.alpha_quality_raw.unwrap_or(quality_val as u8);
                 emitter.write_bits(quality_to_write as u32, 3)?;
-                if (self.header.version == 5 || self.header.version == 6 || self.header.version == 7) && (s_axiom.is_runeword(self.header.flags) || h_axiom.is_v105_shadow(self.header.flags)) {
+                if (self.header.version == 5 || self.header.version == 6 || self.header.version == 7) && (s_axiom.is_runeword(self.header.flags) || h_axiom.is_v105_shadow(self.header.flags, Some(&self.code))) {
                     emitter.write_bits(self.body.v5_runeword_extra.unwrap_or(0) as u32, 2)?;
                 }
             }
@@ -688,7 +689,7 @@ impl Item {
                     let val = self.body.alpha_set_list_val.unwrap_or(match self.set_list_count { 1 => 1, 2 => 3, 3 => 7, 4 => 15, 5 => 31, _ => 0 });
                     emitter.write_bits(val as u32, 5)?;
                 }
-                let is_shadow = s_axiom.is_v105_shadow(self.header.flags);
+                let is_shadow = s_axiom.is_v105_shadow(self.header.flags, Some(&self.code));
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
@@ -780,6 +781,7 @@ pub fn parse_item_header<R: BitRead>(
     is_first_item: bool,
     forced_compact: Option<bool>,
     has_checksum_hint: Option<bool>,
+    start_bit_offset: Option<u64>,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let w_axiom = V105PropertyWidthAxiom::default();
     let start_bit = cursor.pos();
@@ -820,9 +822,10 @@ pub fn parse_item_header<R: BitRead>(
     let location = cursor.read_bits::<u8>(w_axiom.location_bits() as u32)? as u8;
     let x = cursor.read_bits::<u8>(w_axiom.x_bits() as u32)? as u8;
 
-    let item_alpha_mode = alpha_mode && has_checksum;
+    let item_alpha_mode = alpha_mode;
     let h_axiom = HeaderAxiom::new(version, item_alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, item_alpha_mode);
+    
     let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags);
     let _is_rw_initial = h_axiom.is_runeword(flags, code_hint);
@@ -833,17 +836,14 @@ pub fn parse_item_header<R: BitRead>(
     let mut alpha_header_gap_bits = Vec::new();
     if geometry.has_header_gap {
         if h_axiom.is_alpha() {
-            let is_v105_shadow = h_axiom.is_v105_shadow(flags);
+            let is_v105_shadow = h_axiom.is_v105_shadow(flags, code_hint);
             let is_rw = h_axiom.is_runeword(flags, code_hint);
             
             let gap_bits = if let Some(go) = gap_override {
                 let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize;
                 if go >= geom_bits { go - geom_bits } else { go }
-            } else if is_rw || is_v105_shadow {
-                let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                if is_v105_shadow_local { 8 } else { 24 }
             } else {
-                V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum)
+                V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum, start_bit_offset)
             };
 
             // Forensic (Slice 25): Summary item identification and mandatory geometry.
@@ -937,7 +937,7 @@ pub fn parse_item_header<R: BitRead>(
     Ok((ItemHeader {
         flags, version, mode, location, x, y, page, socket_hint, id: None, level: None, quality: None, is_compact,
         is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact), is_personalized,
-        is_runeword: s_axiom.is_runeword(flags), is_ethereal: s_axiom.is_ethereal(flags), is_ear: !alpha_mode && (flags & (1 << 24)) != 0,
+        is_runeword: h_axiom.is_runeword(flags, code_hint), is_ethereal: s_axiom.is_ethereal(flags), is_ear: !alpha_mode && (flags & (1 << 24)) != 0,
         has_checksum,
         alpha_quality_raw: None, alpha_v5_runeword_extra: None, alpha_unique_id_raw: None,
         save_is_alpha: item_alpha_mode,
@@ -1009,7 +1009,9 @@ pub fn parse_item_body<R: BitRead>(
             if code.is_empty() {
                 for i in 0..4 {
                     match huff.decode_recorded(cursor) {
-                        Ok(ch) => code.push(ch),
+                        Ok(ch) => {
+                            code.push(ch)
+                        },
                         Err(e) => {
                             if alpha_mode && i >= 1 {
                                 // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
@@ -1041,7 +1043,8 @@ pub fn parse_item_body<R: BitRead>(
         let mut alpha_nudge = None;
         if alpha_mode {
             // Forensic: Apply 2-bit alignment nudge for item bodies in Alpha v105
-            if h_axiom.is_alpha() && !header.is_compact {
+            // Axiom 0340: Summary items don't use this nudge.
+            if h_axiom.is_alpha() && !header.is_compact && !w_axiom.is_summary_item(header.version, &code) {
                 if header.version == 5 {
                     let nudge_val = cursor.read_bits::<u8>(w_axiom.nudge_bits() as u32)?;
                     alpha_nudge = Some(nudge_val);
@@ -1089,21 +1092,26 @@ impl ExtendedStatsData {
         let is_fragment = h_axiom.is_alpha() && (version == 5 || version == 2 || version == 1) && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0) ;
         let is_alpha_early_exit = h_axiom.is_alpha() && w_axiom.is_extended_stats_early_exit(version);
         if axiom.is_alpha() {
+            if h_axiom.is_alpha() && w_axiom.is_summary_item(version, trimmed_code) {
+                data.id = Some(0);
+                cursor.end_segment();
+                return Ok(data);
+            }
+
             if !is_compact {
                 let quality_raw = cursor.read_bits::<u8>(w_axiom.quality_bits(true) as u32)?;
                 let quality = ItemQuality::from(quality_raw);
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
 
-                if w_axiom.has_v5_runeword_extra(version) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags)) {
+                if w_axiom.has_v5_runeword_extra(version) && (is_runeword || is_fragment || h_axiom.is_v105_shadow(header.flags, Some(&code))) {
                     data.v5_runeword_extra = Some(cursor.with_context("AlphaV5RunewordExtra", |c| c.read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32))?);
                     data.id = Some(0);
-                } else if version == 5 && w_axiom.is_summary_item(version, trimmed_code) {
-                    cursor.end_segment();
-                    return Ok(data);
-                } else { 
-                    data.id = Some(0); 
+                } else {
+                    data.id = Some(cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)?);
+                    data.level = Some(cursor.read_bits::<u8>(w_axiom.item_level_bits() as u32)?);
                 }
+
             } else { data.id = Some(0); }
         } else {
             data.id = Some(cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)?);
