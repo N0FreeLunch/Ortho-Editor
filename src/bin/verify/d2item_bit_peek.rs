@@ -271,17 +271,18 @@ fn main() {
                         }
 
                         if let Some((
-                            mode,
-                            location,
-                            x,
-                            code,
-                            flags,
-                            version,
-                            is_compact,
-                            header_bits,
-                            _nudge,
-                            _has_checksum,
+                          mode,
+                          location,
+                          _x,
+                          code,
+                          flags,
+                          version,
+                          _is_compact,
+                          _header_bits,
+                          _nudge,
+                          _has_checksum,
                         )) = d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true)
+
                         {
                             if d2r_core::item::is_plausible_item_header(
                                 mode, location, code.as_bytes(), flags, version, true,
