@@ -120,13 +120,8 @@ impl V105HeaderGapAxiom {
             
             let snap_gap = (target_rem + 8 - current_rem) % 8;
             
-            // If the snap gap is too small (e.g., 0 or 1 bits), it usually means 
-            // we should snap to the NEXT bit 5 boundary (8 bits later) 
-            // to maintain the expected header length of ~52-53 bits.
-            let final_snap = if snap_gap < 5 { snap_gap + 8 } else { snap_gap };
-
             // Apply snap.
-            gap = final_snap;
+            gap = snap_gap;
         }
 
 
@@ -295,7 +290,12 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         }
 
         if is_summary {
-            return w_axiom.summary_item_fixed_width();
+            if w_axiom.is_summary_rhythm_forced(version, code) {
+                return w_axiom.summary_item_fixed_width();
+            }
+            // Axiom 0715: Version 0 potions like 'hp1' take exactly 72 bits.
+            // Forced 80-bit rhythm applies only to higher tier or specific summary codes.
+            return 72;
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
@@ -646,7 +646,7 @@ impl V105PropertyWidthAxiom {
         // 2. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
         match trimmed {
             // Potions
-            "hp2" | "hp3" | "hp4" | "hp5" |
+            "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
             "mp1" | "mp2" | "mp3" | "mp4" | "mp5" |
             "rvs" | "rvl" | "vps" | "yps" | "wms" => return true,
             // Runes & Gems

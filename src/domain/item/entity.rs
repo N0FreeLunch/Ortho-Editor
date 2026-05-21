@@ -517,8 +517,8 @@ impl Item {
         let s_axiom = StatsAxiom::new(self.header.version, self.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
             .with_index(idx)
             .with_personalization(self.header.is_personalized)
-            .with_code(&self.code)
-            .with_compact(self.header.is_compact);
+            .with_compact(self.header.is_compact)
+            .with_code(&self.code);
 
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let w_axiom = V105PropertyWidthAxiom::default();
@@ -615,7 +615,8 @@ impl Item {
             emitter.extend_bits(encoded_code)?;
             if h_axiom.is_alpha() && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) && !s_axiom.is_compact {
                 let nudge = self.body.alpha_nudge.unwrap_or(0);
-                emitter.write_bits(nudge as u32, 2)?;
+                let nudge_bits = w_axiom.nudge_bits() as u32;
+                emitter.write_bits(nudge as u32, nudge_bits)?;
             }
         }
 
@@ -1008,8 +1009,13 @@ pub fn parse_item_body<R: BitRead>(
 
             if code.is_empty() {
                 for i in 0..4 {
+                    let pre_decode_pos = cursor.pos();
                     match huff.decode_recorded(cursor) {
                         Ok(ch) => {
+                            let bits_read = cursor.pos() - pre_decode_pos;
+                            if alpha_mode && i < 4 {
+                                println!("[DEBUG-BODY-HUFF] pos={} i={} code_so_far='{}' ch='{}' consumed={}", pre_decode_pos, i, code, ch, bits_read);
+                            }
                             code.push(ch)
                         },
                         Err(e) => {

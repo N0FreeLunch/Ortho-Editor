@@ -155,6 +155,10 @@ pub fn verify_marker_lookahead(bytes: &[u8], start_bit: u64, _huffman: &HuffmanT
         }
     }
     
+    if _alpha && (start_bit >= 390 && start_bit <= 415) {
+         println!("[DEBUG-LOOKAHEAD-FAIL] start_bit={} stat_id={}", start_bit, stat_id);
+    }
+
     false
 }
 
@@ -283,8 +287,16 @@ pub fn peek_item_header_at(
             if t_reader.skip(start_bit as u32 + trial_total_skip).is_err() { continue; }
             let mut t_cursor = BitCursor::new(t_reader);
             let mut t_code = String::new();
-            for _ in 0..4 {
-                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { t_code.push(ch); }
+            let trial_pos = start_bit + trial_total_skip as u64;
+            for i in 0..4 {
+                let pre_decode_pos = t_cursor.pos();
+                if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { 
+                    let bits_read = t_cursor.pos() - pre_decode_pos;
+                    if _debug_peek && (start_bit == 32 || start_bit == 325 || start_bit == 354 || start_bit == 522 || start_bit == 353 || start_bit == 521) {
+                         println!("[DEBUG-PEEK-HUFF] start_bit={} gap={} i={} code_so_far='{}' ch='{}' consumed={}", start_bit, gap, i, t_code, ch, bits_read);
+                    }
+                    t_code.push(ch); 
+                }
                 else { break; }
             }
             
@@ -294,6 +306,7 @@ pub fn peek_item_header_at(
                 let reg = crate::domain::forensic::registry::get_registry();
                 let is_known = reg.forced_compact_codes.as_ref().map(|codes| codes.iter().any(|c| c == trimmed)).unwrap_or(false)
                     || reg.forced_runeword_codes.as_ref().map(|codes| codes.iter().any(|c| c == trimmed)).unwrap_or(false)
+                    || item_template(trimmed).is_some()
                     || trimmed == "acww" || trimmed == "bcww";
 
                 if is_known { confidence += 400; }
@@ -303,6 +316,10 @@ pub fn peek_item_header_at(
                 }
                 if has_checksum { confidence += 100; }
                 
+                if _debug_peek && (start_bit == 32 || start_bit == 325 || start_bit == 354 || start_bit == 522 || start_bit == 353 || start_bit == 521) {
+                     println!("[DEBUG-PEEK-CONF] start_bit={} gap={} code='{}' conf={} has_chk={}", start_bit, gap, trimmed, confidence, has_checksum);
+                }
+
                 let is_compact_trial = h_axiom.is_compact(flags, Some(trimmed));
                 if confidence > max_confidence {
                     max_confidence = confidence;
@@ -609,6 +626,7 @@ impl Item {
         alpha_mode: bool,
         verbose: bool,
     ) -> ParsingResult<Vec<Item>> {
+        println!("[DEBUG-SECTION] offset={}", section_bit_offset);
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
@@ -1048,12 +1066,18 @@ impl Item {
             body.code = peeked_code.clone();
             body.alpha_header_gap = alpha_header_gap;
             body.alpha_header_gap_bits = alpha_header_gap_bits;
+            
+            let all_recorded = cursor.recorded_bits();
+            let start_idx = (start_bit as usize).min(all_recorded.len());
+            let end_idx = (cursor.pos() as usize).min(all_recorded.len());
+            let bits = all_recorded[start_idx..end_idx].to_vec();
+
             cursor.end_segment(); // Root segment
             return Ok(Item {
                 header,
                 body,
                 code: peeked_code,
-                bits: Vec::new(),
+                bits,
                 range: crate::domain::item::ItemBitRange { start: start_bit, end: cursor.pos() },
                 total_bits: cursor.pos() - start_bit,
                 ..Default::default()

@@ -189,9 +189,10 @@ impl StatsAxiom {
     pub fn code_encoding(&self) -> CodeEncoding {
         if self.save_is_alpha && self.is_compact {
             // Axiom 0391: Encoding Duality for Alpha v105 summary items.
-            // Items identified as summary codes (including non-ASCII stealth codes)
-            // use raw 3x8 bit ASCII encoding instead of Huffman.
-            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
+            // Items identified as summary codes use raw 3x8 bit ASCII encoding 
+            // ONLY if they are explicitly compact or in higher versions.
+            // In Version 0, they often remain Huffman encoded.
+            if self.version != 0 && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
                 return CodeEncoding::Ascii3x8;
             }
 
@@ -206,12 +207,6 @@ impl StatsAxiom {
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
         // Alpha v105 forensic: Shadow items are truly header-only (no code, no stats).
         if self.is_v105_shadow(_flags, Some(_code)) { return true; }
-
-        // Axiom 0344: Compact summary items are header-only in Alpha v105.
-        // Alignment is handled dynamically by the section snapper.
-        if self.is_alpha() && self.is_compact && crate::domain::forensic::v105::axioms::is_v105_summary_code(_code) {
-            return true;
-        }
 
         false
     }
@@ -320,7 +315,11 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
         // but this is best handled dynamically by the AlignmentSnapper in read_section
         // to accommodate 81/79 bit oscillation.
         
-        let mut min_bits = if self.save_is_alpha { 0 } else { crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64 };
+        let mut min_bits = if self.save_is_alpha {
+            crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64
+        } else {
+            0
+        };
 
         if self.save_is_alpha {
             if let Some(overrides) = &reg.item_overrides {

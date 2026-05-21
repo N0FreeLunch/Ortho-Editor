@@ -78,14 +78,18 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
 
-                for offset in 0..8 {
+                let nudge_range = if alpha { 1 } else { 8 };
+                for offset in 0..nudge_range {
                     let scan_pos = probe + offset;
                     let safety_margin = 72;
                     if scan_pos + safety_margin > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
-
+                        if alpha && (scan_pos == 353 || scan_pos == 354 || scan_pos == 521 || scan_pos == 522) {
+                             println!("[DEBUG-SCAN-PEEK] scan_pos={} code='{}' comp={} chk={}", scan_pos, code, is_compact, has_checksum);
+                        }
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
+
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
                                 || crate::domain::item::serialization::item_template(&code).is_some()
                                 || code == "acww"
@@ -104,10 +108,11 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 is_forced = true;
                             }
 
+                            let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || code == "Þ.";
+                            
                             // Axiom 0344: Forced 80-bit slot check for Alpha v105 summary items (potions, etc.)
                             let mut forced_80 = false;
                             if alpha && !is_compact && !is_forced {
-                                let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || code == "Þ.";
                                 if is_v105_summary {
                                     if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
@@ -119,19 +124,33 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 }
                             }
 
-                            if alpha && !is_compact && !is_forced && !forced_80 {
+                            let mut confidence = if is_known { 500 } else { 50 };
+                            let trimmed_code = code.trim();
+                            let is_alpha_runeword_candidate = alpha && (trimmed_code == "xrs" || (flags & (1 << 26)) != 0);
+
+                            if alpha && !is_compact && !is_forced && !forced_80 && !is_alpha_runeword_candidate && !is_v105_summary {
                                 if !verify_marker_lookahead(bytes, scan_pos + _header_len, huffman, alpha) {
                                     continue;
                                 }
                             }
 
-                            let mut confidence = if is_known { 500 } else { 50 };
+                            if alpha && (trimmed_code == "hp1" || trimmed_code == "xrs") {
+                                confidence += 200;
+                            }
+                            if alpha && (flags & (1 << 26)) != 0 && trimmed_code == "xrs" {
+                                confidence += 300;
+                            }
                             if alpha && version == 5 {
                                 confidence += 100;
                             }
                             if alpha && has_checksum {
                                 confidence += 100;
                             }
+                            
+                            if alpha && (scan_pos == 353 || scan_pos == 354 || scan_pos == 521 || scan_pos == 522) {
+                                println!("[DEBUG-SCAN-TRIAL] scan_pos={} code='{}' conf={} is_comp={} chk={}", scan_pos, code, confidence, is_compact, has_checksum);
+                            }
+
                             if confidence > max_confidence {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
@@ -140,8 +159,13 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                         }
                     }
                 }
+
                 if max_confidence > 0 {
-                    local_markers.push((best_offset, max_confidence, best_code));
+                    if alpha {
+                         println!("[DEBUG-SCAN-WINNER] best_off={} code='{}' conf={}", best_offset, best_code, max_confidence);
+                    }
+                    local_markers.push((best_offset, max_confidence, best_code.clone()));
+
                     // Slice S3: Safe algorithmic jump. If we are highly confident (is_known),
                     // we can safely skip the known minimum item length (72 bits) to avoid phantoms.
                     if max_confidence >= 500 {
