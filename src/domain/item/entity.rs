@@ -1008,14 +1008,13 @@ pub fn parse_item_body<R: BitRead>(
             }
 
             if code.is_empty() {
+                if alpha_mode && header.is_runeword {
+                    let _ = cursor.read_bits::<u8>(2); 
+                }
                 for i in 0..4 {
                     let pre_decode_pos = cursor.pos();
                     match huff.decode_recorded(cursor) {
                         Ok(ch) => {
-                            let bits_read = cursor.pos() - pre_decode_pos;
-                            if alpha_mode && i < 4 {
-                                println!("[DEBUG-BODY-HUFF] pos={} i={} code_so_far='{}' ch='{}' consumed={}", pre_decode_pos, i, code, ch, bits_read);
-                            }
                             code.push(ch)
                         },
                         Err(e) => {

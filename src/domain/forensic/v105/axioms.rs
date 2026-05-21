@@ -285,16 +285,21 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     if is_summary || is_compact_flag {
         if let Some(overrides) = &reg.item_overrides {
             if let Some(map) = overrides.get(trimmed) {
-                if let Some(&width) = map.get("fixed_width") { return width; }
+                if let Some(&width) = map.get("fixed_width") { 
+                    eprintln!("[DEBUG-WIDTH] code='{}' width={} (override)", trimmed, width);
+                    return width; 
+                }
             }
         }
 
         if is_summary {
             if w_axiom.is_summary_rhythm_forced(version, code) {
+                eprintln!("[DEBUG-WIDTH] code='{}' width={} (forced)", trimmed, w_axiom.summary_item_fixed_width());
                 return w_axiom.summary_item_fixed_width();
             }
             // Axiom 0715: Version 0 potions like 'hp1' take exactly 72 bits.
             // Forced 80-bit rhythm applies only to higher tier or specific summary codes.
+            eprintln!("[DEBUG-WIDTH] code='{}' width=72 (axiom 0715)", trimmed);
             return 72;
         }
 
