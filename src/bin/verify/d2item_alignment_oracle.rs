@@ -91,26 +91,23 @@ fn main() {
             peek_item_header_at(&bytes, bit_idx, &huffman, is_alpha)
         {
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, is_alpha) {
-                // Heuristic: v105 items should be version 5 or similar
-                if !is_alpha || version == 5 {
-                    if found_count > 0 {
-                        let interval = bit_idx - last_marker_pos;
-                        intervals.push(interval);
-                        contextual_mapping.entry(code.trim().to_string()).or_default().push(interval);
-                    }
-                    
-                    let trimmed_code = code.trim().to_string();
-                    if !use_json {
-                        println!("{:12} | {:10.2} | {:>15} | v={}", bit_idx, bit_idx as f64 / 8.0, trimmed_code, version);
-                    }
-                    
-                    last_marker_pos = bit_idx;
-                    found_count += 1;
-                    
-                    // Jump ahead by at least 72 bits (minimum item size)
-                    bit_idx += 72;
-                    continue;
+                if found_count > 0 {
+                    let interval = bit_idx - last_marker_pos;
+                    intervals.push(interval);
+                    contextual_mapping.entry(code.trim().to_string()).or_default().push(interval);
                 }
+                
+                let trimmed_code = code.trim().to_string();
+                if !use_json {
+                    println!("{:12} | {:10.2} | {:>15} | v={}", bit_idx, bit_idx as f64 / 8.0, trimmed_code, version);
+                }
+                
+                last_marker_pos = bit_idx;
+                found_count += 1;
+                
+                // Jump ahead by at least 72 bits (minimum item size)
+                bit_idx += 72;
+                continue;
             }
         }
         bit_idx += 8; // Byte-aligned search
