@@ -233,7 +233,6 @@ where
     let id_bits = 9; // Placeholder for initial reading
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
     
-
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
     
     let id_bits = rhythm.id_bits;
@@ -329,6 +328,7 @@ where
                 context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
             }); }
             d.set(prev + 1);
+            
             let res = recovery_fn(
                 reader_ctx.bytes,
                 found_pos,

@@ -193,34 +193,32 @@ pub fn is_plausible_item_header(
     mode: u8,
     location: u8,
     code: &[u8],
-    _flags: u32,
+    flags: u32,
     version: u8,
     alpha_mode: bool,
 ) -> bool {
-    if alpha_mode {
+    let res = if alpha_mode {
         if let Ok(s) = std::str::from_utf8(code) {
              let trimmed = s.trim();
-             if trimmed == "xrs" || trimmed == "Þ." { return mode <= 6 && location <= 5; }
-        }
-    }
-    if alpha_mode && code.is_empty() {
-         return mode <= 6 && location <= 5;
-    }
-    
-    let decoded_code: std::borrow::Cow<[u8]> = if let Ok(s) = std::str::from_utf8(code) {
-        if s.chars().any(|c| c as u32 > 127) {
-            std::borrow::Cow::Owned(s.chars().map(|c| c as u32 as u8).collect())
+             if trimmed == "xrs" || trimmed == "Þ." { mode <= 6 && location <= 5 }
+             else {
+                let axiom = HeaderAxiom::new(version, alpha_mode);
+                axiom.is_plausible(mode, location, code, flags)
+             }
         } else {
-            std::borrow::Cow::Borrowed(code)
+            let axiom = HeaderAxiom::new(version, alpha_mode);
+            axiom.is_plausible(mode, location, code, flags)
         }
     } else {
-        std::borrow::Cow::Borrowed(code)
+        let axiom = HeaderAxiom::new(version, alpha_mode);
+        axiom.is_plausible(mode, location, code, flags)
     };
 
-    let axiom = HeaderAxiom::new(version, alpha_mode);
-    axiom.is_plausible(mode, location, &decoded_code, _flags)
+    if alpha_mode && !res {
+        // eprintln!("[DEBUG-PLAUSIBLE-FAIL] code='{:?}' mode={} loc={} v={} flags={:08X}", String::from_utf8_lossy(code), mode, location, version, flags);
+    }
+    res
 }
-
 pub fn peek_item_header_at(
     section_bytes: &[u8],
     start_bit: u64,
@@ -291,10 +289,6 @@ pub fn peek_item_header_at(
             for i in 0..4 {
                 let pre_decode_pos = t_cursor.pos();
                 if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) { 
-                    let bits_read = t_cursor.pos() - pre_decode_pos;
-                    if _debug_peek && (start_bit == 32 || start_bit == 325 || start_bit == 354 || start_bit == 522 || start_bit == 353 || start_bit == 521) {
-                         println!("[DEBUG-PEEK-HUFF] start_bit={} gap={} i={} code_so_far='{}' ch='{}' consumed={}", start_bit, gap, i, t_code, ch, bits_read);
-                    }
                     t_code.push(ch); 
                 }
                 else { break; }
@@ -316,8 +310,9 @@ pub fn peek_item_header_at(
                 }
                 if has_checksum { confidence += 100; }
                 
-                if _debug_peek && (start_bit == 32 || start_bit == 325 || start_bit == 354 || start_bit == 522 || start_bit == 353 || start_bit == 521) {
-                     println!("[DEBUG-PEEK-CONF] start_bit={} gap={} code='{}' conf={} has_chk={}", start_bit, gap, trimmed, confidence, has_checksum);
+                // Rhythmic Bonus: Favor gaps that align body start with Bit 5 boundary (Slice 7)
+                if alpha_mode && (start_bit + trial_total_skip as u64) % 8 == 5 {
+                    confidence += 150;
                 }
 
                 let is_compact_trial = h_axiom.is_compact(flags, Some(trimmed));
@@ -626,7 +621,6 @@ impl Item {
         alpha_mode: bool,
         verbose: bool,
     ) -> ParsingResult<Vec<Item>> {
-        println!("[DEBUG-SECTION] offset={}", section_bit_offset);
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
@@ -664,12 +658,23 @@ impl Item {
         eprintln!("[DEBUG-SLICE13] section_header_bits: {}", section_header_bits);
         let mut start_offset = section_header_bits;
         let mut subsumed_indices = std::collections::HashSet::new();
+        let mut next_expected_start = section_header_bits;
 
         for (i, marker) in markers.iter().enumerate() {
             if subsumed_indices.contains(&i) {
                 continue;
             }
-            let start = marker.offset; // marker.offset is relative to section_bytes
+            let mut start = marker.offset; // marker.offset is relative to section_bytes
+            
+            if alpha_mode && i > 0 {
+                // Rhythmic Realignment (Slice 7): 
+                // In Alpha v105, items often have a dynamic rhythm.
+                // If the marker is 1 or 2 bits off from the predicted boundary, snap it.
+                if (start as i64 - next_expected_start as i64).abs() <= 2 {
+                    start = next_expected_start;
+                }
+            }
+
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
             if non_residue_count >= top_level_count as usize {
                 break;
@@ -850,6 +855,7 @@ impl Item {
 
                     items.push(final_item);
                     start_offset = start + actual_consumed;
+                    next_expected_start = start + actual_consumed;
                 }
                 Err(e) => {
                     // Marker was plausible but parsing failed or was rejected. Capture raw bits as Opaque item.

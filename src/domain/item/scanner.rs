@@ -78,15 +78,15 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
 
-                let nudge_range = if alpha { 1 } else { 8 };
+                let nudge_range = 8;
                 for offset in 0..nudge_range {
                     let scan_pos = probe + offset;
                     let safety_margin = 72;
                     if scan_pos + safety_margin > limit_bits { continue; }
                     
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
-                        if alpha && (scan_pos == 353 || scan_pos == 354 || scan_pos == 521 || scan_pos == 522) {
-                             println!("[DEBUG-SCAN-PEEK] scan_pos={} code='{}' comp={} chk={}", scan_pos, code, is_compact, has_checksum);
+                        if alpha && (scan_pos >= 7256 - section_bit_offset && scan_pos <= 7500 - section_bit_offset) {
+                             eprintln!("[DEBUG-SCAN-PEEK-FIX] scan_pos={} abs={} code='{}' comp={} chk={}", scan_pos, section_bit_offset + scan_pos, code, is_compact, has_checksum);
                         }
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
 
@@ -147,10 +147,35 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 confidence += 100;
                             }
                             
-                            if alpha && (scan_pos == 353 || scan_pos == 354 || scan_pos == 521 || scan_pos == 522) {
-                                println!("[DEBUG-SCAN-TRIAL] scan_pos={} code='{}' conf={} is_comp={} chk={}", scan_pos, code, confidence, is_compact, has_checksum);
+                            // Rhythmic Bonus: Favor candidates that align with the Bit 5 Rhythm rule
+                            if alpha {
+                                let body_start = scan_pos + _header_len;
+                                if body_start % 8 == 5 {
+                                    confidence += 500;
+                                }
+                                
+                                // Pattern Bonus: Authority Potion Oscillation (0, 1, 0, 1)
+                                // and Runeword Shift (2, 2).
+                                let rem = scan_pos % 8;
+                                
+                                if (trimmed_code == "hp1" || trimmed_code == "mp1") {
+                                    if has_checksum {
+                                        confidence += 1000;
+                                    } else {
+                                        // Require checksum for summary items in Alpha
+                                        continue;
+                                    }
+                                }
+                                
+                                if (trimmed_code == "xrs" || (flags & (1 << 26)) != 0) {
+                                     if rem == 2 {
+                                         confidence += 1000;
+                                     } else {
+                                         continue;
+                                     }
+                                }
                             }
-
+                            
                             if confidence > max_confidence {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
@@ -161,18 +186,18 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 }
 
                 if max_confidence > 0 {
-                    if alpha {
-                         println!("[DEBUG-SCAN-WINNER] best_off={} code='{}' conf={}", best_offset, best_code, max_confidence);
-                    }
                     local_markers.push((best_offset, max_confidence, best_code.clone()));
 
-                    // Slice S3: Safe algorithmic jump. If we are highly confident (is_known),
-                    // we can safely skip the known minimum item length (72 bits) to avoid phantoms.
-                    if max_confidence >= 500 {
-                        probe = best_offset + 72;
+                    // Slice S3: Safe rhythmic jump.
+                    let jump = if alpha {
+                        // Re-peek best to get version/flags for target width
+                        if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha) {
+                             crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f) as u64
+                        } else { 72 }
                     } else {
-                        probe = best_offset + 8;
-                    }
+                        72 // Retail minimum width
+                    };
+                    probe = best_offset + jump;
                 } else {
                     probe += 8;
                 }
