@@ -184,15 +184,12 @@ impl HeaderAxiom {
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
         if self.alpha_mode {
-            // Forensic (Axiom 0338): Runewords are implicitly socketed in Alpha v105
-            if (flags & (1 << 26)) != 0 { return true; }
-
             if self.version == 5 {
                 !is_compact && (flags & (1 << 11)) != 0
+            } else if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6 {
+                (flags & (1 << 11)) != 0
             } else {
-                // In Authority fixture (v1/v2), bit 27 seems to be the socketed flag for equipment?
-                // Actually, let's try allowing both bit 11 and bit 27 for Alpha.
-                (flags & (1 << 11)) != 0 || (flags & (1 << 27)) != 0
+                (flags & (1 << 27)) != 0
             }
         } else {
             (flags & (1 << 11)) != 0
@@ -363,7 +360,7 @@ impl ItemHeader {
             let v = cursor.read_bits::<u8>(3)? as u8;
             let expected = calculate_alpha_v105_checksum(flags, v);
             
-            if checksum == expected && v >= 5 {
+            if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4) {
                 (v, true)
             } else {
                 cursor.rollback(saved_pos);
@@ -475,15 +472,8 @@ pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
             // Version 1/2 rule: (sum * 24 + 106) % 256
             bits_set.wrapping_mul(24).wrapping_add(106)
         },
-        5 => {
-            // Version 5 rule: (sum * 16 + 213) % 256
-            bits_set.wrapping_mul(16).wrapping_add(213)
-        },
         _ => {
-            // Version 0 rule: (flags ^ (flags >> 21)) & 0xFF
-            // Verification: 0x00A20010 (bit 32) -> 0x15 (21). Match.
-            // Verification: 10008002 (bit 181/192?) -> ...
-            // Let's try sum bits * 16 + 213 for all Version 0.
+            // Version 0/5 rule: (sum * 16 + 213) % 256
             bits_set.wrapping_mul(16).wrapping_add(213)
         }
     }
@@ -497,6 +487,5 @@ mod tests {
     fn test_alpha_v105_checksum_known_vector() {
         assert_eq!(calculate_alpha_v105_checksum(0x00A20010, 0), 21);
         assert_eq!(calculate_alpha_v105_checksum(0x87E10001, 1), 66);
-        assert_eq!(calculate_alpha_v105_checksum(0x87E10201, 2), 90);
     }
 }

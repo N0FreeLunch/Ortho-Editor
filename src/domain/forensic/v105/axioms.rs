@@ -149,10 +149,10 @@ impl V105HeaderGapAxiom {
                 }
             }
             
-            // Axiom 0392: Summary items in Alpha v105 are structurally compact 
-            // but still preserve the JM-to-Body gap to maintain the 80-bit rhythm.
+            // Axiom 0392: Summary items in Alpha v105 follow a strict 80-bit rhythm.
+            // They always have an 8-bit gap between the header and the body to align with the 80-bit slot.
             if base_gap == 0 && is_v105_summary_code(trimmed) {
-                base_gap = if has_checksum || version == 5 { 0 } else { 8 };
+                base_gap = 8;
             }
         }
 
@@ -161,6 +161,7 @@ impl V105HeaderGapAxiom {
             if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
                 base_gap = 8;
             } else if is_compact {
+                // Axiom 0718: Generic compact items (not summary) default to 0 gap.
                 base_gap = 0;
             } else {
                 // Standard equipment
@@ -169,11 +170,14 @@ impl V105HeaderGapAxiom {
         }
 
         // Alpha v105 Forensic: Add version-specific residue nudge to the gap (Axiom 0340)
-        let residue = match version {
-            5 => 5,
-            0 | 1 | 2 => 3,
-            4 => 1, // Observed 1-bit drift in version 4 (Item 13)
-            _ => 0,
+        // Axiom 0718: Compact items (potions, scrolls, etc.) do NOT use residue nudges.
+        let residue = if is_compact { 0 } else {
+            match version {
+                5 => 5,
+                0 | 1 | 2 => 3,
+                4 => 1, // Observed 1-bit drift in version 4 (Item 13)
+                _ => 0,
+            }
         };
 
         base_gap + residue
@@ -228,10 +232,13 @@ impl V105AlignmentAxiom {
     pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, is_compact: bool) -> usize {
         if is_compact { return 0; }
         if code.trim().is_empty() { return 0; }
-        let is_socketed = (flags & 0x00000008) != 0;
+        
         let trimmed = code.trim();
-        if trimmed == "hp1" {
+        if is_v105_summary_code(trimmed) {
+            return 0; // Axiom 0718: Summary items don't use the equipment drift.
         }
+
+        let is_socketed = (flags & 0x00000008) != 0;
         let res = match (version, trimmed) {
             (5, "wuw8") => 176,
             (5, "w8cs") => 96,
@@ -285,22 +292,13 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     if is_summary || is_compact_flag {
         if let Some(overrides) = &reg.item_overrides {
             if let Some(map) = overrides.get(trimmed) {
-                if let Some(&width) = map.get("fixed_width") { 
-                    eprintln!("[DEBUG-WIDTH] code='{}' width={} (override)", trimmed, width);
-                    return width; 
-                }
+                if let Some(&width) = map.get("fixed_width") { return width; }
             }
         }
 
         if is_summary {
-            if w_axiom.is_summary_rhythm_forced(version, code) {
-                eprintln!("[DEBUG-WIDTH] code='{}' width={} (forced)", trimmed, w_axiom.summary_item_fixed_width());
-                return w_axiom.summary_item_fixed_width();
-            }
-            // Axiom 0715: Version 0 potions like 'hp1' take exactly 72 bits.
-            // Forced 80-bit rhythm applies only to higher tier or specific summary codes.
-            eprintln!("[DEBUG-WIDTH] code='{}' width=72 (axiom 0715)", trimmed);
-            return 72;
+            // Axiom 0344: Summary items in Alpha v105 are strictly 80 bits.
+            return 80;
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.

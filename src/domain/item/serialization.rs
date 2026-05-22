@@ -197,28 +197,30 @@ pub fn is_plausible_item_header(
     version: u8,
     alpha_mode: bool,
 ) -> bool {
-    let res = if alpha_mode {
+    if alpha_mode {
         if let Ok(s) = std::str::from_utf8(code) {
              let trimmed = s.trim();
-             if trimmed == "xrs" || trimmed == "Þ." { mode <= 6 && location <= 5 }
-             else {
-                let axiom = HeaderAxiom::new(version, alpha_mode);
-                axiom.is_plausible(mode, location, code, flags)
-             }
+             if trimmed == "xrs" || trimmed == "Þ." { return mode <= 6 && location <= 5; }
+        }
+    }
+    if alpha_mode && code.is_empty() {
+         return mode <= 6 && location <= 5;
+    }
+
+    let decoded_code: std::borrow::Cow<[u8]> = if let Ok(s) = std::str::from_utf8(code) {
+        if s.chars().any(|c| c as u32 > 127) {
+            std::borrow::Cow::Owned(s.chars().map(|c| c as u32 as u8).collect())
         } else {
-            let axiom = HeaderAxiom::new(version, alpha_mode);
-            axiom.is_plausible(mode, location, code, flags)
+            std::borrow::Cow::Borrowed(code)
         }
     } else {
-        let axiom = HeaderAxiom::new(version, alpha_mode);
-        axiom.is_plausible(mode, location, code, flags)
+        std::borrow::Cow::Borrowed(code)
     };
 
-    if alpha_mode && !res {
-        // eprintln!("[DEBUG-PLAUSIBLE-FAIL] code='{:?}' mode={} loc={} v={} flags={:08X}", String::from_utf8_lossy(code), mode, location, version, flags);
-    }
-    res
+    let axiom = HeaderAxiom::new(version, alpha_mode);
+    axiom.is_plausible(mode, location, &decoded_code, flags)
 }
+
 pub fn peek_item_header_at(
     section_bytes: &[u8],
     start_bit: u64,
@@ -670,9 +672,17 @@ impl Item {
                 // Rhythmic Realignment (Slice 7): 
                 // In Alpha v105, items often have a dynamic rhythm.
                 // If the marker is 1 or 2 bits off from the predicted boundary, snap it.
-                if (start as i64 - next_expected_start as i64).abs() <= 2 {
+                let drift = start as i64 - next_expected_start as i64;
+                if drift.abs() <= 2 {
+                    if drift != 0 {
+                        eprintln!("[DEBUG-DRIFT] Snapping marker {} from {} to expected {} (drift={})", i, start, next_expected_start, drift);
+                    }
                     start = next_expected_start;
+                } else {
+                    eprintln!("[DEBUG-DRIFT] Marker {} at {} is too far from expected {} (drift={})", i, start, next_expected_start, drift);
                 }
+            } else if alpha_mode {
+                eprintln!("[DEBUG-DRIFT] First marker {} starts at {}", i, start);
             }
 
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
@@ -811,6 +821,7 @@ impl Item {
                     let mut actual_consumed = consumed_bits;
                     
                     let current_end = start + consumed_bits;
+                    eprintln!("[DEBUG-DRIFT] Item {} parsed. code='{}' start={} consumed={} end={}", i, final_item.code, start, consumed_bits, current_end);
 
                     if alpha_mode {
                         // Look ahead to find the next high-confidence marker that hasn't been subsumed
@@ -823,9 +834,11 @@ impl Item {
                         }
 
                         if let Some(target) = next_target {
+                            eprintln!("[DEBUG-DRIFT] Next target marker at {}", target);
                             if current_end < target {
                                 let drift = target - current_end;
                                 if drift <= 3 {
+                                    eprintln!("[DEBUG-DRIFT] Applying nudge of {} bits to reach target {}", drift, target);
                                     // Axiom 0344: Snap to Grid. Consume the drift as alignment padding.
                                     actual_consumed += drift;
                                     final_item.body.alpha_alignment_padding.extend(vec![false; drift as usize]);
