@@ -7,7 +7,7 @@ use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
-use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom, V105AlignmentAxiom};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom};
 
 pub fn calculate_property_residue(version: u8) -> usize {
     crate::domain::forensic::v105::axioms::V105PropertyNudgeAxiom::default().get_nudge(version) as usize
@@ -672,17 +672,9 @@ impl Item {
                 // Rhythmic Realignment (Slice 7): 
                 // In Alpha v105, items often have a dynamic rhythm.
                 // If the marker is 1 or 2 bits off from the predicted boundary, snap it.
-                let drift = start as i64 - next_expected_start as i64;
-                if drift.abs() <= 2 {
-                    if drift != 0 {
-                        eprintln!("[DEBUG-DRIFT] Snapping marker {} from {} to expected {} (drift={})", i, start, next_expected_start, drift);
-                    }
+                if (start as i64 - next_expected_start as i64).abs() <= 2 {
                     start = next_expected_start;
-                } else {
-                    eprintln!("[DEBUG-DRIFT] Marker {} at {} is too far from expected {} (drift={})", i, start, next_expected_start, drift);
                 }
-            } else if alpha_mode {
-                eprintln!("[DEBUG-DRIFT] First marker {} starts at {}", i, start);
             }
 
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
@@ -815,14 +807,18 @@ impl Item {
                 Ok((item, consumed_bits)) => {
                     let mut final_item = item.clone();
                     
-                    // Slice 9: Active Nudging (AlignmentSnapper)
-                    // If the parser consumed bits don't align with the next marker,
-                    // and we are within the drift threshold (1-3 bits), apply a nudge.
-                    let mut actual_consumed = consumed_bits;
-                    
-                    let current_end = start + consumed_bits;
-                    eprintln!("[DEBUG-DRIFT] Item {} parsed. code='{}' start={} consumed={} end={}", i, final_item.code, start, consumed_bits, current_end);
+                    // Axiom 0344: In Alpha v105, if the scanner found a valid code, 
+                    // ensure the parser uses it (prevents Huffman collisions).
+                    if alpha_mode && !marker.code.trim().is_empty() {
+                        let reg = crate::domain::forensic::registry::get_registry();
+                        if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code) {
+                            final_item.code = marker.code.clone();
+                        }
+                    }
 
+                    let mut actual_consumed = consumed_bits;
+                    let current_end = start + consumed_bits;
+                    
                     if alpha_mode {
                         // Look ahead to find the next high-confidence marker that hasn't been subsumed
                         let mut next_target = None;
@@ -834,11 +830,9 @@ impl Item {
                         }
 
                         if let Some(target) = next_target {
-                            eprintln!("[DEBUG-DRIFT] Next target marker at {}", target);
                             if current_end < target {
                                 let drift = target - current_end;
                                 if drift <= 3 {
-                                    eprintln!("[DEBUG-DRIFT] Applying nudge of {} bits to reach target {}", drift, target);
                                     // Axiom 0344: Snap to Grid. Consume the drift as alignment padding.
                                     actual_consumed += drift;
                                     final_item.body.alpha_alignment_padding.extend(vec![false; drift as usize]);

@@ -155,7 +155,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 // and Runeword Shift (2, 2).
                                 let rem = scan_pos % 8;
                                 
-                                if (trimmed_code == "hp1" || trimmed_code == "mp1") {
+                                if trimmed_code == "hp1" || trimmed_code == "mp1" {
                                     if has_checksum {
                                         confidence += 1000;
                                     } else {
@@ -164,7 +164,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                     }
                                 }
                                 
-                                if (trimmed_code == "xrs" || (flags & (1 << 26)) != 0) {
+                                if trimmed_code == "xrs" || (flags & (1 << 26)) != 0 {
                                      if rem == 2 {
                                          confidence += 1000;
                                      } else {

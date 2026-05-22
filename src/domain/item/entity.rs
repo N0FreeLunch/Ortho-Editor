@@ -1012,7 +1012,6 @@ pub fn parse_item_body<R: BitRead>(
                     let _ = cursor.read_bits::<u8>(2); 
                 }
                 for i in 0..4 {
-                    let pre_decode_pos = cursor.pos();
                     match huff.decode_recorded(cursor) {
                         Ok(ch) => {
                             code.push(ch)
