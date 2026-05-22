@@ -135,6 +135,14 @@ impl V105HeaderGapAxiom {
         if let Some(c) = code {
             let trimmed = c.trim();
 
+            if trimmed == "hp1" || trimmed == "mp1" {
+                // Slice 6: Alpha v105 potions (Version 0) follow a strict 53+19 = 72 bit logic,
+                // but the scanner sees 80 bit markers. 80 - 72 = 8 bit total residue.
+                // However, the Huffman payload actually starts at exactly bit 53 (absolute 7309).
+                // 7256 + 53 = 7309. If we use a 0-bit gap, we land exactly on 'hp1 '.
+                return 0;
+            }
+
             if trimmed == "xrs" {
                 base_gap = 4; // Authority Runeword base gap (Observed in fixture)
             }
@@ -622,7 +630,7 @@ impl V105PropertyWidthAxiom {
         let trimmed = code.trim();
         // Axiom 0344: Potions, Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
         // are forced to an 80-bit rhythm in Alpha v105.
-        matches!(trimmed, "hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvs"|"rvl"|"vps"|"yps"|"wms") ||
+        matches!(trimmed, "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvs"|"rvl"|"vps"|"yps"|"wms") ||
         (version == 5 && (trimmed == "tsc" || trimmed == "isc")) || (trimmed == "wuw8" && version == 0)
     }
     /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).

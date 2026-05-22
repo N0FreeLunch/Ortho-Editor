@@ -143,6 +143,13 @@ impl<R: BitRead> BitCursor<R> {
         Ok(())
     }
 
+    pub fn skip(&mut self, n: u64) -> ParsingResult<()> {
+        for _ in 0..n {
+            let _ = self.read_bit()?;
+        }
+        Ok(())
+    }
+
     /// Begins a new semantic segment with a custom label.
     pub fn push_context(&mut self, label: &str) {
         self.context_stack.push((label.to_string(), self.bit_pos, None));

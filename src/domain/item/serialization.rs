@@ -1701,6 +1701,30 @@ impl HuffmanTree {
             })
     }
 
+    pub fn visualize_decode<R: BitRead>(&self, cursor: &mut BitCursor<R>) -> ParsingResult<(char, Vec<bool>)> {
+        let mut current = &self.root;
+        let mut bits = Vec::new();
+        loop {
+            if let Some(symbol) = current.symbol {
+                return Ok((symbol, bits));
+            }
+            let bit = cursor.read_bit().map_err(|_| {
+                cursor.fail(ParsingError::InvalidHuffmanBit { bit_offset: cursor.pos() })
+                    .with_hint("Unexpected EOF during Huffman visualization")
+            })?;
+            bits.push(bit);
+            current = if bit {
+                current.right.as_ref()
+            } else {
+                current.left.as_ref()
+            }
+            .ok_or_else(|| {
+                cursor.fail(ParsingError::InvalidHuffmanBit { bit_offset: cursor.pos() })
+                    .with_hint("Invalid bit path in Huffman tree during visualization")
+            })?;
+        }
+    }
+
     pub fn decode<R: BitRead>(&self, reader: &mut R) -> io::Result<char> {
         self.decode_internal(|| reader.read_bit())
     }
