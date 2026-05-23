@@ -12,6 +12,11 @@ use crate::domain::item::subdomains::property::{PropertyNormalizer, AlphaPropert
 use crate::domain::item::subdomains::stats::StatsCombinator;
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom};
+use d2r_macros::serialization_symmetry;
+
+/// Category B: Alpha v105 bitstream symmetry point for trailing alignment.
+#[serialization_symmetry(align = true)]
+pub struct TrailingAlignmentSeam;
 
 pub fn calculate_property_residue(version: u8) -> usize {
     crate::domain::forensic::v105::axioms::V105PropertyNudgeAxiom::default().get_nudge(version) as usize
@@ -1557,8 +1562,10 @@ impl Item {
             .with_compact(item.header.is_compact)
             .with_code(&item.code);
         
-        item.body.alpha_alignment_padding = NudgeCombinator.apply_alignment_padding(cursor, start_bit, &item.code, item.header.flags, &axiom)?;
-
+        if alpha_mode {
+            item.body.alpha_alignment_padding = NudgeCombinator.apply_alignment_padding(cursor, start_bit, &item.code, item.header.flags, &axiom)?;
+        }
+        
         item.range.end = cursor.pos();
         item.total_bits = item.range.end - item.range.start;
         
@@ -1575,17 +1582,15 @@ impl Item {
 
         cursor.end_segment();
         
-        if let Some(l) = cursor.limit() {
-            if cursor.pos() < l {
-                let residue_len = l - cursor.pos();
-                let mut residue_bits = Vec::new();
-                for _ in 0..residue_len {
-                    if let Ok(b) = cursor.read_bit() { residue_bits.push(b); }
-                }
-                if alpha_mode {
+        if alpha_mode {
+            if let Some(l) = cursor.limit() {
+                if cursor.pos() < l {
+                    let residue_len = l - cursor.pos();
+                    let mut residue_bits = Vec::new();
+                    for _ in 0..residue_len {
+                        if let Ok(b) = cursor.read_bit() { residue_bits.push(b); }
+                    }
                     item.modules.push(crate::domain::item::ItemModule::Opaque(residue_bits));
-                } else {
-                    item.modules.push(crate::domain::item::ItemModule::Residue(residue_bits));
                 }
             }
         }
@@ -1811,7 +1816,7 @@ pub fn write_property_list(
     if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit { emitter.write_bit(terminator_bit)?; }
-        if !preserve_trailing_align { emitter.byte_align()?; }
+        if !preserve_trailing_align && TrailingAlignmentSeam::align_required() { emitter.byte_align()?; }
     }
 
     // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
