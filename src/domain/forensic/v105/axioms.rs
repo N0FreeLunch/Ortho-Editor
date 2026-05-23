@@ -114,16 +114,15 @@ impl V105HeaderGapAxiom {
         if start_bit_offset.is_some() && (version == 5 || version == 2 || version == 1 || version == 0 || version == 6 || version == 4) {
             let abs_start = start_bit_offset.unwrap();
             let header_len = if has_checksum { 53 } else { 45 }; 
-            let current_body_start = abs_start + header_len as u64;
+            let current_body_start = abs_start + header_len as u64 + gap as u64;
             let target_rem = 5;
             let current_rem = (current_body_start % 8) as usize;
             
             let snap_gap = (target_rem + 8 - current_rem) % 8;
             
             // Apply snap.
-            gap = snap_gap;
+            gap += snap_gap;
         }
-
 
         gap
     }
@@ -133,18 +132,12 @@ impl V105HeaderGapAxiom {
         let mut base_gap = 0;
 
         if let Some(c) = code {
-            let trimmed = c.trim();
+            let trimmed = c.trim_matches(|c: char| c.is_whitespace() || c == '\0');
 
-            if trimmed == "hp1" || trimmed == "mp1" {
-                // Slice 6: Alpha v105 potions (Version 0) follow a strict 53+19 = 72 bit logic,
-                // but the scanner sees 80 bit markers. 80 - 72 = 8 bit total residue.
-                // However, the Huffman payload actually starts at exactly bit 53 (absolute 7309).
-                // 7256 + 53 = 7309. If we use a 0-bit gap, we land exactly on 'hp1 '.
+            if trimmed == "hp1" || trimmed == "mp1" || trimmed == "tsc" || trimmed == "isc" || trimmed == "xrs" {
+                // Slice 9: Alpha v105 potions and Runewords often follow a zero-base gap
+                // and rely on Bit 5 snap logic.
                 return 0;
-            }
-
-            if trimmed == "xrs" {
-                base_gap = 4; // Authority Runeword base gap (Observed in fixture)
             }
 
             if base_gap == 0 {
@@ -156,18 +149,13 @@ impl V105HeaderGapAxiom {
                     }
                 }
             }
-            
-            // Axiom 0392: Summary items in Alpha v105 follow a strict 80-bit rhythm.
-            // They always have an 8-bit gap between the header and the body to align with the 80-bit slot.
-            if base_gap == 0 && is_v105_summary_code(trimmed) {
-                base_gap = 8;
-            }
         }
 
         if base_gap == 0 {
             // Runeword/Shadow Items (Bit 26/27)
             if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
-                base_gap = 8;
+                // Slice 9: Alpha runewords often use Bit 5 snap with 0 base gap.
+                base_gap = 0;
             } else if is_compact {
                 // Axiom 0718: Generic compact items (not summary) default to 0 gap.
                 base_gap = 0;
@@ -239,18 +227,22 @@ impl ForensicAxiom for V105AlignmentAxiom {
 impl V105AlignmentAxiom {
     pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, is_compact: bool) -> usize {
         if is_compact { return 0; }
-        if code.trim().is_empty() { return 0; }
+        let is_empty = code.trim_matches(|c: char| c.is_whitespace() || c == '\0').is_empty();
+        if is_empty { return 0; }
         
-        let trimmed = code.trim();
+        let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         if is_v105_summary_code(trimmed) {
             return 0; // Axiom 0718: Summary items don't use the equipment drift.
         }
 
         let is_socketed = (flags & 0x00000008) != 0;
+        let is_runeword = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
         let res = match (version, trimmed) {
             (5, "wuw8") => 176,
             (5, "w8cs") => 96,
             (0, "wuw8") | (0, "s7ds") => 22, // 3-bit drift from standard 19-bit
+            (0, "xrs") => 0, // Authority runeword xrs in Version 0 uses 0 nudge
+            (0, _) if is_runeword => 0, // Runewords in Version 0 do not use socketed drift
             (0, _) if is_socketed => 32,
             (0, _) => 19,
             (2, "xrs") | (2, "hp1") => 0, // Authority fixture items don't use the 19-bit drift
@@ -278,24 +270,26 @@ impl ForensicAxiom for V105RhythmicNudgeAxiom {
 }
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    let trimmed = code.trim();
+    let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+    if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
+        return false;
+    }
     if trimmed == "tsc" || trimmed == "isc" {
         return true;
     }
     V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
-    let trimmed = code.trim();
+    let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+    if trimmed == "xrs" {
+        return 0;
+    }
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_rhythm_forced(version, code);
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
     let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
     let is_personalized = (flags & (1 << 24)) != 0;
     let reg = crate::domain::forensic::registry::get_registry();
-
-    if trimmed == "xrs" {
-        return 0; // Authority Runeword alignment handled by explicit gap
-    }
 
     if is_summary || is_compact_flag {
         if let Some(overrides) = &reg.item_overrides {
@@ -305,8 +299,8 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         }
 
         if is_summary {
-            // Axiom 0344: Summary items in Alpha v105 are strictly 80 bits.
-            return 80;
+            // Slice 9: Alpha v105 summary items (potions, scrolls) are strictly 72 bits.
+            return 72;
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
@@ -322,9 +316,13 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         return 80;
     }
 
+    if trimmed.starts_with('r') && trimmed.len() <= 3 {
+        // Slice 9: Alpha v105 Runes (r08, r13, r15) are strictly 88 bits.
+        return 88;
+    }
+
     match version {
-        1 | 2 | 0 | 6 => reg.axioms.get("v0_equipment_width").cloned().unwrap_or(72) as u32,
-        4 => 73, // Version 4 requires a 1-bit residue nudge (Slice 5)
+        1 | 2 | 0 | 6 | 4 => 80, // Standard Alpha equipment width (including xrs)
         5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
         _ => 0,
     }
@@ -627,7 +625,7 @@ impl ForensicAxiom for V105PropertyWidthAxiom {
 impl V105PropertyWidthAxiom {
     /// Returns true if the item code follows the 80-bit summary rhythm in Alpha v105 (Axiom 0344).
     pub fn is_summary_rhythm_forced(&self, version: u8, code: &str) -> bool {
-        let trimmed = code.trim();
+        let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         // Axiom 0344: Potions, Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
         // are forced to an 80-bit rhythm in Alpha v105.
         matches!(trimmed, "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvs"|"rvl"|"vps"|"yps"|"wms") ||
@@ -639,9 +637,9 @@ impl V105PropertyWidthAxiom {
             return true;
         }
 
-        let trimmed = code.trim();
-        if trimmed == "xrs" {
-            return false; // Authority Runeword is NOT summary (Slice 7)
+        let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
+            return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
         if trimmed.is_empty() {
             // Axiom 0344: Blank codes ("    ") are classified as summary items in Alpha v105 
@@ -662,6 +660,9 @@ impl V105PropertyWidthAxiom {
             "rvs" | "rvl" | "vps" | "yps" | "wms" => return true,
             // Runes & Gems
             "r01" | "r02" | "r03" | "r04" | "r05" | "r06" | "r07" | "r08" | "r09" | "r10" |
+            "r11" | "r12" | "r13" | "r14" | "r15" | "r16" | "r17" | "r18" | "r19" | "r20" |
+            "r21" | "r22" | "r23" | "r24" | "r25" | "r26" | "r27" | "r28" | "r29" | "r30" |
+            "r31" | "r32" | "r33" |
             "gcv" | "gcw" | "gcg" | "gcr" | "gcb" | "gcy" | "gcz" => return true,
             // Quest/Marker
             "wuw8" | "bwcw" | "acww" | "bcww" | "tsc" | "isc" | "tsc " | "isc " => return true,

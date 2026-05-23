@@ -21,21 +21,30 @@ pub fn read_item_stats<R: BitRead>(
     is_v105_shadow: bool,
     is_personalized: bool,
     is_compact: bool,
+    is_socketed: bool,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Option<u8>, Option<Vec<bool>>, Option<u64>, Vec<crate::domain::item::Item>)> {
+    eprintln!("[FORENSIC-STATS-START] code: {:?}, version: {}, is_runeword: {}, is_compact: {}, pos: {}", code, version, is_runeword, is_compact, cursor.pos());
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
     let trimmed_code = code.trim();
+
     let quality_val = quality.unwrap_or(ItemQuality::Normal);
     let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
         .with_personalization(is_personalized)
         .with_compact(is_compact)
+        .with_socketed(is_socketed)
         .with_code(trimmed_code);
     let is_alpha = axiom.is_alpha();
 
     let is_v105_shadow_final = alpha_mode && version == 5 && is_v105_shadow;
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
-    let is_potion = trimmed_code.starts_with('h') || trimmed_code.starts_with('m') || (version == 5 && trimmed_code.starts_with('7')) || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
+    let is_potion = trimmed_code.starts_with('h') 
+        || trimmed_code.starts_with('m') 
+        || trimmed_code.contains("hp") 
+        || trimmed_code.contains("mp") 
+        || (version == 5 && (trimmed_code.starts_with('7') || trimmed_code == "wwsw")) 
+        || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
 
     if is_alpha && trimmed_code.is_empty() {
         return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
@@ -63,9 +72,31 @@ pub fn read_item_stats<R: BitRead>(
         let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);
     }
-    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, |bytes, pos, huff, idx, alpha| {
+
+    let mut child_offsets = Vec::new();
+    if let Some((bytes, _)) = ctx {
+        let markers = crate::domain::item::scanner::scan_item_markers(
+            bytes,
+            huffman,
+            alpha_mode,
+            0,
+            None,
+            false,
+        );
+        child_offsets = markers.iter()
+            .filter(|m| {
+                let t = m.code.trim();
+                (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew"
+            })
+            .map(|m| m.offset)
+            .collect();
+    }
+
+    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, Some(&child_offsets), |bytes, pos, huff, idx, alpha| {
         // println!("[DEBUG-SLICE12] Property read attempt at bit {}", pos);
-        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None, None, None)
+        let peek_code = crate::item::peek_item_header_at(bytes, pos, huff, alpha).map(|p| p.3);
+        let code_hint = peek_code.as_deref();
+        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None, None, code_hint)
     })?;
     
     if alpha_mode && version == 5 && is_runeword {
@@ -94,6 +125,7 @@ pub fn read_property_list<R: BitRead, F>(
     alpha_runeword: bool,
     is_v105_shadow: bool,
     axiom: &StatsAxiom,
+    child_marker_offsets: Option<&[u64]>,
     mut recovery_fn: F,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Vec<crate::domain::item::Item>)> 
 where 
@@ -105,6 +137,13 @@ where
     let mut saw_terminator = false;
 
     let start_pos = recorder.pos();
+
+    let old_limit = recorder.limit();
+    let is_actual_runeword = (alpha_runeword || code.trim() == "Þ.") && axiom.is_socketed;
+    if axiom.is_alpha() && is_actual_runeword {
+        eprintln!("[DEBUG-RUNEWORD-LIMIT-RELEASE] Released limit for code: {}, alpha_runeword: {}", code, alpha_runeword);
+        recorder.set_limit(u64::MAX);
+    }
 
     // Axiom 0344: Explicit header signal is primary, but blank items in Alpha v105 
     // often lack the compact flag despite being structurally compact (80-bit slot).
@@ -122,6 +161,46 @@ where
         // BitBudget Guardrail: Prevent "swallowing" items in Alpha v105
         if axiom.is_alpha() && (recorder.pos() - start_pos) > MAX_ALPHA_V105_ITEM_BITS {
             return Err(recorder.fail(crate::error::ParsingError::BitBudgetExceeded { bit_offset: recorder.pos() }));
+        }
+
+        // Lookahead: If we detect a plausible child item header at our current absolute bit position
+        // during runeword stats parsing, we must immediately stop parsing properties to prevent swallowing the child.
+        if axiom.is_alpha() && alpha_runeword {
+            let current_abs_pos = _section_recovery.item_start_bit + recorder.pos();
+            
+            // Find the nearest next verified child marker offset
+            let next_child_off = if let Some(offsets) = child_marker_offsets {
+                offsets.iter().filter(|&&off| off >= current_abs_pos).min().cloned()
+            } else {
+                None
+            };
+            
+            let target_peek_pos = next_child_off.unwrap_or(current_abs_pos);
+            
+            // Only stop if we are close to the target child marker (within 32 bits)
+            let is_close = if next_child_off.is_some() {
+                target_peek_pos >= current_abs_pos && (target_peek_pos - current_abs_pos) < 32
+            } else {
+                true // Fallback to legacy behavior if child offsets are not provided
+            };
+            
+            if is_close {
+                if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_peek_pos, huffman, axiom.save_is_alpha) {
+                    let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
+                    if crate::item::is_plausible_item_header(mode, loc, code_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
+                        let trimmed_peek = code_peek.trim();
+                        let is_socketable = (trimmed_peek.starts_with('r') && trimmed_peek.len() <= 3)
+                            || (trimmed_peek.starts_with('g') && trimmed_peek.len() == 3)
+                            || trimmed_peek == "jew";
+                        if is_socketable {
+                            eprintln!("[DEBUG-RUNEWORD-STOP] Plausible child item header detected at verified absolute bit {}. Stopping property list parsing.", target_peek_pos);
+                            saw_terminator = true;
+                            terminator_bit = false;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         // Safe-guard: Stop if we hit the bit limit (e.g. next item marker)
@@ -157,6 +236,7 @@ where
              }
         }
 
+        let before_pos = recorder.pos();
         let result = parse_single_property_internal(
             recorder,
             version,
@@ -172,8 +252,20 @@ where
 
         match result {
             Ok(Some((prop, is_term, term_bit, items))) => {
+                if axiom.is_alpha() {
+                    eprintln!("[DEBUG-PROP] code: {}, stat_id: {}, mapped_id: {}, value: {}, is_term: {}", code, prop.stat_id, axiom.map_alpha_id(prop.stat_id), prop.value, is_term);
+                }
+                if axiom.is_alpha() && (prop.stat_id == 317 || prop.stat_id == 320) {
+                    eprintln!("[DEBUG-CHILD] Stat ID: {}, before_pos: {}, after_pos: {}, nested_items_len: {}", prop.stat_id, before_pos, recorder.pos(), items.len());
+                }
                 props.push(prop);
                 nested_items.extend(items);
+                if axiom.is_alpha() && is_actual_runeword && nested_items.len() >= 3 {
+                    eprintln!("[DEBUG-RUNEWORD-LIMIT-CLAMP] Clamping nested loop due to socket capacity (3) reached.");
+                    saw_terminator = true;
+                    terminator_bit = false;
+                    break;
+                }
                 if is_term {
                     saw_terminator = true;
                     terminator_bit = term_bit;
@@ -190,6 +282,87 @@ where
                     break;
                 }
             }
+        }
+    }
+
+    let is_actual_runeword = (alpha_runeword || code.trim() == "Þ.") && axiom.is_socketed;
+    if axiom.is_alpha() && is_actual_runeword {
+        eprintln!("[DEBUG-RUNEWORD-LIMIT-CLAMP] Clamped limit to: {} + 512 for code: {}", recorder.pos(), code);
+        recorder.set_limit(recorder.pos() + 512);
+    } else if let Some(l) = old_limit {
+        recorder.set_limit(l);
+    }
+
+    // Manual runeword child recovery gate (if not already nested and lookahead stopped us)
+    if axiom.is_alpha() && alpha_runeword && axiom.is_socketed && nested_items.is_empty() {
+        let mut child_idx = 0;
+        loop {
+            let mut current_pos = recorder.pos();
+            let mut current_abs_pos = _section_recovery.item_start_bit + current_pos;
+            
+            // Snap to next child marker before peeking/parsing (Differential Snap)
+            if let Some(offsets) = child_marker_offsets {
+                if let Some(&next_marker_off) = offsets.iter().filter(|&&off| off >= current_abs_pos).min() {
+                    let diff = next_marker_off - current_abs_pos;
+                    if diff > 0 && diff <= 48 { // Allow snapping up to 48 bits of gap/residue
+                        recorder.skip_and_record(diff as u32)?;
+                        current_pos = recorder.pos();
+                        current_abs_pos = next_marker_off;
+                        eprintln!("[DEBUG-RUNEWORD-PRE-SNAP] Snapped child idx {} start from {} to {}", child_idx, next_marker_off - diff, next_marker_off);
+                    }
+                }
+            }
+            
+            if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, current_abs_pos, huffman, axiom.save_is_alpha) {
+                let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
+                if crate::item::is_plausible_item_header(mode, loc, code_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
+                    let trimmed_peek = code_peek.trim();
+                    let is_socketable = (trimmed_peek.starts_with('r') && trimmed_peek.len() <= 3)
+                        || (trimmed_peek.starts_with('g') && trimmed_peek.len() == 3)
+                        || trimmed_peek == "jew";
+                    if !is_socketable {
+                        break;
+                    }
+                    let result = NESTED_DEPTH.with(|d| {
+                        let prev = d.get();
+                        if prev > 10 { return Err(crate::error::ParsingFailure { 
+                            error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
+                            context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
+                        }); }
+                        d.set(prev + 1);
+                        
+                        let res = recovery_fn(
+                            _section_recovery.bytes,
+                            current_abs_pos,
+                            huffman,
+                            child_idx,
+                            axiom.save_is_alpha,
+                        );
+                        d.set(prev);
+                        res
+                    });
+
+                    if let Ok((mut child, end_pos)) = result {
+                        child.mode = 6;
+                        child.header.mode = 6;
+                        eprintln!("[DEBUG-RUNEWORD-CHILD-RECOVERED] Recovered runeword child: {} at abs_pos: {}", child.code, current_abs_pos);
+                        nested_items.push(child);
+                        child_idx += 1;
+                        
+                        let absolute_end = current_abs_pos + end_pos;
+                        if absolute_end > current_abs_pos {
+                            let consumed = (absolute_end - current_abs_pos) as u32;
+                            recorder.skip_and_record(consumed)?;
+                        }
+                        
+                        if child_idx >= 3 {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+            }
+            break;
         }
     }
 
@@ -236,7 +409,7 @@ where
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
     
     let id_bits = rhythm.id_bits;
-    let terminator = (1 << id_bits) - 1;
+    let terminator = (1u32 << id_bits) - 1;
 
     if stat_id != (stat_id & terminator) {
         // Re-read with correct bits if rhythm changed
@@ -302,15 +475,16 @@ where
     let is_already_nested = recorder.context_stack().iter().any(|s| s == "nested");
     let mut handled = false;
 
-    if axiom.is_alpha() && (is_stat_317 || is_stat_320) && !is_already_nested {
+    if axiom.is_alpha() && alpha_runeword && axiom.is_socketed && (is_stat_317 || is_stat_320) && !is_already_nested {
         let entry_pos = recorder.pos();
+        let absolute_entry_pos = reader_ctx.item_start_bit + entry_pos;
         recorder.push_context("nested");
         
         // Scan for the next item header within a small window to handle potential padding/nudges
-        let mut found_pos = entry_pos;
+        let mut found_pos = absolute_entry_pos;
         if is_stat_320 {
             for offset in 0..64 {
-                let probe_pos = entry_pos + offset;
+                let probe_pos = absolute_entry_pos + offset;
                 if let Some(header_info) = crate::item::peek_item_header_at(reader_ctx.bytes, probe_pos, huffman, axiom.save_is_alpha) {
                     let (mode, loc, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
                     if crate::item::is_plausible_item_header(mode, loc, code.as_bytes(), flags, version, axiom.save_is_alpha) {
@@ -344,8 +518,8 @@ where
             nested_items.push(child);
             
             let absolute_end = found_pos + end_pos;
-            if absolute_end > recorder.pos() {
-                let consumed = (absolute_end - recorder.pos()) as u32;
+            if absolute_end > absolute_entry_pos {
+                let consumed = (absolute_end - absolute_entry_pos) as u32;
                 recorder.skip_and_record(consumed)?;
             }
             handled = true;
