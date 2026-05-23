@@ -723,11 +723,9 @@ impl Item {
                 } else {
                     "    ".to_string()
                 };
-                if alpha_mode {
-                    residue.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
-                } else {
-                    residue.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
-                }
+                // Slice 4: Consistently use Residue module for gaps to avoid jm_coherence errors
+                residue.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                
                 for (idx, b) in bits.iter().enumerate() {
                     residue.bits.push(crate::domain::item::RecordedBit {
                         bit: *b,
@@ -741,7 +739,7 @@ impl Item {
                     residue.forensic_audit.record(ForensicMetadata::new(
                         Confidence::Speculative,
                         Intentionality::Artifactual,
-                        "Alpha v105 item preservation"
+                        "Alpha v105 section gap preservation"
                     ));
                 } else {
                     residue.forensic_audit.record(ForensicMetadata::new(
@@ -1132,7 +1130,8 @@ impl Item {
                     let mut residue = Item::default();
                     residue.expected_start_bit = recovery_start;
                     residue.code = "Opaque".to_string();
-                    residue.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                    // Slice 4: Consistently use Residue module for gaps to avoid jm_coherence errors
+                    residue.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
                     for (idx, b) in bits.iter().enumerate() {
                         residue.bits.push(crate::domain::item::RecordedBit {
                             bit: *b,
@@ -1145,7 +1144,7 @@ impl Item {
                     residue.forensic_audit.record(ForensicMetadata::new(
                         Confidence::Speculative,
                         Intentionality::Artifactual,
-                        "Alpha v105 item preservation"
+                        "Alpha v105 section gap preservation (recovery)"
                     ));
                     items.push(residue);
                 }
@@ -1227,20 +1226,29 @@ impl Item {
                     } else {
                         "    ".to_string()
                     };
-                    if alpha_mode {
-                        opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
-                        opaque_item.forensic_audit.record(ForensicMetadata::new(
+                    if is_missing_item {
+                         opaque_item.modules.push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                         opaque_item.forensic_audit.record(ForensicMetadata::new(
                             Confidence::Speculative,
                             Intentionality::Artifactual,
                             "Alpha v105 item preservation"
                         ));
                     } else {
+                        // Slice 4: Tail noise is Residue, not an item candidate.
                         opaque_item.modules.push(crate::domain::item::ItemModule::Residue(bits.clone()));
-                        opaque_item.forensic_audit.record(ForensicMetadata::new(
-                            Confidence::Fragile,
-                            Intentionality::Artifactual,
-                            "Residue preservation"
-                        ));
+                        if alpha_mode {
+                            opaque_item.forensic_audit.record(ForensicMetadata::new(
+                                Confidence::Speculative,
+                                Intentionality::Artifactual,
+                                "Alpha v105 section tail preservation"
+                            ));
+                        } else {
+                            opaque_item.forensic_audit.record(ForensicMetadata::new(
+                                Confidence::Fragile,
+                                Intentionality::Artifactual,
+                                "Residue preservation"
+                            ));
+                        }
                     }
                     for (idx, b) in bits.iter().enumerate() {
                         opaque_item.bits.push(crate::domain::item::RecordedBit {
@@ -1549,10 +1557,22 @@ impl Item {
             .with_compact(item.header.is_compact)
             .with_code(&item.code);
         
-        if !is_v105_summary {
-            item.body.alpha_alignment_padding = NudgeCombinator.apply_alignment_padding(cursor, start_bit, &item.code, item.header.flags, &axiom)?;
+        item.body.alpha_alignment_padding = NudgeCombinator.apply_alignment_padding(cursor, start_bit, &item.code, item.header.flags, &axiom)?;
+
+        item.range.end = cursor.pos();
+        item.total_bits = item.range.end - item.range.start;
+        
+        let start_idx = start_bit as usize;
+        let end_idx = cursor.pos() as usize;
+        if end_idx <= cursor.recorded_bits().len() {
+             item.bits = cursor.recorded_bits()[start_idx..end_idx].to_vec();
         }
         
+        item.segments = cursor.segments().iter()
+            .filter(|s| s.start >= start_bit && s.end <= cursor.pos())
+            .cloned()
+            .collect();
+
         cursor.end_segment();
         
         if let Some(l) = cursor.limit() {
@@ -1569,20 +1589,6 @@ impl Item {
                 }
             }
         }
-
-        item.range.end = cursor.pos();
-        item.total_bits = item.range.end - item.range.start;
-        
-        let start_idx = start_bit as usize;
-        let end_idx = cursor.pos() as usize;
-        if end_idx <= cursor.recorded_bits().len() {
-             item.bits = cursor.recorded_bits()[start_idx..end_idx].to_vec();
-        }
-        
-        item.segments = cursor.segments().iter()
-            .filter(|s| s.start >= start_bit && s.end <= cursor.pos())
-            .cloned()
-            .collect();
 
         Ok(item)
     }
