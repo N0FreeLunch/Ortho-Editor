@@ -385,5 +385,9 @@ name = "d2item_code_fuzzer"
 path = "src/bin/verify/d2item_code_fuzzer.rs"
 
 [[bin]]
+name = "d2item_socket_fuzzer"
+path = "src/bin/verify/d2item_socket_fuzzer.rs"
+
+[[bin]]
 name = "d2item_huffman_visualizer"
 path = "src/bin/verify/d2item_huffman_visualizer.rs"

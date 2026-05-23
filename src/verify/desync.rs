@@ -65,7 +65,7 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
     let mut found_count = 0;
     while bit_idx < total_bits.saturating_sub(100) && found_count < count as usize {
         if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) =
-            peek_item_header_at(bytes, bit_idx, huffman, is_alpha)
+            peek_item_header_at(bytes, bit_idx, huffman, is_alpha, 0)
         {
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, is_alpha) {
                 let is_summary = crate::domain::item::serialization::is_v105_summary_code(&code);

@@ -82,7 +82,7 @@ fn alpha_sync<R: BitRead>(
         return Err(cursor.fail(ParsingError::Generic("Alpha v105 requires context for heuristic sync".to_string())));
     };
 
-    let header_info = crate::item::peek_item_header_at(section_bytes, start_bit, huffman, axiom.alpha_mode)
+    let header_info = crate::item::peek_item_header_at(section_bytes, start_bit, huffman, axiom.alpha_mode, 0)
         .ok_or_else(|| cursor.fail(ParsingError::Generic("Alpha heuristic probe failed".to_string())))?;
     let (peek_m, peek_l, peek_x, _code, flags, version, is_compact, header_bits, _nudge, has_checksum) = header_info;
 

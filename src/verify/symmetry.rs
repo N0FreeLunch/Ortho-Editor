@@ -240,7 +240,7 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
         alpha_header_gap: item.body.alpha_header_gap,
         alpha_alignment_padding_len: item.body.alpha_alignment_padding.len(),
         alpha_body_gap_len: item.body.alpha_body_gap_bits.len(),
-        discovered_alpha_header_gap: if alpha_mode { peek_item_header_at(original_bytes, item.range.start, huffman, alpha_mode).map(|p| p.8 as u32) } else { None },
+        discovered_alpha_header_gap: if alpha_mode { peek_item_header_at(original_bytes, item.range.start, huffman, alpha_mode, 0).map(|p| p.8 as u32) } else { None },
         parsed_alpha_header_gap: if alpha_mode { Some(item.body.alpha_header_gap_bits.len() as u32) } else { None },
         orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(rebuilt_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
@@ -310,7 +310,7 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String, bytes_a: &[u8]
         discovered_alpha_header_gap: if item_a.header.version >= 5 {
              // In this context, we re-parse using symmetry's huffman
              let huffman = HuffmanTree::new();
-             peek_item_header_at(bytes_a, item_a.range.start, &huffman, true).map(|p| p.8 as u32)
+             peek_item_header_at(bytes_a, item_a.range.start, &huffman, true, 0).map(|p| p.8 as u32)
         } else { None },
         parsed_alpha_header_gap: if item_a.header.version >= 5 { Some(item_a.body.alpha_header_gap_bits.len() as u32) } else { None },
         orig_bits: Some(item_a.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
