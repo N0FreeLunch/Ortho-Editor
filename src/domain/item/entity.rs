@@ -10,8 +10,22 @@ use crate::domain::item::subdomains::affix::{AffixCombinator, MagicAffixSegment,
 use crate::domain::item::subdomains::gap::{GapCombinator, AlphaHeaderGap};
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105PropertyWidthAxiom};
+use d2r_macros::serialization_symmetry;
 use std::ops::{Deref, DerefMut};
 use std::io;
+
+/// Category B: Alpha v105 bitstream symmetry point for ear name alignment.
+#[serialization_symmetry(align = true)]
+pub struct AlphaV105EarAlignment;
+
+/// Category B: Alpha v105 bitstream symmetry point for personalized name alignment.
+#[serialization_symmetry(align = true)]
+pub struct AlphaV105PersonalizedAlignment;
+
+/// Category B: Alpha v105 bitstream symmetry point for post-body alignment.
+#[serialization_symmetry(align = true)]
+pub struct AlphaV105PostBodyAlignment;
+
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BitSemantic {
@@ -506,7 +520,7 @@ impl Item {
         }
 
         use crate::domain::item::serialization::write_player_name;
-        let mut flags_to_write = self.header.flags;
+        let flags_to_write = self.header.flags;
         emitter.write_bits(flags_to_write, 32)?;
         if alpha_mode && self.header.has_checksum {
             let checksum = calculate_alpha_v105_checksum(flags_to_write, self.header.version);
@@ -602,7 +616,7 @@ impl Item {
             emitter.write_bits(self.ear_class.unwrap_or(0) as u32, 3)?;
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
             write_player_name(emitter, self.ear_player_name.as_deref().unwrap_or(""), alpha_mode && self.header.version == 5)?;
-            if alpha_mode && self.header.version == 5 { emitter.byte_align()?; }
+            if alpha_mode && self.header.version == 5 && AlphaV105EarAlignment::align_required() { emitter.byte_align()?; }
         } else if s_axiom.code_encoding() == crate::domain::stats::axiom::CodeEncoding::Ascii3x8 {
             let trimmed = self.code.trim();
             let chars: Vec<char> = trimmed.chars().collect();
@@ -667,7 +681,7 @@ impl Item {
                     emitter.write_bits(0, 4)?;
                 }
                 if self.header.is_personalized {
-                    if alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) { emitter.byte_align()?; }
+                    if alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) && AlphaV105PersonalizedAlignment::align_required() { emitter.byte_align()?; }
                     write_player_name(emitter, self.personalized_player_name.as_deref().unwrap_or(""), alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1))?;
                 }
                 if !s_axiom.is_compact {
@@ -693,7 +707,7 @@ impl Item {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits { emitter.write_bits_u64(bits, 47)?; } else { emitter.write_bits(0, 47)?; }
                 }
                 let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
-                if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
+                if !is_summary && (self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact) || !self.properties.is_empty()) {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
                     if gap_len > 0 || !self.body.alpha_body_gap_bits.is_empty() {
@@ -788,9 +802,15 @@ pub fn parse_item_header<R: BitRead>(
     let (version, has_checksum) = if alpha_mode {
         let saved_pos = cursor.checkpoint();
         
-        if has_checksum_hint == Some(false) {
-            let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
-            (v, false)
+        if let Some(hint) = has_checksum_hint {
+            if hint {
+                let _checksum = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32)?;
+                let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+                (v, true)
+            } else {
+                let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+                (v, false)
+            }
         } else {
             let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
             let v_res = cursor.read_bits::<u8>(w_axiom.version_bits() as u32);
@@ -984,7 +1004,7 @@ pub fn parse_item_body<R: BitRead>(
         let class = Some(cursor.read_bits::<u8>(w_axiom.ear_class_bits() as u32)? as u8);
         let level = Some(cursor.read_bits::<u8>(w_axiom.ear_level_bits() as u32)? as u8);
         let name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && w_axiom.is_ear_name_v5_style(header.version))?);
-        if alpha_mode && w_axiom.needs_ear_name_byte_alignment(header.version) { cursor.byte_align()?; }
+        if alpha_mode && w_axiom.needs_ear_name_byte_alignment(header.version) && AlphaV105EarAlignment::align_required() { cursor.byte_align()?; }
         cursor.end_segment();
         (String::new(), None, class, level, name)
     } else {
@@ -1138,7 +1158,7 @@ pub fn parse_item_body<R: BitRead>(
         }
 
         // Forensic: Ensure byte-alignment after body properties for Version 5 to resolve drift
-        if w_axiom.needs_post_body_byte_alignment(header.version, header.is_compact) {
+        if w_axiom.needs_post_body_byte_alignment(header.version, header.is_compact) && AlphaV105PostBodyAlignment::align_required() {
             cursor.byte_align()?;
         }
 
@@ -1229,7 +1249,7 @@ impl ExtendedStatsData {
         }
         if is_runeword && !is_fragment && !axiom.is_alpha() && version != 5 { data.runeword_id = Some(cursor.read_bits::<u16>(w_axiom.runeword_id_bits() as u32)? as u16); data.runeword_level = Some(cursor.read_bits::<u8>(w_axiom.runeword_level_bits() as u32)? as u8); }
         if is_personalized { 
-            if alpha_mode && w_axiom.needs_player_name_byte_alignment(version) { cursor.byte_align()?; }
+            if alpha_mode && w_axiom.needs_player_name_byte_alignment(version) && AlphaV105PersonalizedAlignment::align_required() { cursor.byte_align()?; }
             data.personalized_player_name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && w_axiom.is_player_name_alpha_style(version))?); 
         }
         if trimmed_code == "tbk" || trimmed_code == "ibk" { data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(w_axiom.teleport_bits() as u32)? as u8) }
