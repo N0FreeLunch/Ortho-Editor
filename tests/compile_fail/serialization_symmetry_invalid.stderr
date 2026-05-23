@@ -1,0 +1,17 @@
+error: Hashing verification requires post-eval byte alignment constraints.
+       Self-Healing Hint: Hashing verification requires post-eval byte alignment constraints. When 'align' is set to false, you cannot specify a 'checksum' parameter. To resolve this, either remove 'checksum' or set 'align = true'.
+ --> tests/compile_fail/serialization_symmetry_invalid.rs:4:1
+  |
+4 | #[serialization_symmetry(align = false, checksum = "Xor8", seed = 0x87)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `serialization_symmetry` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: Checksum verification seed requires an explicitly bound algorithm parameter.
+       Self-Healing Hint: Checksum verification seed requires an explicitly bound algorithm parameter. If you specify a 'seed' parameter, you must also specify a valid 'checksum' algorithm parameter (e.g. checksum = "Xor8").
+  --> tests/compile_fail/serialization_symmetry_invalid.rs:10:1
+   |
+10 | #[serialization_symmetry(align = true, seed = 0x87)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `serialization_symmetry` (in Nightly builds, run with -Z macro-backtrace for more info)

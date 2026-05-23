@@ -17,6 +17,7 @@ name = "scan_all_headers"
 path = "examples/scan_all_headers.rs"
 
 [dependencies]
+d2r-macros = { path = "d2r-macros" }
 bitstream-io = "4.9.0"
 byteorder = { version = "1.5", default-features = false }
 hex = "0.4"
@@ -391,3 +392,6 @@ path = "src/bin/verify/d2item_socket_fuzzer.rs"
 [[bin]]
 name = "d2item_huffman_visualizer"
 path = "src/bin/verify/d2item_huffman_visualizer.rs"
+
+[dev-dependencies]
+trybuild = "1.0"
