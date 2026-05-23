@@ -169,8 +169,8 @@ impl StatsAxiom {
         false
     }
 
-    pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
-        self.header_axiom().is_socketed(flags, is_compact)
+    pub fn is_socketed(&self, flags: u32, is_compact: bool, code: Option<&str>) -> bool {
+        self.header_axiom().is_socketed(flags, is_compact, code)
     }
 
     pub fn is_compact(&self, _flags: u32) -> bool {
@@ -272,10 +272,25 @@ impl StatsAxiom {
                     has_extra_terminal_bit: false,
                 };
             }
-            
-            if self.version == 1 || self.version == 0 || self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
-                 return PropertyRhythm {
+
+            // Alpha v105 Version 0 rows use a 17-bit rhythm
+            // (9-bit stat id + 8-bit value). Reading the value as 9 bits overreads
+            // the next property seam and produces the observed 256-offset drift.
+            if self.version == 0 {
+                return PropertyRhythm {
                     id_bits: 9,
+                    value_bits: Some(8),
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                };
+            }
+
+            if self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
+                 return PropertyRhythm {
+                     id_bits: 9,
+                     // Alpha v105 legacy alpha stat rows are generally 9-bit,
+                    // but version 0 rows are handled by the narrower guard above
+                    // to preserve the observed 17-bit property rhythm.
                     value_bits: Some(9),
                     has_terminal_bit: false,
                     has_extra_terminal_bit: false,
@@ -332,9 +347,12 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
     current_len
 }
 
-    pub fn reads_defense(&self) -> bool { !self.is_alpha() }
-    pub fn reads_durability(&self) -> bool { !self.is_alpha() }
-    pub fn reads_quantity(&self) -> bool { !self.is_alpha() }
+    // Alpha v105 still stores these fields for the relevant templates; the
+    // template gate in ExtendedStatsData already prevents unrelated items from
+    // consuming the wrong widths.
+    pub fn reads_defense(&self) -> bool { true }
+    pub fn reads_durability(&self) -> bool { true }
+    pub fn reads_quantity(&self) -> bool { true }
 
     pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<MappingInfo> {
         let reg = get_registry();

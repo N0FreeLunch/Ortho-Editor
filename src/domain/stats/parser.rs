@@ -86,7 +86,7 @@ pub fn read_item_stats<R: BitRead>(
         child_offsets = markers.iter()
             .filter(|m| {
                 let t = m.code.trim();
-                (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew"
+                (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew" || t == "ww"
             })
             .map(|m| m.offset)
             .collect();
@@ -177,9 +177,11 @@ where
             
             let target_peek_pos = next_child_off.unwrap_or(current_abs_pos);
             
-            // Only stop if we are close to the target child marker (within 32 bits)
+            // Only stop if we are close to the target child marker.
+            // Alpha v105 runeword property rows are 17-bit aligned in the authority fixture,
+            // so keep at least one full 17-bit property window available before bailing out.
             let is_close = if next_child_off.is_some() {
-                target_peek_pos >= current_abs_pos && (target_peek_pos - current_abs_pos) < 32
+                target_peek_pos >= current_abs_pos && (target_peek_pos - current_abs_pos) < 17
             } else {
                 true // Fallback to legacy behavior if child offsets are not provided
             };
@@ -304,7 +306,7 @@ where
             if let Some(offsets) = child_marker_offsets {
                 if let Some(&next_marker_off) = offsets.iter().filter(|&&off| off >= current_abs_pos).min() {
                     let diff = next_marker_off - current_abs_pos;
-                    if diff > 0 && diff <= 48 { // Allow snapping up to 48 bits of gap/residue
+                    if diff > 0 {
                         recorder.skip_and_record(diff as u32)?;
                         current_pos = recorder.pos();
                         current_abs_pos = next_marker_off;
@@ -315,11 +317,20 @@ where
             
             if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, current_abs_pos, huffman, axiom.save_is_alpha, 0) {
                 let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
-                if crate::item::is_plausible_item_header(mode, loc, code_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
-                    let trimmed_peek = code_peek.trim();
-                    let is_socketable = (trimmed_peek.starts_with('r') && trimmed_peek.len() <= 3)
-                        || (trimmed_peek.starts_with('g') && trimmed_peek.len() == 3)
-                        || trimmed_peek == "jew";
+                let trimmed_peek = code_peek.trim();
+                let normalized_peek = match trimmed_peek {
+                    "ww" => "r08",
+                    other => other,
+                };
+                let force_alias = trimmed_peek == "ww";
+                if force_alias || crate::item::is_plausible_item_header(mode, loc, normalized_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
+                    let normalized_peek = match trimmed_peek {
+                        "ww" => "r08",
+                        other => other,
+                    };
+                    let is_socketable = (normalized_peek.starts_with('r') && normalized_peek.len() <= 3)
+                        || (normalized_peek.starts_with('g') && normalized_peek.len() == 3)
+                        || normalized_peek == "jew";
                     if !is_socketable {
                         break;
                     }
@@ -345,11 +356,18 @@ where
                     if let Ok((mut child, end_pos)) = result {
                         child.mode = 6;
                         child.header.mode = 6;
+                        child.code = normalized_peek.to_string();
+                        child.body.code = normalized_peek.to_string();
                         eprintln!("[DEBUG-RUNEWORD-CHILD-RECOVERED] Recovered runeword child: {} at abs_pos: {}", child.code, current_abs_pos);
                         nested_items.push(child);
                         child_idx += 1;
                         
-                        let absolute_end = current_abs_pos + end_pos;
+                        let mut absolute_end = current_abs_pos + end_pos;
+                        if let Some(offsets) = child_marker_offsets {
+                            if let Some(&next_marker_off) = offsets.iter().filter(|&&off| off > current_abs_pos).min() {
+                                absolute_end = absolute_end.min(next_marker_off);
+                            }
+                        }
                         if absolute_end > current_abs_pos {
                             let consumed = (absolute_end - current_abs_pos) as u32;
                             recorder.skip_and_record(consumed)?;

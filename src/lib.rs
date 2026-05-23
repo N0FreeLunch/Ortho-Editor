@@ -117,7 +117,6 @@ mod tests {
     }
     #[test]
     fn test_item_template_lookup() {
-        use crate::item::Item;
         // This is a bit of a hack since item_template is private, 
         // but we can test it indirectly or make it pub(crate).
         // For now, let's just check if ITEM_TEMPLATES has what we need.
@@ -144,7 +143,7 @@ mod tests {
             .expect("truth file should exist");
         
         let truth: serde_json::Value = serde_json::from_str(&truth_json).expect("truth should be valid JSON");
-        
+
         // Find the xrs item (Authority base)
         let xrs = real_items.iter().find(|it| it.code.trim() == "xrs" && it.is_runeword).expect("xrs item should be present");
         
