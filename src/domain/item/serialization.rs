@@ -779,7 +779,8 @@ impl Item {
             // Slice 5: Acceptance Gate
             // If confidence is low, degrade to Opaque isolation instead of attempting full parse.
             let mut reject_candidate = false;
-            if alpha_mode && marker.confidence < 250 {
+            let trimmed_m = marker.code.trim();
+            if alpha_mode && (marker.confidence < 250 || trimmed_m.starts_with("99x") || trimmed_m.starts_with("xrs")) {
                 reject_candidate = true;
             }
 
@@ -1221,7 +1222,7 @@ impl Item {
                 return Err(e);
             }
         };
-        if header.save_is_alpha && (body.code.trim() == "c8xr" || body.code.trim() == "c8xr " || (body.code.trim() == "scs" && header.is_runeword)) {
+        if header.save_is_alpha && (body.code.trim() == "c8xr" || body.code.trim() == "c8xr " || (body.code.trim() == "scs" && header.is_runeword) || body.code.trim() == "99x") {
             body.code = "xrs ".to_string();
         }
         body.alpha_header_gap = alpha_header_gap;

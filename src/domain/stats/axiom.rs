@@ -213,16 +213,17 @@ impl StatsAxiom {
 
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
         if self.is_runeword(_flags) { return false; }
-        
+
         // Alpha v105 forensic: Shadow items are truly header-only (no code, no stats).
         // They are identified by flags (bit 26/27) and have NO item code.
         let trimmed = _code.trim();
-        if self.is_v105_shadow(_flags, Some(_code)) && trimmed.is_empty() { 
-            return true; 
+        if self.is_v105_shadow(_flags, Some(_code)) && trimmed.is_empty() {
+            return true;
         }
 
         false
     }
+
     pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
         if !self.is_alpha() {
             return 0;
