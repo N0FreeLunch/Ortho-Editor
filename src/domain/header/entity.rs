@@ -208,7 +208,9 @@ impl HeaderAxiom {
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
         if let Some(c) = code {
             let trimmed = c.trim();
-            if trimmed == "xrs" || trimmed == "xrs " { return true; }
+            if trimmed == "c8xr" {
+                return true;
+            }
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
                 return false;
             }
@@ -374,7 +376,10 @@ impl ItemHeader {
         let x = cursor.read_bits::<u8>(4)? as u8;
         
         let axiom = HeaderAxiom::new(version, alpha_mode);
-        let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+        let mut s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+        if let Some(c) = code {
+            s_axiom = s_axiom.with_code(c);
+        }
         
         let mut y = 0;
         let mut page = 0;
@@ -464,7 +469,7 @@ impl ItemHeader {
 pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
     let mut bits_set = 0u8;
     for i in 0..32 {
-        if (flags & (1 << i)) != 0 { bits_set += 1; }
+        if (flags & (1u32 << i)) != 0 { bits_set += 1; }
     }
     
     match version {

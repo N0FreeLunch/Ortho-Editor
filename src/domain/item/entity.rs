@@ -504,9 +504,10 @@ impl Item {
         }
 
         use crate::domain::item::serialization::write_player_name;
-        emitter.write_bits(self.header.flags, 32)?;
+        let mut flags_to_write = self.header.flags;
+        emitter.write_bits(flags_to_write, 32)?;
         if alpha_mode && self.header.has_checksum {
-            let checksum = calculate_alpha_v105_checksum(self.header.flags, self.header.version);
+            let checksum = calculate_alpha_v105_checksum(flags_to_write, self.header.version);
             emitter.write_bits(checksum as u32, 8)?;
         }
         emitter.write_bits(self.header.version as u32, 3)?;
@@ -784,10 +785,15 @@ pub fn parse_item_header<R: BitRead>(
     has_checksum_hint: Option<bool>,
     start_bit_offset: Option<u64>,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
+    let code_hint = code_hint;
     let w_axiom = V105PropertyWidthAxiom::default();
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
     let flags = cursor.read_bits::<u32>(w_axiom.flags_bits() as u32)?;
+    if alpha_mode {
+         let abs = start_bit_offset.unwrap_or(0);
+         eprintln!("[DEBUG-FLAGS] abs={} flags={:08X}", abs, flags);
+    }
     if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
@@ -819,6 +825,14 @@ pub fn parse_item_header<R: BitRead>(
     } else {
         (cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8, false)
     };
+    let mut flags = flags;
+    if alpha_mode {
+        if let Some(code) = code_hint {
+            if is_potion_code(code) {
+                flags |= 1 << 23;
+            }
+        }
+    }
     let mode = cursor.read_bits::<u8>(w_axiom.mode_bits() as u32)? as u8;
     let location = cursor.read_bits::<u8>(w_axiom.location_bits() as u32)? as u8;
     let x = cursor.read_bits::<u8>(w_axiom.x_bits() as u32)? as u8;
@@ -840,12 +854,21 @@ pub fn parse_item_header<R: BitRead>(
             let is_v105_shadow = h_axiom.is_v105_shadow(flags, code_hint);
             let is_rw = h_axiom.is_runeword(flags, code_hint);
             
-            let gap_bits = if let Some(go) = gap_override {
+            let mut gap_bits = if let Some(go) = gap_override {
                 let geom_bits = (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize;
                 if go >= geom_bits { go - geom_bits } else { go }
             } else {
                 V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum, start_bit_offset)
             };
+
+            // Forensic: For real Alpha v105 runewords or standard variant of xrs, force a 14-bit gap
+            // to ensure correct alignment and socket count parsing.
+            if let Some(c) = code_hint {
+                let trimmed = c.trim();
+                if trimmed == "xrs" || trimmed == "c8xr" {
+                    gap_bits = 14;
+                }
+            }
 
             // Forensic (Slice 25): Summary item identification and mandatory geometry.
             let w_axiom = V105PropertyWidthAxiom::default();
@@ -870,7 +893,7 @@ pub fn parse_item_header<R: BitRead>(
 
             let mut gap = 0u32;
             for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
-                if i < 32 && bit { gap |= 1 << i; }
+                if i < 32 && bit { gap |= 1u32 << i; }
             }
             alpha_header_gap = Some(gap);
 
@@ -907,7 +930,9 @@ pub fn parse_item_header<R: BitRead>(
 
             alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
             let mut val = 0u32;
-            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { if bit { val |= 1 << i; } }
+            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
+                if i < 32 && bit { val |= 1u32 << i; } 
+            }
             alpha_header_gap = Some(val);
         }
     } else if !geometry.skip_geometry {
@@ -928,7 +953,7 @@ pub fn parse_item_header<R: BitRead>(
                 }
                 let mut val = 0u32;
                 for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
-                    if i < 32 && bit { val |= 1 << i; } 
+                    if i < 32 && bit { val |= 1u32 << i; } 
                 }
                 alpha_header_gap = Some(val);
             }
@@ -950,6 +975,7 @@ pub fn parse_item_body<R: BitRead>(
     huff: &crate::domain::item::serialization::HuffmanTree,
     header: &ItemHeader,
     alpha_mode: bool,
+    code_hint: Option<&str>,
 ) -> ParsingResult<(ItemBody, Option<u8>, Option<u8>, Option<String>)> {
     let w_axiom = V105PropertyWidthAxiom::default();
     let h_axiom = HeaderAxiom::new(header.version, alpha_mode);
@@ -969,28 +995,66 @@ pub fn parse_item_body<R: BitRead>(
         let _s_axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode).with_compact(header.is_compact);
 
         if alpha_mode && header.is_compact {
-            // Forensic (Axiom 0344): Compact items in Alpha v105 
-            // use 3x8-bit fixed width characters for the item code.
-            let saved_pos = cursor.pos();
-            let mut temp_code = String::new();
-            let mut success = true;
-            for _ in 0..3 {
-                let mut ch = 0u8;
-                for bit in 0..8 {
-                    match cursor.read_bit() {
-                        Ok(b) => { if b { ch |= 1 << bit; } }
+            let mut is_summary_candidate = false;
+            if let Some(hint) = code_hint {
+                is_summary_candidate = w_axiom.is_summary_item(header.version, hint);
+                if !is_summary_candidate {
+                    let trimmed = hint.trim();
+                    is_summary_candidate = trimmed == "hp1" || trimmed == "mp1" || trimmed == "tsc" || trimmed == "isc";
+                }
+            }
+
+            if is_summary_candidate {
+                // Forensic (Axiom 0344): Compact items in Alpha v105
+                // use 3x8-bit fixed width characters for the item code.
+                let saved_pos = cursor.pos();
+                let mut temp_code = String::new();
+                let mut success = true;
+                for _ in 0..3 {
+                    match cursor.read_bits::<u8>(8) {
+                        Ok(ch) => { temp_code.push(ch as char); }
                         Err(_) => { success = false; break; }
                     }
                 }
-                if !success { break; }
-                temp_code.push(ch as char);
+
+                if success && w_axiom.is_summary_item(header.version, &temp_code) {
+                    code = temp_code;
+                } else {
+                    cursor.rollback(saved_pos);
+                }
             }
-            
-            if success && w_axiom.is_summary_item(header.version, &temp_code) {
-                code = temp_code;
-            } else {
-                cursor.rollback(saved_pos);
-            }
+        }
+
+        if code.is_empty() && alpha_mode {
+             let mut try_xrs = false;
+             if let Some(hint) = code_hint {
+                 let trimmed = hint.trim();
+                 if trimmed == "xrs" {
+                     try_xrs = true;
+                 }
+             }
+             if try_xrs {
+                 eprintln!("[DEBUG-XRS-BODY] Attempting ASCII xrs decode at pos={}", cursor.pos());
+                 let saved_pos = cursor.pos();
+                 let mut temp_code = String::new();
+                 let mut success = true;
+                 for _ in 0..3 {
+                     match cursor.read_bits::<u8>(8) {
+                         Ok(ch) => { temp_code.push(ch as char); }
+                         Err(e) => { 
+                             eprintln!("[DEBUG-XRS-BODY] ASCII decode failed: {:?}", e);
+                             success = false; break; 
+                         }
+                     }
+                 }
+                 if success && temp_code.trim() == "xrs" {
+                     eprintln!("[DEBUG-XRS-BODY] ASCII xrs decode SUCCESS: {:?}", temp_code);
+                     code = "xrs ".to_string();
+                 } else {
+                     eprintln!("[DEBUG-XRS-BODY] ASCII xrs decode FAILED or mismatch: {:?}", temp_code);
+                     cursor.rollback(saved_pos);
+                 }
+             }
         }
 
         if code.is_empty() {
@@ -1008,16 +1072,13 @@ pub fn parse_item_body<R: BitRead>(
             }
 
             if code.is_empty() {
-                if alpha_mode && header.is_runeword {
-                    let _ = cursor.read_bits::<u8>(2); 
-                }
-                for i in 0..4 {
+                for _ in 0..4 {
                     match huff.decode_recorded(cursor) {
                         Ok(ch) => {
                             code.push(ch)
                         },
                         Err(e) => {
-                            if alpha_mode && i >= 1 {
+                            if alpha_mode {
                                 // Trial: 1-bit and 2-bit lookahead nudges (Axiom 0340) for Alpha v105 bitstream drift
                                 let saved_pos = cursor.pos();
                                 // Try 1-bit nudge
@@ -1057,16 +1118,16 @@ pub fn parse_item_body<R: BitRead>(
                 }
             }
         }
-        
+
         // Forensic: Ensure byte-alignment after body properties for Version 5 to resolve drift
         if w_axiom.needs_post_body_byte_alignment(header.version, header.is_compact) {
             cursor.byte_align()?;
         }
 
         cursor.end_segment();
+        eprintln!("[DEBUG-BODY] code: {:?}, version: {}, pos: {}", code, header.version, cursor.pos());
         (code, alpha_nudge, None, None, None)
     };
-
     Ok((ItemBody {
         code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,
         defense: None, max_durability: None, current_durability: None, quantity: None, alpha_header_gap: None, 
@@ -1175,3 +1236,13 @@ impl ExtendedStatsData {
         Ok(data)
     }
 }
+
+fn is_potion_code(code: &str) -> bool {
+    let trimmed = code.trim();
+    trimmed.starts_with('h')
+        || trimmed.starts_with('m')
+        || (trimmed.starts_with('r') && trimmed.len() <= 3)
+        || trimmed == "wwsw"
+        || trimmed.starts_with('7')
+}
+

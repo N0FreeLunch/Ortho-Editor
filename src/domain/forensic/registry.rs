@@ -18,6 +18,8 @@ pub struct AlphaForensics {
     pub compact_code_encoding: Option<String>,
     #[serde(default)]
     pub mercenary_class_map: HashMap<u8, String>,
+    #[serde(default)]
+    pub scanner_nudges: Option<HashMap<String, u64>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

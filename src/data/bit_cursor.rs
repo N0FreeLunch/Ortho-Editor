@@ -9,6 +9,7 @@ use crate::error::{BackingBitCursor, ParsingError, ParsingFailure, ParsingResult
 pub struct BitCursor<R: BitRead> {
     inner: R,
     bit_pos: u64,
+    pub base_pos: u64, // Added to support relative caching
     limit: Option<u64>,
     recorded_bits: Vec<RecordedBit>,
     segments: Vec<BitSegment>,
@@ -36,6 +37,7 @@ impl<R: BitRead> BitCursor<R> {
         Self {
             inner,
             bit_pos: 0,
+            base_pos: 0,
             limit: None,
             recorded_bits: Vec::new(),
             segments: Vec::new(),
@@ -95,6 +97,14 @@ impl<R: BitRead> BitCursor<R> {
                 return Err(self.fail(ParsingError::Io("Bit limit exceeded (possible section boundary violation)".to_string()))
                     .with_hint("The parser tried to read beyond the allocated bits for this item or section."));
             }
+        }
+
+        // Slice 9: True rollback support via bit cache (relative to base_pos)
+        let cache_idx = self.bit_pos.saturating_sub(self.base_pos) as usize;
+        if cache_idx < self.recorded_bits.len() {
+            let bit = self.recorded_bits[cache_idx].bit;
+            self.bit_pos += 1;
+            return Ok(bit);
         }
 
         let bit = self.inner.read_bit().map_err(|e| {
@@ -228,8 +238,10 @@ impl<R: BitRead> BitCursor<R> {
     /// Rollback to a previous bit position.
     pub fn rollback(&mut self, checkpoint: u64) {
         self.bit_pos = checkpoint;
-        self.recorded_bits.retain(|rb| rb.offset < checkpoint);
-        self.segments.retain(|s| s.end <= checkpoint);
+        // Slice 9: We no longer discard recorded bits/segments on rollback.
+        // This allows re-reading from the cache.
+        // self.recorded_bits.retain(|rb| rb.offset < checkpoint);
+        // self.segments.retain(|s| s.end <= checkpoint);
     }
 
     pub fn byte_align(&mut self) -> ParsingResult<()> {
@@ -256,6 +268,7 @@ impl<'a> BitCursor<bitstream_io::BitReader<std::io::Cursor<&'a [u8]>, bitstream_
         let _ = reader.skip(bit_offset as u32);
         let mut cursor = BitCursor::new(reader);
         cursor.bit_pos = bit_offset;
+        cursor.base_pos = bit_offset;
         cursor
     }
 }

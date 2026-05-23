@@ -11,17 +11,23 @@ pub struct StatsAxiom {
     pub save_is_alpha: bool,
     pub is_personalized: bool,
     pub is_compact: bool,
+    pub is_socketed: bool,
     pub code: String,
     pub idx: usize,
 }
 
 impl StatsAxiom {
     pub fn new(version: u8, quality: ItemQuality, save_is_alpha: bool) -> Self {
-        Self { version, quality, save_is_alpha, is_personalized: false, is_compact: false, code: String::new(), idx: 0 }
+        Self { version, quality, save_is_alpha, is_personalized: false, is_compact: false, is_socketed: false, code: String::new(), idx: 0 }
     }
 
     pub fn with_index(mut self, idx: usize) -> Self {
         self.idx = idx;
+        self
+    }
+
+    pub fn with_socketed(mut self, is_socketed: bool) -> Self {
+        self.is_socketed = is_socketed;
         self
     }
 
@@ -147,6 +153,7 @@ impl StatsAxiom {
 
     pub fn is_runeword(&self, flags: u32) -> bool {
         let trimmed = self.code.trim();
+        if trimmed == "c8xr" { return true; }
         if (flags & (1 << 26)) != 0 { return true; }
         if self.save_is_alpha {
             let reg = get_registry();
@@ -205,6 +212,7 @@ impl StatsAxiom {
     }
 
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
+        if self.is_runeword(_flags) { return false; }
         // Alpha v105 forensic: Shadow items are truly header-only (no code, no stats).
         if self.is_v105_shadow(_flags, Some(_code)) { return true; }
 
@@ -303,117 +311,19 @@ impl StatsAxiom {
         padding
     }
 pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
-    let mut final_len = current_len;
-    let is_socketed = self.is_socketed(flags, self.is_compact);
-    let is_personalized = self.is_personalized(flags);
-
     if self.save_is_alpha {
-        let reg = get_registry();
-        let trimmed = code.trim();
-
-        // Note (Axiom 0344): In Alpha v105, summary items often follow an 80-bit rhythm,
-        // but this is best handled dynamically by the AlignmentSnapper in read_section
-        // to accommodate 81/79 bit oscillation.
-        
-        let mut min_bits = if self.save_is_alpha {
-            crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64
-        } else {
-            0
-        };
-
-        if self.save_is_alpha {
-            if let Some(overrides) = &reg.item_overrides {
-                if let Some(item_map) = overrides.get(trimmed) {
-                    if let Some(&f_width) = item_map.get("fixed_width") {
-                        if crate::item::item_trace_enabled() {
-                            eprintln!("[DEBUG-ALIGN] override found: code='{}', fixed_width={}", trimmed, f_width);
-                        }
-                        min_bits = f_width as u64;
-                    }
-                }
-            }
+        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
+        if target_width > 0 {
+            return target_width;
         }
-        
-        if crate::item::item_trace_enabled() && self.save_is_alpha {
-            eprintln!("[DEBUG-ALIGN] code='{}', current={}, min_bits={}", code, current_len, min_bits);
-        }
-
-            // Slice 6: Isolate Alpha v105 compact layout policy.
-            // Axiom 0340: Institutional Rhythm Resolution (72/73 bit pattern)
-            min_bits = self.resolve_compact_rhythm(min_bits);
-
-            let policy = self.compact_layout_policy();
-            
-            // Alpha v105 compact items are strictly bounded and do not accept retail-style alignment nudges.
-            if policy == CompactLayoutPolicy::AlphaV105 && self.is_compact {
-                if final_len < min_bits {
-                    final_len = min_bits;
-                }
-                // Suppress all further nudges/alignments for Alpha v105 compact
-                return self.resolve_compact_rhythm(final_len);
-            }
-
-            let apply_min_nudge = !self.is_alpha() || (self.version == 5 || self.version == 7 || self.is_compact);
-
-            let alignment_nudge = V105AlignmentAxiom::default().get_alignment_nudge(self.version, &self.code, flags, self.is_compact);
-            if alignment_nudge > 0 {
-                final_len = (current_len + alignment_nudge as u64).max(min_bits);
-            } else if apply_min_nudge && final_len < min_bits {
-                final_len = min_bits;
-            }
-
-            if self.version == 5 && !self.is_compact && !self.is_runeword(flags) {
-                final_len += self.resolve_flag_padding(flags, is_socketed);
-            }
-
-            let apply_32bit_align = !self.is_compact && !self.is_runeword(flags) && (self.version == 5 || self.version == 7) && !is_personalized;
-
-            if apply_32bit_align {
-                if final_len % 32 != 0 {
-                    final_len += 32 - (final_len % 32);
-                }
-            } else if self.is_alpha() && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) && !self.is_compact {
-                // Alpha v105 non-compact property blocks require byte-level alignment (8-bit)
-                let align = reg.axioms.get("property_alignment").copied().unwrap_or(8);
-                if final_len % align != 0 {
-                    final_len += align - (final_len % align);
-                }
-            } else if self.version == 5 && self.is_runeword(flags) {
-                // Alpha v105 Runewords require byte-level alignment (8-bit)
-                if final_len % 8 != 0 {
-                    final_len += 8 - (final_len % 8);
-                }
-            }
-
-            final_len = self.resolve_compact_rhythm(final_len);
-
-            if let Ok(nudge_val) = std::env::var("D2R_ALIGNMENT_NUDGE") {
-                if let Ok(nudge_bits) = nudge_val.parse::<i64>() {
-                    let apply = if std::env::var("D2R_ALIGNMENT_NUDGE_ALL").is_ok() {
-                        true
-                    } else {
-                        let mut can_apply = false;
-                        if let Some(codes) = &reg.forced_runeword_codes {
-                            if codes.iter().any(|c| c == trimmed) { can_apply = true; }
-                        }
-                        can_apply || trimmed == "acww" || trimmed == "jav" || trimmed == "Opaque"
-                    };
-
-                    if apply {
-                        if nudge_bits >= 0 { final_len += nudge_bits as u64; }
-                        else {
-                            let sub = (-nudge_bits) as u64;
-                            if final_len >= sub { final_len -= sub; }
-                        }
-                    }
-                }
-            }
-        } else if final_len % 8 != 0 {
-            final_len += 8 - (final_len % 8);
-        }
-
-        final_len
     }
+
+    if !self.is_compact {
+        let aligned = (current_len + 7) / 8 * 8;
+        return aligned;
+    }
+    current_len
+}
 
     pub fn reads_defense(&self) -> bool { !self.is_alpha() }
     pub fn reads_durability(&self) -> bool { !self.is_alpha() }
