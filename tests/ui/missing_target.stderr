@@ -1,0 +1,7 @@
+error: #[forensic_sensor] requires a 'target' parameter.
+ --> tests/ui/missing_target.rs:3:1
+  |
+3 | #[forensic_sensor(trigger = "on_desync")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `forensic_sensor` (in Nightly builds, run with -Z macro-backtrace for more info)
