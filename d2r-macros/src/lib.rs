@@ -139,6 +139,58 @@ pub fn rhythm_alignment(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Custom attribute for Category C forensic sensing pipeline governance.
 #[proc_macro_attribute]
-pub fn forensic_sensor(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn forensic_sensor(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr2 = proc_macro2::TokenStream::from(attr);
+    
+    let mut target = None;
+    let mut trigger = None;
+    let mut _bit_offset = None;
+    let mut _label = None;
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("target") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            target = Some(value.value());
+        } else if meta.path.is_ident("trigger") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            trigger = Some(value.value());
+        } else if meta.path.is_ident("bit_offset") {
+            let value: syn::LitInt = meta.value()?.parse()?;
+            let num: u64 = value.base10_parse()?;
+            _bit_offset = Some(num);
+        } else if meta.path.is_ident("label") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            _label = Some(value.value());
+        } else {
+            return Err(meta.error("unsupported forensic_sensor property"));
+        }
+        Ok(())
+    });
+
+    if let Err(err) = args_parser.parse2(attr2) {
+        return err.to_compile_error().into();
+    }
+
+    if target.is_none() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[forensic_sensor] requires a 'target' parameter."
+        ).to_compile_error().into();
+    }
+
+    if let Some(t) = &trigger {
+        if t != "on_desync" && t != "always" {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "#[forensic_sensor] 'trigger' must be either \"on_desync\" or \"always\"."
+            ).to_compile_error().into();
+        }
+    } else {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[forensic_sensor] requires a 'trigger' parameter."
+        ).to_compile_error().into();
+    }
+
     item
 }
