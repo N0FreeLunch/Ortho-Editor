@@ -14,7 +14,7 @@ use crate::domain::item::subdomains::nudge::NudgeCombinator;
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom};
 use d2r_macros::serialization_symmetry;
 
-/// Category B: Alpha v105 bitstream symmetry point for trailing alignment.
+/// Category B: Alpha v105 bitstream symmetry point for trailing alignment (Governance Checked).
 #[serialization_symmetry(align = true)]
 pub struct TrailingAlignmentSeam;
 
@@ -1505,9 +1505,7 @@ impl Item {
 
         // Slice 1: Force stats reading for Alpha v105 items even if compact, 
         // to detect residue Defense/Durability as per mini-spec.
-        // EXCEPT for summary items (Axiom 0392) which never have stats.
-        let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
-        if !is_v105_summary {
+        if !item.header.is_compact || item.header.save_is_alpha {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code));
 
             // Slice 11: Handle JM-to-Body alignment gap
@@ -1562,7 +1560,11 @@ impl Item {
             .with_compact(item.header.is_compact)
             .with_code(&item.code);
         
-        if alpha_mode {
+        eprintln!("[DEBUG-AXIOM] code={}, version={}, alpha_mode={}, is_alpha={}", item.code, item.header.version, alpha_mode, axiom.is_alpha());
+        
+        let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
+        
+        if alpha_mode && !is_v105_summary {
             item.body.alpha_alignment_padding = NudgeCombinator.apply_alignment_padding(cursor, start_bit, &item.code, item.header.flags, &axiom)?;
         }
         
@@ -1582,7 +1584,7 @@ impl Item {
 
         cursor.end_segment();
         
-        if alpha_mode {
+        if alpha_mode && (!is_v105_summary || item.code.trim().is_empty()) {
             if let Some(l) = cursor.limit() {
                 if cursor.pos() < l {
                     let residue_len = l - cursor.pos();
