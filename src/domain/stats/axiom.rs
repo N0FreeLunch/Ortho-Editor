@@ -1,6 +1,6 @@
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
-use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105AlignmentAxiom};
+use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
 use crate::domain::header::entity::{HeaderAxiom, HeaderGeometry};
 
@@ -200,7 +200,18 @@ impl StatsAxiom {
             // ONLY if they are explicitly compact or in higher versions.
             // In Version 0, they often remain Huffman encoded.
             if self.version != 0 && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
-                return CodeEncoding::Ascii3x8;
+                // Forensic (Slice 3): Potions and some markers often use Huffman even in Version 1/2.
+                // ASCII 3x8 is typically used for 'xrs' and specific quest items.
+                let trimmed = self.code.trim();
+                if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
+                    return CodeEncoding::Ascii3x8;
+                }
+                
+                // If it matches a known stealth pattern (e.g. 0xCF 0x4F for hp1), it MUST be Huffman.
+                if crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_item(self.version, &self.code) {
+                     // Check if it should be ASCII based on registry or other rules.
+                     // For now, default to Huffman for potions/scrolls in v1/v2 if not explicitly forced.
+                }
             }
 
             let reg = get_registry();

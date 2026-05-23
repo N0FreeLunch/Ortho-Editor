@@ -182,8 +182,11 @@ impl HeaderAxiom {
         }
     }
 
-    pub fn is_socketed(&self, flags: u32, is_compact: bool) -> bool {
+    pub fn is_socketed(&self, flags: u32, is_compact: bool, code: Option<&str>) -> bool {
         if self.alpha_mode {
+            if self.is_runeword(flags, code) {
+                return true;
+            }
             if self.version == 5 {
                 !is_compact && (flags & (1 << 11)) != 0
             } else if self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6 {
@@ -208,7 +211,7 @@ impl HeaderAxiom {
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
         if let Some(c) = code {
             let trimmed = c.trim();
-            if trimmed == "c8xr" {
+            if trimmed == "c8xr" || trimmed == "xrs" {
                 return true;
             }
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
@@ -452,7 +455,7 @@ impl ItemHeader {
             quality: None,
             is_compact,
             is_identified: s_axiom.is_identified(flags),
-            is_socketed: s_axiom.is_socketed(flags, is_compact),
+            is_socketed: s_axiom.is_socketed(flags, is_compact, code),
             is_personalized: axiom.is_personalized(flags),
             is_runeword: s_axiom.is_runeword(flags),
             is_ethereal: s_axiom.is_ethereal(flags),

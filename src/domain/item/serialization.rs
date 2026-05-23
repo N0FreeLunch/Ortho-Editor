@@ -9,6 +9,8 @@ use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alph
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
 use crate::domain::item::subdomains::gap::{GapCombinator, AlphaHeaderGap};
 use crate::domain::item::subdomains::property::{PropertyNormalizer, AlphaPropertyCombinator};
+use crate::domain::item::subdomains::stats::StatsCombinator;
+use crate::domain::item::subdomains::nudge::NudgeCombinator;
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom};
 
 pub fn calculate_property_residue(version: u8) -> usize {
@@ -21,7 +23,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
     let section_bits = limit;
 
     // Header cache to skip regions known to produce false positives
-    let mut invalid_regions: Vec<(u64, u64)> = Vec::new();
+    let invalid_regions: Vec<(u64, u64)> = Vec::new();
 
     while probe < section_bits {
         if invalid_regions.iter().any(|&(s, e)| probe >= s && probe < e) {
@@ -35,7 +37,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
              }
             // Alpha recovery: keep broad candidate coverage here.
             // Later plausibility and lookahead checks decide whether the candidate is real.
-            let is_blank = alpha && code.trim().is_empty();
+            let _is_blank = alpha && code.trim().is_empty();
 
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                 // Look-ahead verification (Slice 4): Prevent swallowing by verifying the candidate body
@@ -220,7 +222,7 @@ pub fn peek_item_header_at(
     start_bit: u64,
     huffman: &HuffmanTree,
     alpha_mode: bool,
-    idx: usize,
+    _idx: usize,
 ) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
     let _debug_peek = start_bit < 1200;
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -296,6 +298,7 @@ pub fn peek_item_header_at(
             
             // Trial 2: 3x8 ASCII (Alpha v105 specific)
             if alpha_mode {
+                let huffman_end_pos = t_cursor.checkpoint();
                 t_cursor.rollback(huffman_pos);
                 let mut ascii_code = String::new();
                 let mut success = true;
@@ -309,7 +312,7 @@ pub fn peek_item_header_at(
                 if success && (trimmed_ascii == "xrs" || trimmed_ascii == "Þ." || is_v105_summary_code(&ascii_code)) {
                     t_code = ascii_code;
                 } else {
-                    t_cursor.rollback(huffman_pos);
+                    t_cursor.rollback(huffman_end_pos);
                 }
             }
             
@@ -520,7 +523,7 @@ pub fn peek_item_header_at_specific_gap(
     
     let code: String = code_bytes[..code_len].iter().map(|&b| b as char).collect();
     let code = code.trim_end_matches('\0').to_string();
-    let mut is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
+    let is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
     if ok {
         if is_plausible_item_header(mode, loc, &code_bytes[..code_len], flags, version, item_alpha_mode) {
             return Some((mode, loc, x_val, code, flags, version, is_compact, (base_header_len as u64 + gap), gap as i8, has_checksum));
@@ -771,7 +774,7 @@ impl Item {
             if let Some(flen) = forced_length {
                 dynamic_limit = flen;
                 is_compact_final = true;
-            } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
+            } else if let Some((_version, _, _, code, flags, _, is_compact, _, _, _)) =
                 peek_item_header_at(section_bytes, start, huffman, alpha_mode, i)
 
                         {
@@ -824,33 +827,36 @@ impl Item {
 
             match parse_result {
                 Ok((item, mut consumed_bits)) => {
+                    let mut final_item = item.clone();
+
+                    // Axiom 0344: In Alpha v105, if the scanner found a valid code, 
+                    // ensure the parser uses it (prevents Huffman collisions).
+                    // Restore code BEFORE alignment calculation to ensure correct target width.
+                    if alpha_mode && !marker.code.trim().is_empty() {
+                        let _reg = crate::domain::forensic::registry::get_registry();
+                        if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code) {
+                            final_item.code = marker.code.clone();
+                        }
+                    }
+
                     // Slice 9: Strictly enforce Alpha v105 target widths
                     if alpha_mode {
-                        let alignment_axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+                        let alignment_axiom = StatsAxiom::new(final_item.header.version, final_item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
                             .with_index(i)
-                            .with_compact(item.header.is_compact)
-                            .with_code(&item.code);
-                        let target_width = alignment_axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
+                            .with_compact(final_item.header.is_compact)
+                            .with_code(&final_item.code);
+                        let target_width = alignment_axiom.calculate_alignment(consumed_bits, &final_item.code, final_item.header.flags);
                         if target_width > 0 {
                             consumed_bits = target_width;
                         }
                     }
                     
-                    let mut final_item = item.clone();
                     if final_item.code.trim().is_empty()
                         && final_item.modules.iter().any(|m| matches!(m, crate::domain::item::ItemModule::Opaque(_)))
                     {
                         final_item.code = "Opaque".to_string();
                     }
                     
-                    // Axiom 0344: In Alpha v105, if the scanner found a valid code, 
-                    // ensure the parser uses it (prevents Huffman collisions).
-                    if alpha_mode && !marker.code.trim().is_empty() {
-                        let reg = crate::domain::forensic::registry::get_registry();
-                        if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code) {
-                            final_item.code = marker.code.clone();
-                        }
-                    }
 
                     let mut actual_consumed = consumed_bits;
                     let current_end = start + consumed_bits;
@@ -979,12 +985,21 @@ impl Item {
                                 Some(&marker.code),
                             ) {
                                 let mut final_item = item.clone();
+
+                                // Restore code BEFORE alignment calculation
+                                if alpha_mode && !marker.code.trim().is_empty() {
+                                    let _reg = crate::domain::forensic::registry::get_registry();
+                                    if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code) {
+                                        final_item.code = marker.code.clone();
+                                    }
+                                }
+
                                 if alpha_mode {
-                                    let alignment_axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+                                    let alignment_axiom = StatsAxiom::new(final_item.header.version, final_item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
                                         .with_index(i)
-                                        .with_compact(item.header.is_compact)
-                                        .with_code(&item.code);
-                                    let target_width = alignment_axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
+                                        .with_compact(final_item.header.is_compact)
+                                        .with_code(&final_item.code);
+                                    let target_width = alignment_axiom.calculate_alignment(consumed_bits, &final_item.code, final_item.header.flags);
                                     if target_width > 0 {
                                         consumed_bits = target_width;
                                     }
@@ -994,13 +1009,6 @@ impl Item {
                                     && final_item.modules.iter().any(|m| matches!(m, crate::domain::item::ItemModule::Opaque(_)))
                                 {
                                     final_item.code = "Opaque".to_string();
-                                }
-
-                                if alpha_mode && !marker.code.trim().is_empty() {
-                                    let reg = crate::domain::forensic::registry::get_registry();
-                                    if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code) {
-                                        final_item.code = marker.code.clone();
-                                    }
                                 }
 
                                 let mut actual_consumed = consumed_bits;
@@ -1500,17 +1508,11 @@ impl Item {
 
             // Slice 23: Apply residue nudge (symbolic anchor)
             if item.header.save_is_alpha {
-                let p_nudge = calculate_property_residue(item.header.version);
-                if p_nudge > 0 && !rhythm_recovery && !item.header.is_runeword {
-                    cursor.push_context("AlphaPropertyResidueNudge");
-                    let _ = cursor.read_bits::<u32>(p_nudge as u32)?;
-                    item.forensic_audit.record(V105PropertyNudgeAxiom::default().metadata());
-                    cursor.pop_context();
-                }
+                NudgeCombinator.apply_property_residue_nudge(cursor, item.header.version, rhythm_recovery, item.header.is_runeword, &mut item.forensic_audit)?;
             }
 
-            let (props, complete, term, _extra_bits, _payload, shadow_bits, nested_items) =
-                match crate::domain::stats::parser::read_item_stats(
+            let (props, complete, term, shadow_bits, nested_items) =
+                StatsCombinator.read_stats(
                     cursor,
                     &item.code,
                     item.header.version,
@@ -1523,11 +1525,8 @@ impl Item {
                     item.header.is_personalized,
                     item.header.is_compact,
                     item.header.is_socketed,
-                ) {
-                    Ok(result) => result,
-                    Err(err) => return Err(err),
-                };
-            
+                )?;
+
             let mut props = props;
             AlphaPropertyCombinator.normalize(&mut props, &item.code, &axiom);
 
@@ -1549,38 +1548,11 @@ impl Item {
             .with_personalization(item.header.is_personalized)
             .with_compact(item.header.is_compact)
             .with_code(&item.code);
-        let consumed_bits = cursor.pos() - start_bit;
-        let final_consumed = axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
         
-        if final_consumed > consumed_bits {
-            let padding_count = (final_consumed - consumed_bits) as u32;
-            let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
-                let mut bits = Vec::new();
-                for _ in 0..padding_count { 
-                    match c.read_bit() {
-                        Ok(bit) => bits.push(bit),
-                        Err(_) => break, // Stop gracefully if we hit the end
-                    }
-                }
-                Ok(bits)
-            })?;
-            item.body.alpha_alignment_padding = padding;
+        if !is_v105_summary {
+            item.body.alpha_alignment_padding = NudgeCombinator.apply_alignment_padding(cursor, start_bit, &item.code, item.header.flags, &axiom)?;
         }
         
-        item.range.end = cursor.pos();
-        item.total_bits = item.range.end - item.range.start;
-        
-        let start_idx = start_bit as usize;
-        let end_idx = cursor.pos() as usize;
-        if end_idx <= cursor.recorded_bits().len() {
-             item.bits = cursor.recorded_bits()[start_idx..end_idx].to_vec();
-        }
-        
-        item.segments = cursor.segments().iter()
-            .filter(|s| s.start >= start_bit && s.end <= cursor.pos())
-            .cloned()
-            .collect();
-
         cursor.end_segment();
         
         if let Some(l) = cursor.limit() {
@@ -1597,6 +1569,20 @@ impl Item {
                 }
             }
         }
+
+        item.range.end = cursor.pos();
+        item.total_bits = item.range.end - item.range.start;
+        
+        let start_idx = start_bit as usize;
+        let end_idx = cursor.pos() as usize;
+        if end_idx <= cursor.recorded_bits().len() {
+             item.bits = cursor.recorded_bits()[start_idx..end_idx].to_vec();
+        }
+        
+        item.segments = cursor.segments().iter()
+            .filter(|s| s.start >= start_bit && s.end <= cursor.pos())
+            .cloned()
+            .collect();
 
         Ok(item)
     }
@@ -1739,7 +1725,7 @@ impl BitEmitter {
 
 pub fn write_property_list(
     emitter: &mut BitEmitter,
-    code: &str,
+    _code: &str,
     props: &[ItemProperty],
     nested_items: &[Item],
     huffman: &HuffmanTree,
