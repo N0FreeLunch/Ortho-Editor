@@ -58,7 +58,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
             let section_header_bits = if alpha && chunk_idx == 0 {
                 let mut p = 32;
-                if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha) {
+                if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha, 0) {
 
                     p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
                 }
@@ -84,7 +84,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     let safety_margin = 72;
                     if scan_pos + safety_margin > limit_bits { continue; }
                     
-                    if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha) {
+                    if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha, 0) {   
+
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
 
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
@@ -111,7 +112,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             let mut forced_80 = false;
                             if alpha && !is_compact && !is_forced {
                                 if is_v105_summary {
-                                    if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha) {
+                                    if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha, 0) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
 
                                         if is_plausible_item_header(n_mode, n_loc, n_code.as_bytes(), n_flags, n_ver, alpha) {
@@ -188,10 +189,11 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     // Slice S3: Safe rhythmic jump.
                     let jump = if alpha {
                         // Re-peek best to get version/flags for target width
-                        if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha) {
+                        if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
                              let j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f) as u64;
                              if j > 0 { j } else { 8 } // Ensure forward progress
                         } else { 72 }
+
                     } else {
                         72 // Retail minimum width
                     };

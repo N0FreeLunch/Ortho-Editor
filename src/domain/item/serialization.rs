@@ -27,7 +27,7 @@ pub fn find_next_item_match(bytes: &[u8], pos: u64, huffman: &HuffmanTree, alpha
             continue;
         }
 
-        if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge, _has_checksum)) = peek_item_header_at(bytes, probe, huffman, alpha) {
+        if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge, _has_checksum)) = peek_item_header_at(bytes, probe, huffman, alpha, 0) {
              if crate::item::item_trace_enabled() {
                 // Probe success
              }
@@ -226,6 +226,7 @@ pub fn peek_item_header_at(
     start_bit: u64,
     huffman: &HuffmanTree,
     alpha_mode: bool,
+    idx: usize,
 ) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
     let _debug_peek = start_bit < 1200;
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -331,7 +332,7 @@ pub fn peek_item_header_at(
             
             let trimmed = t_code.trim();
             if trimmed.len() >= 2 {
-                let mut confidence = 100;
+                let mut confidence: i32 = 100;
                 let reg = crate::domain::forensic::registry::get_registry();
                 let is_known = reg.forced_compact_codes.as_ref().map(|codes| codes.iter().any(|c| c == trimmed)).unwrap_or(false)
                     || reg.forced_runeword_codes.as_ref().map(|codes| codes.iter().any(|c| c == trimmed)).unwrap_or(false)
@@ -339,9 +340,9 @@ pub fn peek_item_header_at(
                     || trimmed == "acww" || trimmed == "bcww" || trimmed == "xrs" || trimmed == "Þ.";
 
                 if is_known { confidence += 400; }
-                if trimmed == "hp1" || trimmed == "xrs" { 
-                    confidence += 50; 
-                    if trimmed == "xrs" && (flags & (1 << 26)) != 0 { confidence += 200; }
+                if alpha_mode && (trimmed == "hp1" || trimmed == "xrs") { 
+                    confidence += 500; 
+                    if trimmed == "xrs" && (flags & (1 << 26)) != 0 { confidence += 1000; }
                 }
                 if has_checksum { confidence += 100; }
                 
@@ -686,7 +687,7 @@ impl Item {
         eprintln!("[DEBUG-SLICE13] markers found: {}, top_level_count: {}", markers.len(), top_level_count);
         let mut section_header_bits = 32;
         if alpha_mode {
-            if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(section_bytes, 32, huffman, alpha_mode) {
+            if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(section_bytes, 32, huffman, alpha_mode, 0) {
                 section_header_bits = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
             }
         }
@@ -796,7 +797,7 @@ impl Item {
                 dynamic_limit = flen;
                 is_compact_final = true;
             } else if let Some((version, _, _, code, flags, _, is_compact, _, _, _)) =
-                peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                peek_item_header_at(section_bytes, start, huffman, alpha_mode, i)
 
                         {
                 is_compact_final = is_compact;
@@ -804,7 +805,7 @@ impl Item {
                 if alpha_mode && !is_compact && (code.trim().is_empty() || is_v105_summary_code(&code)) {
                     // Refined: Only force compact if there's another plausible marker 72 bits later
                     let min_interval = if alpha_mode { 72 } else { 80 };
-                    if let Some(next_header) = peek_item_header_at(section_bytes, start + min_interval, huffman, alpha_mode) {
+                    if let Some(next_header) = peek_item_header_at(section_bytes, start + min_interval, huffman, alpha_mode, 0) {
                          let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
                          if is_plausible_item_header(n_mode, n_loc, n_code.as_bytes(), n_flags, n_ver, alpha_mode) {
                              is_compact_final = true;
@@ -847,12 +848,20 @@ impl Item {
             };
 
             match parse_result {
-                Ok((item, consumed_bits)) => {
-                    eprintln!("[DEBUG-SLICE9-RESULT] marker_idx={} code='{}' start={} consumed={} end={}", i, marker.code, start, consumed_bits, start + consumed_bits);
-                    let mut final_item = item.clone();
-                    if final_item.code.trim() == "xrs" || marker.code.trim() == "c8xr" {
-                        eprintln!("[DEBUG-FINAL-CODE-BEFORE] item.code='{}', final_item.code='{}', marker.code='{}', is_summary={}", item.code, final_item.code, marker.code, crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code));
+                Ok((item, mut consumed_bits)) => {
+                    // Slice 9: Strictly enforce Alpha v105 target widths
+                    if alpha_mode {
+                        let alignment_axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
+                            .with_index(i)
+                            .with_compact(item.header.is_compact)
+                            .with_code(&item.code);
+                        let target_width = alignment_axiom.calculate_alignment(consumed_bits, &item.code, item.header.flags);
+                        if target_width > 0 {
+                            consumed_bits = target_width;
+                        }
                     }
+                    
+                    let mut final_item = item.clone();
                     
                     // Axiom 0344: In Alpha v105, if the scanner found a valid code, 
                     // ensure the parser uses it (prevents Huffman collisions).
@@ -947,7 +956,7 @@ impl Item {
                     let (peek_code, peek_limit) = if let Some(flen) = forced_length {
                         ("    ".to_string(), flen)
                     } else if let Some((_version, _, _, code, flags, _, is_compact, _, _, _)) =
-                        peek_item_header_at(section_bytes, start, huffman, alpha_mode)
+                        peek_item_header_at(section_bytes, start, huffman, alpha_mode, 0)
 
                                 {
                         let axiom = StatsAxiom::new(_version, ItemQuality::Normal, alpha_mode)
@@ -1100,7 +1109,7 @@ impl Item {
 
         let peek = if alpha_mode && ctx.is_some() {
             let (bytes, start_bit) = ctx.unwrap();
-            peek_item_header_at(bytes, start_bit, huff, true)
+            peek_item_header_at(bytes, start_bit, huff, true, 0)
         } else { None };
         let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
         let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
@@ -1419,7 +1428,8 @@ pub fn scan_socket_children(
     let section_bits = (bytes.len() * 8) as u64;
 
     while current_pos < max_pos && current_pos < section_bits {
-        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) = peek_item_header_at(bytes, current_pos, huffman, alpha) {
+        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) = peek_item_header_at(bytes, current_pos, huffman, alpha, 0) {        
+
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                 if mode == 6 || location == 6 {
                     let remaining = section_bits.saturating_sub(current_pos);
@@ -1854,6 +1864,7 @@ mod tests {
             32,
             &huffman,
             true,
+            0,
         );
         println!("peek_item_header_at result in test: {:?}", peek_res);
         

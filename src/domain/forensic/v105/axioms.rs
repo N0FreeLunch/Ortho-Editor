@@ -281,11 +281,8 @@ pub fn is_v105_summary_code(code: &str) -> bool {
 }
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
-    if trimmed == "xrs" {
-        return 0;
-    }
     let w_axiom = V105PropertyWidthAxiom::default();
-    let is_summary = w_axiom.is_summary_rhythm_forced(version, code);
+    let is_summary = w_axiom.is_summary_item(version, code);
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
     let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
     let is_personalized = (flags & (1 << 24)) != 0;
@@ -299,8 +296,9 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         }
 
         if is_summary {
-            // Slice 9: Alpha v105 summary items (potions, scrolls) are strictly 72 bits.
-            return 72;
+            // Slice 9: Alpha v105 summary items follow a 72/80 bit alternating rhythm (Institutional Oscillation)
+            // Note: Oscillation logic moved to caller or simplified to 80-bit default for target-width estimation.
+            return 80;
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
@@ -316,13 +314,8 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         return 80;
     }
 
-    if trimmed.starts_with('r') && trimmed.len() <= 3 {
-        // Slice 9: Alpha v105 Runes (r08, r13, r15) are strictly 88 bits.
-        return 88;
-    }
-
     match version {
-        1 | 2 | 0 | 6 | 4 => 80, // Standard Alpha equipment width (including xrs)
+        1 | 2 | 0 | 6 | 4 => 80, // Standard Alpha equipment width (including xrs and runes)
         5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
         _ => 0,
     }

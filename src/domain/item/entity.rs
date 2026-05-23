@@ -790,10 +790,6 @@ pub fn parse_item_header<R: BitRead>(
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
     let flags = cursor.read_bits::<u32>(w_axiom.flags_bits() as u32)?;
-    if alpha_mode {
-         let abs = start_bit_offset.unwrap_or(0);
-         eprintln!("[DEBUG-FLAGS] abs={} flags={:08X}", abs, flags);
-    }
     if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
@@ -1034,24 +1030,20 @@ pub fn parse_item_body<R: BitRead>(
                  }
              }
              if try_xrs {
-                 eprintln!("[DEBUG-XRS-BODY] Attempting ASCII xrs decode at pos={}", cursor.pos());
                  let saved_pos = cursor.pos();
                  let mut temp_code = String::new();
                  let mut success = true;
                  for _ in 0..3 {
                      match cursor.read_bits::<u8>(8) {
                          Ok(ch) => { temp_code.push(ch as char); }
-                         Err(e) => { 
-                             eprintln!("[DEBUG-XRS-BODY] ASCII decode failed: {:?}", e);
+                         Err(_) => { 
                              success = false; break; 
                          }
                      }
                  }
                  if success && temp_code.trim() == "xrs" {
-                     eprintln!("[DEBUG-XRS-BODY] ASCII xrs decode SUCCESS: {:?}", temp_code);
                      code = "xrs ".to_string();
                  } else {
-                     eprintln!("[DEBUG-XRS-BODY] ASCII xrs decode FAILED or mismatch: {:?}", temp_code);
                      cursor.rollback(saved_pos);
                  }
              }
@@ -1125,10 +1117,11 @@ pub fn parse_item_body<R: BitRead>(
         }
 
         cursor.end_segment();
-        eprintln!("[DEBUG-BODY] code: {:?}, version: {}, pos: {}", code, header.version, cursor.pos());
         (code, alpha_nudge, None, None, None)
-    };
-    Ok((ItemBody {
+        };
+
+        Ok((ItemBody {
+
         code, x: header.x, y: header.y, page: header.page, location: header.location, mode: header.mode,
         defense: None, max_durability: None, current_durability: None, quantity: None, alpha_header_gap: None, 
         alpha_header_gap_bits: Vec::new(),

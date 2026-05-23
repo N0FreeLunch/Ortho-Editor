@@ -213,8 +213,13 @@ impl StatsAxiom {
 
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
         if self.is_runeword(_flags) { return false; }
+        
         // Alpha v105 forensic: Shadow items are truly header-only (no code, no stats).
-        if self.is_v105_shadow(_flags, Some(_code)) { return true; }
+        // They are identified by flags (bit 26/27) and have NO item code.
+        let trimmed = _code.trim();
+        if self.is_v105_shadow(_flags, Some(_code)) && trimmed.is_empty() { 
+            return true; 
+        }
 
         false
     }
@@ -317,6 +322,7 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
             return target_width;
         }
     }
+
 
     if !self.is_compact {
         let aligned = (current_len + 7) / 8 * 8;

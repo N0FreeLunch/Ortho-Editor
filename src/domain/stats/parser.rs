@@ -94,7 +94,7 @@ pub fn read_item_stats<R: BitRead>(
 
     let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, Some(&child_offsets), |bytes, pos, huff, idx, alpha| {
         // println!("[DEBUG-SLICE12] Property read attempt at bit {}", pos);
-        let peek_code = crate::item::peek_item_header_at(bytes, pos, huff, alpha).map(|p| p.3);
+        let peek_code = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0).map(|p| p.3);
         let code_hint = peek_code.as_deref();
         crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None, None, code_hint)
     })?;
@@ -185,7 +185,7 @@ where
             };
             
             if is_close {
-                if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_peek_pos, huffman, axiom.save_is_alpha) {
+                if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_peek_pos, huffman, axiom.save_is_alpha, 0) {
                     let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
                     if crate::item::is_plausible_item_header(mode, loc, code_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
                         let trimmed_peek = code_peek.trim();
@@ -313,7 +313,7 @@ where
                 }
             }
             
-            if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, current_abs_pos, huffman, axiom.save_is_alpha) {
+            if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, current_abs_pos, huffman, axiom.save_is_alpha, 0) {
                 let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
                 if crate::item::is_plausible_item_header(mode, loc, code_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
                     let trimmed_peek = code_peek.trim();
@@ -485,7 +485,7 @@ where
         if is_stat_320 {
             for offset in 0..64 {
                 let probe_pos = absolute_entry_pos + offset;
-                if let Some(header_info) = crate::item::peek_item_header_at(reader_ctx.bytes, probe_pos, huffman, axiom.save_is_alpha) {
+                if let Some(header_info) = crate::item::peek_item_header_at(reader_ctx.bytes, probe_pos, huffman, axiom.save_is_alpha, 0) {
                     let (mode, loc, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
                     if crate::item::is_plausible_item_header(mode, loc, code.as_bytes(), flags, version, axiom.save_is_alpha) {
                         found_pos = probe_pos;
