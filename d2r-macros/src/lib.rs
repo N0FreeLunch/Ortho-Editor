@@ -2,11 +2,18 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use syn::parse::Parser;
+use quote::quote;
 
 /// Custom attribute for Category B bitstream serialization symmetry governance.
 #[proc_macro_attribute]
 pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr2 = proc_macro2::TokenStream::from(attr);
+    let item2 = proc_macro2::TokenStream::from(item);
+    
+    let input: syn::Item = match syn::parse2(item2.clone()) {
+        Ok(parsed) => parsed,
+        Err(err) => return err.to_compile_error().into(),
+    };
     
     let mut align = None;
     let mut checksum = None;
@@ -65,7 +72,63 @@ pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStre
         return err.to_compile_error().into();
     }
 
-    item
+    // Extract item identifier for impl block injection
+    let name = match &input {
+        syn::Item::Struct(item_struct) => &item_struct.ident,
+        syn::Item::Enum(item_enum) => &item_enum.ident,
+        syn::Item::Union(item_union) => &item_union.ident,
+        _ => {
+            let err = syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "Attribute #[serialization_symmetry] can only be applied to structs, enums, or unions."
+            );
+            return err.to_compile_error().into();
+        }
+    };
+
+    let checksum_expr = match checksum {
+        Some(algo) => quote! { Some(#algo) },
+        None => quote! { None },
+    };
+    let seed_expr = match seed {
+        Some(s) => quote! { Some(#s) },
+        None => quote! { None },
+    };
+    let tentative_val = tentative.unwrap_or(false);
+    let confidence_expr = match confidence {
+        Some(conf) => quote! { Some(#conf) },
+        None => quote! { None },
+    };
+
+    let expanded = quote! {
+        #item2
+
+        impl #name {
+            pub const SER_ALIGN: bool = #align_val;
+            pub const SER_CHECKSUM: Option<&'static str> = #checksum_expr;
+            pub const SER_SEED: Option<u8> = #seed_expr;
+            pub const SER_TENTATIVE: bool = #tentative_val;
+            pub const SER_CONFIDENCE: Option<&'static str> = #confidence_expr;
+
+            pub fn align_required() -> bool {
+                #align_val
+            }
+            pub fn checksum_algorithm() -> Option<&'static str> {
+                #checksum_expr
+            }
+            pub fn checksum_seed() -> Option<u8> {
+                #seed_expr
+            }
+            pub fn is_tentative() -> bool {
+                #tentative_val
+            }
+            pub fn confidence_level() -> Option<&'static str> {
+                #confidence_expr
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
 }
 
 /// Custom attribute for Category A bitstream slot geometry governance.
