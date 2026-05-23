@@ -269,6 +269,34 @@ impl ForensicAxiom for V105RhythmicNudgeAxiom {
     }
 }
 
+/// Marker proximity axiom for boundary recovery in Alpha v105.
+#[derive(Debug, Clone, Default)]
+pub struct V105MarkerProximityAxiom;
+
+impl ForensicAxiom for V105MarkerProximityAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Marker proximity check for bit-level boundary recovery after child exhaustion (Axiom 0345)",
+        )
+    }
+}
+
+impl V105MarkerProximityAxiom {
+    /// Checks if we are within a reasonable 'snap' distance of the next marker.
+    /// Alpha v105 typically uses a 64-bit brute-force window for marker alignment.
+    pub fn calculate_nudge(&self, current_pos: u64, next_marker_pos: u64) -> Option<u64> {
+        if next_marker_pos > current_pos {
+            let drift = next_marker_pos - current_pos;
+            if drift <= 64 {
+                return Some(drift);
+            }
+        }
+        None
+    }
+}
+
 pub fn is_v105_summary_code(code: &str) -> bool {
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
     if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
@@ -310,15 +338,22 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
         return base_width;
     }
 
+    // Equipment items (non-compact, non-summary) have variable width based on property lists.
+    // We should NOT return a fixed width here unless it's a known shadow/personalized fixed container
+    // that does NOT contain variable properties.
     if is_shadow || is_personalized {
-        return 80;
+        // Runewords and personalized items in Alpha v105 are OFTEN variable.
+        // Returning 80 here causes "swallowing" if the item is larger.
+        // We only return 80 if it's a known fixed shadow (e.g. from registry).
+        if let Some(overrides) = &reg.item_overrides {
+            if let Some(map) = overrides.get(trimmed) {
+                if let Some(&width) = map.get("fixed_width") { return width; }
+            }
+        }
+        return 0; // Default to variable
     }
 
-    match version {
-        1 | 2 | 0 | 6 | 4 => 80, // Standard Alpha equipment width (including xrs and runes)
-        5 | 7 => reg.axioms.get("v5_equipment_width").cloned().unwrap_or(104) as u32,
-        _ => 0,
-    }
+    0 // Default to variable for standard equipment
 }
 /// JM Marker scanning axiom for Alpha v105.
 #[derive(Debug, Clone, Default)]

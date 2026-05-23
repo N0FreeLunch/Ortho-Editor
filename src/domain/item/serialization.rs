@@ -887,12 +887,12 @@ impl Item {
 
                         if let Some(target) = next_target {
                             if current_end < target {
-                                let drift = target - current_end;
-                                if drift <= 3 {
-                                    // Axiom 0344: Snap to Grid. Consume the drift as alignment padding.
+                                let proximity_axiom = crate::domain::forensic::v105::axioms::V105MarkerProximityAxiom::default();
+                                if let Some(drift) = proximity_axiom.calculate_nudge(current_end, target) {
+                                    // Axiom 0345: Proximity Snap. Consume the drift as alignment padding to recover boundary.
                                     actual_consumed += drift;
                                     final_item.body.alpha_alignment_padding.extend(vec![false; drift as usize]);
-                                    final_item.forensic_audit.record(crate::domain::forensic::v105::axioms::V105RhythmicNudgeAxiom::default().metadata());
+                                    final_item.forensic_audit.record(proximity_axiom.metadata());
                                 }
                             }
                         }
