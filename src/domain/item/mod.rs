@@ -4,6 +4,7 @@ pub mod serialization;
 pub mod axiom_meta;
 pub mod scanner;
 pub mod editor;
+pub mod subdomains;
 
 pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;

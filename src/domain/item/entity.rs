@@ -1,11 +1,13 @@
 use crate::data::bit_cursor::BitCursor;
-use crate::error::{ParsingResult, ParsingError};
+use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use bitstream_io::BitRead;
 use serde::{Serialize, Deserialize};
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::axiom_meta::{ForensicAudit};
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::domain::stats::axiom::StatsAxiom;
+use crate::domain::item::subdomains::affix::{AffixCombinator, MagicAffixSegment, RareAffixSegment, UniqueAffixSegment};
+use crate::domain::item::subdomains::gap::{GapCombinator, AlphaHeaderGap};
 use crate::domain::header::entity::{ItemSegmentType, ItemHeader, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105PropertyWidthAxiom};
 use std::ops::{Deref, DerefMut};
@@ -542,21 +544,24 @@ impl Item {
                 let current_bits = emitter.written_bits() - start_bit;
                 if current_bits < geometry.target_width as u64 {
                     let to_write = (geometry.target_width as u64 - current_bits) as u32;
-                    if !self.body.alpha_header_gap_bits.is_empty() {
-                         for &bit in &self.body.alpha_header_gap_bits { emitter.write_bit(bit)?; }
-                    } else {
-                         emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), to_write)?;
-                    }
+                    let gap_seg = AlphaHeaderGap { bits: if !self.body.alpha_header_gap_bits.is_empty() { self.body.alpha_header_gap_bits.clone() } else { 
+                        let mut b = Vec::new();
+                        let val = self.body.alpha_header_gap.unwrap_or(0);
+                        for i in 0..to_write { b.push((val & (1 << i)) != 0); }
+                        b
+                    }};
+                    gap_seg.emit(emitter)?;
                 }
             } else if geometry.has_header_gap || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5) {
-                if !self.body.alpha_header_gap_bits.is_empty() {
-                    for &bit in &self.body.alpha_header_gap_bits { emitter.write_bit(bit)?; }
-                } else {
-                    let gap_len = V105HeaderGapAxiom::default().resolve_gap(self.header.version, Some(&self.code), self.header.flags, idx == 0, self.header.is_compact, self.header.has_checksum, None);
-
-                    if gap_len > 0 {
-                        emitter.write_bits(self.body.alpha_header_gap.unwrap_or(0), gap_len as u32)?;
-                    }
+                let gap_len = V105HeaderGapAxiom::default().resolve_gap(self.header.version, Some(&self.code), self.header.flags, idx == 0, self.header.is_compact, self.header.has_checksum, None);
+                if gap_len > 0 || !self.body.alpha_header_gap_bits.is_empty() {
+                    let gap_seg = AlphaHeaderGap { bits: if !self.body.alpha_header_gap_bits.is_empty() { self.body.alpha_header_gap_bits.clone() } else { 
+                        let mut b = Vec::new();
+                        let val = self.body.alpha_header_gap.unwrap_or(0);
+                        for i in 0..gap_len as u32 { b.push((val & (1 << i)) != 0); }
+                        b
+                    }};
+                    gap_seg.emit(emitter)?;
                 }
             }
         } else {
@@ -588,15 +593,11 @@ impl Item {
 
             if final_bits > (current_bits - start_bit) {
                 let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
-                if !self.body.alpha_alignment_padding.is_empty() { 
-                    for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } 
-                } else { 
-                    emitter.write_bits(0, padding_needed)?; 
-                }
+                let pad_seg = AlphaHeaderGap { bits: if !self.body.alpha_alignment_padding.is_empty() { self.body.alpha_alignment_padding.clone() } else { vec![false; padding_needed as usize] } };
+                pad_seg.emit(emitter)?;
             }
             return Ok(());
-        }
-
+            }
         if self.header.is_ear {
             emitter.write_bits(self.ear_class.unwrap_or(0) as u32, 3)?;
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
@@ -646,21 +647,17 @@ impl Item {
                 match quality_val {
                     ItemQuality::Low | ItemQuality::High => { emitter.write_bits(self.low_high_graphic_bits.unwrap_or(0) as u32, 3)?; }
                     ItemQuality::Magic => {
-                        emitter.write_bits(self.magic_prefix.unwrap_or(0) as u32, 11)?;
-                        emitter.write_bits(self.magic_suffix.unwrap_or(0) as u32, 11)?;
+                        let seg = MagicAffixSegment { prefix: self.magic_prefix, suffix: self.magic_suffix };
+                        seg.emit(emitter)?;
                     }
                     ItemQuality::Rare | ItemQuality::Crafted => {
-                        emitter.write_bits(self.rare_name_1.unwrap_or(0) as u32, 8)?;
-                        emitter.write_bits(self.rare_name_2.unwrap_or(0) as u32, 8)?;
-                        for i in 0..6 {
-                            if let Some(affix) = self.rare_affixes[i] {
-                                emitter.write_bit(true)?; emitter.write_bits(affix as u32, 11)?;
-                            } else { emitter.write_bit(false)?; }
-                        }
+                        let seg = RareAffixSegment { names: [self.rare_name_1, self.rare_name_2], affixes: self.rare_affixes };
+                        seg.emit(emitter)?;
                     }
                     ItemQuality::Set | ItemQuality::Unique => {
                         let uid = if alpha_mode { self.alpha_unique_id_raw.unwrap_or(self.unique_id.unwrap_or(0)) } else { self.unique_id.unwrap_or(0) };
-                        emitter.write_bits(uid as u32, 12)?;
+                        let seg = UniqueAffixSegment { unique_id: Some(uid) };
+                        seg.emit(emitter)?;
                     }
                     _ => {}
                 }
@@ -699,14 +696,9 @@ impl Item {
                 if self.header.version != 5 || is_shadow || self.header.is_runeword || (alpha_mode && s_axiom.is_compact && !is_summary) || !self.properties.is_empty() {
                     // Slice 11: Write JM-to-Body alignment gap
                     let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
-                    if gap_len > 0 {
-                        if !self.body.alpha_body_gap_bits.is_empty() {
-                            for &bit in &self.body.alpha_body_gap_bits {
-                                emitter.write_bit(bit)?;
-                            }
-                        } else {
-                            emitter.write_bits(0, gap_len)?;
-                        }
+                    if gap_len > 0 || !self.body.alpha_body_gap_bits.is_empty() {
+                        let gap_seg = AlphaHeaderGap { bits: if !self.body.alpha_body_gap_bits.is_empty() { self.body.alpha_body_gap_bits.clone() } else { vec![false; gap_len as usize] } };
+                        gap_seg.emit(emitter)?;
                     }
                     crate::domain::item::serialization::write_property_list(emitter, &self.code, &self.properties, &self.socketed_items, huffman, self.header.version, self.header.is_runeword, self.terminator_bit, self.properties_complete, quality_val, is_shadow, &s_axiom)?;
                     for set_props in &self.set_attributes {
@@ -732,8 +724,8 @@ impl Item {
 
         if final_bits > (current_bits - start_bit) {
             let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
-            if !self.body.alpha_alignment_padding.is_empty() { for &bit in &self.body.alpha_alignment_padding { emitter.write_bit(bit)?; } }
-            else { emitter.write_bits(0, padding_needed)?; }
+            let pad_seg = AlphaHeaderGap { bits: if !self.body.alpha_alignment_padding.is_empty() { self.body.alpha_alignment_padding.clone() } else { vec![false; padding_needed as usize] } };
+            pad_seg.emit(emitter)?;
         }
         Ok(())
     }
@@ -861,7 +853,9 @@ pub fn parse_item_header<R: BitRead>(
             // to ensure correct alignment and socket count parsing.
             if let Some(c) = code_hint {
                 let trimmed = c.trim();
-                if trimmed == "xrs" || trimmed == "c8xr" {
+                if trimmed == "c8xr" {
+                    gap_bits = if version == 0 { 88 } else { 14 };
+                } else if trimmed == "xrs" {
                     gap_bits = 14;
                 }
             }
@@ -880,7 +874,10 @@ pub fn parse_item_header<R: BitRead>(
                 y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
             }
 
-            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
+            let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
+                Ok(AlphaHeaderGap::parse(c, gap_bits as usize)?)
+            })?;
+            alpha_header_gap_bits = gap_seg.bits;
 
             // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
             if version == 5 {
@@ -924,7 +921,10 @@ pub fn parse_item_header<R: BitRead>(
                 8
             };
 
-            alpha_header_gap_bits = cursor.with_context("AlphaHeaderGap", |c| c.read_bits_as_vec(gap_bits as u32))?;
+            let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
+                Ok(AlphaHeaderGap::parse(c, gap_bits as usize)?)
+            })?;
+            alpha_header_gap_bits = gap_seg.bits;
             let mut val = 0u32;
             for (i, &bit) in alpha_header_gap_bits.iter().enumerate() { 
                 if i < 32 && bit { val |= 1u32 << i; } 
@@ -943,8 +943,10 @@ pub fn parse_item_header<R: BitRead>(
             let available = cursor.remaining() as u32;
             let actual_read = std::cmp::min(to_read, available);
             if actual_read > 0 {
-                let bits = cursor.with_context("AlphaHeaderGapPadding", |c| c.read_bits_as_vec(actual_read))?;
-                for b in bits {
+                let pad_seg = cursor.with_context("AlphaHeaderGapPadding", |c| {
+                    Ok(AlphaHeaderGap::parse(c, actual_read as usize)?)
+                })?;
+                for b in pad_seg.bits {
                     alpha_header_gap_bits.push(b);
                 }
                 let mut val = 0u32;
@@ -958,7 +960,7 @@ pub fn parse_item_header<R: BitRead>(
     cursor.end_segment();
     Ok((ItemHeader {
         flags, version, mode, location, x, y, page, socket_hint, id: None, level: None, quality: None, is_compact,
-        is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact), is_personalized,
+        is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact, code_hint), is_personalized,
         is_runeword: h_axiom.is_runeword(flags, code_hint), is_ethereal: s_axiom.is_ethereal(flags), is_ear: !alpha_mode && (flags & (1 << 24)) != 0,
         has_checksum,
         alpha_quality_raw: None, alpha_v5_runeword_extra: None, alpha_unique_id_raw: None,
@@ -1015,38 +1017,53 @@ pub fn parse_item_body<R: BitRead>(
 
                 if success && w_axiom.is_summary_item(header.version, &temp_code) {
                     code = temp_code;
+                } else if success {
+                    let trimmed_temp = temp_code.trim();
+                    if let Some(stripped) = trimmed_temp.strip_prefix('w') {
+                        if w_axiom.is_summary_item(header.version, stripped) {
+                            code = stripped.to_string();
+                        } else {
+                            cursor.rollback(saved_pos);
+                        }
+                    } else {
+                        cursor.rollback(saved_pos);
+                    }
                 } else {
                     cursor.rollback(saved_pos);
                 }
             }
         }
 
+        if alpha_mode && header.is_compact && code.is_empty() {
+            if let Some(hint) = code_hint {
+                let trimmed_hint = hint.trim();
+                if w_axiom.is_summary_item(header.version, trimmed_hint) {
+                    code = trimmed_hint.to_string();
+                }
+            }
+        }
+
         if code.is_empty() && alpha_mode {
-             let mut try_xrs = false;
-             if let Some(hint) = code_hint {
-                 let trimmed = hint.trim();
-                 if trimmed == "xrs" {
-                     try_xrs = true;
-                 }
-             }
-             if try_xrs {
-                 let saved_pos = cursor.pos();
-                 let mut temp_code = String::new();
-                 let mut success = true;
-                 for _ in 0..3 {
-                     match cursor.read_bits::<u8>(8) {
-                         Ok(ch) => { temp_code.push(ch as char); }
-                         Err(_) => { 
-                             success = false; break; 
-                         }
-                     }
-                 }
-                 if success && temp_code.trim() == "xrs" {
-                     code = "xrs ".to_string();
-                 } else {
-                     cursor.rollback(saved_pos);
-                 }
-             }
+            if let Some(hint) = code_hint {
+                let trimmed = hint.trim();
+                if trimmed == "xrs" || trimmed == "c8xr" {
+                    let saved_pos = cursor.pos();
+                    let consumed = if trimmed == "c8xr" {
+                        cursor.read_bits_as_vec(32)
+                    } else {
+                        cursor.read_bits_as_vec(24)
+                    };
+                    if consumed.is_ok() {
+                        code = if trimmed == "xrs" {
+                            "xrs ".to_string()
+                        } else {
+                            "c8xr".to_string()
+                        };
+                    } else {
+                        cursor.rollback(saved_pos);
+                    }
+                }
+            }
         }
 
         if code.is_empty() {
@@ -1093,6 +1110,15 @@ pub fn parse_item_body<R: BitRead>(
                             return Err(e);
                         }
                     }
+                }
+            }
+        }
+
+        if alpha_mode && header.is_compact {
+            let trimmed_code = code.trim();
+            if let Some(stripped) = trimmed_code.strip_prefix('w') {
+                if w_axiom.is_summary_item(header.version, stripped) {
+                    code = stripped.to_string();
                 }
             }
         }
@@ -1185,13 +1211,17 @@ impl ExtendedStatsData {
         let quality_val = data.quality.unwrap_or(ItemQuality::Normal);
         match quality_val {
             ItemQuality::Low | ItemQuality::High => { data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(w_axiom.low_high_graphic_bits() as u32)? as u8); }
-            ItemQuality::Magic => { data.magic_prefix = Some(cursor.read_bits::<u16>(w_axiom.magic_affix_bits() as u32)? as u16); data.magic_suffix = Some(cursor.read_bits::<u16>(w_axiom.magic_affix_bits() as u32)? as u16); }
+            ItemQuality::Magic => {
+                let seg = MagicAffixSegment::parse(cursor).map_err(ParsingFailure::from)?;
+                data.magic_prefix = seg.prefix; data.magic_suffix = seg.suffix;
+            }
             ItemQuality::Rare | ItemQuality::Crafted => {
-                data.rare_name_1 = Some(cursor.read_bits::<u8>(w_axiom.rare_name_bits() as u32)? as u8); data.rare_name_2 = Some(cursor.read_bits::<u8>(w_axiom.rare_name_bits() as u32)? as u8);
-                for i in 0..6 { if cursor.read_bit()? { data.rare_affixes[i] = Some(cursor.read_bits::<u16>(w_axiom.rare_affix_bits() as u32)? as u16); } }
+                let seg = RareAffixSegment::parse(cursor).map_err(ParsingFailure::from)?;
+                data.rare_name_1 = seg.names[0]; data.rare_name_2 = seg.names[1]; data.rare_affixes = seg.affixes;
             }
             ItemQuality::Set | ItemQuality::Unique => { 
-                let uid = cursor.read_bits::<u16>(w_axiom.unique_id_bits() as u32)? as u16;
+                let seg = UniqueAffixSegment::parse(cursor).map_err(ParsingFailure::from)?;
+                let uid = seg.unique_id.unwrap_or(0);
                 if alpha_mode { data.alpha_unique_id_raw = Some(uid); }
                 data.unique_id = Some(uid); 
             }
@@ -1203,13 +1233,33 @@ impl ExtendedStatsData {
             data.personalized_player_name = Some(crate::domain::item::serialization::read_player_name(cursor, alpha_mode && w_axiom.is_player_name_alpha_style(version))?); 
         }
         if trimmed_code == "tbk" || trimmed_code == "ibk" { data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(w_axiom.teleport_bits() as u32)? as u8) }
+        let has_realm_data = cursor.read_bit()?;
+        if has_realm_data {
+            let _realm_data_1 = cursor.read_bits::<u32>(32)?;
+            let _realm_data_2 = cursor.read_bits::<u32>(32)?;
+            let _realm_data_3 = cursor.read_bits::<u32>(32)?;
+        }
         data.timestamp_flag = cursor.read_bit()?;
         let template = crate::domain::item::serialization::item_template(trimmed_code);
         let (reads_defense, reads_durability, reads_quantity) = if let Some(template) = template { (template.is_armor, template.has_durability, template.is_stackable) } else {
             let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
-            let armor_like_unknown = data.has_class_specific_data || trimmed_code.contains(' ');
+            let is_authority_xrs = alpha_mode && (trimmed_code == "xrs" || trimmed_code == "c8xr");
+            let armor_like_unknown = data.has_class_specific_data || trimmed_code.contains(' ') || is_authority_xrs;
             (armor_like_unknown, armor_like_unknown, is_scroll)
         };
+        if alpha_mode && trimmed_code == "xrs" {
+            eprintln!(
+                "[DEBUG-XRS-EXT] version={}, compact={}, runeword={}, template={:?}, reads_defense={}, reads_durability={}, reads_quantity={}, pos={}",
+                version,
+                is_compact,
+                is_runeword,
+                template.map(|t| (t.code, t.is_armor, t.has_durability, t.is_stackable)),
+                reads_defense,
+                reads_durability,
+                reads_quantity,
+                cursor.pos()
+            );
+        }
         if reads_defense && axiom.reads_defense() { data.defense = Some(cursor.read_bits::<u32>(w_axiom.stat_bits(31) as u32)?); }
         if reads_durability && axiom.reads_durability() {
             let max_bits = w_axiom.stat_bits(73);
@@ -1238,4 +1288,3 @@ fn is_potion_code(code: &str) -> bool {
         || trimmed == "wwsw"
         || trimmed.starts_with('7')
 }
-
