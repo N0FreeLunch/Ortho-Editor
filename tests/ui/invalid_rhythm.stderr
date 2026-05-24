@@ -1,0 +1,15 @@
+error: #[rhythm_alignment] requires a 'width' parameter.
+ --> tests/ui/invalid_rhythm.rs:4:1
+  |
+4 | #[rhythm_alignment(gap = "alpha_v0")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `rhythm_alignment` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: #[rhythm_alignment] 'width' must be an even number.
+ --> tests/ui/invalid_rhythm.rs:8:1
+  |
+8 | #[rhythm_alignment(width = 75)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `rhythm_alignment` (in Nightly builds, run with -Z macro-backtrace for more info)

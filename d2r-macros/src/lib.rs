@@ -133,8 +133,107 @@ pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStre
 
 /// Custom attribute for Category A bitstream slot geometry governance.
 #[proc_macro_attribute]
-pub fn rhythm_alignment(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
+pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr2 = proc_macro2::TokenStream::from(attr);
+    let item2 = proc_macro2::TokenStream::from(item);
+    
+    let input: syn::Item = match syn::parse2(item2.clone()) {
+        Ok(parsed) => parsed,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    
+    let mut width = None;
+    let mut gap = None;
+    let mut versions = Vec::new();
+
+    let args_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("width") {
+            let value: syn::LitInt = meta.value()?.parse()?;
+            let num: u32 = value.base10_parse()?;
+            width = Some(num);
+        } else if meta.path.is_ident("gap") {
+            let value: syn::LitStr = meta.value()?.parse()?;
+            gap = Some(value.value());
+        } else if meta.path.is_ident("versions") {
+            let value: syn::Expr = meta.value()?.parse()?;
+            if let syn::Expr::Array(expr_array) = value {
+                for elem in expr_array.elems {
+                    if let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit_int), .. }) = elem {
+                        let num: u32 = lit_int.base10_parse()?;
+                        versions.push(num);
+                    } else {
+                        return Err(meta.error("versions array must contain only integer literals"));
+                    }
+                }
+            } else {
+                return Err(meta.error("versions must be an array of integers, e.g. versions = [0, 1, 5]"));
+            }
+        } else {
+            return Err(meta.error("unsupported rhythm_alignment property"));
+        }
+        Ok(())
+    });
+
+    if let Err(err) = args_parser.parse2(attr2) {
+        return err.to_compile_error().into();
+    }
+
+    if width.is_none() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[rhythm_alignment] requires a 'width' parameter."
+        ).to_compile_error().into();
+    }
+
+    if let Some(w) = width {
+        if w == 0 {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "#[rhythm_alignment] 'width' must be greater than 0."
+            ).to_compile_error().into();
+        }
+        if w % 2 != 0 {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "#[rhythm_alignment] 'width' must be an even number."
+            ).to_compile_error().into();
+        }
+    }
+
+    if let syn::Item::Struct(ref item_struct) = input {
+        let name = &item_struct.ident;
+        let width_val = width.unwrap();
+        
+        let gap_expr = match gap {
+            Some(g) => quote! { Some(#g) },
+            None => quote! { None },
+        };
+        
+        let versions_expr = quote! { &[#(#versions),*] };
+
+        let expanded = quote! {
+            #item2
+
+            impl #name {
+                pub const RHYTHM_WIDTH: u32 = #width_val;
+                pub const RHYTHM_GAP: Option<&'static str> = #gap_expr;
+                pub const RHYTHM_VERSIONS: &'static [u32] = #versions_expr;
+                
+                pub fn slot_width() -> u32 {
+                    #width_val
+                }
+                pub fn alignment_gap() -> Option<&'static str> {
+                    #gap_expr
+                }
+                pub fn supported_versions() -> &'static [u32] {
+                    #versions_expr
+                }
+            }
+        };
+        return TokenStream::from(expanded);
+    }
+
+    TokenStream::from(item2)
 }
 
 /// Custom attribute for Category C forensic sensing pipeline governance.
