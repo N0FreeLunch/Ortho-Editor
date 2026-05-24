@@ -141,6 +141,12 @@ pub fn rhythm_alignment(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn forensic_sensor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr2 = proc_macro2::TokenStream::from(attr);
+    let item2 = proc_macro2::TokenStream::from(item);
+    
+    let input: syn::Item = match syn::parse2(item2.clone()) {
+        Ok(parsed) => parsed,
+        Err(err) => return err.to_compile_error().into(),
+    };
     
     let mut target = None;
     let mut trigger = None;
@@ -192,5 +198,42 @@ pub fn forensic_sensor(attr: TokenStream, item: TokenStream) -> TokenStream {
         ).to_compile_error().into();
     }
 
-    item
+    if let syn::Item::Struct(ref item_struct) = input {
+        let name = &item_struct.ident;
+        let target_str = target.clone().unwrap();
+        let target_ident = syn::Ident::new(&target_str, proc_macro2::Span::call_site());
+        
+        let trigger_expr = match &trigger {
+            Some(t) => quote! { Some(#t) },
+            None => quote! { None },
+        };
+        
+        let label_expr = match &_label {
+            Some(l) => quote! { Some(#l) },
+            None => quote! { None },
+        };
+
+        let expanded = quote! {
+            #item2
+
+            impl #name {
+                pub fn sensor_dump(&self) {
+                    if std::env::var("D2R_FORENSIC").is_ok() {
+                        let trigger_val = #trigger_expr;
+                        let mut should_log = true;
+                        if trigger_val == Some("on_desync") {
+                            should_log = std::env::var("D2R_DESYNC").is_ok();
+                        }
+                        if should_log {
+                            let label_str = #label_expr.unwrap_or("generic");
+                            eprintln!("[FORENSIC-SENSOR] label: {}, target: {}, value: {:?}", label_str, #target_str, self.#target_ident);
+                        }
+                    }
+                }
+            }
+        };
+        return TokenStream::from(expanded);
+    }
+
+    TokenStream::from(item2)
 }
