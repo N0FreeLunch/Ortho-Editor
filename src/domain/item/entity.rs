@@ -26,6 +26,10 @@ pub struct AlphaV105PersonalizedAlignment;
 #[serialization_symmetry(align = true)]
 pub struct AlphaV105PostBodyAlignment;
 
+/// Category B: Alpha v105 bitstream symmetry point for post-header-gap alignment.
+#[serialization_symmetry(align = true)]
+pub struct AlphaV105HeaderGapAlignment;
+
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BitSemantic {
@@ -900,7 +904,7 @@ pub fn parse_item_header<R: BitRead>(
             alpha_header_gap_bits = gap_seg.bits;
 
             // Forensic: Byte-align after header gap for Version 5 to fix body parsing desync
-            if version == 5 {
+            if version == 5 && AlphaV105HeaderGapAlignment::align_required() {
                 cursor.byte_align()?;
             }
 
