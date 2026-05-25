@@ -209,7 +209,7 @@ impl HeaderAxiom {
             if trimmed == "c8xr" || trimmed == "xrs" {
                 return true;
             }
-            if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+            if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {
                 return false;
             }
         }
@@ -217,7 +217,7 @@ impl HeaderAxiom {
         if self.alpha_mode {
             if let Some(c) = code {
                 let trimmed = c.trim();
-                if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+                if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {
                     return false;
                 }
                 let reg = crate::domain::forensic::registry::get_registry();

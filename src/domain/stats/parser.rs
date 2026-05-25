@@ -174,7 +174,7 @@ where
                         let trimmed_peek = code_peek.trim();
                         let is_socketable = (trimmed_peek.starts_with('r') && trimmed_peek.len() <= 3)
                             || (trimmed_peek.starts_with('g') && trimmed_peek.len() == 3)
-                            || trimmed_peek == "jew";
+                            || trimmed_peek == "jew" || trimmed_peek == "tsc" || trimmed_peek == "isc";
                         if is_socketable {
                             saw_terminator = true;
                             terminator_bit = false;
@@ -235,7 +235,7 @@ where
         }
     }
 
-    if axiom.is_alpha() && alpha_runeword && axiom.is_socketed && nested_items.is_empty() {
+    if axiom.is_alpha() && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw") && axiom.is_socketed && nested_items.is_empty() {
         let mut child_idx = 0;
         loop {
             let mut current_pos = recorder.pos();
@@ -263,7 +263,7 @@ where
                 if force_alias || crate::item::is_plausible_item_header(mode, loc, normalized_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
                     let is_socketable = (normalized_peek.starts_with('r') && normalized_peek.len() <= 3)
                         || (normalized_peek.starts_with('g') && normalized_peek.len() == 3)
-                        || normalized_peek == "jew";
+                        || normalized_peek == "jew" || normalized_peek == "tsc" || normalized_peek == "isc";
                     if !is_socketable {
                         break;
                     }
