@@ -102,6 +102,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2save_diff`**   | Save | Byte-level diff between two saves (header vs item section). |
 | **`d2save_bit_xor_diff`**| Save | **Semantic Shift Detector**: Bit-level XOR diff with section context. |
 | **`d2save_item_diff`**| Save | **Crucial**: Compares only the item bitstream, masking header noise. |
+| **`d2item_bit_visualizer`** | Item | **Semantic Visualizer**: Hierarchical bitstream mapping with desync context. |
 | **`d2item_inspect`** | Item | Decomposes a `.d2i` or `.d2s` item into its bit-fields and props. |
 | **`d2item_extract`** | Item | Extracts a raw item bit-payload from a save into a `.d2i` file. |
 | **`d2save_inject`** | Item | Injects a raw `.d2i` item into a specific save file. |

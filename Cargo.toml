@@ -36,6 +36,10 @@ pulldown-cmark = "0.12"
 colored = "2.1"
 
 [[bin]]
+name = "d2item_bit_visualizer"
+path = "src/bin/inspect/d2item_bit_visualizer.rs"
+
+[[bin]]
 name = "d2save_status_inspect"
 path = "src/bin/d2save_status_inspect.rs"
 
