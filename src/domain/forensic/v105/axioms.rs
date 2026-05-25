@@ -232,7 +232,7 @@ impl V105AlignmentAxiom {
         if is_compact { return 0; }
         let is_empty = code.trim_matches(|c: char| c.is_whitespace() || c == '\0').is_empty();
         if is_empty { return 0; }
-        
+
         let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         if is_v105_summary_code(trimmed) {
             return 0; // Axiom 0718: Summary items don't use the equipment drift.
@@ -253,10 +253,10 @@ impl V105AlignmentAxiom {
             _ => 0,
         };
         if trimmed == "hp1" {
+            eprintln!("[DEBUG-Nudge] code='{}' version={} res={}", code, version, res);
         }
         res
-    }
-}
+    }}
 
 /// Active alignment nudge (Active Nudging) for rhythm-aware boundary correction.
 #[derive(Debug, Clone, Default)]
@@ -314,6 +314,7 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_item(version, code);
+    
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
     let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
     let is_personalized = (flags & (1 << 24)) != 0;
@@ -327,13 +328,15 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
         }
 
         if is_summary {
+            if w_axiom.is_summary_rhythm_forced(version, code) {
+                return w_axiom.summary_item_fixed_width(); // Enforce strict 80-bit slotted boundary
+            }
+            
             // Slice 9: Alpha v105 summary items follow a 72/80 bit alternating rhythm (Institutional Oscillation)
             let item_idx = if let Some(i) = idx {
                 i
             } else {
-                // If index is not provided, infer from absolute position in section (assumes byte-aligned JM markers)
-                // Note: The oscillation is relative to the FIRST item in the section (usually bit 32).
-                0 // Fallback or sophisticated inference
+                0
             };
             
             return if item_idx % 2 == 0 { 80 } else { 72 };

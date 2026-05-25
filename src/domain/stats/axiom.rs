@@ -353,9 +353,7 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
         if target_width > 0 {
             return target_width;
         }
-    }
-
-    if !self.is_compact {
+    }    if !self.is_compact {
         let aligned = (current_len + 7) / 8 * 8;
         return aligned;
     }
