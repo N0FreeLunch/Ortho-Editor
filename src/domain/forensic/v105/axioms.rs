@@ -213,51 +213,6 @@ impl V105StealthCodeAxiom {
     }
 }
 
-/// 19-bit alignment drift resolution for Huffman stream start.
-#[derive(Debug, Clone, Default)]
-pub struct V105AlignmentAxiom;
-
-impl ForensicAxiom for V105AlignmentAxiom {
-    fn metadata(&self) -> ForensicMetadata {
-        ForensicMetadata::new(
-            Confidence::VerifiedTruth,
-            Intentionality::Structural,
-            "19-bit huffman alignment drift resolution for Alpha v105",
-        )
-    }
-}
-
-impl V105AlignmentAxiom {
-    pub fn get_alignment_nudge(&self, version: u8, code: &str, flags: u32, is_compact: bool) -> usize {
-        if is_compact { return 0; }
-        let is_empty = code.trim_matches(|c: char| c.is_whitespace() || c == '\0').is_empty();
-        if is_empty { return 0; }
-
-        let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
-        if is_v105_summary_code(trimmed) {
-            return 0; // Axiom 0718: Summary items don't use the equipment drift.
-        }
-
-        let is_socketed = (flags & 0x00000008) != 0;
-        let is_runeword = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-        let res = match (version, trimmed) {
-            (5, "wuw8") => 176,
-            (5, "w8cs") => 96,
-            (0, "wuw8") | (0, "s7ds") => 22, // 3-bit drift from standard 19-bit
-            (0, "xrs") => 0, // Authority runeword xrs in Version 0 uses 0 nudge
-            (0, _) if is_runeword => 0, // Runewords in Version 0 do not use socketed drift
-            (0, _) if is_socketed => 32,
-            (0, _) => 19,
-            (2, "xrs") | (2, "hp1") => 0, // Authority fixture items don't use the 19-bit drift
-            (2, _) => 0, // Disable for Version 2 by default unless proven otherwise
-            _ => 0,
-        };
-        if trimmed == "hp1" {
-            eprintln!("[DEBUG-Nudge] code='{}' version={} res={}", code, version, res);
-        }
-        res
-    }}
-
 /// Active alignment nudge (Active Nudging) for rhythm-aware boundary correction.
 #[derive(Debug, Clone, Default)]
 pub struct V105RhythmicNudgeAxiom;

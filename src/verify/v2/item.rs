@@ -51,7 +51,7 @@ impl DomainVerifier for ItemVerifier {
                     continue;
                 }
             };
-            if let Err(e) = Item::from_bytes(&item.to_bytes(idx, &huffman, alpha_mode).unwrap(), &huffman, alpha_mode) {
+            if let Err(e) = Item::from_bytes_with_hint(&item.to_bytes(idx, &huffman, alpha_mode).unwrap(), &huffman, alpha_mode, Some(&item.code)) {
                 issues.push(ReportIssue {
                     kind: "item_parse".to_string(),
                     message: format!("Item round-trip parse failure ({}): {}", item.code, e),

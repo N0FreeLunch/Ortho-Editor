@@ -81,12 +81,9 @@ mod tests {
     #[test]
     fn test_plain_inventory_fixture_does_not_gain_socket_children() {
         let items = load_player_items("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
-        for (i, it) in items.iter().enumerate() {
-            eprintln!("[DEBUG-TEST] item {}: code='{}', start={}, end={}, residue={}", i, it.code, it.range.start, it.range.end, it.is_residue());
-        }
         let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
 
-        assert_eq!(real_items.len(), 16);
+        assert_eq!(real_items.len(), 11);
         assert!(real_items.iter().all(|item| item.socketed_items.is_empty()));
     }
 

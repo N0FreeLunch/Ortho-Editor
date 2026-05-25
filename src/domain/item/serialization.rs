@@ -589,13 +589,21 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
 }
 
 pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
-    let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None, None, None)?;
+    from_bytes_with_hint(bytes, huffman, alpha, None)
+}
+
+pub fn from_bytes_with_hint(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, hint: Option<&str>) -> ParsingResult<Item> {
+    let (item, _) = parse_item_at_with_limit(bytes, 0, huffman, 0, alpha, None, None, hint)?;
     Ok(item)
 }
 
 impl Item {
     pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
         from_bytes(bytes, huffman, alpha)
+    }
+
+    pub fn from_bytes_with_hint(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, hint: Option<&str>) -> ParsingResult<Item> {
+        from_bytes_with_hint(bytes, huffman, alpha, hint)
     }
 
     pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Vec<Item>> {

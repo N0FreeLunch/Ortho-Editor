@@ -631,12 +631,15 @@ impl Item {
                 }
             }
         } else {
-            let encoded_code = huffman.encode(&self.code)?;
-            emitter.extend_bits(encoded_code)?;
-            if h_axiom.is_alpha() && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) && !s_axiom.is_compact {
-                let nudge = self.body.alpha_nudge.unwrap_or(0);
-                let nudge_bits = w_axiom.nudge_bits() as u32;
-                emitter.write_bits(nudge as u32, nudge_bits)?;
+            let is_v105_summary = alpha_mode && s_axiom.is_compact && w_axiom.is_summary_item(self.header.version, &self.code);
+            if !is_v105_summary {
+                let encoded_code = huffman.encode(&self.code)?;
+                emitter.extend_bits(encoded_code)?;
+                if h_axiom.is_alpha() && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1) && !s_axiom.is_compact {
+                    let nudge = self.body.alpha_nudge.unwrap_or(0);
+                    let nudge_bits = w_axiom.nudge_bits() as u32;
+                    emitter.write_bits(nudge as u32, nudge_bits)?;
+                }
             }
         }
 
