@@ -96,6 +96,10 @@ name = "d2save_item_diff"
 path = "src/bin/verify/d2save_item_diff.rs"
 
 [[bin]]
+name = "d2save_bit_visualizer"
+path = "src/bin/verify/d2save_bit_visualizer.rs"
+
+[[bin]]
 name = "d2save_grid"
 path = "src/bin/verify/d2save_grid.rs"
 

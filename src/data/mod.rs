@@ -3,6 +3,10 @@ pub mod generated;
 
 pub mod bit_cursor;
 pub mod repository;
+pub mod alignment_oracle;
+
+#[cfg(test)]
+mod alignment_oracle_test;
 
 pub use bit_cursor::BitCursor;
 pub use repository::DataRepository;
