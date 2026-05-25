@@ -98,7 +98,8 @@ impl V105PropertyNudgeAxiom {
         match version {
             5 => 5, // Version 5 requires a 5-bit residue nudge (Slice 23)
             4 => 1, // Version 4 requires a 1-bit residue nudge (Slice 5)
-            2 | 1 | 0 => 3, // Version 2, 1, 0 require a 3-bit residue nudge
+            2 | 0 => 3, // Version 2 and 0 require a 3-bit residue nudge
+            1 => 0, // Version 1 (xrs runeword base) does not use this nudge
             _ => 0,
         }
     }
@@ -758,7 +759,9 @@ impl V105PropertyWidthAxiom {
     pub fn mode_bits(&self) -> u32 { 3 }
     pub fn location_bits(&self) -> u32 { 3 }
     pub fn x_bits(&self) -> u32 { 4 }
-    pub fn nudge_bits(&self) -> u32 { 2 }
+    pub fn nudge_bits(&self, version: u8) -> u32 {
+        if version == 1 { 0 } else { 2 }
+    }
     
     pub fn is_extended_stats_early_exit(&self, version: u8) -> bool {
         version == 6 || version == 7
