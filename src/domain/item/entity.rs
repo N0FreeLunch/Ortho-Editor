@@ -216,7 +216,7 @@ impl Item {
         self.modules.iter().any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
     }
     pub fn is_residue(&self) -> bool {
-        self.code.trim().is_empty() || self.modules.iter().any(|m| matches!(m, ItemModule::Residue(_)))
+        self.code.trim().is_empty() || self.code == "Opaque"
     }
     pub fn defense(&self) -> Option<u32> { 
         if let Some(d) = self.body.defense { return Some(d); }
@@ -1271,19 +1271,6 @@ impl ExtendedStatsData {
             let armor_like_unknown = data.has_class_specific_data || trimmed_code.contains(' ') || is_authority_xrs;
             (armor_like_unknown, armor_like_unknown, is_scroll)
         };
-        if alpha_mode && trimmed_code == "xrs" {
-            eprintln!(
-                "[DEBUG-XRS-EXT] version={}, compact={}, runeword={}, template={:?}, reads_defense={}, reads_durability={}, reads_quantity={}, pos={}",
-                version,
-                is_compact,
-                is_runeword,
-                template.map(|t| (t.code, t.is_armor, t.has_durability, t.is_stackable)),
-                reads_defense,
-                reads_durability,
-                reads_quantity,
-                cursor.pos()
-            );
-        }
         if reads_defense && axiom.reads_defense() { data.defense = Some(cursor.read_bits::<u32>(w_axiom.stat_bits(31) as u32)?); }
         if reads_durability && axiom.reads_durability() {
             let max_bits = w_axiom.stat_bits(73);

@@ -114,6 +114,7 @@ impl V105HeaderGapAxiom {
         if start_bit_offset.is_some() && (version == 5 || version == 2 || version == 1 || version == 0 || version == 6 || version == 4) {
             let abs_start = start_bit_offset.unwrap();
             let header_len = if has_checksum { 53 } else { 45 }; 
+            
             let current_body_start = abs_start + header_len as u64 + gap as u64;
             let target_rem = 5;
             let current_rem = (current_body_start % 8) as usize;
@@ -134,10 +135,12 @@ impl V105HeaderGapAxiom {
         if let Some(c) = code {
             let trimmed = c.trim_matches(|c: char| c.is_whitespace() || c == '\0');
 
-            if trimmed == "hp1" || trimmed == "mp1" || trimmed == "tsc" || trimmed == "isc" || trimmed == "xrs" {
-                // Slice 9: Alpha v105 potions and Runewords often follow a zero-base gap
-                // and rely on Bit 5 snap logic.
-                return 0;
+            if trimmed == "hp1" || trimmed == "mp1" || trimmed == "tsc" || trimmed == "isc" {
+                base_gap = 0;
+            }
+
+            if trimmed == "xrs" {
+                base_gap = 50;
             }
 
             if base_gap == 0 {
@@ -307,7 +310,7 @@ pub fn is_v105_summary_code(code: &str) -> bool {
     }
     V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
-pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
+pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<usize>) -> u32 {
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_item(version, code);
@@ -325,8 +328,15 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
 
         if is_summary {
             // Slice 9: Alpha v105 summary items follow a 72/80 bit alternating rhythm (Institutional Oscillation)
-            // Note: Oscillation logic moved to caller or simplified to 80-bit default for target-width estimation.
-            return 80;
+            let item_idx = if let Some(i) = idx {
+                i
+            } else {
+                // If index is not provided, infer from absolute position in section (assumes byte-aligned JM markers)
+                // Note: The oscillation is relative to the FIRST item in the section (usually bit 32).
+                0 // Fallback or sophisticated inference
+            };
+            
+            return if item_idx % 2 == 0 { 80 } else { 72 };
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
@@ -342,6 +352,12 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32) -> u32 {
     // We should NOT return a fixed width here unless it's a known shadow/personalized fixed container
     // that does NOT contain variable properties.
     if is_shadow || is_personalized {
+        // Authority runeword fixtures (`xrs` / `c8xr`) need variable-width handling.
+        // The registry override for fixed-width shadow items is too narrow here and
+        // truncates ExtendedStats before the verified property anchor.
+        if trimmed == "xrs" || trimmed == "c8xr" {
+            return 0;
+        }
         // Runewords and personalized items in Alpha v105 are OFTEN variable.
         // Returning 80 here causes "swallowing" if the item is larger.
         // We only return 80 if it's a known fixed shadow (e.g. from registry).

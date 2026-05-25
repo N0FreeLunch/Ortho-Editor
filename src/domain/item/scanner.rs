@@ -190,7 +190,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     let jump = if alpha {
                         // Re-peek best to get version/flags for target width
                         if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
-                             let j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f) as u64;
+                             let j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
                              if j > 0 { j } else { 8 } // Ensure forward progress
                         } else { 72 }
 

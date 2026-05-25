@@ -139,13 +139,9 @@ impl HeaderAxiom {
             if let Some(c) = code {
                 let trimmed = c.trim();
                 if trimmed.is_empty() { return true; }
-                
+
                 let reg = crate::domain::forensic::registry::get_registry();
                 if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
-                    // Axiom 0365: Summary items in Alpha v105 follow the 80-bit rhythm
-                    // but can be either Huffman or 3x8 encoded.
-                    // They do NOT have geometry fields (Y, Page, SocketHint), 
-                    // so we must treat them as compact for header parsing.
                     is_compact = true; 
                 }
                 if let Some(overrides) = &reg.item_overrides {
@@ -154,7 +150,6 @@ impl HeaderAxiom {
                     }
                 }
             }
-            
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                 is_compact && !is_fragment
@@ -273,7 +268,7 @@ impl HeaderAxiom {
 
             let target_width = if self.is_alpha() {
                 if let Some(c) = code_hint {
-                    crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, c, flags)
+                    crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, c, flags, None)
                 } else {
                     0
                 }

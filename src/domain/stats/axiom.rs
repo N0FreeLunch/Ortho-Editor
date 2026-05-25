@@ -43,7 +43,7 @@ impl StatsAxiom {
             let reg = get_registry();
             let mut is_compact = self.is_compact || crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
             
-            if trimmed.is_empty() { 
+            if trimmed.is_empty() && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) { 
                 is_compact = true; 
             } else {
                 if let Some(codes) = &reg.forced_compact_codes {
@@ -120,12 +120,17 @@ pub enum CodeEncoding {
 
 impl StatsAxiom {
     pub fn is_alpha(&self) -> bool {
+        self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 4 || self.version == 6)
+    }
+
+    /// Whitelist for Alpha stat mapping (includes version 7).
+    pub fn uses_alpha_mapping(&self) -> bool {
         self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
     }
 
     /// Maps an Alpha v105 raw stat ID to its effective (standard) ID.
     pub fn map_alpha_id(&self, raw_id: u32) -> u32 {
-        if !self.is_alpha() {
+        if !self.uses_alpha_mapping() {
             return raw_id;
         }
         let reg = get_registry();
@@ -344,12 +349,11 @@ impl StatsAxiom {
     }
 pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
     if self.save_is_alpha {
-        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags) as u64;
+        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags, Some(self.idx)) as u64;
         if target_width > 0 {
             return target_width;
         }
     }
-
 
     if !self.is_compact {
         let aligned = (current_len + 7) / 8 * 8;
@@ -361,9 +365,9 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
     // Alpha v105 still stores these fields for the relevant templates; the
     // template gate in ExtendedStatsData already prevents unrelated items from
     // consuming the wrong widths.
-    pub fn reads_defense(&self) -> bool { true }
-    pub fn reads_durability(&self) -> bool { true }
-    pub fn reads_quantity(&self) -> bool { true }
+    pub fn reads_defense(&self) -> bool { !self.is_compact }
+    pub fn reads_durability(&self) -> bool { !self.is_compact }
+    pub fn reads_quantity(&self) -> bool { !self.is_compact }
 
     pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<MappingInfo> {
         let reg = get_registry();
