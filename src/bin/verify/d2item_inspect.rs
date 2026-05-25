@@ -1,12 +1,14 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use serde_json::json;
 use std::env;
 use std::fs;
 use std::io::Cursor;
 
 fn print_bits_window(bytes: &[u8], start_bit: usize, bit_count: usize) {
     let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
-    let _ = reader.skip(start_bit as u32);
+    let _ = reader.skip(start_bit as u32).unwrap_or(());
     println!("Bits from {} ({} bits):", start_bit, bit_count);
     for i in 0..bit_count {
         let bit = reader.read_bit().unwrap_or(false);
@@ -27,7 +29,7 @@ fn read_bits(reader: &mut BitReader<Cursor<&[u8]>, LittleEndian>, count: u32) ->
 
 fn analyze_non_compact_item(bytes: &[u8], bit_start: usize, huffman: &HuffmanTree) {
     let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
-    let _ = reader.skip(bit_start as u32);
+    let _ = reader.skip(bit_start as u32).unwrap_or(());
     let mut offset = bit_start;
 
     let flags = read_bits(&mut reader, 32);
@@ -167,23 +169,79 @@ fn analyze_non_compact_item(bytes: &[u8], bit_start: usize, huffman: &HuffmanTre
     println!("  0x1FF candidates after {}", offset);
     for delta in 0..48 {
         let mut probe = BitReader::endian(Cursor::new(bytes), LittleEndian);
-        let _ = probe.skip((offset + delta) as u32);
+        let _ = probe.skip((offset + delta) as u32).unwrap_or(());
         if probe.read::<9, u32>().unwrap_or(0) == 0x1FF {
             println!("    offset {} -> bit {}", delta, offset + delta);
         }
     }
 }
 
+fn item_to_json(item: &Item) -> serde_json::Value {
+    json!({
+        "code": item.code.trim(),
+        "bit_length": item.range.end - item.range.start,
+        "stats": item.properties.iter().map(|p| {
+            json!({
+                "id": p.stat_id,
+                "name": p.name,
+                "is_unknown": p.name.starts_with("Unknown")
+            })
+        }).collect::<Vec<_>>(),
+        "residue_bits": item.modules.iter().find_map(|m| {
+            if let d2r_core::item::ItemModule::Residue(bits) = m {
+                Some(bits.iter().map(|&b| if b { '1' } else { '0' }).collect::<String>())
+            } else {
+                None
+            }
+        })
+    })
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        return;
-    }
-    let bytes = fs::read(&args[1]).unwrap();
+    let mut parser = ArgParser::new("d2item_inspect")
+        .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
+    parser.add_spec(ArgSpec::positional("file", "Path to .d2i or .d2s file"));
+    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+
+    let parsed = match parser.parse(env::args_os().skip(1).collect()) {
+        Ok(p) => p,
+        Err(ArgError::Help(h)) => {
+            println!("{}", h);
+            return;
+        }
+        Err(ArgError::Error(e)) => {
+            eprintln!("error: {}\n\n{}", e, parser.usage());
+            std::process::exit(1);
+        }
+    };
+
+    let path = parsed.get("file").unwrap();
+    let is_json = parsed.is_json();
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            if is_json {
+                println!("{}", json!({"errors": [format!("Failed to read file: {}", e)]}));
+            } else {
+                eprintln!("Failed to read file: {}", e);
+            }
+            return;
+        }
+    };
     let huffman = HuffmanTree::new();
 
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-    if let Ok(items) = Item::read_player_items(&bytes, &huffman, version == 105) {
+    let version_raw = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version_raw == 105 || version_raw == 6;
+
+    // 1. Try reading as player items (save file format)
+    if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
+        if is_json {
+            let item_objs: Vec<_> = items.iter().map(|it| item_to_json(it)).collect();
+            println!("{}", json!({"items": item_objs, "errors": []}));
+            return;
+        }
+        
         println!(
             "Library parse recovered {} top-level items from player section",
             items.len()
@@ -198,8 +256,6 @@ fn main() {
                     prop.stat_id, prop.raw_value, prop.param, prop.range.start, prop.range.end);
             }
 
-
-
             for (socket_index, child) in item.socketed_items.iter().enumerate() {
                 println!(
                     "  socket {:2}: '{}' mode={} loc={}",
@@ -210,18 +266,27 @@ fn main() {
         return;
     }
 
-    let jm_pos = (0..bytes.len() - 2)
-        .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
-        .expect("JM not found");
-    let item_count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
-    let next_jm = (jm_pos + 4..bytes.len().saturating_sub(1))
-        .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
-        .unwrap_or(bytes.len());
-    let section_bytes = &bytes[jm_pos + 4..next_jm];
-    let section_bits = (section_bytes.len() * 8) as u64;
+    // 2. Fallback: search for JM markers or treat as raw item
+    let jm_pos = (0..bytes.len().saturating_sub(2))
+        .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M');
 
+    let (section_bytes, jm_offset_bits, item_count) = if let Some(pos) = jm_pos {
+        let count = u16::from_le_bytes([
+            bytes.get(pos + 2).cloned().unwrap_or(0),
+            bytes.get(pos + 3).cloned().unwrap_or(0)
+        ]);
+        let next_jm = (pos + 4..bytes.len().saturating_sub(1))
+            .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
+            .unwrap_or(bytes.len());
+        (&bytes[pos + 4..next_jm], (pos + 4) * 8, count)
+    } else {
+        (&bytes[..], 0, 1)
+    };
+
+    let section_bits = (section_bytes.len() * 8) as u64;
     let mut reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     let mut visible_items: Vec<(usize, usize, Item)> = Vec::new();
+    let mut errors = Vec::new();
     let mut raw_index = 0usize;
 
     while reader.position_in_bits().unwrap_or(section_bits) < section_bits {
@@ -230,20 +295,17 @@ fn main() {
         if pos >= section_bits {
             break;
         }
-        let bit_start = (jm_pos + 4) * 8 + pos as usize;
+        let bit_start = jm_offset_bits + pos as usize;
 
-        match Item::from_reader(&mut reader, &huffman, version == 105) {
+        match Item::from_reader(&mut reader, &huffman, is_alpha) {
             Ok(item) => {
                 let pos_end = reader.position_in_bits().unwrap_or(0);
-                let bit_end = (jm_pos + 4) * 8 + pos_end as usize;
+                let bit_end = jm_offset_bits + pos_end as usize;
                 if item.mode == 6 {
                     if let Some((_, _, parent)) = visible_items.last_mut() {
                         parent.socketed_items.push(item);
                     } else {
-                        println!(
-                            "Error at raw item {}: socketed item without a parent",
-                            raw_index
-                        );
+                        errors.push(format!("Error at raw item {}: socketed item without a parent", raw_index));
                         break;
                     }
                 } else {
@@ -252,44 +314,48 @@ fn main() {
             }
             Err(e) => {
                 if visible_items.len() >= item_count as usize {
-                    println!(
-                        "Stopped after {} visible items at raw item {}: {}",
-                        visible_items.len(),
-                        raw_index,
-                        e
-                    );
                     break;
                 }
-                println!("Error at raw item {}: {}", raw_index, e);
-                analyze_non_compact_item(&bytes, bit_start, &huffman);
+                errors.push(format!("Error at raw item {}: {}", raw_index, e));
+                if !is_json {
+                    analyze_non_compact_item(&bytes, bit_start, &huffman);
+                }
                 break;
             }
         }
-
         raw_index += 1;
     }
 
-    println!(
-        "Parsed {} visible items from a section expecting {} top-level items",
-        visible_items.len(),
-        item_count
-    );
-
-    for (i, (bit_start, bit_end, item)) in visible_items.iter().enumerate() {
+    if is_json {
+        let item_objs: Vec<_> = visible_items.iter().map(|(_, _, it)| item_to_json(it)).collect();
+        if item_objs.len() == 1 {
+            println!("{}", json!({ "item": item_objs[0], "errors": errors }));
+        } else {
+            println!("{}", json!({ "items": item_objs, "errors": errors }));
+        }
+    } else {
         println!(
-            "Item {:2}: '{}' bits {}-{} loc={} socketed_children={}",
-            i,
-            item.code,
-            bit_start,
-            bit_end,
-            item.location,
-            item.socketed_items.len()
+            "Parsed {} visible items from a section expecting {} top-level items",
+            visible_items.len(),
+            item_count
         );
-        for (socket_index, child) in item.socketed_items.iter().enumerate() {
+
+        for (i, (bit_start, bit_end, item)) in visible_items.iter().enumerate() {
             println!(
-                "  socket {:2}: '{}' loc={}",
-                socket_index, child.code, child.location
+                "Item {:2}: '{}' bits {}-{} loc={} socketed_children={}",
+                i,
+                item.code,
+                bit_start,
+                bit_end,
+                item.location,
+                item.socketed_items.len()
             );
+            for (socket_index, child) in item.socketed_items.iter().enumerate() {
+                println!(
+                    "  socket {:2}: '{}' loc={}",
+                    socket_index, child.code, child.location
+                );
+            }
         }
     }
 }
