@@ -135,7 +135,13 @@ impl HeaderAxiom {
             return false;
         }
         if self.alpha_mode {
-            let mut is_compact = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
+            // Alpha v105 version 7 reuses the legacy compact bits for other header state.
+            // Treat compactness as opt-in there so code-aware overrides can drive the final decision.
+            let mut is_compact = if self.version == 7 {
+                false
+            } else {
+                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+            };
             if let Some(c) = code {
                 let trimmed = c.trim();
                 if trimmed.is_empty() { return true; }
@@ -194,8 +200,14 @@ impl HeaderAxiom {
         }
     }
 
-    pub fn is_personalized(&self, flags: u32) -> bool {
+    pub fn is_personalized(&self, flags: u32, is_compact: bool) -> bool {
+        if is_compact {
+            return false;
+        }
         if self.alpha_mode {
+            if self.version == 7 {
+                return false;
+            }
             // Forensic (Axiom 0337): Personalization bit is 24 across most Alpha v105 variants.
             (flags & (1 << 24)) != 0
         } else {
@@ -250,18 +262,19 @@ impl HeaderAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
+        let trimmed = code_hint.unwrap_or("").trim();
+        if self.alpha_mode && (trimmed == "xrs" || trimmed == "c8xr") { return true; }
         if self.is_runeword(flags, code_hint) { return false; }
         if self.alpha_mode && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1) {
             if (flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0 {
-                 return true; 
+                 return true;
             }
         }
         false
     }
-
     pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
         let is_compact = self.is_compact(flags, code_hint);
-        let is_personalized = self.is_personalized(flags);
+        let is_personalized = self.is_personalized(flags, is_compact);
 
         if self.alpha_mode {            let is_rw = self.is_runeword(flags, code_hint);
             let is_v105_shadow = self.is_v105_shadow(flags, code_hint);
@@ -451,7 +464,7 @@ impl ItemHeader {
             is_compact,
             is_identified: s_axiom.is_identified(flags),
             is_socketed: s_axiom.is_socketed(flags, is_compact, code),
-            is_personalized: axiom.is_personalized(flags),
+            is_personalized: axiom.is_personalized(flags, is_compact),
             is_runeword: s_axiom.is_runeword(flags),
             is_ethereal: s_axiom.is_ethereal(flags),
             is_ear: (flags & (1 << 24)) != 0,

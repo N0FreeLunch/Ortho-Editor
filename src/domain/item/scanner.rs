@@ -88,10 +88,17 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
 
+                            let trimmed_code = code.trim();
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
                                 || crate::domain::item::serialization::item_template(&code).is_some()
                                 || code == "acww"
                                 || code == "bcww";
+                            let reg = crate::domain::forensic::registry::get_registry();
+                            let override_noncompact = reg.item_overrides.as_ref()
+                                .and_then(|overrides| overrides.get(trimmed_code))
+                                .and_then(|map| map.get("is_compact"))
+                                .map(|&val| val == 0)
+                                .unwrap_or(false);
                             
                             // Slice S3: Stricter parity. Alpha v105 version 5 items must have a valid checksum unless they are known summary/templated items.
                             if alpha && version == 5 && !has_checksum && !is_known { continue; }
@@ -107,6 +114,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             }
 
                             let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || code == "Þ.";
+                            if alpha && trimmed_code == "ww" && (flags & (1 << 26)) == 0 {
+                                continue;
+                            }
                             
                             // Axiom 0344: Forced 80-bit slot check for Alpha v105 summary items (potions, etc.)
                             let mut forced_80 = false;
@@ -123,10 +133,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             }
 
                             let mut confidence = if is_known { 500 } else { 50 };
-                            let trimmed_code = code.trim();
                             let is_alpha_runeword_candidate = alpha && (trimmed_code == "xrs" || (flags & (1 << 26)) != 0);
+                            if override_noncompact {
+                                confidence += 300;
+                            }
 
-                            if alpha && !is_compact && !is_forced && !forced_80 && !is_alpha_runeword_candidate && !is_v105_summary {
+                            if alpha && !is_compact && !is_forced && !forced_80 && !is_alpha_runeword_candidate && !is_v105_summary && !override_noncompact {
                                 if !verify_marker_lookahead(bytes, scan_pos + _header_len, huffman, alpha) {
                                     continue;
                                 }
@@ -165,7 +177,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                     }
                                 }
                                 
-                                if trimmed_code == "xrs" || (flags & (1 << 26)) != 0 {
+                                if trimmed_code == "xrs" || trimmed_code == "c8xr" {
                                      if rem == 2 {
                                          confidence += 1000;
                                      } else {
@@ -394,7 +406,7 @@ fn is_alpha_v105_slot_item(code: &str) -> bool {
     if matches!(trimmed, 
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
         "whp1"|"whp2"|"whp3"|"whp4"|"whp5"|"wmp1"|"wmp2"|"wmp3"|"wmp4"|"wmp5"|
-        "rvs"|"rvl"|"vps"|"tsc"|"isc"|"yps"|"wps"|"us g"|"w8cs"|"w88w"|"xrs"|
+        "rvs"|"rvl"|"vps"|"tsc"|"isc"|"jav"|"yps"|"wps"|"w8cs"|"w88w"|"xrs"|
         "6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|"mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|
         "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"|"swsp"
     ) { return true; }

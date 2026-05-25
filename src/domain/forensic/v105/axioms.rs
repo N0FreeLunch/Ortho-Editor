@@ -749,7 +749,7 @@ impl V105PropertyWidthAxiom {
     pub fn socket_bits(&self) -> u32 { 4 }
     pub fn set_list_bits(&self) -> u32 { 5 }
     pub fn teleport_bits(&self) -> u32 { 5 }
-    pub fn v5_runeword_extra_bits(&self) -> u32 { 2 }
+    pub fn v5_runeword_extra_bits(&self) -> u32 { 1 }
     pub fn ear_class_bits(&self) -> u32 { 3 }
     pub fn ear_level_bits(&self) -> u32 { 7 }
     
@@ -768,7 +768,7 @@ impl V105PropertyWidthAxiom {
     }
     
     pub fn has_v5_runeword_extra(&self, version: u8) -> bool {
-        version == 5 || version == 6 || version == 7
+        version == 5 || version == 6 || version == 7 || version == 1
     }
     
     pub fn is_player_name_alpha_style(&self, version: u8) -> bool {

@@ -17,6 +17,7 @@ pub fn read_item_stats<R: BitRead>(
     huffman: &HuffmanTree,
     alpha_mode: bool,
     quality: Option<ItemQuality>,
+    flags: u32,
     is_runeword: bool,
     is_v105_shadow: bool,
     is_personalized: bool,
@@ -34,9 +35,23 @@ pub fn read_item_stats<R: BitRead>(
         .with_compact(is_compact)
         .with_socketed(is_socketed)
         .with_code(trimmed_code);
+    if crate::item::item_trace_enabled() && matches!(trimmed_code, "jav" | "buc") {
+        eprintln!(
+            "[DEBUG-STATS] code={} header_compact={} axiom_compact={} socketed={} runeword={} personalized={} version={}",
+            trimmed_code,
+            is_compact,
+            axiom.is_compact,
+            is_socketed,
+            is_runeword,
+            is_personalized,
+            version
+        );
+    }
     let is_alpha = axiom.is_alpha();
 
-    let is_v105_shadow_final = alpha_mode && version == 5 && is_v105_shadow;
+    let is_v105_shadow_final = alpha_mode && (version == 5 || version == 1) && is_v105_shadow;
+    let is_shadow_container = alpha_mode && (trimmed_code == "xrs" || trimmed_code == "c8xr");
+    
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
     let is_potion = trimmed_code.starts_with('h') 
         || trimmed_code.starts_with('m') 
@@ -89,20 +104,22 @@ pub fn read_item_stats<R: BitRead>(
             .collect();
     }
 
-    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final, &axiom, Some(&child_offsets), |bytes, pos, huff, idx, alpha| {
+    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final || is_shadow_container, &axiom, Some(&child_offsets), |bytes, pos, huff, idx, alpha| {
         let peek_code = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0).map(|p| p.3);
         let code_hint = peek_code.as_deref();
-        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, huff, idx, alpha, None, None, code_hint)
+        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, 0, huff, idx, alpha, None, None, code_hint)
     })?;
     
-    if alpha_mode && version == 5 && is_runeword {
+    if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) {
+        let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
         cursor.begin_segment(ItemSegmentType::ExtendedStats);
         cursor.push_context("AlphaV5RunewordExtra");
-        let extra = cursor.read_bits::<u8>(2)?;
+        let extra = cursor.read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32)?;
         alpha_v5_runeword_extra = Some(extra);
         cursor.pop_context();
         cursor.end_segment();
     }
+
     
     cursor.end_segment();
     Ok((props, complete, term, alpha_v5_runeword_extra, None, alpha_shadow_skip_bits, nested_items))
@@ -149,6 +166,11 @@ where
     }
 
     loop {
+        if is_compact && !is_actual_runeword {
+            if props.len() >= 1 {
+                break;
+            }
+        }
         if axiom.is_alpha() && !is_actual_runeword && (recorder.pos() - start_pos) > MAX_ALPHA_V105_ITEM_BITS {
             return Err(recorder.fail(crate::error::ParsingError::BitBudgetExceeded { bit_offset: recorder.pos() }));
         }
@@ -298,7 +320,9 @@ where
                             recorder.skip_and_record(consumed)?;
                         }
                         
-                        if child_idx >= 3 {
+                        let is_tome = code.trim() == "ucb8" || code.trim() == "bwcw";
+                        let max_children = if is_tome { 20 } else { 3 };
+                        if child_idx >= max_children {
                             break;
                         }
                         continue;
@@ -393,7 +417,6 @@ where
     }
 
 
-    let raw_value;
     let mut param = 0;
     let mut nested_items = Vec::new();
 
@@ -401,7 +424,7 @@ where
         axiom.stat_bit_width(stat_id, width)
     } else {
         let mapped_id = axiom.map_alpha_id(stat_id);
-        let default_width = if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
+        let mut default_width = if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
             if stat.save_param_bits > 0 {
                 param = recorder.read_bits::<u32>(stat.save_param_bits as u32)?;
             }
@@ -409,6 +432,12 @@ where
         } else {
             9
         };
+        
+        // Alpha v105 Version 0 and 1 items use a 17-bit rhythm (9-bit id + 8-bit value) for standard stats.
+        if axiom.save_is_alpha && (_version == 0 || _version == 1) && rhythm.id_bits == 9 && default_width == 9 {
+            default_width = 8;
+        }
+
         axiom.stat_bit_width(stat_id, default_width)
     };
 
@@ -416,6 +445,7 @@ where
     let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;
     let is_already_nested = recorder.context_stack().iter().any(|s| s == "nested");
     let mut handled = false;
+    let raw_value;
 
     if axiom.is_alpha() && alpha_runeword && axiom.is_socketed && (is_stat_317 || is_stat_320) && !is_already_nested {
         let entry_pos = recorder.pos();
