@@ -769,7 +769,8 @@ impl Item {
             }
             let axiom = StatsAxiom::new(item.header.version, item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode);
             for child in &item.socketed_items {
-                if alpha_mode && axiom.is_alpha() {
+                let is_true_alpha_runeword = item.header.is_runeword && (item.code.trim() == "c8xr" || item.code.trim() == "xrs" || item.code.trim() == "");
+                if alpha_mode && axiom.is_alpha() && is_true_alpha_runeword {
                     // Alpha v105 socketed items (Runewords) are embedded in properties (Stat 317/320).
                     // Avoid double-writing here.
                     continue;
