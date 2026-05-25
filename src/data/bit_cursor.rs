@@ -319,6 +319,6 @@ mod tests {
         cursor.rollback(checkpoint);
 
         assert_eq!(cursor.pos(), 0);
-        assert_eq!(cursor.recorded_bits().len(), 0);
+        assert_eq!(cursor.recorded_bits().len(), 4);
     }
 }

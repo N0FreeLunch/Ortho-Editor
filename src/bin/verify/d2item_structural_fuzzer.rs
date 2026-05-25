@@ -167,7 +167,7 @@ fn main() -> io::Result<()> {
         
         for bit in scan_start..scan_end {
             if let Some((mode, loc, _x, code, flags, ver, _compact, header_bits, _nudge, _has_checksum)) =
-                peek_item_header_at(&bytes, bit, &huffman, true)
+                peek_item_header_at(&bytes, bit, &huffman, true, 0)
             {
                 if is_plausible_item_header(mode, loc, code.as_bytes(), flags, ver, true) {
                     heatmap_candidates.push(HeatmapCandidate {
@@ -208,7 +208,7 @@ fn main() -> io::Result<()> {
             let mut stop_reason = "Sequence complete or reached limit".to_string();
 
             for _ in 0..16 { // Limit simulation to 16 items
-                let header = peek_item_header_at(&bytes, current_bit, &huffman, true);
+                let header = peek_item_header_at(&bytes, current_bit, &huffman, true, 0);
                 if header.is_none() {
                     stop_reason = "Invalid item header".to_string();
                     break;
@@ -279,7 +279,7 @@ fn main() -> io::Result<()> {
                 // Try 80/160/etc bit slots first
                 for slots in 1..=2 {
                     let slot_candidate = current_bit + (slots * 80);
-                    if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, slot_candidate, &huffman, true) {
+                    if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, slot_candidate, &huffman, true, 0) {
                         if is_plausible_item_header(m, l, c.as_bytes(), f, v, true) {
                             next_header_bit = slot_candidate;
                             found_next = true;
@@ -291,7 +291,7 @@ fn main() -> io::Result<()> {
                 if !found_next {
                     let item_end = best_step_term + best_step_width as u64;
                     for bit in item_end..(item_end + 128) {
-                        if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, bit, &huffman, true) {
+                        if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, bit, &huffman, true, 0) {
                             if is_plausible_item_header(m, l, c.as_bytes(), f, v, true) {
                                 next_header_bit = bit;
                                 found_next = true;

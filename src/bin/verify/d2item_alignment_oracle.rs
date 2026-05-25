@@ -88,7 +88,7 @@ fn main() {
     let mut bit_idx = last_marker_pos;
     while bit_idx < total_bits - 100 {
         if let Some((mode, location, _, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) =
-            peek_item_header_at(&bytes, bit_idx, &huffman, is_alpha)
+            peek_item_header_at(&bytes, bit_idx, &huffman, is_alpha, 0)
         {
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, is_alpha) {
                 if found_count > 0 {

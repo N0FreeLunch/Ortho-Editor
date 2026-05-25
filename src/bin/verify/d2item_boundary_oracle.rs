@@ -157,7 +157,7 @@ fn main() {
             let mut used_left = left;
 
             for offset in 0..64 {
-                if let Some(res) = peek_item_header_at(&bytes, left + offset, &huffman, is_alpha) {
+                if let Some(res) = peek_item_header_at(&bytes, left + offset, &huffman, is_alpha, 0) {
                     found_res = Some(res);
                     used_left = left + offset;
                     break;

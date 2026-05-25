@@ -67,7 +67,7 @@ fn main() -> io::Result<()> {
 
         while bit_cursor < section_end {
             if let Some((mode, location, _, code, flags, version, _is_compact, header_bits, _nudge, _has_checksum)) =
-                            peek_item_header_at(&bytes, bit_cursor, &huffman, true)
+                            peek_item_header_at(&bytes, bit_cursor, &huffman, true, 0)
                         {
                 if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, true) {
                     let mut record = ScanAnchor {

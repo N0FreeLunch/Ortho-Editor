@@ -33,7 +33,7 @@ pub struct FormattedItem {
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
     let mut base_attributes = Vec::new();
 
-    if let Some(def) = item.defense {
+    if let Some(def) = item.defense() {
         let label = get_loc("ItemStats1h", language);
         if label.contains('%') {
             base_attributes.push(format_template(label, &[def.to_string()]));
@@ -42,7 +42,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         }
     }
 
-    if let (Some(cur), Some(max)) = (item.current_durability, item.max_durability) {
+    if let (Some(cur), Some(max)) = (item.current_durability(), item.max_durability()) {
         if max > 0 {
             let label = get_loc("ItemStats1d", language);
             let val_str = format!("{} / {}", cur, max);
@@ -54,7 +54,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         }
     }
 
-    if let Some(qty) = item.quantity {
+    if let Some(qty) = item.quantity() {
         let label = get_loc("ItemStats1i", language);
         if label.contains('%') {
             base_attributes.push(format_template(label, &[qty.to_string()]));

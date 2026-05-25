@@ -281,7 +281,7 @@ fn main() {
                           _header_bits,
                           _nudge,
                           _has_checksum,
-                        )) = d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true)
+                        )) = d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true, 0)
 
                         {
                             if d2r_core::item::is_plausible_item_header(
