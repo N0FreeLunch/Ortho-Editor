@@ -528,7 +528,9 @@ impl Item {
         let flags_to_write = self.header.flags;
         emitter.write_bits(flags_to_write, 32)?;
         if alpha_mode && self.header.has_checksum {
-            let checksum = calculate_alpha_v105_checksum(flags_to_write, self.header.version);
+            let checksum = self.header.alpha_checksum.unwrap_or_else(|| {
+                calculate_alpha_v105_checksum(flags_to_write, self.header.version)
+            });
             emitter.write_bits(checksum as u32, 8)?;
         }
         emitter.write_bits(self.header.version as u32, 3)?;
@@ -842,12 +844,14 @@ pub fn parse_item_header<R: BitRead>(
     if !alpha_mode && !is_nested && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
+    let mut alpha_checksum = None;
     let (version, has_checksum) = if alpha_mode {
         let saved_pos = cursor.checkpoint();
         
         if let Some(hint) = has_checksum_hint {
             if hint {
-                let _checksum = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32)?;
+                let ck = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32)?;
+                alpha_checksum = Some(ck);
                 let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
                 (v, true)
             } else {
@@ -861,6 +865,7 @@ pub fn parse_item_header<R: BitRead>(
             if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
                 let expected = calculate_alpha_v105_checksum(flags, v);
                 if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2) {
+                    alpha_checksum = Some(checksum);
                     (v, true)
                 } else {
                     cursor.rollback(saved_pos);
@@ -905,23 +910,13 @@ pub fn parse_item_header<R: BitRead>(
             let is_v105_shadow = h_axiom.is_v105_shadow(flags, code_hint);
             let is_rw = h_axiom.is_runeword(flags, code_hint);
             
-            let mut gap_bits = if let Some(go) = gap_override {
+            let gap_bits = if let Some(go) = gap_override {
                 go
             } else {
                 let g = V105HeaderGapAxiom::default().resolve_gap(version, code_hint, flags, is_first_item, is_compact, has_checksum, start_bit_offset);
                 g
             };
 
-            // Forensic: For real Alpha v105 runewords or standard variant of xrs, force a 14-bit gap
-            // to ensure correct alignment and socket count parsing.
-            if let Some(c) = code_hint {
-                let trimmed = c.trim();
-                if trimmed == "c8xr" {
-                    gap_bits = 58;
-                } else if trimmed == "xrs" {
-                    gap_bits = 0; // Use residue/rollback for xrs
-                }
-            }
             let is_v105_summary = if let Some(c) = code_hint {
                 w_axiom.is_summary_item(version, c)
             } else {
@@ -1023,6 +1018,7 @@ pub fn parse_item_header<R: BitRead>(
         is_identified: s_axiom.is_identified(flags), is_socketed: s_axiom.is_socketed(flags, is_compact, code_hint), is_personalized,
         is_runeword: h_axiom.is_runeword(flags, code_hint), is_ethereal: s_axiom.is_ethereal(flags), is_ear: !alpha_mode && (flags & (1 << 24)) != 0,
         has_checksum,
+        alpha_checksum,
         alpha_quality_raw: None, alpha_v5_runeword_extra: None, alpha_unique_id_raw: None,
         save_is_alpha: item_alpha_mode,
     }, alpha_header_gap, alpha_header_gap_bits))

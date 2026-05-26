@@ -50,6 +50,7 @@ pub struct ItemHeader {
 
     // Alpha Forensic Preservation Fields
     pub has_checksum: bool,
+    pub alpha_checksum: Option<u8>,
     pub alpha_quality_raw: Option<u8>,
     pub alpha_v5_runeword_extra: Option<u8>,
     pub alpha_unique_id_raw: Option<u16>,
@@ -379,6 +380,7 @@ impl ItemHeader {
              return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
         }
 
+        let mut alpha_checksum = None;
         let (version, has_checksum) = if alpha_mode {
             let saved_pos = cursor.checkpoint();
             let checksum = cursor.read_bits::<u8>(8)?;
@@ -386,6 +388,7 @@ impl ItemHeader {
             let expected = calculate_alpha_v105_checksum(flags, v);
             
             if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4) {
+                alpha_checksum = Some(checksum);
                 (v, true)
             } else {
                 cursor.rollback(saved_pos);
@@ -481,6 +484,7 @@ impl ItemHeader {
             is_ethereal: s_axiom.is_ethereal(flags),
             is_ear: (flags & (1 << 24)) != 0,
             has_checksum,
+            alpha_checksum,
             alpha_quality_raw: None,
             alpha_v5_runeword_extra: None,
             alpha_unique_id_raw: None,

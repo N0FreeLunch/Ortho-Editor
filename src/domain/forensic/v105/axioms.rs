@@ -632,7 +632,7 @@ impl V105PropertyWidthAxiom {
         // Axiom 0344: Potions, Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
         // are forced to an 80-bit rhythm in Alpha v105.
         matches!(trimmed, "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|"rvs"|"rvl"|"vps"|"yps"|"wms") ||
-        (version == 5 && (trimmed == "tsc" || trimmed == "isc")) || (trimmed == "wuw8" && version == 0)
+        ((version == 5 || version == 0 || version == 1 || version == 2) && (trimmed == "tsc" || trimmed == "isc")) || (trimmed == "wuw8" && version == 0)
     }
     /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).
     pub fn is_summary_item(&self, version: u8, code: &str) -> bool {
@@ -668,7 +668,7 @@ impl V105PropertyWidthAxiom {
             "r31" | "r32" | "r33" |
             "gcv" | "gcw" | "gcg" | "gcr" | "gcb" | "gcy" | "gcz" => return true,
             // Quest/Marker
-            "wuw8" | "bwcw" | "acww" | "bcww" | "tsc" | "isc" | "tsc " | "isc " => return true,
+            "wuw8" | "bwcw" | "acww" | "bcww" | "tsc" | "isc" | "tsc " | "isc " | "ww" | "ww " => return true,
             _ => {}
         }
 

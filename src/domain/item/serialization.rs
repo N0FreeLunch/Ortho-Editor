@@ -8,7 +8,7 @@ use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
 use crate::domain::item::subdomains::gap::{GapCombinator, AlphaHeaderGap};
-use crate::domain::item::subdomains::property::{PropertyNormalizer, AlphaPropertyCombinator};
+use crate::domain::item::subdomains::property::AlphaPropertyCombinator;
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom};
 use crate::domain::item::subdomains::stats::StatsCombinator;
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
@@ -245,7 +245,8 @@ pub fn peek_item_header_at_with_base(
     let _ = alpha_reader.skip(start_bit as u32 + 32);
     let checksum = alpha_reader.read::<8, u8>().unwrap_or(0);
     let v = alpha_reader.read::<3, u8>().unwrap_or(0);
-    let calculated = calculate_alpha_v105_checksum(flags, v);
+    let _calculated = calculate_alpha_v105_checksum(flags, v);
+
     let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     let mut v_retail = 0;
     let mut retail_skip_ok = false;
@@ -258,7 +259,7 @@ pub fn peek_item_header_at_with_base(
     let mut max_confidence = 0;
 
     let mut trial_configs = Vec::new();
-    if alpha_mode && (v <= 7) && (calculated == checksum) {
+    if alpha_mode && (v <= 7) {
         let m = alpha_reader.read::<3, u8>().ok();
         let l = alpha_reader.read::<3, u8>().ok();
         let x = alpha_reader.read::<4, u8>().ok();
@@ -266,6 +267,7 @@ pub fn peek_item_header_at_with_base(
              trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 3 + 4, true));
         }
     }
+
     if retail_skip_ok {
         let m = retail_reader.read::<3, u8>().ok();
         let l = retail_reader.read::<3, u8>().ok();
@@ -841,8 +843,15 @@ impl Item {
                 reject_candidate = true;
             }
 
-            let next_marker = markers.get(i + 1).map(|m| m.offset).unwrap_or(section_bits);
-            let limit = next_marker - start;
+            // Slice 3: Find the next high-confidence marker to determine the true physical slot size.
+            let mut next_hi_conf_marker = section_bits;
+            for next_m in markers.iter().skip(i + 1) {
+                if next_m.confidence >= 500 {
+                    next_hi_conf_marker = next_m.offset;
+                    break;
+                }
+            }
+            let limit = next_hi_conf_marker - start;
 
             let absolute_offset = section_bit_offset + start;
             let forced_length = force_length_map.get(&absolute_offset).cloned();
@@ -855,13 +864,13 @@ impl Item {
             if let Some(flen) = forced_length {
                 dynamic_limit = flen;
                 is_compact_final = true;
-            } else if let Some((_, _, _, code, flags, version, is_compact, _, _, _)) =
+            } else if let Some((_, _, _, code, flags, _version, is_compact, _, _, _)) =
                 peek_item_header_at_with_base(section_bytes, start, Some(section_bit_offset + start), huffman, alpha_mode, item_count)
 
                         {
                 peek_code_hint = Some(code.clone());
                 is_compact_final = is_compact;
-                let trimmed_code = code.trim();
+                let _trimmed_code = code.trim();
                 // Slice 6/9: Axiom 0344 inference for blank items and summary codes missing the compact flag
                 if alpha_mode && !is_compact && (code.trim().is_empty() || is_v105_summary_code(&code)) {
                     // Refined: Only force compact if there's another plausible marker 72 bits later
@@ -978,7 +987,7 @@ impl Item {
                     // ensure the parser uses it (prevents Huffman collisions).
                     // Restore code BEFORE alignment calculation to ensure correct target width.
                     if alpha_mode && !marker.code.trim().is_empty() {
-                        let reg = crate::domain::forensic::registry::get_registry();
+                        let _reg = crate::domain::forensic::registry::get_registry();
                         if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code) {
                             final_item.code = marker.code.clone();
                         }
@@ -986,10 +995,20 @@ impl Item {
 
                     if alpha_mode {
                         let alignment_axiom = StatsAxiom::new(final_item.header.version, final_item.header.quality.unwrap_or(ItemQuality::Normal), alpha_mode)
-                            .with_index(item_count)
+                            .with_index(i)
                             .with_compact(final_item.header.is_compact)
                             .with_code(&final_item.code);
-                        let target_width = alignment_axiom.calculate_alignment(consumed_bits, &final_item.code, final_item.header.flags);
+                        let mut target_width = alignment_axiom.calculate_alignment(consumed_bits, &final_item.code, final_item.header.flags);
+                        
+                        // Slice 3 Resolution: Trust the physical marker found by the scanner as the absolute boundary.
+                        if let Some(limit) = parse_limit {
+                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code) {
+                                if limit >= 72 && limit <= 128 && (limit % 8 == 0 || limit % 8 == 5) {
+                                    target_width = limit;
+                                }
+                            }
+                        }
+
                         if target_width > 0 {
                             consumed_bits = target_width;
                         }
@@ -1189,12 +1208,21 @@ impl Item {
                                             final_item.header.quality.unwrap_or(ItemQuality::Normal),
                                             alpha_mode,
                                         )
-                                        .with_index(item_count)
+                                        .with_index(i)
                                         .with_compact(final_item.header.is_compact)
                                         .with_code(&final_item.code);
 
-                                        let target_width =
+                                        let mut target_width =
                                             alignment_axiom.calculate_alignment(consumed_bits, &final_item.code, final_item.header.flags);
+                                        
+                                        if let Some(limit_hint) = retry_limit {
+                                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code) {
+                                                if limit_hint >= 72 && limit_hint <= 128 && (limit_hint % 8 == 0 || limit_hint % 8 == 5) {
+                                                    target_width = limit_hint;
+                                                }
+                                            }
+                                        }
+
                                         if target_width > 0 {
                                             consumed_bits = target_width;
                                         }
