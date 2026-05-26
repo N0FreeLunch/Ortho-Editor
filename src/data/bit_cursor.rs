@@ -99,12 +99,17 @@ impl<R: BitRead> BitCursor<R> {
             }
         }
 
-        // Slice 9: True rollback support via bit cache (relative to base_pos)
-        let cache_idx = self.bit_pos.saturating_sub(self.base_pos) as usize;
-        if cache_idx < self.recorded_bits.len() {
-            let bit = self.recorded_bits[cache_idx].bit;
-            self.bit_pos += 1;
-            return Ok(bit);
+        // Slice 9: True rollback support via bit cache.
+        // Forensic: We use the offset of the first recorded bit as the baseline for the cache.
+        if let Some(first) = self.recorded_bits.first() {
+            if self.bit_pos >= first.offset {
+                let cache_idx = (self.bit_pos - first.offset) as usize;
+                if cache_idx < self.recorded_bits.len() {
+                    let bit = self.recorded_bits[cache_idx].bit;
+                    self.bit_pos += 1;
+                    return Ok(bit);
+                }
+            }
         }
 
         let bit = self.inner.read_bit().map_err(|e| {

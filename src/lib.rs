@@ -145,7 +145,7 @@ mod tests {
         let truth: serde_json::Value = serde_json::from_str(&truth_json).expect("truth should be valid JSON");
 
         // Find the xrs item (Authority base)
-        let xrs = real_items.iter().find(|it| it.code.trim() == "xrs" && it.is_runeword).expect("xrs item should be present");
+        let xrs = real_items.iter().find(|it| it.code.trim() == "xrs" && it.header.is_runeword).expect("xrs item should be present");
         
         let truth_props = truth["properties"].as_array().expect("properties should be array");
         

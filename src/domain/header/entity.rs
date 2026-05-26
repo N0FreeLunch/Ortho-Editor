@@ -308,7 +308,7 @@ impl HeaderAxiom {
 
             if is_summary {
                 return HeaderGeometry {
-                    y_bits: 0,
+                    y_bits: 3,
                     page_bits: 0,
                     socket_hint_bits: 0,
                     has_header_gap: true,

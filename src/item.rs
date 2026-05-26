@@ -10,6 +10,13 @@ pub(crate) fn item_trace_enabled() -> bool {
     std::env::var_os("D2R_ITEM_TRACE").is_some()
 }
 
+pub(crate) fn normalize_alpha_code_hint(code: &str) -> &str {
+    match code.trim() {
+        "us g" | "k g" => "jav",
+        other => other,
+    }
+}
+
 #[macro_export]
 macro_rules! item_trace {
     ($($arg:tt)*) => {

@@ -17,7 +17,10 @@ impl NudgeCombinator {
         audit: &mut ForensicAudit,
     ) -> ParsingResult<()> {
         let p_nudge = V105PropertyNudgeAxiom::default().get_nudge(version) as usize;
-        if p_nudge > 0 && !rhythm_recovery && !is_runeword {
+        
+        // forensic-1363: In Alpha v105, version 1 runewords (xrs) do NOT use the 2-bit property residue nudge
+        // if they are correctly aligned via resolve_gap. Standard runewords also skip this.
+        if p_nudge > 0 && !rhythm_recovery && !is_runeword && cursor.remaining() >= p_nudge as u64 {
             cursor.push_context("AlphaPropertyResidueNudge");
             let _ = cursor.read_bits::<u32>(p_nudge as u32)?;
             audit.record(V105PropertyNudgeAxiom::default().metadata());
@@ -39,7 +42,9 @@ impl NudgeCombinator {
         
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;
-            let padding = cursor.with_context("AlphaAlignmentPadding", |c| {
+            let saved_base_pos = cursor.base_pos;
+            cursor.base_pos = start_bit;
+            let padding_result = cursor.with_context("AlphaAlignmentPadding", |c| {
                 let mut bits = Vec::new();
                 for _ in 0..padding_count { 
                     match c.read_bit() {
@@ -48,7 +53,9 @@ impl NudgeCombinator {
                     }
                 }
                 Ok(bits)
-            })?;
+            });
+            cursor.base_pos = saved_base_pos;
+            let padding = padding_result?;
             return Ok(padding);
         }
         Ok(Vec::new())

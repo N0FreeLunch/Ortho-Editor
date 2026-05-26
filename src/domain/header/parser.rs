@@ -95,7 +95,7 @@ fn alpha_sync<R: BitRead>(
     }
 
     let is_identified = (flags & (1 << 4)) != 0;
-    let is_personalized = (flags & (1 << 28)) != 0; 
+    let is_personalized = axiom.is_personalized(flags, is_compact);
     let is_runeword = (flags & (1 << 26)) != 0;
     let is_socketed = (flags & (1 << 27)) != 0; 
     let is_ethereal = (flags & (1 << 22)) != 0;

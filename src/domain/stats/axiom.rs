@@ -46,15 +46,19 @@ impl StatsAxiom {
             if trimmed.is_empty() && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) { 
                 is_compact = true; 
             } else {
-                if let Some(codes) = &reg.forced_compact_codes {
-                    if codes.iter().any(|c| c == trimmed) { is_compact = true; }
-                }
-                
-                if !is_compact {
-                    if let Some(overrides) = &reg.item_overrides {
-                        if let Some(map) = overrides.get(trimmed) {
-                            if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+                if let Some(overrides) = &reg.item_overrides {
+                    if let Some(map) = overrides.get(trimmed) {
+                        if let Some(&val) = map.get("is_compact") {
+                            is_compact = val != 0;
+                            self.is_compact = is_compact;
+                            return self;
                         }
+                    }
+                }
+
+                if let Some(codes) = &reg.forced_compact_codes {
+                    if codes.iter().any(|c| c == trimmed) {
+                        is_compact = true;
                     }
                 }
             }
@@ -190,8 +194,8 @@ impl StatsAxiom {
         self.header_axiom().is_identified(flags)
     }
 
-    pub fn is_personalized(&self, flags: u32) -> bool {
-        self.header_axiom().is_personalized(flags)
+    pub fn is_personalized(&self, flags: u32, is_compact: bool) -> bool {
+        self.header_axiom().is_personalized(flags, is_compact)
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
@@ -289,10 +293,10 @@ impl StatsAxiom {
                 };
             }
 
-            // Alpha v105 Version 0 rows use a 17-bit rhythm
+            // Alpha v105 Version 0 and 1 rows use a 17-bit rhythm
             // (9-bit stat id + 8-bit value). Reading the value as 9 bits overreads
             // the next property seam and produces the observed 256-offset drift.
-            if self.version == 0 {
+            if self.version == 0 || self.version == 1 {
                 return PropertyRhythm {
                     id_bits: 9,
                     value_bits: Some(8),
@@ -301,11 +305,11 @@ impl StatsAxiom {
                 };
             }
 
-            if self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
+            if self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
                  return PropertyRhythm {
                      id_bits: 9,
                      // Alpha v105 legacy alpha stat rows are generally 9-bit,
-                    // but version 0 rows are handled by the narrower guard above
+                    // but version 0 and 1 rows are handled by the narrower guard above
                     // to preserve the observed 17-bit property rhythm.
                     value_bits: Some(9),
                     has_terminal_bit: false,

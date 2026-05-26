@@ -191,6 +191,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 best_offset = scan_pos;
                                 best_code = code.clone();
                             }
+                            if alpha && (trimmed_code == "xrs" || trimmed_code == "c8xr") {
+                                println!("[DEBUG-SCAN-FOUND] code={} pos={} conf={} rem8={}", trimmed_code, scan_pos, confidence, scan_pos % 8);
+                            }
                         }
                     }
                 }

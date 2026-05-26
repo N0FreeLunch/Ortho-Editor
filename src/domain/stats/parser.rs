@@ -35,18 +35,6 @@ pub fn read_item_stats<R: BitRead>(
         .with_compact(is_compact)
         .with_socketed(is_socketed)
         .with_code(trimmed_code);
-    if crate::item::item_trace_enabled() && matches!(trimmed_code, "jav" | "buc") {
-        eprintln!(
-            "[DEBUG-STATS] code={} header_compact={} axiom_compact={} socketed={} runeword={} personalized={} version={}",
-            trimmed_code,
-            is_compact,
-            axiom.is_compact,
-            is_socketed,
-            is_runeword,
-            is_personalized,
-            version
-        );
-    }
     let is_alpha = axiom.is_alpha();
 
     let is_v105_shadow_final = alpha_mode && (version == 5 || version == 1) && is_v105_shadow;
@@ -80,7 +68,13 @@ pub fn read_item_stats<R: BitRead>(
         PropertyReaderContext { bytes: &[], item_start_bit: 0 }
     };
     if is_v105_shadow_final {
-        let skip_bits_count = if version == 5 { 47 } else { 24 };
+        let skip_bits_count = if is_shadow_container {
+            30
+        } else if version == 5 {
+            47
+        } else {
+            24
+        };
         let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);
     }
@@ -109,8 +103,7 @@ pub fn read_item_stats<R: BitRead>(
         let code_hint = peek_code.as_deref();
         crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, 0, huff, idx, alpha, None, None, code_hint)
     })?;
-    
-    if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) {
+    if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) && !is_shadow_container {
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
         cursor.begin_segment(ItemSegmentType::ExtendedStats);
         cursor.push_context("AlphaV5RunewordExtra");
@@ -375,10 +368,9 @@ where
 {
 
     let entry_start = recorder.pos();
-    
     let id_bits = 9; 
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
-    
+
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
     
     let id_bits = rhythm.id_bits;
@@ -419,27 +411,35 @@ where
 
     let mut param = 0;
     let mut nested_items = Vec::new();
-
-    let effective_width = if let Some(width) = rhythm.value_bits {
-        axiom.stat_bit_width(stat_id, width)
-    } else {
-        let mapped_id = axiom.map_alpha_id(stat_id);
-        let mut default_width = if let Some(stat) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id) {
-            if stat.save_param_bits > 0 {
-                param = recorder.read_bits::<u32>(stat.save_param_bits as u32)?;
-            }
-            stat.save_bits as u32
-        } else {
-            9
-        };
-        
-        // Alpha v105 Version 0 and 1 items use a 17-bit rhythm (9-bit id + 8-bit value) for standard stats.
-        if axiom.save_is_alpha && (_version == 0 || _version == 1) && rhythm.id_bits == 9 && default_width == 9 {
-            default_width = 8;
+    let mapped_id = axiom.map_alpha_id(stat_id);
+    let stat_cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id);
+    let suppress_authority_params = axiom.save_is_alpha
+        && alpha_runeword
+        && matches!(axiom.code.trim(), "xrs" | "c8xr")
+        && _version == 1;
+    if let Some(stat) = stat_cost {
+        if stat.save_param_bits > 0 && !suppress_authority_params {
+            param = recorder.read_bits::<u32>(stat.save_param_bits as u32)?;
         }
+    }
 
-        axiom.stat_bit_width(stat_id, default_width)
+    let mut default_width = if let Some(stat) = stat_cost {
+        if let Some(width) = rhythm.value_bits {
+            width
+        } else {
+            stat.save_bits as u32
+        }
+    } else {
+        9
     };
+
+    // Alpha v105 Version 0 and 1 items use a 17-bit rhythm (9-bit id + 8-bit value)
+    // for standard stats, even when the stat table would otherwise suggest a wider save field.
+    if axiom.save_is_alpha && (_version == 0 || _version == 1) && rhythm.id_bits == 9 && default_width == 9 {
+        default_width = 8;
+    }
+
+    let effective_width = axiom.stat_bit_width(stat_id, default_width);
 
     let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
     let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;
@@ -497,7 +497,7 @@ where
             recorder.skip_and_record(effective_width)?;
             raw_value = 0; 
         } else {
-            raw_value = recorder.read_bits::<u32>(effective_width)?;
+            raw_value = recorder.read_bits::<u32>(effective_width)? as i32;
         }
     } else {
         raw_value = 0;
