@@ -202,6 +202,7 @@ fn main() {
         .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
     parser.add_spec(ArgSpec::positional("file", "Path to .d2i or .d2s file"));
     parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+    parser.add_spec(ArgSpec::option("bit-offset", None, Some("bit-offset"), "Start parsing at specific bit offset"));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -217,6 +218,7 @@ fn main() {
 
     let path = parsed.get("file").unwrap();
     let is_json = parsed.is_json();
+    let bit_offset = parsed.get("bit-offset").and_then(|s| s.parse::<usize>().ok());
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -231,8 +233,41 @@ fn main() {
     };
     let huffman = HuffmanTree::new();
 
-    let version_raw = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version_raw = if bytes.len() >= 8 {
+        u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
+    } else {
+        0
+    };
     let is_alpha = version_raw == 105 || version_raw == 6;
+
+    if let Some(offset) = bit_offset {
+        let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let _ = reader.skip(offset as u32).unwrap_or(());
+        match Item::from_reader(&mut reader, &huffman, is_alpha) {
+            Ok(item) => {
+                let bit_end = reader.position_in_bits().unwrap_or(0) as usize;
+
+                if is_json {
+                    println!("{}", json!({ "item": item_to_json(&item), "errors": [], "range": {"start": offset, "end": bit_end} }));
+                } else {
+                    println!("Parsed item at offset {}: '{}' bits {}-{} loc={} quality={:?}", offset, item.code, offset, bit_end, item.location, item.header.quality);
+                    for prop in &item.properties {
+                        println!("  Prop: id={} value={} param={} bits {}-{}", 
+                            prop.stat_id, prop.raw_value, prop.param, prop.range.start, prop.range.end);
+                    }
+                }
+            }
+            Err(e) => {
+                if is_json {
+                    println!("{}", json!({ "errors": [format!("Error at offset {}: {}", offset, e)] }));
+                } else {
+                    eprintln!("Error at offset {}: {}", offset, e);
+                    analyze_non_compact_item(&bytes, offset, &huffman);
+                }
+            }
+        }
+        return;
+    }
 
     // 1. Try reading as player items (save file format)
     if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
