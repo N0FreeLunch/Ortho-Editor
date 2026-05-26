@@ -12,6 +12,8 @@ fn main() -> anyhow::Result<()> {
     parser.add_flag("fix", "Automatically fix checksums if mismatch is detected")
         .short('f')
         .long("fix");
+    parser.add_flag("dump-residue-map", "Visualize unparsed 'gap' bits between valid items")
+        .long("dump-residue-map");
     parser.add_opt("diff-baseline", "Path to a baseline JSON report for regression checking")
         .long("diff-baseline");
     parser.add_arg("files", "Save files to verify")
@@ -40,6 +42,14 @@ fn main() -> anyhow::Result<()> {
         let start_bit: u64 = bits_args[0].parse().unwrap_or(0);
         let count: u64 = bits_args[1].parse().unwrap_or(0);
         dump_bits(&mut om, &files[0], start_bit, count)?;
+        return Ok(());
+    }
+
+    if parsed.is_set("dump-residue-map") {
+        if files.is_empty() {
+            anyhow::bail!("Error: No file provided for --dump-residue-map");
+        }
+        dump_residue_map(&mut om, &files[0])?;
         return Ok(());
     }
 
@@ -198,5 +208,37 @@ fn dump_bits(om: &mut d2r_core::verify::OutputManager, path: &str, start_bit: u6
         om.println(&line);
     }
     om.println("");
+    Ok(())
+}
+
+fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> anyhow::Result<()> {
+    use d2r_core::item::{HuffmanTree, Item};
+    let bytes = fs::read(path)?;
+    let huffman = HuffmanTree::new();
+    let alpha_mode = bytes.len() > 4 && bytes[4] == 105;
+
+    om.summary(&format!("Residue Gap Map for {}:", path));
+    
+    let items = Item::read_player_items(&bytes, &huffman, alpha_mode).unwrap_or_default();
+    
+    for (i, item) in items.iter().enumerate() {
+        let start = item.range.start;
+        let len = item.total_bits;
+        let end = item.range.end;
+        
+        if item.is_residue() || item.is_opaque() {
+            let mut bits = String::new();
+            for (bi, b) in item.bits.iter().enumerate() {
+                bits.push(if b.bit { '1' } else { '0' });
+                if (bi + 1) % 8 == 0 && bi + 1 < item.bits.len() {
+                    bits.push(' ');
+                }
+            }
+            om.println(&format!("[{:>3}] [GAP: {:>5} bits] [0x{:08X} - 0x{:08X}] bits: {}", i, len, start, end, bits));
+        } else {
+            om.println(&format!("[{:>3}] [CLAIMED: {:>4}] [0x{:08X} - 0x{:08X}]", i, item.code.trim(), start, end));
+        }
+    }
+    
     Ok(())
 }
