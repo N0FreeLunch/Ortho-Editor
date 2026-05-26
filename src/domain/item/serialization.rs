@@ -1002,7 +1002,9 @@ impl Item {
                         
                         // Slice 3 Resolution: Trust the physical marker found by the scanner as the absolute boundary.
                         if let Some(limit) = parse_limit {
-                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code) {
+                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code) 
+                                && !crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_rhythm_forced(final_item.header.version, &final_item.code)
+                            {
                                 if limit >= 72 && limit <= 128 && (limit % 8 == 0 || limit % 8 == 5) {
                                     target_width = limit;
                                 }
@@ -1216,7 +1218,9 @@ impl Item {
                                             alignment_axiom.calculate_alignment(consumed_bits, &final_item.code, final_item.header.flags);
                                         
                                         if let Some(limit_hint) = retry_limit {
-                                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code) {
+                                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code) 
+                                                && !crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_rhythm_forced(final_item.header.version, &final_item.code)
+                                            {
                                                 if limit_hint >= 72 && limit_hint <= 128 && (limit_hint % 8 == 0 || limit_hint % 8 == 5) {
                                                     target_width = limit_hint;
                                                 }
