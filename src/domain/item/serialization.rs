@@ -1516,37 +1516,37 @@ impl Item {
                 .collect();
 
             if authority_indices.len() > 1 {
-                let mut best_idx = authority_indices[0];
-                for &idx in &authority_indices[1..] {
-                    let current = &items[idx];
-                    let best = &items[best_idx];
-                    if current.properties.len() > best.properties.len()
-                        || (current.properties.len() == best.properties.len() && current.total_bits > best.total_bits)
-                    {
-                        best_idx = idx;
+                let mut duplicate_groups = std::collections::HashMap::<u64, Vec<usize>>::new();
+                for idx in authority_indices {
+                    duplicate_groups.entry(items[idx].range.start).or_default().push(idx);
+                }
+
+                let mut removals = Vec::new();
+                for mut group in duplicate_groups.into_values().filter(|group| group.len() > 1) {
+                    group.sort_unstable();
+
+                    let mut best_idx = group[0];
+                    for &idx in &group[1..] {
+                        let current = &items[idx];
+                        let best = &items[best_idx];
+                        if current.properties.len() > best.properties.len()
+                            || (current.properties.len() == best.properties.len() && current.total_bits > best.total_bits)
+                        {
+                            best_idx = idx;
+                        }
+                    }
+
+                    for idx in group {
+                        if idx != best_idx {
+                            removals.push(idx);
+                        }
                     }
                 }
 
-                if let Some(preferred_idx) = authority_indices.iter().copied().find(|&idx| {
-                    items[idx].header.version == 1
-                        && items[idx].properties.first().map(|p| p.stat_id) == Some(133)
-                }) {
-                    best_idx = preferred_idx;
-                }
-
-                let first_idx = authority_indices[0];
-                if best_idx != first_idx {
-                    items.swap(first_idx, best_idx);
-                }
-
-                for idx in (0..items.len()).rev() {
-                    if idx != first_idx
-                        && items[idx].header.is_runeword
-                        && items[idx].code.trim() == "xrs"
-                        && !items[idx].is_residue()
-                    {
-                        items.remove(idx);
-                    }
+                removals.sort_unstable();
+                removals.dedup();
+                for idx in removals.into_iter().rev() {
+                    items.remove(idx);
                 }
             }
         }
@@ -1746,8 +1746,15 @@ impl Item {
         // Slice 9: Alpha v105 runewords are shadow containers and skip standard extended stats.
         let skip_ext_stats = header.save_is_alpha && detected_runeword;
 
+        let mut ext_axiom = axiom.clone();
+        if header.save_is_alpha && matches!(body.code.trim(), "buc") {
+            // Buckler keeps the compact header shape, but its extended stats still
+            // carry armor fields that must be parsed with non-compact width gates.
+            ext_axiom.is_compact = false;
+        }
+
         let ext_data = if !rhythm_recovery && !skip_ext_stats {
-            match crate::domain::item::entity::ExtendedStatsData::read_from_cursor(cursor, &body.code, &header, header.save_is_alpha, &axiom) {
+            match crate::domain::item::entity::ExtendedStatsData::read_from_cursor(cursor, &body.code, &header, header.save_is_alpha, &ext_axiom) {
                 Ok(data) => data,
                 Err(e) => {
                     return Err(e);
@@ -1816,22 +1823,7 @@ impl Item {
         if item.body.alpha_shadow_skip_bits.is_some() { item.forensic_audit.record(V105ShadowAxiom.metadata()); }
         if rhythm_recovery { item.forensic_audit.record(V105PropertyNudgeAxiom::default().metadata()); }
 
-        // Slice 1: Force stats reading for Alpha v105 items even if compact, 
-        // to detect residue Defense/Durability as per mini-spec.
-        // EXCEPT for summary items (Axiom 0392) which never have stats.
         let is_v105_summary = alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
-        if crate::item::item_trace_enabled() && matches!(item.code.trim(), "jav" | "buc") {
-            eprintln!(
-                "[DEBUG-SUMMARY-GATE] code={:?} summary={} alpha={} compact={} runeword={} version={} flags={:08X}",
-                item.code,
-                is_v105_summary,
-                alpha_mode,
-                item.header.is_compact,
-                item.header.is_runeword,
-                item.header.version,
-                item.header.flags
-            );
-        }
         if !is_v105_summary {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code));
             let authority_runeword_hint = alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd");

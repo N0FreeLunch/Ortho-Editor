@@ -168,7 +168,7 @@ where
             return Err(recorder.fail(crate::error::ParsingError::BitBudgetExceeded { bit_offset: recorder.pos() }));
         }
         if axiom.is_alpha() && alpha_runeword {
-            let current_abs_pos = _section_recovery.item_start_bit + recorder.pos();
+            let current_abs_pos = recorder.pos().saturating_sub(recorder.base_pos);
             let next_child_off = if let Some(offsets) = child_marker_offsets {
                 offsets.iter().filter(|&&off| off >= current_abs_pos).min().cloned()
             } else {
@@ -254,7 +254,7 @@ where
         let mut child_idx = 0;
         loop {
             let mut current_pos = recorder.pos();
-            let mut current_abs_pos = _section_recovery.item_start_bit + current_pos;
+            let mut current_abs_pos = current_pos.saturating_sub(recorder.base_pos);
             
             if let Some(offsets) = child_marker_offsets {
                 if let Some(&next_marker_off) = offsets.iter().filter(|&&off| off >= current_abs_pos).min() {
