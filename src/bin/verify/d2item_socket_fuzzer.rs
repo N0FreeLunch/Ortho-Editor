@@ -1,136 +1,352 @@
-use bitstream_io::{BitRead, BitReader, LittleEndian};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::item::{HuffmanTree, Item};
+use serde::Serialize;
 use std::fs;
-use std::io::Cursor;
 use std::path::PathBuf;
+use std::env;
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
+enum ProbeStatus {
+    Ok,
+    FallbackParent,
+    NoParent,
+    ParseError,
+}
+
+#[derive(Serialize, Debug)]
+struct SeamDiscovery {
+    bit_offset: u64,
+    source: String,
+    marker_bit: Option<u64>,
+    terminator_bit: Option<u64>,
+    fallback_bit: u64,
+}
+
+#[derive(Serialize, Debug)]
+struct ShiftProbe {
+    shift: u32,
+    status: ProbeStatus,
+    parent_code: Option<String>,
+    mode: Option<String>,
+    parsed_children: usize,
+    expected_children: usize,
+    child_codes: Vec<String>,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+struct SocketFuzzerReport {
+    fixture: PathBuf,
+    anchor_bit: u64,
+    jm_byte_pos: usize,
+    parent_code: String,
+    expected_children: usize,
+    shift_start: u32,
+    shift_end: u32,
+    seam: SeamDiscovery,
+    probes: Vec<ShiftProbe>,
+}
 
 fn main() -> anyhow::Result<()> {
-    // 1. Setup paths and constants
-    let args: Vec<String> = std::env::args().collect();
-    let mut fixture_path = if args.len() > 1 {
-        PathBuf::from(&args[1])
-    } else {
-        // Default paths if no arg provided
-        let mut p = PathBuf::from("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
-        if !p.exists() {
-            p = PathBuf::from("d2r-core/tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+    let mut parser = ArgParser::new("d2item_socket_fuzzer");
+    parser.add_spec(ArgSpec::positional("fixture", "Path to the save file (.d2s)").optional());
+    parser.add_spec(ArgSpec::option("parent-code", None, Some("parent-code"), "Item code to track for socket-child recovery").with_default("xrs"));
+    parser.add_spec(ArgSpec::option("expected-children", None, Some("expected-children"), "Expected socket child count for the tracked parent").with_default("3"));
+    parser.add_spec(ArgSpec::option("shift-start", None, Some("shift-start"), "First shift to probe").with_default("0"));
+    parser.add_spec(ArgSpec::option("shift-end", None, Some("shift-end"), "Last shift to probe (inclusive)").with_default("48"));
+    parser.add_spec(ArgSpec::option("seam-bit", None, Some("seam-bit"), "Override the discovered seam bit offset"));
+    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+
+    let parsed = match parser.parse(env::args_os().skip(1).collect()) {
+        Ok(p) => p,
+        Err(ArgError::Help(h)) => {
+            println!("{}", h);
+            std::process::exit(0);
         }
-        p
+        Err(ArgError::Error(e)) => {
+            eprintln!("error: {}", e);
+            eprintln!("\n{}", parser.usage());
+            std::process::exit(1);
+        }
     };
-    
+
+    let fixture_path = parsed
+        .get("fixture")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let mut p = PathBuf::from("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+            if !p.exists() {
+                p = PathBuf::from("d2r-core/tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+            }
+            p
+        });
+
     if !fixture_path.exists() {
-        anyhow::bail!("Fixture path not found: {}", fixture_path.display());
+        anyhow::bail!("fixture path not found: {}", fixture_path.display());
     }
-    
+
+    let parent_code = parsed
+        .get("parent-code")
+        .cloned()
+        .unwrap_or_else(|| "xrs".to_string());
+    let expected_children = parsed
+        .get("expected-children")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(3);
+    let shift_start = parsed
+        .get("shift-start")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    let shift_end = parsed
+        .get("shift-end")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(48);
+    let seam_override = parsed
+        .get("seam-bit")
+        .and_then(|s| s.parse::<u64>().ok());
+    let use_json = parsed.is_set("json");
+
     let bytes = fs::read(&fixture_path).map_err(|e| anyhow::anyhow!("Failed to read {}: {}", fixture_path.display(), e))?;
-    
-    // 2. Find first JM marker (anchor)
-    let jm_byte_pos = (0..bytes.len() - 2)
+
+    if bytes.len() < 2 {
+        anyhow::bail!("fixture is too small to contain a JM anchor");
+    }
+
+    let jm_byte_pos = (0..bytes.len().saturating_sub(1))
         .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
-        .expect("No JM marker found");
+        .ok_or_else(|| anyhow::anyhow!("No JM marker found"))?;
     let anchor = (jm_byte_pos as u64) * 8;
-    
-    // 3. Discover target seam dynamically
+
     let huffman = HuffmanTree::new();
     let is_alpha = true;
-    
+
     let initial_items = Item::read_section_ext(
         &bytes[jm_byte_pos..],
         anchor,
-        15, // Plenty of items
+        15,
         &huffman,
         is_alpha,
         false,
-    ).expect("Initial parse failed to find items for seam discovery");
+    )?;
 
-    // We look for the "parent" item - usually the first one that is a candidate for sockets or a runeword
-    let parent = initial_items.iter().find(|it| {
-        let code = it.code().trim().to_lowercase();
-        code == "xrs" || (it.header.is_runeword && it.socketed_items.len() > 0)
-    }).or_else(|| initial_items.first()) // Fallback to first item if no specific xrs found
-    .expect("No items found to determine seam");
+    let parent = select_parent(&initial_items, &parent_code)
+        .ok_or_else(|| anyhow::anyhow!("No items found to determine seam"))?;
 
-    // Dynamic Seam Discovery (Marker + Terminator Heuristic)
     let section_bits = to_bits(&bytes[jm_byte_pos..]);
-    let rel_parent_start = parent.range.start - anchor;
-    
-    // Search after header + gap + code (roughly 127 bits for xrs)
-    let search_start = (rel_parent_start + 100) as usize;
-    
-    let marker_seam = find_marker(&section_bits, search_start);
-    let term_seam = find_terminator_at(&section_bits, search_start);
-    
-    let (seam_offset, seam_source) = match (marker_seam, term_seam) {
-        (Some(m), Some(t)) => {
-            if m < t { (m as u64, "marker_jm") } else { (t as u64, "terminator_0x1FF") }
-        },
-        (Some(m), None) => (m as u64, "marker_jm"),
-        (None, Some(t)) => (t as u64, "terminator_0x1FF"),
-        (None, None) => (parent.range.end - anchor, "item_range_end_fallback"),
+    let seam = if let Some(seam_bit) = seam_override {
+        SeamDiscovery {
+            bit_offset: seam_bit,
+            source: "override".to_string(),
+            marker_bit: None,
+            terminator_bit: None,
+            fallback_bit: parent.range.end.saturating_sub(anchor),
+        }
+    } else {
+        discover_seam(&section_bits, parent, anchor)
     };
 
-    let seam = anchor + seam_offset;
-    
-    println!("Fixture: {}", fixture_path.display());
-    println!("Anchor (JM): {} (byte {}), Seam: {} (relative {}), Source: {}", anchor, jm_byte_pos, seam, seam_offset, seam_source);
-    println!("{:>5} | {:>15} | {:>5} | {:>8} | {:>10}", "Shift", "Children", "Mode", "Symmetry", "Status");
-    println!("{:-<65}", "");
-
-    for shift in 0..=48 {
-        // Construct modified bitstream
+    let mut probes = Vec::new();
+    for shift in shift_start..=shift_end {
         let fuzzed_bytes = if shift == 0 {
             bytes.clone()
         } else {
-            inject_bits(&bytes, seam, shift)
+            inject_bits(&bytes, seam.bit_offset, shift)
         };
-        
-        // Slice to item section
+
         let section_bytes = &fuzzed_bytes[jm_byte_pos..];
-        
-        // Parse from anchor
-        let res = Item::read_section_ext(
-            section_bytes,
-            anchor,
-            15, // Plenty of items
-            &huffman,
-            is_alpha,
-            false,
-        );
+        let res = Item::read_section_ext(section_bytes, anchor, 15, &huffman, is_alpha, false);
 
         match res {
             Ok(items) => {
-                if shift == 0 {
-                    for (i, it) in items.iter().enumerate() {
-                        println!("DEBUG: Item {} code='{}' socketed={}", i, it.code(), it.socketed_items.len());
-                        for (j, child) in it.socketed_items.iter().enumerate() {
-                            println!("  DEBUG: Child {} code='{}'", j, child.code());
-                        }
-                    }
-                }
-                // Find the xrs item that is supposed to have socketed items
-                let parent = items.iter().find(|it| it.code().trim().to_lowercase() == "xrs" && it.socketed_items.len() > 0);
-                
-                if let Some(p) = parent {
-                    let child_count = p.socketed_items.len();
-                    let mode = p.header.mode;
-                    println!("seam={} source={} shift={} parsed_children={}/3 mode={} status=ok", seam, seam_source, shift, child_count, mode);
-                } else {
-                    // Try to find ANY xrs if no child-bearing one is found
-                    let any_xrs = items.iter().find(|it| it.code().trim().to_lowercase() == "xrs");
-                    if let Some(p) = any_xrs {
-                         println!("seam={} source={} shift={} parsed_children={}/3 mode={} status=no_children", seam, seam_source, shift, p.socketed_items.len(), p.header.mode);
+                let exact_parent = find_parent(&items, &parent_code);
+                let fallback_parent = exact_parent.or_else(|| fallback_parent(&items));
+                let selected = fallback_parent;
+
+                let (status, parent_code_seen, mode, parsed_children, child_codes) = if let Some(p) = selected {
+                    let exact = exact_parent.is_some();
+                    let status = if exact {
+                        ProbeStatus::Ok
                     } else {
-                         println!("seam={} source={} shift={} parsed_children=0/3 mode=- status=no_xrs", seam, seam_source, shift);
-                    }
-                }
+                        ProbeStatus::FallbackParent
+                    };
+                    (
+                        status,
+                        Some(p.code().trim().to_string()),
+                        Some(p.header.mode.to_string()),
+                        p.socketed_items.len(),
+                        p.socketed_items
+                            .iter()
+                            .map(|child| child.code().trim().to_string())
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    (
+                        ProbeStatus::NoParent,
+                        None,
+                        None,
+                        0,
+                        Vec::new(),
+                    )
+                };
+
+                probes.push(ShiftProbe {
+                    shift,
+                    status,
+                    parent_code: parent_code_seen,
+                    mode,
+                    parsed_children,
+                    expected_children,
+                    child_codes,
+                    error: None,
+                });
             }
             Err(e) => {
-                println!("seam={} source={} shift={} parsed_children=0/3 mode=- status=error:{}", seam, seam_source, shift, e);
+                probes.push(ShiftProbe {
+                    shift,
+                    status: ProbeStatus::ParseError,
+                    parent_code: None,
+                    mode: None,
+                    parsed_children: 0,
+                    expected_children,
+                    child_codes: Vec::new(),
+                    error: Some(e.to_string()),
+                });
             }
         }
     }
 
+    let report = SocketFuzzerReport {
+        fixture: fixture_path,
+        anchor_bit: anchor,
+        jm_byte_pos,
+        parent_code: parent_code.clone(),
+        expected_children,
+        shift_start,
+        shift_end,
+        seam,
+        probes,
+    };
+
+    if use_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    println!("Fixture: {}", report.fixture.display());
+    println!(
+        "Anchor (JM): {} (byte {}), Seam: {} (source: {})",
+        report.anchor_bit,
+        report.jm_byte_pos,
+        report.seam.bit_offset,
+        report.seam.source
+    );
+    println!(
+        "Parent code: '{}' expected_children: {} shifts: {}..={}",
+        report.parent_code,
+        report.expected_children,
+        report.shift_start,
+        report.shift_end
+    );
+    println!("{:>5} | {:>14} | {:>10} | {:>24} | {:>6}", "Shift", "Status", "Children", "Child codes", "Mode");
+    println!("{:-<76}", "");
+
+    for probe in &report.probes {
+        let codes = if probe.child_codes.is_empty() {
+            "-".to_string()
+        } else {
+            probe.child_codes.join(",")
+        };
+        let status = match probe.status {
+            ProbeStatus::Ok => "ok",
+            ProbeStatus::FallbackParent => "fallback",
+            ProbeStatus::NoParent => "no_parent",
+            ProbeStatus::ParseError => "parse_error",
+        };
+        let mode = probe.mode.as_deref().unwrap_or("-");
+        println!(
+            "{:>5} | {:>14} | {:>2}/{:<7} | {:>24} | {:>6}",
+            probe.shift,
+            status,
+            probe.parsed_children,
+            probe.expected_children,
+            truncate_codes(&codes, 24),
+            mode
+        );
+    }
+
+    if let Some(best) = report
+        .probes
+        .iter()
+        .find(|p| matches!(p.status, ProbeStatus::Ok) && p.parsed_children == report.expected_children)
+    {
+        println!(
+            "\nFirst exact match: shift={} children={}/{} codes={}",
+            best.shift,
+            best.parsed_children,
+            best.expected_children,
+            if best.child_codes.is_empty() {
+                "-".to_string()
+            } else {
+                best.child_codes.join(",")
+            }
+        );
+    }
+
     Ok(())
+}
+
+fn discover_seam(bits: &[bool], parent: &Item, anchor: u64) -> SeamDiscovery {
+    let rel_parent_start = parent.range.start.saturating_sub(anchor);
+    let search_start = rel_parent_start.saturating_add(100) as usize;
+
+    let marker_seam = find_marker(bits, search_start).map(|bit| bit as u64);
+    let term_seam = find_terminator_at(bits, search_start).map(|bit| bit as u64);
+
+    let (bit_offset, source) = match (marker_seam, term_seam) {
+        (Some(m), Some(t)) => {
+            if m < t {
+                (m, "marker_jm".to_string())
+            } else {
+                (t, "terminator_0x1ff".to_string())
+            }
+        }
+        (Some(m), None) => (m, "marker_jm".to_string()),
+        (None, Some(t)) => (t, "terminator_0x1ff".to_string()),
+        (None, None) => (
+            parent.range.end.saturating_sub(anchor),
+            "item_range_end_fallback".to_string(),
+        ),
+    };
+
+    SeamDiscovery {
+        bit_offset,
+        source,
+        marker_bit: marker_seam,
+        terminator_bit: term_seam,
+        fallback_bit: parent.range.end.saturating_sub(anchor),
+    }
+}
+
+fn select_parent<'a>(items: &'a [Item], parent_code: &str) -> Option<&'a Item> {
+    find_parent(items, parent_code)
+        .or_else(|| items.iter().find(|it| it.header.is_runeword && !it.socketed_items.is_empty()))
+        .or_else(|| items.first())
+}
+
+fn fallback_parent<'a>(items: &'a [Item]) -> Option<&'a Item> {
+    items
+        .iter()
+        .find(|it| it.header.is_runeword && !it.socketed_items.is_empty())
+        .or_else(|| items.first())
+}
+
+fn find_parent<'a>(items: &'a [Item], parent_code: &str) -> Option<&'a Item> {
+    items.iter().find(|it| code_matches(it.code(), parent_code))
+}
+
+fn code_matches(actual: &str, expected: &str) -> bool {
+    actual.trim().eq_ignore_ascii_case(expected.trim())
 }
 
 fn inject_bits(original: &[u8], at_bit: u64, count: u32) -> Vec<u8> {
@@ -142,15 +358,16 @@ fn inject_bits(original: &[u8], at_bit: u64, count: u32) -> Vec<u8> {
     }
     
     let mut new_bits = Vec::new();
-    if at_bit as usize > bits.len() {
+    if at_bit > bits.len() as u64 {
         return original.to_vec();
     }
+    let at_bit = at_bit as usize;
     
-    new_bits.extend_from_slice(&bits[..at_bit as usize]);
+    new_bits.extend_from_slice(&bits[..at_bit]);
     for _ in 0..count {
         new_bits.push(false); // Inject zeros
     }
-    new_bits.extend_from_slice(&bits[at_bit as usize..]);
+    new_bits.extend_from_slice(&bits[at_bit..]);
     
     // Convert back to bytes
     let mut out_bytes = Vec::new();
@@ -212,6 +429,15 @@ fn find_terminator_at(bits: &[bool], start_at: usize) -> Option<usize> {
     None
 }
 
-fn find_terminator(bits: &[bool]) -> Option<usize> {
-    find_terminator_at(bits, 0)
+fn truncate_codes(codes: &str, max_chars: usize) -> String {
+    if codes.chars().count() <= max_chars {
+        return codes.to_string();
+    }
+
+    let mut out = String::new();
+    for ch in codes.chars().take(max_chars.saturating_sub(1)) {
+        out.push(ch);
+    }
+    out.push_str("...");
+    out
 }

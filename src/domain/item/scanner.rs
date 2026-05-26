@@ -26,6 +26,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         return Vec::new();
     }
 
+    let debug_scan = verbose || std::env::var_os("D2R_DEBUG_SCAN").is_some();
+
     // Tier 1: Parallel Structural Indexing using Rayon
     // We split the byte stream into chunks and scan each chunk in parallel.
     // To avoid missing markers straddling chunk boundaries, we overlap chunks slightly.
@@ -150,6 +152,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             if alpha && (flags & (1 << 26)) != 0 && trimmed_code == "xrs" {
                                 confidence += 300;
                             }
+                            if alpha && trimmed_code == "ww" && (flags & (1 << 26)) == 0 {
+                                continue;
+                            }
                             if alpha && version == 5 {
                                 confidence += 100;
                             }
@@ -191,7 +196,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 best_offset = scan_pos;
                                 best_code = code.clone();
                             }
-                            if alpha && (trimmed_code == "xrs" || trimmed_code == "c8xr") {
+                            if debug_scan && alpha && (trimmed_code == "xrs" || trimmed_code == "c8xr") {
                                 println!("[DEBUG-SCAN-FOUND] code={} pos={} conf={} rem8={}", trimmed_code, scan_pos, confidence, scan_pos % 8);
                             }
                         }
