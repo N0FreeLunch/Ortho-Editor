@@ -401,5 +401,9 @@ path = "src/bin/verify/d2item_socket_fuzzer.rs"
 name = "d2item_huffman_visualizer"
 path = "src/bin/verify/d2item_huffman_visualizer.rs"
 
+[[bin]]
+name = "d2item_grep"
+path = "src/bin/verify/d2item_grep.rs"
+
 [dev-dependencies]
 trybuild = "1.0"
