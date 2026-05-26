@@ -831,7 +831,15 @@ pub fn parse_item_header<R: BitRead>(
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
     let flags = cursor.read_bits::<u32>(w_axiom.flags_bits() as u32)?;
-    if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
+    let is_nested = cursor.context_stack().iter().any(|s| s == "nested") || crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get());
+    crate::item_trace!(
+        "[TEST-DEBUG] parse_item_header IN_NESTED_RECOVERY: {}, is_nested: {}, alpha_mode: {}, flags: {:08x}",
+        crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()),
+        is_nested,
+        alpha_mode,
+        flags
+    );
+    if !alpha_mode && !is_nested && (flags & 0xFFFF) != 0x4D4A {
          return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
     }
     let (version, has_checksum) = if alpha_mode {
@@ -1358,10 +1366,15 @@ impl ExtendedStatsData {
 
             } else { data.id = Some(0); }
         } else {
-            data.id = Some(read_or_truncate!(cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)));
-            data.level = Some(read_or_truncate!(cursor.read_bits::<u8>(w_axiom.item_level_bits() as u32)));
-            let quality_raw = read_or_truncate!(cursor.read_bits::<u8>(w_axiom.quality_bits(false) as u32));
-            data.quality = Some(ItemQuality::from(quality_raw));
+            let is_nested = crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get());
+            if is_nested && is_compact {
+                data.id = Some(0);
+            } else {
+                data.id = Some(read_or_truncate!(cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)));
+                data.level = Some(read_or_truncate!(cursor.read_bits::<u8>(w_axiom.item_level_bits() as u32)));
+                let quality_raw = read_or_truncate!(cursor.read_bits::<u8>(w_axiom.quality_bits(false) as u32));
+                data.quality = Some(ItemQuality::from(quality_raw));
+            }
         }
         // Version 2 remains as early exit for now if confirmed. 
         // Version 1 and 4 are removed from early exit to allow stats/sockets parsing.

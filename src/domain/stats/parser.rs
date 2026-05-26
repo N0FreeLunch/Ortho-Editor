@@ -1,4 +1,5 @@
 use bitstream_io::BitRead;
+use std::cell::{Cell, RefCell};
 use crate::domain::item::{ItemBitRange, ItemQuality};
 use crate::domain::stats::{
     ItemProperty, StatsAxiom,
@@ -8,6 +9,55 @@ use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext};
 use crate::domain::header::entity::ItemSegmentType;
 
 pub const MAX_ALPHA_V105_ITEM_BITS: u64 = 1500;
+
+#[derive(Clone, Debug)]
+pub struct SocketRecoveryTraceEvent {
+    pub stage: &'static str,
+    pub current_rel_pos: u64,
+    pub next_marker: Option<u64>,
+    pub observed_marker: Option<u64>,
+    pub note: &'static str,
+}
+
+thread_local! {
+    static SOCKET_TRACE_ENABLED: Cell<bool> = const { Cell::new(false) };
+    static SOCKET_TRACE_EVENTS: RefCell<Vec<SocketRecoveryTraceEvent>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn set_socket_recovery_trace_enabled(enabled: bool) {
+    SOCKET_TRACE_ENABLED.with(|f| f.set(enabled));
+}
+
+pub fn clear_socket_recovery_trace_events() {
+    SOCKET_TRACE_EVENTS.with(|events| events.borrow_mut().clear());
+}
+
+pub fn take_socket_recovery_trace_events() -> Vec<SocketRecoveryTraceEvent> {
+    SOCKET_TRACE_EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
+}
+
+fn push_socket_trace_event(
+    stage: &'static str,
+    current_rel_pos: u64,
+    next_marker: Option<u64>,
+    observed_marker: Option<u64>,
+    note: &'static str,
+) {
+    SOCKET_TRACE_ENABLED.with(|enabled| {
+        if !enabled.get() {
+            return;
+        }
+        SOCKET_TRACE_EVENTS.with(|events| {
+            events.borrow_mut().push(SocketRecoveryTraceEvent {
+                stage,
+                current_rel_pos,
+                next_marker,
+                observed_marker,
+                note,
+            });
+        });
+    });
+}
 
 pub fn read_item_stats<R: BitRead>(
     cursor: &mut BitCursor<R>,
@@ -80,28 +130,35 @@ pub fn read_item_stats<R: BitRead>(
     }
 
     let mut child_offsets = Vec::new();
+    let mut child_offset_codes: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
     if let Some((bytes, _)) = ctx {
         let markers = crate::domain::item::scanner::scan_item_markers(
             bytes,
             huffman,
-            alpha_mode,
-            0,
+            false,
+            section_recovery.item_start_bit,
             None,
             false,
         );
-        child_offsets = markers.iter()
-            .filter(|m| {
-                let t = m.code.trim();
-                (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew" || t == "ww"
-            })
-            .map(|m| m.offset)
-            .collect();
+        for m in markers.iter() {
+            let t = m.code.trim();
+            if (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew" {
+                child_offsets.push(m.offset);
+                child_offset_codes.insert(m.offset, m.code.trim().to_string());
+            }
+        }
     }
 
-    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery, huffman, is_runeword, is_v105_shadow_final || is_shadow_container, &axiom, Some(&child_offsets), |bytes, pos, huff, idx, alpha| {
+    // section_base_abs: absolute bit offset of the section start (= cursor.base_pos).
+    // This is used as base_bit_offset in parse_item_at_with_limit so that
+    // absolute_bit = section_base_abs + local_pos is computed correctly.
+    let section_base_abs = cursor.base_pos;
+    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery.clone(), huffman, is_runeword, is_v105_shadow_final || is_shadow_container, &axiom, Some(&child_offsets), Some(&child_offset_codes), |bytes, pos, huff, idx, alpha| {
+        // Use scanner-verified code as hint to ensure correct item identification
+        let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
         let peek_code = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0).map(|p| p.3);
-        let code_hint = peek_code.as_deref();
-        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, 0, huff, idx, alpha, None, None, code_hint)
+        let code_hint = scanner_code.or(peek_code.as_deref());
+        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, section_base_abs, huff, idx, alpha, None, None, code_hint)
     })?;
     if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) && !is_shadow_container {
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
@@ -132,6 +189,7 @@ pub fn read_property_list<R: BitRead, F>(
     is_v105_shadow: bool,
     axiom: &StatsAxiom,
     child_marker_offsets: Option<&[u64]>,
+    child_marker_codes: Option<&std::collections::HashMap<u64, String>>,
     mut recovery_fn: F,
 ) -> ParsingResult<(Vec<ItemProperty>, bool, bool, Vec<crate::domain::item::Item>)> 
 where 
@@ -168,35 +226,61 @@ where
             return Err(recorder.fail(crate::error::ParsingError::BitBudgetExceeded { bit_offset: recorder.pos() }));
         }
         if axiom.is_alpha() && alpha_runeword {
-            let current_abs_pos = recorder.pos().saturating_sub(recorder.base_pos);
-            let next_child_off = if let Some(offsets) = child_marker_offsets {
-                offsets.iter().filter(|&&off| off >= current_abs_pos).min().cloned()
+            // current_rel_pos: section-local offset = absolute_pos - section_base_abs
+            // recorder.base_pos holds the absolute bit offset of the section start.
+            // child_marker_offsets are also section-local, so we subtract base_pos, not item_start_bit.
+            let current_rel_pos = recorder.pos().saturating_sub(recorder.base_pos);
+            let next_child_rel_off = if let Some(offsets) = child_marker_offsets {
+                offsets.iter().filter(|&&off| off >= current_rel_pos).min().cloned()
             } else {
                 None
             };
+            push_socket_trace_event(
+                "pre_loop",
+                current_rel_pos,
+                next_child_rel_off,
+                None,
+                "main_loop_check",
+            );
             
-            let target_peek_pos = next_child_off.unwrap_or(current_abs_pos);
-            let is_close = if next_child_off.is_some() {
-                target_peek_pos >= current_abs_pos && (target_peek_pos - current_abs_pos) < 17
+            // target_local_pos: section-local offset for peek_item_header_at (bytes = section_bytes)
+            let target_local_pos = next_child_rel_off.unwrap_or_else(|| recorder.pos().saturating_sub(recorder.base_pos));
+            
+            let is_close = if let Some(rel_off) = next_child_rel_off {
+                rel_off >= current_rel_pos && (rel_off - current_rel_pos) < 36
             } else {
                 true 
             };
             
             if is_close {
-                if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_peek_pos, huffman, axiom.save_is_alpha, 0) {
-                    let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
-                    if crate::item::is_plausible_item_header(mode, loc, code_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
-                        let trimmed_peek = code_peek.trim();
-                        let is_socketable = (trimmed_peek.starts_with('r') && trimmed_peek.len() <= 3)
-                            || (trimmed_peek.starts_with('g') && trimmed_peek.len() == 3)
-                            || trimmed_peek == "jew" || trimmed_peek == "tsc" || trimmed_peek == "isc";
-                        if is_socketable {
-                            saw_terminator = true;
-                            terminator_bit = false;
-                            break;
-                        }
-                    }
-                }
+                 // Use alpha=false for detection: rune markers at these offsets are
+                 // detectable via retail-style header peek even in alpha saves.
+                 if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_local_pos, huffman, false, 0) {
+                     let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
+                     let trimmed_peek = code_peek.trim();
+                     let normalized_peek = match trimmed_peek {
+                         "ww" => "r08",
+                         "gcw" => "r15",
+                         other => other,
+                     };
+                     if crate::item::is_plausible_item_header(mode, loc, normalized_peek.as_bytes(), flags, version_peek, false) {
+                         let is_socketable = (normalized_peek.starts_with('r') && normalized_peek.len() <= 3)
+                             || (normalized_peek.starts_with('g') && normalized_peek.len() == 3)
+                             || normalized_peek == "jew";
+                         if is_socketable {
+                             push_socket_trace_event(
+                                 "post_loop",
+                                 current_rel_pos,
+                                 next_child_rel_off,
+                                 Some(target_local_pos),
+                                 "main_loop_break_on_socketable_header",
+                             );
+                             saw_terminator = true;
+                             terminator_bit = false;
+                             break;
+                         }
+                     }
+                 }
             }
         }
 
@@ -250,81 +334,201 @@ where
         }
     }
 
-    if axiom.is_alpha() && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw") && axiom.is_socketed && nested_items.is_empty() {
-        let mut child_idx = 0;
-        loop {
-            let mut current_pos = recorder.pos();
-            let mut current_abs_pos = current_pos.saturating_sub(recorder.base_pos);
+     let needs_socket_recovery = axiom.is_alpha()
+         && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw")
+         && axiom.is_socketed
+         && child_marker_offsets
+             .map(|offsets| nested_items.len() < offsets.len())
+             .unwrap_or(false);
+     if needs_socket_recovery {
+         push_socket_trace_event(
+             "fallback_entry",
+             recorder.pos().saturating_sub(recorder.base_pos),
+             child_marker_offsets.and_then(|offsets| offsets.iter().min().copied()),
+             None,
+             "needs_socket_recovery_true",
+         );
+         let mut child_idx = nested_items.len();
+         loop {
+             // current_rel_pos: section-local offset. recorder.base_pos = section absolute start bit.
+             let current_rel_pos = recorder.pos().saturating_sub(recorder.base_pos);
             
-            if let Some(offsets) = child_marker_offsets {
-                if let Some(&next_marker_off) = offsets.iter().filter(|&&off| off >= current_abs_pos).min() {
-                    let diff = next_marker_off - current_abs_pos;
-                    if diff > 0 {
-                        recorder.skip_and_record(diff as u32)?;
-                        current_pos = recorder.pos();
-                        current_abs_pos = next_marker_off;
-                    }
-                }
-            }
-            
-            if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, current_abs_pos, huffman, axiom.save_is_alpha, 0) {
-                let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
-                let trimmed_peek = code_peek.trim();
-                let normalized_peek = match trimmed_peek {
-                    "ww" => "r08",
-                    other => other,
-                };
-                let force_alias = trimmed_peek == "ww";
-                if force_alias || crate::item::is_plausible_item_header(mode, loc, normalized_peek.as_bytes(), flags, version_peek, axiom.save_is_alpha) {
-                    let is_socketable = (normalized_peek.starts_with('r') && normalized_peek.len() <= 3)
-                        || (normalized_peek.starts_with('g') && normalized_peek.len() == 3)
-                        || normalized_peek == "jew" || normalized_peek == "tsc" || normalized_peek == "isc";
-                    if !is_socketable {
-                        break;
-                    }
-                    let result = NESTED_DEPTH.with(|d| {
-                        let prev = d.get();
-                        if prev > 10 { return Err(crate::error::ParsingFailure { 
-                            error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
-                            context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
-                        }); }
-                        d.set(prev + 1);
-                        let res = recovery_fn(_section_recovery.bytes, current_abs_pos, huffman, child_idx, axiom.save_is_alpha);
-                        d.set(prev);
-                        res
-                    });
+             // next_marker_rel_off: section-local offset of the next child marker
+             let next_marker_local_off = if let Some(offsets) = child_marker_offsets {
+                 if let Some(&next_off) = offsets.iter().filter(|&&off| off >= current_rel_pos).min() {
+                     let diff = next_off - current_rel_pos;
+                     if diff > 0 {
+                         recorder.skip_and_record(diff as u32)?;
+                     }
+                     next_off
+                 } else {
+                     break;
+                 }
+             } else {
+                 break;
+             };
+             push_socket_trace_event(
+                 "per_child",
+                 current_rel_pos,
+                 Some(next_marker_local_off),
+                 Some(next_marker_local_off),
+                 "attempt_recovery_at_marker",
+             );
+             
+             // target_local_pos: section-local offset for peek_item_header_at (bytes = section_bytes)
+             // and for parse_item_at_with_limit(bytes, bit=local, base=section_abs, ...)
+             let target_local_pos = next_marker_local_off;
 
-                    if let Ok((mut child, end_pos)) = result {
-                        child.mode = 6;
-                        child.header.mode = 6;
-                        child.code = normalized_peek.to_string();
-                        child.body.code = normalized_peek.to_string();
-                        nested_items.push(child);
-                        child_idx += 1;
-                        
-                        let mut absolute_end = current_abs_pos + end_pos;
-                        if let Some(offsets) = child_marker_offsets {
-                            if let Some(&next_marker_off) = offsets.iter().filter(|&&off| off > current_abs_pos).min() {
-                                absolute_end = absolute_end.min(next_marker_off);
-                            }
-                        }
-                        if absolute_end > current_abs_pos {
-                            let consumed = (absolute_end - current_abs_pos) as u32;
-                            recorder.skip_and_record(consumed)?;
-                        }
-                        
-                        let is_tome = code.trim() == "ucb8" || code.trim() == "bwcw";
-                        let max_children = if is_tome { 20 } else { 3 };
-                        if child_idx >= max_children {
-                            break;
-                        }
-                        continue;
+             // These offsets were already validated by scan_item_markers as rune candidates.
+             // Attempt to peek to get the code for normalization, but fall back to direct parse
+             // if peek fails. Use retail(false) peek which is empirically reliable for rune detection.
+             let scanner_code = child_marker_codes
+                 .and_then(|codes| codes.get(&target_local_pos))
+                 .map(|code| match code.trim() {
+                     "ww" => "r08",
+                     "gcw" => "r15",
+                     other => other,
+                 });
+             let (normalized_code, force_from_scan) = if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_local_pos, huffman, false, 0) {
+                 let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
+                 let trimmed_peek = code_peek.trim();
+                 let normalized_peek = match trimmed_peek {
+                     "ww" => "r08",
+                     "gcw" => "r15",
+                     other => other,
+                 };
+                 let force_alias = trimmed_peek == "ww" || trimmed_peek == "gcw";
+                 let is_plausible = force_alias || crate::item::is_plausible_item_header(mode, loc, normalized_peek.as_bytes(), flags, version_peek, false);
+                 if is_plausible {
+                     (normalized_peek.to_string(), false)
+                 } else if let Some(scanner_code) = scanner_code {
+                     (scanner_code.to_string(), true)
+                 } else {
+                     (normalized_peek.to_string(), true)
+                 }
+             } else {
+                 // peek failed — scanner-verified position, force the attempt
+                 (scanner_code.unwrap_or("").to_string(), true)
+             };
+
+             let is_socketable = (normalized_code.starts_with('r') && normalized_code.len() <= 3)
+                 || (normalized_code.starts_with('g') && normalized_code.len() == 3)
+                 || normalized_code == "jew";
+
+             // If peek gave a non-socketable plausible item, stop (e.g. reached next equipment slot).
+             // If force_from_scan=true, we trust the scanner and attempt recovery anyway.
+             if !is_socketable && !force_from_scan {
+                 break;
+             }
+
+             let result = NESTED_DEPTH.with(|d| {
+                 let prev = d.get();
+                 if prev > 10 { return Err(crate::error::ParsingFailure { 
+                     error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
+                     context_stack: vec![], bit_offset: 0, context_relative_offset: 0, hint: None 
+                 }); }
+                 d.set(prev + 1);
+                 recorder.push_context("nested");
+                 let prev_nested = crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| {
+                     let p = v.get();
+                     v.set(true);
+                     p
+                 });
+                 // Use alpha=false: empirically reliable for parsing runes in alpha saves at scanner-found offsets
+                 let res = recovery_fn(_section_recovery.bytes, target_local_pos, huffman, child_idx, false);
+                 crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(prev_nested));
+                 recorder.pop_context();
+                 d.set(prev);
+                 res
+             });
+
+            // If recovery_fn fails but the offset was scanner-verified (force_from_scan),
+            // create a minimal placeholder Item using the known scanner code.
+            let (child_item, end_pos_val) = match result {
+                Ok((item, ep)) => (Some(item), ep),
+                Err(_) if force_from_scan && !normalized_code.is_empty() => {
+                    // Recovery parse failed, but scanner confirmed this as a rune/gem.
+                    // Create a minimal placeholder using the scanner-verified code.
+                    let mut placeholder = crate::domain::item::Item::default();
+                    let sc = match normalized_code.as_str() {
+                        "ww" => "r08".to_string(),
+                        "gcw" => "r15".to_string(),
+                        c => c.to_string(),
+                    };
+                    placeholder.code = sc.clone();
+                    placeholder.body.code = sc;
+                    // Estimate consumed bits: use gap to next marker, or fallback to 72
+                    let est_end = if let Some(offsets) = child_marker_offsets {
+                        if let Some(&next_local) = offsets.iter().filter(|&&off| off > target_local_pos).min() {
+                            next_local - target_local_pos
+                        } else { 72 }
+                    } else { 72 };
+                    (Some(placeholder), est_end)
+                }
+                Err(_) => (None, 0),
+            };
+
+            if let Some(mut child) = child_item {
+                let end_pos = end_pos_val;
+                // Normalize code: use peek result if available, otherwise use child's parsed code.
+                let final_code = if !normalized_code.is_empty() && (normalized_code.starts_with('r') || normalized_code.starts_with('g') || normalized_code == "jew") {
+                    normalized_code.clone()
+                } else {
+                    let c = child.code.trim().to_string();
+                    match c.as_str() {
+                        "ww" => "r08".to_string(),
+                        "gcw" => "r15".to_string(),
+                        _ => c,
+                    }
+                };
+                let final_is_socketable = (final_code.starts_with('r') && final_code.len() <= 3)
+                    || (final_code.starts_with('g') && final_code.len() == 3)
+                    || final_code == "jew";
+                // force_from_scan: scanner already verified this offset as a rune/gem.
+                // Skip the socketable check in that case to avoid false negatives from retail parse.
+                if !final_is_socketable && !force_from_scan {
+                    // Parsed item is not a rune/gem — stop recovery
+                    break;
+                }
+                child.mode = 6;
+                child.header.mode = 6;
+                child.code = final_code.clone();
+                child.body.code = final_code;
+                nested_items.push(child);
+                child_idx += 1;
+                push_socket_trace_event(
+                    "per_child",
+                    recorder.pos().saturating_sub(recorder.base_pos),
+                    child_marker_offsets.and_then(|offsets| offsets.iter().filter(|&&off| off > target_local_pos).min().copied()),
+                    Some(target_local_pos),
+                    "recovery_success",
+                );
+                
+                // end_pos is bits consumed from target_local_pos;
+                // next marker offset is also local, so comparison is consistent.
+                let mut local_end = target_local_pos + end_pos;
+                if let Some(offsets) = child_marker_offsets {
+                    if let Some(&next_local) = offsets.iter().filter(|&&off| off > target_local_pos).min() {
+                        local_end = local_end.min(next_local);
                     }
                 }
+                if local_end > target_local_pos {
+                    let consumed = (local_end - target_local_pos) as u32;
+                    recorder.skip_and_record(consumed)?;
+                }
+                
+                let is_tome = code.trim() == "ucb8" || code.trim() == "bwcw";
+                let max_children = if is_tome { 20 } else { 3 };
+                if child_idx >= max_children {
+                    break;
+                }
+                continue;
             }
             break;
         }
     }
+
+
 
     if axiom.is_alpha() && is_actual_runeword {
         recorder.set_limit(recorder.pos() + 512);

@@ -1,5 +1,8 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::domain::stats::parser::{
+    clear_socket_recovery_trace_events, set_socket_recovery_trace_enabled, take_socket_recovery_trace_events,
+};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -32,7 +35,22 @@ struct ShiftProbe {
     parsed_children: usize,
     expected_children: usize,
     child_codes: Vec<String>,
+    pre_loop: Vec<ProbeTraceEvent>,
+    per_child: Vec<ProbeTraceEvent>,
+    fallback_entry: Vec<ProbeTraceEvent>,
+    post_loop: Vec<ProbeTraceEvent>,
+    expected_next_marker: Option<u64>,
+    observed_next_marker: Option<u64>,
+    marker_940_actionable: bool,
     error: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ProbeTraceEvent {
+    current_rel_pos: u64,
+    next_marker: Option<u64>,
+    observed_marker: Option<u64>,
+    note: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -147,7 +165,9 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut probes = Vec::new();
+    set_socket_recovery_trace_enabled(true);
     for shift in shift_start..=shift_end {
+        clear_socket_recovery_trace_events();
         let fuzzed_bytes = if shift == 0 {
             bytes.clone()
         } else {
@@ -159,6 +179,14 @@ fn main() -> anyhow::Result<()> {
 
         match res {
             Ok(items) => {
+                let traces = take_socket_recovery_trace_events();
+                let pre_loop = filter_trace(&traces, "pre_loop");
+                let per_child = filter_trace(&traces, "per_child");
+                let fallback_entry = filter_trace(&traces, "fallback_entry");
+                let post_loop = filter_trace(&traces, "post_loop");
+                let expected_next_marker = pre_loop.first().and_then(|e| e.next_marker);
+                let observed_next_marker = per_child.first().and_then(|e| e.observed_marker).or_else(|| post_loop.first().and_then(|e| e.observed_marker));
+                let marker_940_actionable = per_child.iter().any(|e| e.observed_marker == Some(940));
                 let exact_parent = find_parent(&items, &parent_code);
                 let fallback_parent = exact_parent.or_else(|| fallback_parent(&items));
                 let selected = fallback_parent;
@@ -198,10 +226,24 @@ fn main() -> anyhow::Result<()> {
                     parsed_children,
                     expected_children,
                     child_codes,
+                    pre_loop,
+                    per_child,
+                    fallback_entry,
+                    post_loop,
+                    expected_next_marker,
+                    observed_next_marker,
+                    marker_940_actionable,
                     error: None,
                 });
             }
             Err(e) => {
+                let traces = take_socket_recovery_trace_events();
+                let pre_loop = filter_trace(&traces, "pre_loop");
+                let per_child = filter_trace(&traces, "per_child");
+                let fallback_entry = filter_trace(&traces, "fallback_entry");
+                let post_loop = filter_trace(&traces, "post_loop");
+                let expected_next_marker = pre_loop.first().and_then(|evt| evt.next_marker);
+                let observed_next_marker = per_child.first().and_then(|evt| evt.observed_marker);
                 probes.push(ShiftProbe {
                     shift,
                     status: ProbeStatus::ParseError,
@@ -210,11 +252,19 @@ fn main() -> anyhow::Result<()> {
                     parsed_children: 0,
                     expected_children,
                     child_codes: Vec::new(),
+                    pre_loop,
+                    per_child,
+                    fallback_entry,
+                    post_loop,
+                    expected_next_marker,
+                    observed_next_marker,
+                    marker_940_actionable: false,
                     error: Some(e.to_string()),
                 });
             }
         }
     }
+    set_socket_recovery_trace_enabled(false);
 
     let report = SocketFuzzerReport {
         fixture: fixture_path,
@@ -440,4 +490,20 @@ fn truncate_codes(codes: &str, max_chars: usize) -> String {
     }
     out.push_str("...");
     out
+}
+
+fn filter_trace(
+    traces: &[d2r_core::domain::stats::parser::SocketRecoveryTraceEvent],
+    stage: &str,
+) -> Vec<ProbeTraceEvent> {
+    traces
+        .iter()
+        .filter(|t| t.stage == stage)
+        .map(|t| ProbeTraceEvent {
+            current_rel_pos: t.current_rel_pos,
+            next_marker: t.next_marker,
+            observed_marker: t.observed_marker,
+            note: t.note.to_string(),
+        })
+        .collect()
 }

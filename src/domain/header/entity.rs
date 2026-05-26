@@ -5,6 +5,10 @@ use bitstream_io::BitRead;
 use serde::Serialize;
 use crate::domain::stats::axiom::StatsAxiom;
 
+thread_local! {
+    pub static IN_NESTED_RECOVERY: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ItemSegmentType {
     Root,
@@ -363,7 +367,15 @@ impl ItemHeader {
         cursor.begin_segment(ItemSegmentType::Header);
 
         let flags = cursor.read_bits::<u32>(32)?;
-        if !alpha_mode && (flags & 0xFFFF) != 0x4D4A {
+        let is_nested = cursor.context_stack().iter().any(|s| s == "nested") || IN_NESTED_RECOVERY.with(|v| v.get());
+        crate::item_trace!(
+            "[TEST-DEBUG] entity side IN_NESTED_RECOVERY: {}, is_nested: {}, alpha_mode: {}, flags: {:08x}",
+            IN_NESTED_RECOVERY.with(|v| v.get()),
+            is_nested,
+            alpha_mode,
+            flags
+        );
+        if !alpha_mode && !is_nested && (flags & 0xFFFF) != 0x4D4A {
              return Err(cursor.fail(ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: start_bit }));
         }
 
