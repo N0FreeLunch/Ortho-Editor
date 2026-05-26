@@ -597,15 +597,15 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
         let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
         if count == 0 { continue; }
 
+        if alpha {
+            // println!("[DEBUG-JM] pos={} count={}", pos, count);
+        }
+
         // Alpha v105 can contain JM-like patterns inside item payloads.
-        // Using the next JM marker as a hard section boundary may truncate
-        // the authority runeword tail before residual child recovery.
-        let section_bytes = if alpha {
-            &bytes[pos..]
-        } else {
-            let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
-            &bytes[pos..next_pos]
-        };
+        // We MUST respect the boundary derived from the next JM marker
+        // to prevent over-reading into subsequent sections.
+        let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
+        let section_bytes = &bytes[pos..next_pos];
 
         match Item::read_section(section_bytes, (pos as u64) * 8, count, huffman, alpha, false) {
             Ok(items) => {
