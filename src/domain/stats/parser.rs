@@ -153,6 +153,7 @@ pub fn read_item_stats<R: BitRead>(
     // This is used as base_bit_offset in parse_item_at_with_limit so that
     // absolute_bit = section_base_abs + local_pos is computed correctly.
     let section_base_abs = cursor.base_pos;
+
     let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery.clone(), huffman, is_runeword, is_v105_shadow_final || is_shadow_container, &axiom, Some(&child_offsets), Some(&child_offset_codes), |bytes, pos, huff, idx, alpha| {
         // Use scanner-verified code as hint to ensure correct item identification
         let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
@@ -619,8 +620,8 @@ where
     let stat_cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == mapped_id);
     let suppress_authority_params = axiom.save_is_alpha
         && alpha_runeword
-        && matches!(axiom.code.trim(), "xrs" | "c8xr")
-        && _version == 1;
+        && matches!(axiom.code.trim(), "xrs" | "c8xr" | "rhd")
+        && (_version == 1 || _version == 0);
     if let Some(stat) = stat_cost {
         if stat.save_param_bits > 0 && !suppress_authority_params {
             param = recorder.read_bits::<u32>(stat.save_param_bits as u32)?;
@@ -647,11 +648,12 @@ where
 
     let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
     let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;
+    let is_stat_387 = stat_id == 387 || axiom.map_alpha_id(stat_id) == 387;
     let is_already_nested = recorder.context_stack().iter().any(|s| s == "nested");
     let mut handled = false;
     let raw_value;
 
-    if axiom.is_alpha() && alpha_runeword && axiom.is_socketed && (is_stat_317 || is_stat_320) && !is_already_nested {
+    if axiom.is_alpha() && alpha_runeword && axiom.is_socketed && (is_stat_317 || is_stat_320 || is_stat_387) && !is_already_nested {
         let entry_pos = recorder.pos();
         let absolute_entry_pos = reader_ctx.item_start_bit + entry_pos;
         recorder.push_context("nested");

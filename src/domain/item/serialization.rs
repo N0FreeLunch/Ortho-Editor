@@ -8,7 +8,6 @@ use crate::error::{ParsingResult, ParsingError, ParsingFailure};
 use crate::domain::header::entity::{ItemSegmentType, HeaderAxiom, calculate_alpha_v105_checksum};
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom, Confidence, Intentionality, ForensicMetadata};
 use crate::domain::item::subdomains::gap::{GapCombinator, AlphaHeaderGap};
-use crate::domain::item::subdomains::property::AlphaPropertyCombinator;
 use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom, V105PropertyNudgeAxiom};
 use crate::domain::item::subdomains::stats::StatsCombinator;
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
@@ -1888,7 +1887,8 @@ impl Item {
             }
 
             if item.header.save_is_alpha {
-                if (item.body.code.trim() == "xrs" || item.body.code.trim() == "c8xr" || item.body.code.trim() == "rhd") && item.header.version == 1 {
+                let is_authority = item.body.code.trim() == "xrs" || item.body.code.trim() == "c8xr" || item.body.code.trim() == "rhd";
+                if is_authority && (item.header.version == 1 || item.header.version == 0) {
                     // forensic-1363: Map the authority shadow block directly to the 7873 property anchor.
                     let target_stats_pos = 7873u64;
                     if cursor.pos() < target_stats_pos {
@@ -2130,16 +2130,19 @@ pub fn write_property_list(
         emitter.write_bits(raw_id, id_bits)?;
 
         let mut handled = false;
-        let is_nested_stat = (raw_id == 317 || axiom.map_alpha_id(raw_id) == 317) || (raw_id == 320 || axiom.map_alpha_id(raw_id) == 320);
+        let is_nested_stat = (raw_id == 317 || axiom.map_alpha_id(raw_id) == 317) 
+            || (raw_id == 320 || axiom.map_alpha_id(raw_id) == 320)
+            || (raw_id == 387 || axiom.map_alpha_id(raw_id) == 387);
         if axiom.is_alpha() && is_nested_stat {
              if item_idx < nested_items.len() {
                  let child = &nested_items[item_idx];
                  let is_stat_320 = raw_id == 320 || axiom.map_alpha_id(raw_id) == 320;
+                 let is_stat_387 = raw_id == 387 || axiom.map_alpha_id(raw_id) == 387;
 
-                 if is_stat_320 {
+                 if is_stat_320 || is_stat_387 {
                      let child_bits_vec = child.to_bits(0, huffman, axiom.save_is_alpha)?;
                      let child_bits = child_bits_vec.len();
-                     let registry_width = axiom.stat_bit_width(320, 0);
+                     let registry_width = if is_stat_387 { 0 } else { axiom.stat_bit_width(320, 0) };
 
                      emitter.extend_bits(child_bits_vec)?;
 
@@ -2389,7 +2392,6 @@ pub fn write_player_name(emitter: &mut BitEmitter, name: &str, _alpha_v5: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::item::ItemModule;
 
     #[test]
     fn test_read_section_captures_opaque_on_failure() {
