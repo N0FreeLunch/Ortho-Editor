@@ -94,7 +94,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 
 | Tool Name | Scope | Description & Primary Usage |
 | :--- | :--- | :--- |
-| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating. |
+| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating and `--dump-residue-map` for visual residue/gap mapping. |
 | **`d2save_batch`**  | Save | **Batch Runner**: Orchestrates `d2save_verify` and `SymmetryBitDiff` at scale with categorization. |
 | **`d2save_map`**    | Save | Dumps the memory map of a `.d2s` file (JM offsets, item counts). |
 | **`d2save_gap`**    | Save | **GAP Core**: Brute-forces header lengths and calculates alignment scores. |
@@ -125,6 +125,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2item_rhythm_oracle`** | Item | **Rhythm Oracle**: Validates 9-bit property stream rhythms and terminators. |
 | **`d2item_alignment_oracle`** | Item | **Alignment Oracle**: Detects bit-drift and calculates required offsets. |
 | **`d2item_bit_dump`** | Item | **Bitstream Dumper**: Dumps raw bits from an absolute offset with grouping and JSON support. |
+| **`semantic-bit-diff`** | Item | **Semantic Diff**: Read-only forensic CLI to find bit divergence anchored at JM markers. Outputs JSON. (Located in `tools/semantic-bit-diff`) |
 | **`d2item_registry_recommender`** | Forensic | **Triage Oracle**: Suggests bit-width updates from audit logs. |
 | **`d2item_registry_patcher`** | Forensic | **Auto-Patcher**: Applies recommendations to the registry atomically. |
 
