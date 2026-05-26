@@ -597,8 +597,15 @@ pub fn read_player_items(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Pa
         let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
         if count == 0 { continue; }
 
-        let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
-        let section_bytes = &bytes[pos..next_pos];
+        // Alpha v105 can contain JM-like patterns inside item payloads.
+        // Using the next JM marker as a hard section boundary may truncate
+        // the authority runeword tail before residual child recovery.
+        let section_bytes = if alpha {
+            &bytes[pos..]
+        } else {
+            let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
+            &bytes[pos..next_pos]
+        };
 
         match Item::read_section(section_bytes, (pos as u64) * 8, count, huffman, alpha, false) {
             Ok(items) => {
@@ -767,6 +774,9 @@ impl Item {
                             recovered_item.total_bits = recovered_consumed;
                             recovered_item.logical_width = Some(recovered_consumed);
                             items.push(recovered_item);
+                            if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                                item_count += 1;
+                            }
                             start_offset += recovered_consumed;
                         }
                     }
@@ -1039,6 +1049,9 @@ impl Item {
                     }
 
                     items.push(final_item);
+                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                        item_count += 1;
+                    }
                     start_offset = start + actual_consumed;
                     next_expected_start = start + actual_consumed;
                 }
@@ -1240,6 +1253,9 @@ impl Item {
                                     }
 
                                     items.push(final_item);
+                                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                                        item_count += 1;
+                                    }
                                     start_offset = start + actual_consumed;
                                     next_expected_start = start + actual_consumed;
                                     continue 'marker_loop;
@@ -1284,7 +1300,9 @@ impl Item {
                         format!("Opaque isolation: {}", e)
                     ));
                     items.push(opaque_item);
-                    item_count += 1;
+                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                        item_count += 1;
+                    }
                     start_offset = start + peek_limit;
                 }
             }
