@@ -20,14 +20,54 @@ mod roundtrip_tests {
         normalize_alpha_code_hint(code.trim()).to_string()
     }
 
-    fn is_alpha_compact_context_sensitive(item: &Item) -> bool {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum CompactStandaloneContract {
+        WireCanonical,
+        SemanticCanonical,
+        ContextRequired,
+    }
+
+    fn compact_standalone_contract(item: &Item) -> CompactStandaloneContract {
         if !(item.header.save_is_alpha && item.header.is_compact) {
-            return false;
+            return CompactStandaloneContract::WireCanonical;
         }
-        matches!(
-            norm_code(&item.code).as_str(),
-            "xrs" | "c8xr" | "rhd" | "jav" | "buc" | "hp1" | "mp1" | "tsc" | "isc"
-        )
+
+        match norm_code(&item.code).as_str() {
+            // "jav"/"us g", "buc "/"buc" can be semantically equivalent.
+            // Standalone decode can still require context, so semantic checks
+            // are best-effort on successful standalone re-parse.
+            "jav" | "buc" => CompactStandaloneContract::SemanticCanonical,
+            // These compact Alpha items still rely on section context/hints for
+            // deterministic standalone re-parse.
+            "xrs" | "c8xr" | "rhd" | "hp1" | "mp1" | "tsc" | "isc" => {
+                CompactStandaloneContract::ContextRequired
+            }
+            _ => CompactStandaloneContract::WireCanonical,
+        }
+    }
+
+    fn assert_code_contract(item: &Item, item_back: &Item, contract: CompactStandaloneContract) {
+        match contract {
+            CompactStandaloneContract::WireCanonical => {
+                assert_eq!(
+                    item.code.trim(),
+                    item_back.code.trim(),
+                    "Wire-level code mismatch for {}",
+                    item.code
+                );
+            }
+            CompactStandaloneContract::SemanticCanonical => {
+                assert_eq!(
+                    norm_code(&item.code),
+                    norm_code(&item_back.code),
+                    "Semantic-level code mismatch for {}",
+                    item.code
+                );
+            }
+            CompactStandaloneContract::ContextRequired => {
+                unreachable!("ContextRequired items must be skipped before code assertion");
+            }
+        }
     }
 
     #[test]
@@ -74,15 +114,30 @@ mod roundtrip_tests {
 
                     // We don't have the original raw segment here easily,
                     // but we can parse the reserialized bytes back and compare properties.
-                    if is_alpha_compact_context_sensitive(item) {
+                    let contract = compact_standalone_contract(item);
+                    if contract == CompactStandaloneContract::ContextRequired {
                         // Compact Alpha seam items can require section context/hints for stable
                         // standalone parsing. Keep this harness focused on serializer stability.
                         continue;
                     }
 
-                    let item_back = Item::from_bytes(&reserialized, &huffman, alpha_mode)
-                        .expect("should parse back");
-                    assert_eq!(norm_code(&item.code), norm_code(&item_back.code));
+                    let item_back = match contract {
+                        CompactStandaloneContract::WireCanonical => {
+                            Item::from_bytes(&reserialized, &huffman, alpha_mode)
+                                .expect("should parse back")
+                        }
+                        CompactStandaloneContract::SemanticCanonical => {
+                            let Ok(parsed) = Item::from_bytes(&reserialized, &huffman, alpha_mode)
+                            else {
+                                // Semantic contract acknowledges standalone decode can still
+                                // need context hints; treat parse failure as context-required.
+                                continue;
+                            };
+                            parsed
+                        }
+                        CompactStandaloneContract::ContextRequired => unreachable!(),
+                    };
+                    assert_code_contract(item, &item_back, contract);
                     assert_eq!(item.properties.len(), item_back.properties.len());
                     for (p1, p2) in item.properties.iter().zip(item_back.properties.iter()) {
                         assert_eq!(p1.stat_id, p2.stat_id);
@@ -216,17 +271,28 @@ mod roundtrip_tests {
             let reserialized = item.to_bytes(i, &huffman, item.header.save_is_alpha).expect("should re-serialize");
 
             // 3. Parse back and verify basic identity
-            if is_alpha_compact_context_sensitive(item) {
+            let contract = compact_standalone_contract(item);
+            if contract == CompactStandaloneContract::ContextRequired {
                 continue;
             }
-            let item_back = Item::from_bytes(&reserialized, &huffman, item.header.save_is_alpha)
-                .expect("should parse back");
-            assert_eq!(
-                norm_code(&item.code),
-                norm_code(&item_back.code),
-                "Code mismatch for {}",
-                item.code
-            );
+            let item_back = match contract {
+                CompactStandaloneContract::WireCanonical => {
+                    Item::from_bytes(&reserialized, &huffman, item.header.save_is_alpha)
+                        .expect("should parse back")
+                }
+                CompactStandaloneContract::SemanticCanonical => {
+                    let Ok(parsed) =
+                        Item::from_bytes(&reserialized, &huffman, item.header.save_is_alpha)
+                    else {
+                        // Semantic contract acknowledges standalone decode can still
+                        // need context hints; treat parse failure as context-required.
+                        continue;
+                    };
+                    parsed
+                }
+                CompactStandaloneContract::ContextRequired => unreachable!(),
+            };
+            assert_code_contract(item, &item_back, contract);
             assert_eq!(
                 item.version, item_back.version,
                 "Version mismatch for {}",
