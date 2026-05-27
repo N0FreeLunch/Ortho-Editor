@@ -3,8 +3,21 @@ mod tests {
     use d2r_core::item::{Item, HuffmanTree};
     use std::fs;
 
+    fn read_alpha_items_from_first_jm(fixture_path: &str) -> (Vec<Item>, u16) {
+        let bytes = fs::read(fixture_path).expect("Fixture not found");
+        let jm_pos = (0..bytes.len().saturating_sub(1))
+            .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
+            .expect("JM header not found");
+        let count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
+        let huffman = HuffmanTree::new();
+        let items =
+            Item::read_player_items(&bytes[jm_pos..], &huffman, true).expect("Parsing failed");
+        (items, count)
+    }
+
     #[test]
     fn test_alpha_v105_amazon_recovery_100pct() {
+        d2r_core::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(false));
         let fixture_path = "tests/fixtures/savegames/original/amazon_10_scrolls.d2s";
         let bytes = fs::read(fixture_path).expect("Fixture not found at tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
         
@@ -22,7 +35,7 @@ mod tests {
         println!("Items recovered: {}", items.len());
         let mut recovered_codes = Vec::new();
         for (i, item) in items.iter().enumerate() {
-            let trimmed = item.code.trim().to_string();
+            let trimmed = d2r_core::item::normalize_alpha_code_hint(item.code.trim()).to_string();
             println!("[{:2}] {:<4} (id: {:?}, qual: {:?})", i, trimmed, item.id, item.quality);
             recovered_codes.push(trimmed);
         }
@@ -38,7 +51,43 @@ mod tests {
     }
 
     #[test]
+    fn test_alpha_v105_overlap_tail_does_not_synthesize_opaque_when_count_satisfied() {
+        d2r_core::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(false));
+        let fixtures = [
+            ("tests/fixtures/savegames/original/amazon_authority_runeword.d2s", None),
+            ("tests/fixtures/savegames/original/amazon_10_scrolls.d2s", Some(16u16)),
+        ];
+
+        for (fixture_path, expected_top_level_count) in fixtures {
+            let (items, count) = read_alpha_items_from_first_jm(fixture_path);
+            if let Some(expected) = expected_top_level_count {
+                assert_eq!(count, expected, "Unexpected JM count in {}", fixture_path);
+                assert_eq!(
+                    items.len() as u16,
+                    expected,
+                    "Top-level item count drift in {}",
+                    fixture_path
+                );
+            }
+
+            let tail_end = items
+                .iter()
+                .map(|it| it.range.end)
+                .max()
+                .unwrap_or(0);
+            assert!(
+                !items
+                    .iter()
+                    .any(|it| it.is_residue() && it.range.end == tail_end),
+                "Unexpected trailing synthesized Opaque/residue item in {}",
+                fixture_path
+            );
+        }
+    }
+
+    #[test]
     fn test_all_alpha_v105_fixtures_bit_perfect() {
+        d2r_core::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(false));
         let fixtures = [
             "tests/fixtures/savegames/original/amazon_authority_runeword.d2s",
             "tests/fixtures/savegames/original/amazon_10_scrolls.d2s",
@@ -55,6 +104,12 @@ mod tests {
             
             // 1. Recover all items
             let items = Item::read_player_items(&bytes, &huffman, true).expect("Parsing failed");
+            if fixture_path.contains("amazon_authority_runeword") || fixture_path.contains("amazon_10_scrolls") {
+                for (idx, item) in items.iter().enumerate() {
+                    println!("[TEST-DEBUG] Recovered item idx={}, code='{}', range={:?}, total_bits={}, is_compact={}, is_residue={}",
+                             idx, item.code.trim(), item.range, item.total_bits, item.header.is_compact, item.is_residue());
+                }
+            }
             
             // 2. Reserialize section
             let reserialized_items = Item::serialize_section(&items, &huffman, true).expect("Serialization failed");
@@ -70,11 +125,34 @@ mod tests {
             // so we compare only up to the length of our reserialized bits.
             // But for these specific Alpha fixtures, we aim for 100% segment matching.
             for i in 0..reserialized_items.len() {
-                assert_eq!(
-                    reserialized_items[i], 
-                    original_payload[i], 
-                    "Byte mismatch at offset {} in fixture {}", i, fixture_path
-                );
+                if reserialized_items[i] != original_payload[i] {
+                    println!("[TEST-DEBUG] Byte mismatch at offset {} in fixture {}", i, fixture_path);
+                    println!("[TEST-DEBUG] reserialized: {:08b} ({}), original: {:08b} ({})", reserialized_items[i], reserialized_items[i], original_payload[i], original_payload[i]);
+                    // Print surrounding bytes in binary
+                    let start_print = i.saturating_sub(4);
+                    let end_print = (i + 4).min(reserialized_items.len());
+                    for j in start_print..end_print {
+                        println!("Byte [{}]: reserialized={:08b}, original={:08b}", j, reserialized_items[j], original_payload[j]);
+                    }
+                    // Print overlapping items
+                    for (idx, item) in items.iter().enumerate() {
+                        let start_byte = (item.range.start - (jm_pos as u64) * 8 - 32) / 8;
+                        let end_byte = (item.range.end - (jm_pos as u64) * 8 - 32 + 7) / 8;
+                        if i as u64 >= start_byte && i as u64 <= end_byte {
+                            println!("[TEST-DEBUG] Overlapping item: idx={}, code={}, start_bit={}, end_bit={}, start_byte={}, end_byte={}", 
+                                     idx, item.code.trim(), item.range.start, item.range.end, start_byte, end_byte);
+                            println!("[TEST-DEBUG] Item properties: {:?}", item.properties.iter().map(|p| (p.stat_id, p.value)).collect::<Vec<_>>());
+                            if !item.socketed_items.is_empty() {
+                                println!("[TEST-DEBUG] Socketed items: {:?}", item.socketed_items.iter().map(|c| c.code.trim()).collect::<Vec<_>>());
+                            }
+                        }
+                    }
+                    assert_eq!(
+                        reserialized_items[i], 
+                        original_payload[i], 
+                        "Byte mismatch at offset {} in fixture {}", i, fixture_path
+                    );
+                }
             }
             println!("  [PASS] {} bytes matched perfectly.", reserialized_items.len());
         }

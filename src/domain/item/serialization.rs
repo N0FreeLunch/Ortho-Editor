@@ -1932,11 +1932,74 @@ impl Item {
             }
         }
 
-        let last_end = items
+        let mut last_end = items
             .last()
             .map(|it| it.range.end - section_bit_offset)
             .unwrap_or(start_offset);
-        if last_end < section_bits {
+        let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
+
+        // Slice19 seam extension:
+        // When Alpha v105 already recovered the declared item count, trailing slack is usually
+        // alignment noise. For compact overlap tail codes, preserve that slack by attaching it
+        // to the last parsed item instead of synthesizing a standalone Opaque item.
+        if alpha_mode && non_residue_count >= top_level_count as usize && last_end < section_bits {
+            if let Some(last_idx) = items.iter().rposition(|it| !it.is_residue()) {
+                let last_code = items[last_idx].code.trim();
+                let is_overlap_tail = matches!(last_code, "jav" | "buc");
+                let trailing_len = section_bits - last_end;
+                if is_overlap_tail
+                    && items[last_idx].header.is_compact
+                    && trailing_len <= 64
+                {
+                    let mut trailing_bits = Vec::new();
+                    let mut trailing_reader =
+                        bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                    if trailing_reader.skip(last_end as u32).is_ok() {
+                        for _ in 0..trailing_len {
+                            if let Ok(b) = trailing_reader.read_bit() {
+                                trailing_bits.push(b);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    if trailing_bits.len() as u64 == trailing_len {
+                        let item = &mut items[last_idx];
+                        item.modules
+                            .push(crate::domain::item::ItemModule::Opaque(trailing_bits.clone()));
+                        for (idx, b) in trailing_bits.iter().enumerate() {
+                            item.bits.push(crate::domain::item::RecordedBit {
+                                bit: *b,
+                                offset: section_bit_offset + last_end + idx as u64,
+                            });
+                        }
+                        item.range.end = section_bit_offset + section_bits;
+                        item.total_bits += trailing_len;
+                        if let Some(logical_width) = item.logical_width {
+                            if item.total_bits > logical_width {
+                                item.logical_width = Some(item.total_bits);
+                            }
+                        } else {
+                            item.logical_width = Some(item.total_bits);
+                        }
+                        last_end = section_bits;
+                    }
+                }
+            }
+        }
+
+        let should_capture_trailing = if alpha_mode {
+            // Slice19 follow-up:
+            // In Alpha v105, trailing slack after full top-level recovery is often
+            // section-alignment noise. Avoid synthesizing an extra Opaque item once
+            // the declared top-level item count is already satisfied.
+            non_residue_count < top_level_count as usize
+        } else {
+            true
+        };
+
+        if should_capture_trailing && last_end < section_bits {
             let missing = if items.len() < top_level_count as usize {
                 top_level_count as usize - items.len()
             } else if items.is_empty() && top_level_count == 0 {
