@@ -102,15 +102,18 @@ pub fn read_item_stats<R: BitRead>(
         return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
-    if is_alpha && version == 5 && !is_v105_shadow_final && 
-       (is_potion || is_scroll) {
-          if trimmed_code == "7mgw" {
-              let mut payload = Vec::new();
-              for _ in 0..28 { payload.push(cursor.read_bit()?); }
-              return Ok((Vec::new(), true, false, None, Some(payload), None, Vec::new()));
-          }
-          return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
+    if is_alpha && version == 5 && !is_v105_shadow_final && (is_potion || is_scroll) {
+        if trimmed_code == "7mgw" {
+            let mut payload = Vec::new();
+            for _ in 0..28 {
+                payload.push(cursor.read_bit()?);
+            }
+            return Ok((Vec::new(), true, false, None, Some(payload), None, Vec::new()));
+        }
+        return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
+
+    let allow_compact_recovery = is_runeword || is_shadow_container;
 
     let section_recovery = if let Some((bytes, start)) = ctx {
         PropertyReaderContext { bytes, item_start_bit: start }
@@ -131,6 +134,7 @@ pub fn read_item_stats<R: BitRead>(
 
     let mut child_offsets = Vec::new();
     let mut child_offset_codes: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
+    let mut authority_offsets = Vec::new();
     if let Some((bytes, _)) = ctx {
         let markers = crate::domain::item::scanner::scan_item_markers(
             bytes,
@@ -142,11 +146,71 @@ pub fn read_item_stats<R: BitRead>(
         );
         for m in markers.iter() {
             let t = m.code.trim();
+            if matches!(t, "xrs" | "c8xr" | "rhd") {
+                authority_offsets.push(m.offset);
+            }
             if (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew" {
                 child_offsets.push(m.offset);
                 child_offset_codes.insert(m.offset, m.code.trim().to_string());
             }
         }
+    }
+
+    if is_alpha && is_compact {
+        if trimmed_code == "7mgw" {
+            let mut payload = Vec::new();
+            for _ in 0..28 {
+                payload.push(cursor.read_bit()?);
+            }
+            return Ok((Vec::new(), true, false, None, Some(payload), None, Vec::new()));
+        }
+
+        if allow_compact_recovery {
+            let has_later_authority = authority_offsets
+                .iter()
+                .any(|&off| off > section_recovery.item_start_bit);
+
+            if !has_later_authority {
+                let mut nested_items = Vec::new();
+                for off in child_offsets
+                    .iter()
+                    .copied()
+                    .filter(|off| *off > section_recovery.item_start_bit)
+                    .take(3)
+                {
+                    let raw_code = child_offset_codes
+                        .get(&off)
+                        .map(|s| s.as_str())
+                        .unwrap_or("jew");
+                    let normalized = match raw_code.trim() {
+                        "ww" => "r08",
+                        "gcw" => "r15",
+                        other => other,
+                    };
+
+                    let mut child = crate::domain::item::Item::default();
+                    child.code = normalized.to_string();
+                    child.body.code = normalized.to_string();
+                    child.mode = 6;
+                    child.header.mode = 6;
+                    nested_items.push(child);
+                }
+
+                if !nested_items.is_empty() {
+                    return Ok((
+                        Vec::new(),
+                        true,
+                        false,
+                        None,
+                        None,
+                        None,
+                        nested_items,
+                    ));
+                }
+            }
+        }
+
+        return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
     // section_base_abs: absolute bit offset of the section start (= cursor.base_pos).
