@@ -223,7 +223,7 @@ impl HeaderAxiom {
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
         if let Some(c) = code {
             let trimmed = c.trim();
-            if trimmed == "c8xr" || trimmed == "xrs" {
+            if trimmed == "c8xr" || trimmed == "xrs" || trimmed == "rhd" || trimmed == "wa2" {
                 return true;
             }
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {

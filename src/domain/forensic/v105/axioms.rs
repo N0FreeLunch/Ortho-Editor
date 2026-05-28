@@ -282,6 +282,19 @@ pub fn is_v105_summary_code(code: &str) -> bool {
     }
     V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
+#[derive(Debug, Clone, Default)]
+pub struct V105AlignmentAxiom;
+
+impl ForensicAxiom for V105AlignmentAxiom {
+    fn metadata(&self) -> ForensicMetadata {
+        ForensicMetadata::new(
+            Confidence::VerifiedTruth,
+            Intentionality::Structural,
+            "Alpha v105 items follow a 72-bit or 80-bit slotted rhythmic boundary".to_string(),
+        )
+    }
+}
+
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<usize>) -> u32 {
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
     let w_axiom = V105PropertyWidthAxiom::default();
@@ -318,8 +331,7 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
 
     // Alpha v105 forensic: Specific item widths observed in Authority Runeword fixture.
     match trimmed {
-        "xrs" => return 152,
-        "wa2" => return 136,
+        "wa2" => return 0,
         "r15" => return 160,
         "r13" => return 80,
         "r08" => return 88,
@@ -330,10 +342,8 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
     // We should NOT return a fixed width here unless it's a known shadow/personalized fixed container
     // that does NOT contain variable properties.
     if is_shadow || is_personalized {
-        // Authority runeword fixtures (`xrs` / `c8xr`) need variable-width handling.
-        // The registry override for fixed-width shadow items is too narrow here and
-        // truncates ExtendedStats before the verified property anchor.
-        if trimmed == "xrs" || trimmed == "c8xr" {
+        // Authority runeword fixtures (`xrs` / `c8xr` / `rhd`) need variable-width handling.
+        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" {
             return 0;
         }
         // Runewords and personalized items in Alpha v105 are OFTEN variable.

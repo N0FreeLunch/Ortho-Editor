@@ -182,7 +182,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                     }
                                 }
                                 
-                                if trimmed_code == "xrs" || trimmed_code == "c8xr" {
+                                if trimmed_code == "xrs" || trimmed_code == "c8xr" || trimmed_code == "rhd" {
                                      if rem == 2 {
                                          confidence += 1000;
                                      } else {
@@ -210,8 +210,11 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     let jump = if alpha {
                         // Re-peek best to get version/flags for target width
                         if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
-                             let j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
-                             if j > 0 { j } else { 8 } // Ensure forward progress
+                             let mut j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
+                             if best_code.trim() == "xrs" && j == 0 {
+                                 j = 512; // Force large jump for variable runeword host to swallow shadow items
+                             }
+                             if j > 0 { j } else { 72 } // Ensure forward progress
                         } else { 72 }
 
                     } else {
@@ -348,10 +351,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         if crate::item::item_trace_enabled() {
             eprintln!("[DEBUG-SLICE13] marker processed: offset={}, code='{}', confidence={}, score={}, status={:?}", best_offset, best_code_str, best_confidence, max_score, status);
         }
-        
+
         if status == MarkerStatus::Accepted || status == MarkerStatus::Phantom {
-            last_offset = *best_offset;
-            last_code = best_code_str.clone();
             if status == MarkerStatus::Accepted {
                 accepted_count += 1;
                 filtered_indices.insert(best_idx);
@@ -362,6 +363,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     score: max_score,
                     status: MarkerStatus::Accepted,
                 });
+                last_offset = *best_offset;
+                last_code = best_code_str.clone();
             } else if verbose {
                 all_markers.push(ItemMarker {
                     offset: *best_offset,

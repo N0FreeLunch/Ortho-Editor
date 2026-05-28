@@ -653,7 +653,7 @@ impl Item {
         alpha_mode: bool,
     ) -> io::Result<()> {
         let start_bit = emitter.written_bits();
-        let is_authority_overlap_code = matches!(self.code.trim(), "xrs" | "c8xr" | "rhd");
+        let is_authority_overlap_code = matches!(self.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
         let is_compact_tail_overlap_code = matches!(self.code.trim(), "jav" | "buc");
         // Slice 2: Opaque pass-through
         // Only full placeholder items should short-circuit here.
@@ -664,7 +664,7 @@ impl Item {
             .modules
             .iter()
             .any(|m| matches!(m, ItemModule::Opaque(_) | ItemModule::Residue(_)));
-        if is_placeholder_opaque || (has_opaque_module && !is_authority_overlap_code) {
+        if is_placeholder_opaque || (has_opaque_module && !is_authority_overlap_code && !is_compact_tail_overlap_code) {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
@@ -681,7 +681,7 @@ impl Item {
         // prefer original recorded prefix bits to avoid re-synthesizing header/code boundary drift.
         let can_preserve_recorded_prefix = alpha_mode
             && self.header.save_is_alpha
-            && self.header.is_compact
+            && (self.header.is_compact || is_authority_overlap_code)
             && self.properties.is_empty()
             && self.total_bits > 0
             && !self.bits.is_empty()
@@ -1215,6 +1215,17 @@ impl Item {
             };
             pad_seg.emit(emitter)?;
         }
+        if (is_authority_overlap_code || is_compact_tail_overlap_code) && has_opaque_module {
+            for module in &self.modules {
+                match module {
+                    ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                        emitter.extend_bits(bits.iter().cloned())?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1252,7 +1263,6 @@ impl Item {
                     continue;
                 }
                 if alpha_mode {
-                    emitter.write_bits(2, 2)?;
                     let child_bits = child.to_bits(0, huffman, alpha_mode)?;
                     emitter.extend_bits(child_bits)?;
                 } else {

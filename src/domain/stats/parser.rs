@@ -165,48 +165,68 @@ pub fn read_item_stats<R: BitRead>(
             return Ok((Vec::new(), true, false, None, Some(payload), None, Vec::new()));
         }
 
-        if allow_compact_recovery {
-            let has_later_authority = authority_offsets
+        let is_pure_fragment = matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "" | "wa2");
+        if allow_compact_recovery && is_pure_fragment {
+            let mut nested_items = Vec::new();
+            for off in child_offsets
                 .iter()
-                .any(|&off| off > section_recovery.item_start_bit);
+                .copied()
+                .filter(|off| *off > section_recovery.item_start_bit)
+                .take(3)
+            {
+                let raw_code = child_offset_codes
+                    .get(&off)
+                    .map(|s| s.as_str())
+                    .unwrap_or("jew");
+                let normalized = match raw_code.trim() {
+                    "ww" => "r08",
+                    "gcw" => "r15",
+                    other => other,
+                };
 
-            if !has_later_authority {
-                let mut nested_items = Vec::new();
-                for off in child_offsets
+                let mut child = crate::domain::item::Item::default();
+                child.code = normalized.to_string();
+                child.body.code = normalized.to_string();
+                child.mode = 6;
+                child.header.mode = 6;
+                nested_items.push(child);
+            }
+
+            if !nested_items.is_empty() {
+                // Consume the bits for the shadow items until the next REAL marker
+                let next_real_off = authority_offsets
                     .iter()
                     .copied()
-                    .filter(|off| *off > section_recovery.item_start_bit)
-                    .take(3)
-                {
-                    let raw_code = child_offset_codes
-                        .get(&off)
-                        .map(|s| s.as_str())
-                        .unwrap_or("jew");
-                    let normalized = match raw_code.trim() {
-                        "ww" => "r08",
-                        "gcw" => "r15",
-                        other => other,
-                    };
+                    .find(|&off| {
+                        off > section_recovery.item_start_bit && {
+                            let raw_code = child_offset_codes.get(&off).map(|s| s.as_str()).unwrap_or("");
+                            let trimmed = raw_code.trim();
+                            !matches!(trimmed, "xrs" | "c8xr" | "rhd" | "" | "ww" | "gcw")
+                        }
+                    });
 
-                    let mut child = crate::domain::item::Item::default();
-                    child.code = normalized.to_string();
-                    child.body.code = normalized.to_string();
-                    child.mode = 6;
-                    child.header.mode = 6;
-                    nested_items.push(child);
+                let total_consumed = if let Some(real_off) = next_real_off {
+                    real_off - section_recovery.item_start_bit
+                } else {
+                    // Consume until the end of the items section budget
+                    child_offsets.iter().copied().filter(|off| *off > section_recovery.item_start_bit).last().map(|off| (off + 80) - section_recovery.item_start_bit).unwrap_or(0)
+                };
+
+                let current_pos = cursor.pos() - section_recovery.item_start_bit;
+                if total_consumed > current_pos {
+                    let to_skip = total_consumed - current_pos;
+                    let _ = cursor.skip_and_record(to_skip as u32)?;
                 }
 
-                if !nested_items.is_empty() {
-                    return Ok((
-                        Vec::new(),
-                        true,
-                        false,
-                        None,
-                        None,
-                        None,
-                        nested_items,
-                    ));
-                }
+                return Ok((
+                    Vec::new(),
+                    true,
+                    false,
+                    None,
+                    None,
+                    None,
+                    nested_items,
+                ));
             }
         }
 

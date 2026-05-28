@@ -162,7 +162,7 @@ impl StatsAxiom {
 
     pub fn is_runeword(&self, flags: u32) -> bool {
         let trimmed = self.code.trim();
-        if trimmed == "c8xr" { return true; }
+        if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" { return true; }
         if (flags & (1 << 26)) != 0 { return true; }
         if self.save_is_alpha {
             let reg = get_registry();
