@@ -136,20 +136,10 @@ impl V105HeaderGapAxiom {
         if let Some(c) = code {
             let trimmed = c.trim_matches(|c: char| c.is_whitespace() || c == '\0');
 
-            if trimmed == "hp1" || trimmed == "mp1" || trimmed == "tsc" || trimmed == "isc" {
-                base_gap = 0;
-            }
-
-            if trimmed == "xrs" {
-                base_gap = 50;
-            }
-
-            if base_gap == 0 {
-                if let Some(overrides) = &reg.item_overrides {
-                    if let Some(item_map) = overrides.get(trimmed) {
-                        if let Some(&gap) = item_map.get("header_gap") {
-                            base_gap = gap as usize;
-                        }
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(item_map) = overrides.get(trimmed) {
+                    if let Some(&gap) = item_map.get("header_gap") {
+                        base_gap = gap as usize;
                     }
                 }
             }
@@ -273,13 +263,6 @@ impl V105MarkerProximityAxiom {
 }
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
-    if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
-        return false;
-    }
-    if trimmed == "tsc" || trimmed == "isc" {
-        return true;
-    }
     V105PropertyWidthAxiom::default().is_summary_item(0, code)
 }
 #[derive(Debug, Clone, Default)]
@@ -327,15 +310,6 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
             return base_width + 1; // Alpha v105 Version 4 compact items require 1-bit nudge (Slice 5)
         }
         return base_width;
-    }
-
-    // Alpha v105 forensic: Specific item widths observed in Authority Runeword fixture.
-    match trimmed {
-        "wa2" => return 0,
-        "r15" => return 160,
-        "r13" => return 80,
-        "r08" => return 88,
-        _ => {}
     }
 
     // Equipment items (non-compact, non-summary) have variable width based on property lists.
@@ -653,20 +627,19 @@ impl ForensicAxiom for V105PropertyWidthAxiom {
 
 impl V105PropertyWidthAxiom {
     /// Returns true if the item code follows the 80-bit summary rhythm in Alpha v105 (Axiom 0344).
-    pub fn is_summary_rhythm_forced(&self, version: u8, code: &str) -> bool {
+    pub fn is_summary_rhythm_forced(&self, _version: u8, code: &str) -> bool {
         let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
-        // Axiom 0344: Identify Scroll (isc), Town Portal Scroll (tsc), and Version 0 weapon 'wuw8'
-        // are forced to an 80-bit rhythm in Alpha v105. Potions (hp/mp) vary by fixture (72/80).
-        matches!(trimmed, "rvs"|"rvl"|"vps"|"yps"|"wms") ||
-        ((version == 5 || version == 0 || version == 1 || version == 2) && (trimmed == "tsc" || trimmed == "isc")) || (trimmed == "wuw8" && version == 0)
+        let reg = crate::domain::forensic::registry::get_registry();
+        if let Some(codes) = &reg.force_summary_rhythm_codes {
+            if codes.iter().any(|c| c == trimmed) { return true; }
+        }
+        false
     }
     /// Returns true if the item code is classified as a summary item in Alpha v105 (Axiom 0365).
     pub fn is_summary_item(&self, version: u8, code: &str) -> bool {
-        if self.is_summary_rhythm_forced(version, code) {
-            return true;
-        }
-
         let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        let reg = crate::domain::forensic::registry::get_registry();
+
         if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
             return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
@@ -675,39 +648,24 @@ impl V105PropertyWidthAxiom {
             // to preserve the 80-bit rhythm and item count parity.
             return true;
         }
+        if trimmed == "hp1" || trimmed == "mp1" {
+            // Alpha v105 potion aliases are textual summaries even when the raw
+            // stealth pattern has already been normalized to a readable code.
+            return true;
+        }
 
         // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
         if self.matches_stealth_pattern(code) {
             return true;
         }
 
-        // 2. Strict consumable/marker check (No wildcards) - Slice 24 Hardening
-        match trimmed {
-            // Potions
-            "hp1" | "hp2" | "hp3" | "hp4" | "hp5" |
-            "mp1" | "mp2" | "mp3" | "mp4" | "mp5" |
-            "rvs" | "rvl" | "vps" | "yps" | "wms" => return true,
-            // Runes & Gems
-            "r01" | "r02" | "r03" | "r04" | "r05" | "r06" | "r07" | "r08" | "r09" | "r10" |
-            "r11" | "r12" | "r13" | "r14" | "r15" | "r16" | "r17" | "r18" | "r19" | "r20" |
-            "r21" | "r22" | "r23" | "r24" | "r25" | "r26" | "r27" | "r28" | "r29" | "r30" |
-            "r31" | "r32" | "r33" |
-            "gcv" | "gcw" | "gcg" | "gcr" | "gcb" | "gcy" | "gcz" => return true,
-            // Quest/Marker
-            "wuw8" | "bwcw" | "acww" | "bcww" | "tsc" | "isc" | "tsc " | "isc " | "ww" | "ww " => return true,
-            _ => {}
-        }
-
-        // 3. Check hardened plausibility (O(1)) - Axiom 0365
-        let h_axiom = crate::domain::header::entity::HeaderAxiom::new(5, true);
-        if !h_axiom.is_plausible(0, 0, trimmed.as_bytes(), 0) {
-            return false;
-        }
-
-        let reg = crate::domain::forensic::registry::get_registry();
-        // 4. Check registry for explicit forced compact
+        // 2. Check registry for explicit forced compact
         if let Some(codes) = &reg.forced_compact_codes {
             if codes.iter().any(|c| c == trimmed) { return true; }
+        }
+
+        if self.is_summary_rhythm_forced(version, code) {
+            return true;
         }
 
         false
@@ -847,5 +805,14 @@ mod tests {
 
         let section = V105SectionMarkerAxiom;
         assert_eq!(section.metadata().confidence, Confidence::VerifiedTruth);
+    }
+
+    #[test]
+    fn test_v105_summary_aliases_keep_hp1_and_mp1_compact() {
+        assert!(is_v105_summary_code("hp1"));
+        assert!(is_v105_summary_code("mp1"));
+        assert_eq!(get_v105_target_width(5, "hp1", 0, None), 80);
+        assert_eq!(get_v105_target_width(5, "mp1", 0, None), 80);
+        assert!(!is_v105_summary_code("xrs"));
     }
 }

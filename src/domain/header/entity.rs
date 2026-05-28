@@ -221,42 +221,32 @@ impl HeaderAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
-        if let Some(c) = code {
-            let trimmed = c.trim();
-            if trimmed == "c8xr" || trimmed == "xrs" || trimmed == "rhd" || trimmed == "wa2" {
+        let trimmed = code.unwrap_or("").trim();
+        if (flags & (1 << 26)) != 0 { return true; }
+        if self.alpha_mode {
+            if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" {
                 return true;
             }
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {
                 return false;
             }
-        }
-        if (flags & (1 << 26)) != 0 { return true; }
-        if self.alpha_mode {
-            if let Some(c) = code {
-                let trimmed = c.trim();
-                if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {
-                    return false;
+            let reg = crate::domain::forensic::registry::get_registry();
+            
+            // 1. Check registry root list
+            if let Some(codes) = &reg.forced_runeword_codes {
+                if codes.iter().any(|rc| rc == trimmed) { return true; }
+            }
+            
+            // 2. Check item overrides
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(map) = overrides.get(trimmed) {
+                    if let Some(&val) = map.get("is_runeword") { return val != 0; }
                 }
-                let reg = crate::domain::forensic::registry::get_registry();
-                
-                // 1. Check registry root list
-                if let Some(codes) = &reg.forced_runeword_codes {
-                    if codes.iter().any(|rc| rc == trimmed) { return true; }
-                }
-                
-                // 2. Check item overrides
-                if let Some(overrides) = &reg.item_overrides {
-                    if let Some(map) = overrides.get(trimmed) {
-                        if let Some(&val) = map.get("is_runeword") { return val != 0; }
-                    }
-                }
-                
-                if self.version == 5 || self.version == 1 {
-                    let is_frag = (flags & (1 << 27)) != 0;
-                    return !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0);
-                }
-            } else if self.version == 5 || self.version == 1 {
-                return false; // Conservatively false if no code hint
+            }
+            
+            if self.version == 5 || self.version == 1 {
+                let is_frag = (flags & (1 << 27)) != 0;
+                return !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0);
             }
             
             if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
@@ -268,7 +258,14 @@ impl HeaderAxiom {
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
         let trimmed = code_hint.unwrap_or("").trim();
-        if self.alpha_mode && (trimmed == "xrs" || trimmed == "c8xr") { return true; }
+        if self.alpha_mode {
+            let reg = crate::domain::forensic::registry::get_registry();
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(map) = overrides.get(trimmed) {
+                    if let Some(&val) = map.get("is_shadow") { return val != 0; }
+                }
+            }
+        }
         if self.is_runeword(flags, code_hint) { return false; }
         if self.alpha_mode && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1) {
             if (flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0 {

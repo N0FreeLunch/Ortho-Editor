@@ -773,7 +773,7 @@ pub fn peek_item_header_at_specific_gap(
             version,
             item_alpha_mode,
         ) {
-            return Some((
+            let candidate = (
                 mode,
                 loc,
                 x_val,
@@ -784,7 +784,8 @@ pub fn peek_item_header_at_specific_gap(
                 (base_header_len as u64 + gap),
                 gap as i8,
                 has_checksum,
-            ));
+            );
+            return Some(candidate);
         }
     }
     None
@@ -1492,11 +1493,15 @@ impl Item {
                                     proximity_axiom.calculate_nudge(current_end, target)
                                 {
                                     // Axiom 0345: Proximity Snap. Consume the drift as alignment padding to recover boundary.
-                                    actual_consumed += drift;
-                                    final_item
-                                        .body
-                                        .alpha_alignment_padding
-                                        .extend(vec![false; drift as usize]);
+                                    let preserve_padding =
+                                        !matches!(final_item.code.trim(), "hp1" | "mp1");
+                                    if preserve_padding {
+                                        actual_consumed += drift;
+                                        final_item
+                                            .body
+                                            .alpha_alignment_padding
+                                            .extend(vec![false; drift as usize]);
+                                    }
                                     final_item.forensic_audit.record(proximity_axiom.metadata());
                                 }
                             }
@@ -1806,11 +1811,15 @@ impl Item {
                                                 if let Some(drift) = proximity_axiom
                                                     .calculate_nudge(current_end, target)
                                                 {
-                                                    actual_consumed += drift;
-                                                    final_item
-                                                        .body
-                                                        .alpha_alignment_padding
-                                                        .extend(vec![false; drift as usize]);
+                                                    let preserve_padding =
+                                                        !matches!(final_item.code.trim(), "hp1" | "mp1");
+                                                    if preserve_padding {
+                                                        actual_consumed += drift;
+                                                        final_item
+                                                            .body
+                                                            .alpha_alignment_padding
+                                                            .extend(vec![false; drift as usize]);
+                                                    }
                                                     final_item
                                                         .forensic_audit
                                                         .record(proximity_axiom.metadata());
@@ -2449,35 +2458,29 @@ impl Item {
             }
         };
         if header.save_is_alpha {
+            let reg = crate::domain::forensic::registry::get_registry();
             if let Some(hint) = code_hint {
                 let trimmed_hint = hint.trim();
                 if (trimmed_hint == "xrs" || trimmed_hint == "c8xr") && body.code.trim().is_empty()
                 {
-                    body.code = if trimmed_hint == "xrs" {
-                        "xrs ".to_string()
-                    } else {
-                        "xrs ".to_string()
-                    };
+                    body.code = "xrs ".to_string();
                 }
             }
             let trimmed_code = body.code.trim();
-            if matches!(trimmed_code, "us g" | "k g") {
-                body.code = "jav ".to_string();
+            if let Some(eff) = reg.effective_codes.get(trimmed_code) {
+                body.code = eff.clone();
             }
         }
-        if header.save_is_alpha && header.is_runeword && body.code.trim() == "c8xr" {
-            body.code = "xrs ".to_string();
-        }
         if crate::item::item_trace_enabled()
-            && matches!(
-                body.code.trim(),
-                "us g" | "k g" | "jav" | "buc" | "c8xr" | "xrs"
-            )
         {
-            eprintln!(
-                "[DEBUG-BODY] code={:?} header_compact={} header_runeword={} header_socketed={}",
-                body.code, header.is_compact, header.is_runeword, header.is_socketed
-            );
+            let trimmed = body.code.trim();
+            let reg = crate::domain::forensic::registry::get_registry();
+            if reg.effective_codes.contains_key(trimmed) || reg.forced_runeword_codes.as_ref().map(|v| v.iter().any(|c| c == trimmed)).unwrap_or(false) {
+                eprintln!(
+                    "[DEBUG-BODY] code={:?} header_compact={} header_runeword={} header_socketed={}",
+                    body.code, header.is_compact, header.is_runeword, header.is_socketed
+                );
+            }
         }
         body.alpha_header_gap = alpha_header_gap;
         body.alpha_header_gap_bits = alpha_header_gap_bits;
@@ -2485,8 +2488,7 @@ impl Item {
         let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, header.save_is_alpha)
             .with_compact(header.is_compact)
             .with_code(&body.code);
-        let detected_runeword = header.is_runeword
-            || (header.save_is_alpha && matches!(body.code.trim(), "xrs" | "c8xr" | "횧."));
+        let detected_runeword = axiom.is_runeword(header.flags);
 
         // Slice 9: Alpha v105 runewords are shadow containers and skip standard extended stats.
         let skip_ext_stats = header.save_is_alpha && detected_runeword;
@@ -2678,17 +2680,6 @@ impl Item {
             item.terminator_bit = term;
             item.body.alpha_shadow_skip_bits = shadow_bits;
             item.socketed_items = nested_items;
-
-            if alpha_mode
-                && (item.body.code.trim() == "c8xr"
-                    || item.body.code.trim() == "xrs"
-                    || item.body.code.trim() == "rhd")
-            {
-                // forensic-1363: Ensure the runeword item code is correctly set for tests.
-                item.body.code = "xrs ".to_string();
-                item.code = "xrs ".to_string();
-                item.header.is_runeword = true;
-            }
         }
 
         let axiom = StatsAxiom::new(

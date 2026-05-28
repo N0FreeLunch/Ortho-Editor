@@ -1,4 +1,10 @@
-use crate::item::{HuffmanTree, peek_item_header_at, is_plausible_item_header, verify_marker_lookahead};
+use crate::item::{
+    HuffmanTree,
+    peek_item_header_at,
+    peek_item_header_at_specific_gap,
+    is_plausible_item_header,
+    verify_marker_lookahead,
+};
 use serde::{Serialize, Deserialize};
 
 use rayon::prelude::*;
@@ -92,7 +98,34 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     let safety_margin = 72;
                     if scan_pos + safety_margin > limit_bits { continue; }
                     
-                    if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = peek_item_header_at(bytes, scan_pos, huffman, alpha, 0) {   
+                    let mut header_candidate =
+                        peek_item_header_at(bytes, scan_pos, huffman, alpha, 0);
+                    if alpha {
+                        for alt_gap in [6u64, 35, 46] {
+                            if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) =
+                                peek_item_header_at_specific_gap(bytes, scan_pos, huffman, alpha, alt_gap)
+                            {
+                                let trimmed_alt = code.trim();
+                                if matches!(trimmed_alt, "xrs" | "c8xr" | "rhd") {
+                                    header_candidate = Some((
+                                        mode,
+                                        location,
+                                        _x,
+                                        code,
+                                        flags,
+                                        version,
+                                        is_compact,
+                                        _header_len,
+                                        _nudge,
+                                        has_checksum,
+                                    ));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = header_candidate {   
 
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
 
