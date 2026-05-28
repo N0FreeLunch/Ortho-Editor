@@ -1907,7 +1907,13 @@ impl ExtendedStatsData {
                     Err(e) => {
                         let failure = crate::error::ParsingFailure::from(e);
                         if soft_truncate_on_limit
-                            && matches!(&failure.error, crate::error::ParsingError::Io(msg) if msg.contains("Bit limit exceeded"))
+                            && matches!(
+                                &failure.error,
+                                crate::error::ParsingError::Io(msg)
+                                    if msg.contains("Bit limit exceeded")
+                                        || msg.contains("failed to fill whole buffer")
+                                        || msg.contains("end of bitstream")
+                            )
                         {
                             cursor.end_segment();
                             return Ok(data);
