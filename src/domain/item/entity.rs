@@ -239,7 +239,17 @@ impl Item {
             .any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
     }
     pub fn is_residue(&self) -> bool {
-        self.code.trim().is_empty()
+        let trimmed = self
+            .code
+            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        if trimmed.is_empty() {
+            return true;
+        }
+
+        // Alpha v105 pure fragments (`ww`, `gcw`) are scanner helpers rather than
+        // semantic top-level items, even though they may still be preserved in the
+        // recovered bitstream.
+        self.header.save_is_alpha && matches!(trimmed, "ww" | "gcw")
     }
     pub fn defense(&self) -> Option<u32> {
         if let Some(d) = self.body.defense {
@@ -1274,11 +1284,19 @@ impl Item {
                 item.header.quality.unwrap_or(ItemQuality::Normal),
                 alpha_mode,
             );
+            let mut is_authority_overlap_code = false;
+            if alpha_mode {
+                let reg = crate::domain::forensic::registry::get_registry();
+                let trimmed = item.code.trim();
+                if let Some(overrides) = &reg.item_overrides {
+                    if let Some(map) = overrides.get(trimmed) {
+                        if let Some(&val) = map.get("is_authority_overlap") { is_authority_overlap_code = val != 0; }
+                    }
+                }
+            }
+
             for child in &item.socketed_items {
-                let is_true_alpha_runeword = item.header.is_runeword
-                    && (item.code.trim() == "c8xr"
-                        || item.code.trim() == "xrs"
-                        || item.code.trim() == "");
+                let is_true_alpha_runeword = item.header.is_runeword && is_authority_overlap_code;
                 if alpha_mode && axiom.is_alpha() && is_true_alpha_runeword {
                     continue;
                 }
