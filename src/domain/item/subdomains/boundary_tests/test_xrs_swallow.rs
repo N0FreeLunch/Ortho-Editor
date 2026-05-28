@@ -1,0 +1,58 @@
+#[cfg(test)]
+mod tests {
+    use crate::domain::item::scanner::{scan_item_markers, MarkerStatus, ItemMarker};
+    use crate::item::HuffmanTree;
+
+    const AUTHORITY_ITEMS: &[u8] = &[
+        0x4A, 0x4D, 0x06, 0x00, 0x10, 0x00, 0xA2, 0x00, 0x15, 0x00, 0x00, 0xCF, 0x4F, 0x00, 0x10, 0x00, 0xA2, 0x00, 0x15, 0x04, 0x00, 0xCF, 0x4F, 0x00, 0x10, 0x00, 0xA2, 0x00, 0x15, 0x08, 0x00, 0xCF, 0x4F, 0x00, 0x10, 0x00, 0xA2, 0x00, 0x15, 0x0C, 0x00, 0xCF, 0x4F, 0x00, 0x10, 0x08, 0x80, 0x00, 0x05, 0x00, 0x84, 0x1F, 0x0A, 0xE5, 0x1C, 0x1F, 0xA5, 0x31, 0x01, 0x35, 0x64, 0x64, 0x98, 0xFF, 0x00, 0x10, 0x08, 0x80, 0x04, 0x05, 0x08, 0x84, 0x1F, 0x6A, 0xE5, 0x1C, 0x1F, 0xA5, 0x31, 0xA1, 0x03, 0x0A, 0x35, 0x64, 0x64, 0x80, 0xF0, 0x11, 0x78, 0xF0, 0x98, 0x72, 0x19, 0x7B, 0x1E, 0x53, 0x24, 0x53, 0x06, 0x13, 0xFC, 0x07, 0x10, 0x00, 0xA0, 0x00, 0x35, 0x00, 0xE0, 0x7C, 0xD0, 0x12, 0x00, 0x10, 0x00, 0xA0, 0x00, 0x35, 0x04, 0xE0, 0x7C, 0xB6, 0x09, 0x00, 0x10, 0x00, 0xA0, 0x00, 0x35, 0x08, 0xE0, 0x7C, 0x23, 0x09, 0x00, 0x4A, 0x4D, 0x00, 0x00, 0x6A, 0x66, 0x6B, 0x66, 0x00, 0x01, 0x00, 0x6C, 0x66, 0x00, 0x00
+    ];
+
+    #[test]
+    fn test_xrs_does_not_swallow_adjacent_potion() {
+        let huffman = HuffmanTree::new();
+        
+        let mut bytes = AUTHORITY_ITEMS.to_vec();
+        
+        // The last original item (idx=5, ww) ends at 7738 in Save Game (bit 514 in section).
+        // Let's add a synthetic potion at bit 800 in section.
+        // 800 - 514 = 286 bits.
+        // This is within the 512 jump window but after our 128 jump.
+        
+        let mut bits = Vec::new();
+        // Convert existing bytes to bits for easier manipulation
+        for b in &bytes {
+            for bit in 0..8 {
+                bits.push((b >> bit) & 1 != 0);
+            }
+        }
+        
+        // Pad until bit 800 (from start of section bits, which start at bit 32 of full JM)
+        while bits.len() < 832 {
+            bits.push(false);
+        }
+        
+        // Append hp1 header bits (from first potion)
+        let potion_bits: Vec<bool> = bits[32..112].to_vec();
+        bits.extend_from_slice(&potion_bits);
+        
+        // Convert back to bytes
+        let mut new_bytes = Vec::new();
+        for chunk in bits.chunks(8) {
+            let mut b = 0u8;
+            for (i, &bit) in chunk.iter().enumerate() {
+                if bit { b |= 1 << i; }
+            }
+            new_bytes.push(b);
+        }
+        
+        // Scan with alpha=true
+        let markers = scan_item_markers(&new_bytes, &huffman, true, 7224, Some(7), false);
+        
+        let accepted: Vec<ItemMarker> = markers.into_iter().filter(|m| m.status == MarkerStatus::Accepted).collect();
+        
+        // We expect the original items + our synthetic one.
+        // Our synthetic one should be at offset 800 (or near it).
+        let has_synthetic = accepted.iter().any(|m| m.offset >= 800);
+        assert!(has_synthetic, "Synthetic potion at 800 should not be swallowed by xrs jump");
+    }
+}

@@ -3,6 +3,12 @@ use serde::{Serialize, Deserialize};
 
 use rayon::prelude::*;
 
+fn is_alpha_v105_shadow_marker(code: &str) -> bool {
+    let trimmed = code.trim();
+    // Shadow markers observed in Alpha v105 runewords/socketed items.
+    matches!(trimmed, "c8xr" | "wa2" | "rhd") || (trimmed.starts_with('r') && trimmed.len() <= 3 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))
+}
+
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,9 +202,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 best_offset = scan_pos;
                                 best_code = code.clone();
                             }
-                            if debug_scan && alpha && (trimmed_code == "xrs" || trimmed_code == "c8xr") {
-                                println!("[DEBUG-SCAN-FOUND] code={} pos={} conf={} rem8={}", trimmed_code, scan_pos, confidence, scan_pos % 8);
-                            }
                         }
                     }
                 }
@@ -212,7 +215,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                         if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
                              let mut j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
                              if best_code.trim() == "xrs" && j == 0 {
-                                 j = 512; // Force large jump for variable runeword host to swallow shadow items
+                                 // Slice 30: Don't use a massive jump that might swallow valid items.
+                                 // Instead, use a safe minimum width (128) and let phantom suppression handle shadow items.
+                                 j = 128; 
                              }
                              if j > 0 { j } else { 72 } // Ensure forward progress
                         } else { 72 }
@@ -245,9 +250,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     let mut last_offset = 0;
     let mut last_code = String::new();
     let mut accepted_count = 0;
+    let mut since_last_xrs: Option<u64> = None;
     
     while i < final_markers.len() {
-        let (offset, confidence, _code) = &final_markers[i];
+        let (offset, confidence, code_str) = &final_markers[i];
         
         // Find the best candidate in a lookahead window
         let mut best_idx = i;
@@ -263,6 +269,14 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 max_score += 100;
             }
 
+            // Slice 30: Boundary-sensitive shadow suppression.
+            if let Some(xrs_off) = since_last_xrs {
+                let dist = offset - xrs_off;
+                if dist < 512 && is_alpha_v105_shadow_marker(code_str) {
+                    max_score -= 1500;
+                }
+            }
+
             if let Some(expected) = expected_count {
                 if accepted_count >= expected as usize {
                     if !is_v105_aligned(diff) {
@@ -276,7 +290,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         let lookahead_limit = if alpha { offset + 64 } else { offset + 120 };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
-            let (o_offset, o_conf, _o_code) = &final_markers[j];
+            let (o_offset, o_conf, o_code) = &final_markers[j];
             let mut score = *o_conf as i32;
             
             if alpha && accepted_count > 0 {
@@ -294,6 +308,14 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     alignment_bonus = 100;
                 }
                 score += alignment_bonus;
+
+                // Slice 30: Boundary-sensitive shadow suppression.
+                if let Some(xrs_off) = since_last_xrs {
+                    let dist = o_offset - xrs_off;
+                    if dist < 512 && is_alpha_v105_shadow_marker(o_code) {
+                        score -= 1500;
+                    }
+                }
 
                 // Recursive Alignment Check (Slice 7): 
                 // Check if THIS lookahead candidate itself has an aligned successor.
@@ -319,7 +341,13 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 if accepted_count >= expected as usize {
                     let is_aligned = if accepted_count == 0 { false } else { is_v105_aligned(o_offset - last_offset) };
                     if !is_aligned {
-                        score -= 500; // Even higher penalty for extra unaligned markers
+                        // Slice 30: Boundary-sensitive unaligned penalty.
+                        let following_xrs = since_last_xrs.map(|off| o_offset - off < 512).unwrap_or(false);
+                        if !following_xrs {
+                            score -= 500; // Even higher penalty for extra unaligned markers
+                        } else {
+                            score -= 100;
+                        }
                     }
                 }
             }
@@ -338,7 +366,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             // stop and defer to isolation.
             if alpha && max_score < 150 {
              if let Some(expected) = expected_count {
-                 if accepted_count < expected as usize {
+                 // Slice 30: Shadow markers following an xrs should ALWAYS be suppressed if low score,
+                 // regardless of expected count.
+                 let following_xrs = since_last_xrs.map(|off| best_offset - off < 512).unwrap_or(false);
+                 if following_xrs && is_alpha_v105_shadow_marker(best_code_str) {
+                     status = MarkerStatus::Phantom;
+                 } else if accepted_count < expected as usize {
                      // Still keep it if we really need items, but with fragile confidence
                  } else {
                      status = MarkerStatus::Phantom;
@@ -365,6 +398,15 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 });
                 last_offset = *best_offset;
                 last_code = best_code_str.clone();
+                
+                // Slice 30: Track last xrs for shadow suppression
+                if last_code.trim() == "xrs" {
+                    since_last_xrs = Some(last_offset);
+                } else if let Some(off) = since_last_xrs {
+                    if last_offset - off >= 512 {
+                        since_last_xrs = None;
+                    }
+                }
             } else if verbose {
                 all_markers.push(ItemMarker {
                     offset: *best_offset,
