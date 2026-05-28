@@ -822,13 +822,55 @@ pub fn parse_item_at_with_limit(
     Ok((item, cursor.pos() - absolute_bit))
 }
 
+pub fn is_likely_jm_section_header(
+    bytes: &[u8],
+    pos: usize,
+    alpha: bool,
+    huffman: &HuffmanTree,
+) -> bool {
+    if pos + 4 > bytes.len() {
+        return false;
+    }
+    if bytes[pos] != b'J' || bytes[pos + 1] != b'M' {
+        return false;
+    }
+    let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+    if count == 0 {
+        return true;
+    } // Empty sections are valid
+    if alpha && count > 255 {
+        return false;
+    } // Unlikely count for Alpha v105
+
+    // If count > 0, check if first item header is plausible
+    if alpha {
+        // First item starts at pos + 4 (byte-aligned)
+        // We use peek_item_header_at with start_bit = 32 (relative to JM)
+        let section_bytes = &bytes[pos..];
+        if let Some((mode, loc, _, code, flags, version, _, _, _, _)) =
+            peek_item_header_at(section_bytes, 32, huffman, alpha, 0)
+        {
+            return is_plausible_item_header(mode, loc, code.as_bytes(), flags, version, alpha);
+        }
+        false
+    } else {
+        true // Retail JM is simpler
+    }
+}
+
 pub fn read_player_items(
     bytes: &[u8],
     huffman: &HuffmanTree,
     alpha: bool,
 ) -> ParsingResult<Vec<Item>> {
     let mut all_items = Vec::new();
-    let jm_positions = crate::save::find_jm_markers(bytes);
+    let all_jm_positions = crate::save::find_jm_markers(bytes);
+    let mut jm_positions = Vec::new();
+    for &pos in &all_jm_positions {
+        if is_likely_jm_section_header(bytes, pos, alpha, huffman) {
+            jm_positions.push(pos);
+        }
+    }
 
     if jm_positions.is_empty() {
         return Err(ParsingFailure {
@@ -839,7 +881,7 @@ pub fn read_player_items(
             context_stack: vec!["read_player_items".to_string()],
             bit_offset: 0,
             context_relative_offset: 0,
-            hint: Some("Could not find any JM markers.".to_string()),
+            hint: Some("Could not find any valid JM markers.".to_string()),
         });
     }
 
@@ -875,7 +917,40 @@ pub fn read_player_items(
                 all_items.extend(items);
             }
             Err(e) => {
-                if !alpha {
+                if alpha {
+                    eprintln!(
+                        "[WARN-JM] read_section failed at pos={}: {:?}. Capturing as Opaque.",
+                        pos, e
+                    );
+                    let mut section_opaque = Item::default();
+                    section_opaque.code = "Opaque".to_string();
+                    let section_bits = section_bytes.len() as u64 * 8;
+                    let mut bits = Vec::with_capacity(section_bits as usize);
+                    let mut reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                    if reader.skip(0).is_ok() {
+                        for _ in 0..section_bits {
+                            if let Ok(b) = reader.read_bit() {
+                                bits.push(b);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    section_opaque
+                        .modules
+                        .push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                    for (idx, b) in bits.iter().enumerate() {
+                        section_opaque.bits.push(crate::domain::item::RecordedBit {
+                            bit: *b,
+                            offset: (pos as u64 * 8) + idx as u64,
+                        });
+                    }
+                    section_opaque.range.start = pos as u64 * 8;
+                    section_opaque.range.end = next_pos as u64 * 8;
+                    section_opaque.total_bits = section_bits;
+                    section_opaque.logical_width = Some(section_bits);
+                    all_items.push(section_opaque);
+                } else {
                     return Err(e);
                 }
             }
@@ -1005,6 +1080,8 @@ impl Item {
         let mut subsumed_indices = std::collections::HashSet::new();
         let mut next_expected_start = section_header_bits;
         let mut item_count = 0;
+        let mut consecutive_opaque = 0;
+        let mut drift_signatures = std::collections::HashSet::new();
         'marker_loop: for (i, marker) in markers.iter().enumerate() {
             if subsumed_indices.contains(&i) {
                 continue;
@@ -1108,11 +1185,7 @@ impl Item {
                 }
                 let mut residue = Item::default();
                 residue.expected_start_bit = start_offset;
-                residue.code = if alpha_mode {
-                    "Opaque".to_string()
-                } else {
-                    "    ".to_string()
-                };
+                residue.code = "    ".to_string();
                 if alpha_mode {
                     residue
                         .modules
@@ -1453,6 +1526,7 @@ impl Item {
                     }
 
                     items.push(final_item);
+                    consecutive_opaque = 0;
                     if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
                         item_count += 1;
                     }
@@ -1460,6 +1534,23 @@ impl Item {
                     next_expected_start = start + actual_consumed;
                 }
                 Err(e) => {
+                    if alpha_mode {
+                        consecutive_opaque += 1;
+                        let signature = (start % 8, format!("{:?}", e));
+                        if drift_signatures.contains(&signature) {
+                            return Err(e).map_err(|e| {
+                                e.with_hint("Terminating section: Repeating drift signature detected.")
+                            });
+                        }
+                        drift_signatures.insert(signature);
+
+                        if consecutive_opaque >= 3 {
+                            return Err(e).map_err(|e| {
+                                e.with_hint("Terminating section: 3 consecutive Opaque items detected.")
+                            });
+                        }
+                    }
+
                     if crate::item::item_trace_enabled()
                         && alpha_mode
                         && (marker.code.trim() == "jav" || marker.code.trim() == "us g")
@@ -1499,9 +1590,36 @@ impl Item {
                                 }
 
                                 if is_next {
-                                    actual_limit = probe_pos - start;
-                                    found_next = true;
-                                    break;
+                                    if alpha_mode {
+                                        if let Some((mode, loc, _, code, flags, version, _, _, _, _)) =
+                                            peek_item_header_at(
+                                                section_bytes,
+                                                probe_pos,
+                                                huffman,
+                                                alpha_mode,
+                                                0,
+                                            )
+                                        {
+                                            if !is_plausible_item_header(
+                                                mode,
+                                                loc,
+                                                code.as_bytes(),
+                                                flags,
+                                                version,
+                                                alpha_mode,
+                                            ) {
+                                                is_next = false;
+                                            }
+                                        } else {
+                                            is_next = false;
+                                        }
+                                    }
+
+                                    if is_next {
+                                        actual_limit = probe_pos - start;
+                                        found_next = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -2049,7 +2167,7 @@ impl Item {
 
                     let mut opaque_item = Item::default();
                     opaque_item.expected_start_bit = start;
-                    opaque_item.code = if alpha_mode || is_missing_item {
+                    opaque_item.code = if is_missing_item {
                         "Opaque".to_string()
                     } else {
                         "    ".to_string()
@@ -2603,7 +2721,12 @@ impl Item {
             .segments()
             .iter()
             .filter(|s| s.start >= start_bit && s.end <= cursor.pos())
-            .cloned()
+            .map(|s| crate::domain::item::BitSegment {
+                start: s.start - start_bit,
+                end: s.end - start_bit,
+                label: s.label.clone(),
+                depth: s.depth,
+            })
             .collect();
 
         cursor.end_segment();

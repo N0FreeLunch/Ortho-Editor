@@ -239,7 +239,7 @@ impl Item {
             .any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
     }
     pub fn is_residue(&self) -> bool {
-        self.code.trim().is_empty() || self.code == "Opaque"
+        self.code.trim().is_empty()
     }
     pub fn defense(&self) -> Option<u32> {
         if let Some(d) = self.body.defense {
