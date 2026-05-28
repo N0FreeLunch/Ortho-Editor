@@ -49,7 +49,9 @@ fn main() -> anyhow::Result<()> {
         if files.is_empty() {
             anyhow::bail!("Error: No file provided for --dump-residue-map");
         }
-        dump_residue_map(&mut om, &files[0])?;
+        for file in &files {
+            dump_residue_map(&mut om, file)?;
+        }
         return Ok(());
     }
 
@@ -217,9 +219,52 @@ fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> any
     let huffman = HuffmanTree::new();
     let alpha_mode = bytes.len() > 4 && bytes[4] == 105;
 
-    om.summary(&format!("Residue Gap Map for {}:", path));
-    
     let items = Item::read_player_items(&bytes, &huffman, alpha_mode).unwrap_or_default();
+
+    if om.is_json() {
+        let mut residue_map = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            let start = item.range.start;
+            let len = item.total_bits;
+            
+            let entry = if item.is_residue() || item.is_opaque() {
+                let mut bits = String::new();
+                for b in &item.bits {
+                    bits.push(if b.bit { '1' } else { '0' });
+                }
+                d2r_core::verify::save_integrity::ResidueMapEntry {
+                    index: i,
+                    kind: "gap".to_string(),
+                    bit_offset: start,
+                    bit_length: len,
+                    code: None,
+                    bits: Some(bits),
+                }
+            } else {
+                d2r_core::verify::save_integrity::ResidueMapEntry {
+                    index: i,
+                    kind: "claimed".to_string(),
+                    bit_offset: start,
+                    bit_length: len,
+                    code: Some(item.code.trim().to_string()),
+                    bits: None,
+                }
+            };
+            residue_map.push(entry);
+        }
+
+        let (report, _) = d2r_core::verify::save_integrity::verify_save_integrity(path, &bytes);
+        let mut report = report.with_forensic_context();
+        if let Some(mut results) = report.scan_results {
+            results.residue_map = Some(residue_map);
+            report.scan_results = Some(results);
+        }
+        
+        om.json(&serde_json::to_string(&report)?);
+        return Ok(());
+    }
+
+    om.summary(&format!("Residue Gap Map for {}:", path));
     
     for (i, item) in items.iter().enumerate() {
         let start = item.range.start;

@@ -8,6 +8,16 @@ use serde::{Serialize, Deserialize};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResidueMapEntry {
+    pub index: usize,
+    pub kind: String, // "gap" or "claimed"
+    pub bit_offset: u64,
+    pub bit_length: u64,
+    pub code: Option<String>,
+    pub bits: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct D2SaveVerifyPayload {
     pub header_version: u32,
@@ -25,6 +35,8 @@ pub struct D2SaveVerifyPayload {
     pub fidelity_score: f32,
     pub rhythmic_fidelity: f32,
     pub forensic_audit: ForensicAudit,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub residue_map: Option<Vec<ResidueMapEntry>>,
 }
 
 pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPayload>, bool) {
@@ -65,6 +77,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
                 fidelity_score: 0.0,
                 rhythmic_fidelity: 0.0,
                 forensic_audit: ForensicAudit::new(),
+                residue_map: None,
             });
             return (report, true);
         }
@@ -192,6 +205,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         fidelity_score,
         rhythmic_fidelity,
         forensic_audit,
+        residue_map: None,
     });
 
     (report, fail)
