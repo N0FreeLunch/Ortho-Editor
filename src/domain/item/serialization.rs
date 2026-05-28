@@ -2328,7 +2328,9 @@ impl Item {
             None
         };
         let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
-        let code_peek = code_hint.or(peek.as_ref().map(|p| p.3.as_str()));
+        let code_peek = code_hint
+            .filter(|hint| !hint.trim().is_empty())
+            .or(peek.as_ref().map(|p| p.3.as_str()));
         let code_peek = code_peek;
         let gap_override = peek.as_ref().map(|p| {
             let mut gap = p.8 as usize;
