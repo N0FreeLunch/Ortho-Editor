@@ -192,6 +192,10 @@ name = "d2item_v5_peek"
 path = "src/bin/verify/d2item_v5_peek.rs"
 
 [[bin]]
+name = "d2item_scanner_visualizer"
+path = "src/bin/verify/d2item_scanner_visualizer.rs"
+
+[[bin]]
 name = "d2item_structural_fuzzer"
 path = "src/bin/verify/d2item_structural_fuzzer.rs"
 [[bin]]
