@@ -95,8 +95,30 @@ pub fn verify_baseline(expected: &SbaBaseline, actual: &SbaBaseline, issues: &mu
             }
 
             // Value comparison
-            let exp_bits = &exp_item.bits[exp_seg.start as usize..exp_seg.end as usize];
-            let act_bits = &act_item.bits[act_seg.start as usize..act_seg.end as usize];
+            let exp_start = exp_seg.start as usize;
+            let exp_end = exp_seg.end as usize;
+            let act_start = act_seg.start as usize;
+            let act_end = act_seg.end as usize;
+
+            if exp_start > exp_item.bits.len() || exp_end > exp_item.bits.len() || exp_start > exp_end {
+                let msg = format!(
+                    "Item {} segment #{} ({}) expected range {}-{} out of bounds (bits len: {})",
+                    exp_item.path, j, exp_seg.label, exp_start, exp_end, exp_item.bits.len()
+                );
+                issues.push(ReportIssue { kind: "structural_oob".to_string(), message: msg.clone(), bit_offset: Some(act_item.range.start + act_seg.start as u64) });
+                anyhow::bail!(msg);
+            }
+            if act_start > act_item.bits.len() || act_end > act_item.bits.len() || act_start > act_end {
+                let msg = format!(
+                    "Item {} segment #{} ({}) actual range {}-{} out of bounds (bits len: {})",
+                    act_item.path, j, act_seg.label, act_start, act_end, act_item.bits.len()
+                );
+                issues.push(ReportIssue { kind: "structural_oob".to_string(), message: msg.clone(), bit_offset: Some(act_item.range.start + act_seg.start as u64) });
+                anyhow::bail!(msg);
+            }
+
+            let exp_bits = &exp_item.bits[exp_start..exp_end];
+            let act_bits = &act_item.bits[act_start..act_end];
             if exp_bits != act_bits {
                 let msg = format!(
                     "Item {} segment #{} ({}) value mismatch",
