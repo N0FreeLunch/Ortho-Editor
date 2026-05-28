@@ -509,7 +509,9 @@ pub fn peek_item_header_at_with_base(
                         confidence += 150;
                     }
 
-                    if trimmed == "tsc" || trimmed == "us g" || trimmed == "jav" {
+                    if crate::item::item_trace_enabled()
+                        && (trimmed == "tsc" || trimmed == "us g" || trimmed == "jav")
+                    {
                         eprintln!("[DEBUG-JAV-TRIAL] is_compact={} gap={} code='{}' confidence={} matches_registry_gap={} skip={}", is_compact, gap, trimmed, confidence, matches_registry_gap, trial_total_skip);
                     }
 
@@ -1188,7 +1190,9 @@ impl Item {
             {
                 peek_code_hint = Some(code.clone());
                 is_compact_final = is_compact;
-                if code.trim() == "jav" || code.trim() == "us g" {
+                if crate::item::item_trace_enabled()
+                    && (code.trim() == "jav" || code.trim() == "us g")
+                {
                     eprintln!("[DEBUG-READ-SECTION-JAV] code='{}' is_compact_peeked={} is_compact_final={} start={}", code, is_compact, is_compact_final, start);
                 }
                 version_peek = version;
@@ -1222,7 +1226,9 @@ impl Item {
                         }
                     }
                 }
-                if code.trim() == "jav" || code.trim() == "us g" {
+                if crate::item::item_trace_enabled()
+                    && (code.trim() == "jav" || code.trim() == "us g")
+                {
                     eprintln!(
                         "[DEBUG-READ-SECTION-JAV-POST] code='{}' is_compact_final={} start={}",
                         code, is_compact_final, start
@@ -1454,7 +1460,10 @@ impl Item {
                     next_expected_start = start + actual_consumed;
                 }
                 Err(e) => {
-                    if alpha_mode && (marker.code.trim() == "jav" || marker.code.trim() == "us g") {
+                    if crate::item::item_trace_enabled()
+                        && alpha_mode
+                        && (marker.code.trim() == "jav" || marker.code.trim() == "us g")
+                    {
                         eprintln!(
                             "[DEBUG-JAV-PARSE-ERR] error={:?} start={} code={:?}",
                             e, start, marker.code

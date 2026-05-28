@@ -1522,8 +1522,10 @@ pub fn parse_item_body<R: BitRead>(
     let code_hint = code_hint.map(crate::item::normalize_alpha_code_hint);
     let w_axiom = V105PropertyWidthAxiom::default();
     let debug_hint = code_hint.map(|s| s.trim());
-    let debug_compact_probe = alpha_mode && matches!(debug_hint, Some("jav") | Some("buc"));
-    if alpha_mode && code_hint == Some("jav") {
+    let debug_compact_probe = crate::item::item_trace_enabled()
+        && alpha_mode
+        && matches!(debug_hint, Some("jav") | Some("buc"));
+    if crate::item::item_trace_enabled() && alpha_mode && code_hint == Some("jav") {
         println!(
             "[DEBUG-JAV-PARSE] version={} is_compact={} has_checksum={} flags={:08X}",
             header.version, header.is_compact, header.has_checksum, header.flags

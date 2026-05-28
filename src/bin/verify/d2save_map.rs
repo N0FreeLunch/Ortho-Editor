@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use d2r_core::verify::args::{ArgParser, ArgError};
+use serde_json::json;
 
 use d2r_core::save::{
     ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET, CHAR_NAME_OFFSET,
@@ -14,6 +15,8 @@ fn main() -> anyhow::Result<()> {
     parser.add_arg("save_file", "path to the save file (.d2s)");
     parser.add_flag("alpha-rhythm-grid", "display 72/80-bit rhythmic grid for Alpha v105").long("alpha-rhythm-grid");
     parser.add_flag("verbose-markers", "display internal scanner confidence scores and rejected markers").long("verbose-markers");
+    parser.add_flag("items-only", "print item inventory only (text)").long("items-only");
+    parser.add_flag("json-items", "print item inventory only (JSON)").long("json-items");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -30,11 +33,54 @@ fn main() -> anyhow::Result<()> {
     let path = parsed.get("save_file").unwrap();
     let alpha_grid = parsed.is_set("alpha-rhythm-grid");
     let verbose_markers = parsed.is_set("verbose-markers");
+    let items_only = parsed.is_set("items-only");
+    let json_items = parsed.is_set("json-items");
+    if items_only && json_items {
+        anyhow::bail!("--items-only and --json-items cannot be used together");
+    }
     let bytes = fs::read(path).map_err(|e| anyhow::anyhow!("Cannot read '{}': {}", path, e))?;
+    let save = Save::from_bytes(&bytes).map_err(|err| anyhow::anyhow!("Cannot parse D2R header: {}", err))?;
+
+    if items_only || json_items {
+        let (inventory, errors, total_jm_sections) =
+            collect_item_inventory(&bytes, save.header.version == 105, verbose_markers);
+        if json_items {
+            let payload = json!({
+                "save_file": path,
+                "total_jm_sections": total_jm_sections,
+                "items": inventory,
+                "errors": errors,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+        } else {
+            println!("ITEM INVENTORY");
+            println!("save_file: {}", path);
+            println!("total_jm_sections: {}", total_jm_sections);
+            if !errors.is_empty() {
+                println!("errors:");
+                for error in errors {
+                    println!("  - {}", error);
+                }
+            }
+            for entry in inventory {
+                println!(
+                    "#{:03} section={} section_label=\"{}\" code={} quality={} mode={} location={} bit_start={} bit_end={}",
+                    entry["index"].as_u64().unwrap_or(0),
+                    entry["section_index"].as_u64().unwrap_or(0),
+                    entry["section_label"].as_str().unwrap_or(""),
+                    entry["code"].as_str().unwrap_or(""),
+                    entry["quality"].as_str().unwrap_or("None"),
+                    entry["mode"].as_str().unwrap_or(""),
+                    entry["location"].as_str().unwrap_or(""),
+                    entry["bit_start"].as_u64().unwrap_or(0),
+                    entry["bit_end"].as_u64().unwrap_or(0),
+                );
+            }
+        }
+        return Ok(());
+    }
 
     println!("=== Section Map: {} ({} bytes) ===", path, bytes.len());
-
-    let save = Save::from_bytes(&bytes).map_err(|err| anyhow::anyhow!("Cannot parse D2R header: {}", err))?;
 
     println!();
     println!("[HEADER]");
@@ -177,6 +223,92 @@ fn main() -> anyhow::Result<()> {
     }
     
     Ok(())
+}
+
+fn collect_item_inventory(
+    bytes: &[u8],
+    is_alpha: bool,
+    verbose_markers: bool,
+) -> (Vec<serde_json::Value>, Vec<String>, usize) {
+    use d2r_core::item::{HuffmanTree, Item, ItemModule};
+
+    let jm_positions = find_jm_markers(bytes);
+    let section_labels = [
+        "Player Items",
+        "Corpse Items",
+        "Mercenary Items",
+        "Iron Golem",
+    ];
+
+    let mut inventory = Vec::new();
+    let mut errors = Vec::new();
+    let mut global_index = 0u64;
+    let huffman = HuffmanTree::new();
+
+    for (section_index, &pos) in jm_positions.iter().enumerate() {
+        let section_label = section_labels
+            .get(section_index)
+            .copied()
+            .unwrap_or("Unknown Section");
+        let item_count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        let next_pos = jm_positions.get(section_index + 1).copied().unwrap_or(bytes.len());
+        let section_data = &bytes[pos..next_pos];
+
+        if item_count == 0 && (next_pos - pos) <= 6 {
+            continue;
+        }
+
+        match Item::read_section(
+            section_data,
+            pos as u64 * 8,
+            item_count,
+            &huffman,
+            is_alpha,
+            verbose_markers,
+        ) {
+            Ok(items) => {
+                for item in items {
+                    if item.is_residue() {
+                        continue;
+                    }
+                    let quality = item
+                        .header
+                        .quality
+                        .map(|q| format!("{:?}", q))
+                        .unwrap_or_else(|| "None".to_string());
+                    let is_opaque = item.code == "Opaque" || item.is_opaque();
+                    let has_semiopaque = item
+                        .modules
+                        .iter()
+                        .any(|module| matches!(module, ItemModule::SemiOpaque { .. }));
+
+                    inventory.push(json!({
+                        "index": global_index,
+                        "section_index": section_index,
+                        "section_label": section_label,
+                        "code": item.code.trim(),
+                        "quality": quality,
+                        "mode": format!("{}", item.mode),
+                        "location": format!("{}", item.location),
+                        "bit_start": item.range.start,
+                        "bit_end": item.range.end,
+                        "total_bits": item.total_bits,
+                        "is_opaque": is_opaque,
+                        "has_semiopaque": has_semiopaque,
+                    }));
+                    global_index += 1;
+                }
+            }
+            Err(err) => {
+                errors.push(format!(
+                    "section_index={} section_label=\"{}\" parse_error={}",
+                    section_index, section_label, err
+                ));
+            }
+        }
+    }
+
+    (inventory, errors, jm_positions.len())
 }
 
 fn render_heatmap(
