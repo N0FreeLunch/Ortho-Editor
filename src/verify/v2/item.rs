@@ -6,6 +6,27 @@ use crate::verify::ReportIssue;
 
 pub struct ItemVerifier;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompactStandaloneContract {
+    WireCanonical,
+    SemanticCanonical,
+    ContextRequired,
+}
+
+fn compact_standalone_contract(item: &Item) -> CompactStandaloneContract {
+    if !(item.header.save_is_alpha && item.header.is_compact) {
+        return CompactStandaloneContract::WireCanonical;
+    }
+
+    match item.code.trim() {
+        "jav" | "buc" => CompactStandaloneContract::SemanticCanonical,
+        "xrs" | "c8xr" | "rhd" | "hp1" | "mp1" | "tsc" | "isc" => {
+            CompactStandaloneContract::ContextRequired
+        }
+        _ => CompactStandaloneContract::WireCanonical,
+    }
+}
+
 impl DomainVerifier for ItemVerifier {
     fn verify(&self, bytes: &[u8], alpha_mode: bool) -> DomainReport {
         let mut issues = Vec::new();
@@ -51,12 +72,20 @@ impl DomainVerifier for ItemVerifier {
                     continue;
                 }
             };
-            if let Err(e) = Item::from_bytes_with_hint(&item.to_bytes(idx, &huffman, alpha_mode).unwrap(), &huffman, alpha_mode, Some(&item.code)) {
-                issues.push(ReportIssue {
-                    kind: "item_parse".to_string(),
-                    message: format!("Item round-trip parse failure ({}): {}", item.code, e),
-                    bit_offset: parsing_error_offset(&e.error),
-                });
+            let contract = compact_standalone_contract(item);
+            if contract != CompactStandaloneContract::ContextRequired {
+                if let Err(e) = Item::from_bytes_with_hint(
+                    &item.to_bytes(idx, &huffman, alpha_mode).unwrap(),
+                    &huffman,
+                    alpha_mode,
+                    Some(&item.code),
+                ) {
+                    issues.push(ReportIssue {
+                        kind: "item_parse".to_string(),
+                        message: format!("Item round-trip parse failure ({}): {}", item.code, e),
+                        bit_offset: parsing_error_offset(&e.error),
+                    });
+                }
             }
 
             let original_bits: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();

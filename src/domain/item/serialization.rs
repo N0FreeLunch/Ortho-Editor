@@ -43,6 +43,32 @@ pub fn find_next_item_match(
             continue;
         }
 
+        let mut header_candidate = peek_item_header_at(bytes, probe, huffman, alpha, 0);
+        if alpha {
+            for alt_gap in [6u64, 35, 46] {
+                if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge, has_checksum)) =
+                    peek_item_header_at_specific_gap(bytes, probe, huffman, alpha, alt_gap)
+                {
+                    let trimmed = code.trim();
+                    if matches!(trimmed, "xrs" | "c8xr" | "rhd") {
+                        header_candidate = Some((
+                            mode,
+                            location,
+                            _x,
+                            code,
+                            flags,
+                            version,
+                            is_compact,
+                            header_len,
+                            _nudge,
+                            has_checksum,
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+
         if let Some((
             mode,
             location,
@@ -54,7 +80,7 @@ pub fn find_next_item_match(
             header_len,
             _nudge,
             _has_checksum,
-        )) = peek_item_header_at(bytes, probe, huffman, alpha, 0)
+        )) = header_candidate
         {
             if crate::item::item_trace_enabled() {
                 // Probe success

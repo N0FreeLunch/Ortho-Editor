@@ -278,16 +278,29 @@ impl HeaderAxiom {
         let is_compact = self.is_compact(flags, code_hint);
         let is_personalized = self.is_personalized(flags, is_compact);
 
-        if self.alpha_mode {            let is_rw = self.is_runeword(flags, code_hint);
+        if self.alpha_mode {
+            let is_rw = self.is_runeword(flags, code_hint);
             let is_v105_shadow = self.is_v105_shadow(flags, code_hint);
 
-            let target_width = if self.is_alpha() {
+            let is_summary = if let Some(c) = code_hint {
+                crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
+            } else {
+                // Forensic Peek: In Alpha v105 (v0, v1, v2, v4, v5, v6), compact items are almost always 
+                // summary items (potions, scrolls, etc.) which use 3-bit Y fields.
+                is_compact && (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 5 || self.version == 6)
+            };
+
+            let target_width = if is_summary {
+                0
+            } else if self.is_alpha() {
                 if let Some(c) = code_hint {
                     crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, c, flags, None)
                 } else {
                     0
                 }
-            } else { 80 };
+            } else {
+                80
+            };
 
             if is_rw || is_v105_shadow || is_personalized {
                 return HeaderGeometry {
@@ -299,14 +312,6 @@ impl HeaderAxiom {
                     target_width: 0,
                 };
             }
-
-            let is_summary = if let Some(c) = code_hint {
-                crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
-            } else {
-                // Forensic Peek: In Alpha v105 (v0, v1, v2, v4, v5, v6), compact items are almost always 
-                // summary items (potions, scrolls, etc.) which use 3-bit Y fields.
-                is_compact && (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 5 || self.version == 6)
-            };
 
             if is_summary {
                 return HeaderGeometry {
@@ -339,9 +344,8 @@ impl HeaderAxiom {
                 skip_geometry: false,
                 target_width,
             };
-
         }
-        
+
         // Retail / Fallback
         if is_compact {
             HeaderGeometry {

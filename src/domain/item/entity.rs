@@ -653,8 +653,27 @@ impl Item {
         alpha_mode: bool,
     ) -> io::Result<()> {
         let start_bit = emitter.written_bits();
-        let is_authority_overlap_code = matches!(self.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
-        let is_compact_tail_overlap_code = matches!(self.code.trim(), "jav" | "buc");
+        let trimmed = self.code.trim();
+        let reg = crate::domain::forensic::registry::get_registry();
+        let mut is_authority_overlap_code =
+            alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2");
+        let mut is_compact_tail_overlap_code = alpha_mode && matches!(trimmed, "jav" | "buc");
+        let mut is_v105_shadow_override = alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd");
+        if alpha_mode {
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(map) = overrides.get(trimmed) {
+                    if let Some(&val) = map.get("is_authority_overlap") {
+                        is_authority_overlap_code = val != 0 || is_authority_overlap_code;
+                    }
+                    if let Some(&val) = map.get("is_compact_tail") {
+                        is_compact_tail_overlap_code = val != 0 || is_compact_tail_overlap_code;
+                    }
+                    if let Some(&val) = map.get("is_shadow") {
+                        is_v105_shadow_override = val != 0 || is_v105_shadow_override;
+                    }
+                }
+            }
+        }
         // Slice 2: Opaque pass-through
         // Only full placeholder items should short-circuit here.
         // Some real items (e.g. authority seam cases) can carry trailing Opaque/Residue
@@ -733,7 +752,7 @@ impl Item {
         if alpha_mode && self.header.save_is_alpha {
             let preserve_compact_summary_header = self.header.is_compact
                 && self.body.alpha_header_gap_bits.is_empty()
-                && matches!(self.code.trim(), "xrs" | "c8xr" | "rhd");
+                && is_v105_shadow_override;
 
             if preserve_compact_summary_header {
                 // Keep parsed compact header shape as-is for authority overlap seam cases.
@@ -986,7 +1005,8 @@ impl Item {
             if is_item_alpha && !s_axiom.is_compact {
                 let quality_to_write = self.alpha_quality_raw.unwrap_or(quality_val as u8);
                 emitter.write_bits(quality_to_write as u32, 3)?;
-                if (self.header.version == 5
+                if (self.header.version == 1
+                    || self.header.version == 5
                     || self.header.version == 6
                     || self.header.version == 7)
                     && (s_axiom.is_runeword(self.header.flags)
@@ -1651,7 +1671,8 @@ pub fn parse_item_body<R: BitRead>(
             }
             if let Some(hint) = code_hint {
                 let trimmed_hint = hint.trim();
-                let trusted_compact_hint = matches!(trimmed_hint, "buc" | "ucb8" | "bwcw" | "jav");
+                let trusted_compact_hint =
+                    matches!(trimmed_hint, "buc" | "ucb8" | "bwcw" | "jav" | "xrs" | "c8xr" | "rhd");
                 if !trimmed_hint.is_empty()
                     && (trusted_compact_hint
                         || h_axiom.is_plausible(
