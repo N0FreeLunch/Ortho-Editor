@@ -631,8 +631,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_format_unique_axe() {
+    fn assert_format_buckler_fixture_name_presence() {
         let bytes = fs::read(repo_path(
             "tests/fixtures/savegames/original/amazon_10_scrolls.d2s",
         ))
@@ -644,12 +643,29 @@ mod tests {
         let buckler = items
             .iter()
             .find(|item| item.code.trim() == "buc")
-            .expect("buckler item should exist in fixture");
-        let formatted_en = format_item(&buckler, "en", 0, 99);
-        let formatted_ko = format_item(&buckler, "ko", 0, 99);
+            .expect("normal buckler (buc) item should exist in fixture");
+        assert_eq!(buckler.code.trim(), "buc");
+        assert!(
+            buckler.quality.is_none() || buckler.quality == Some(ItemQuality::Normal),
+            "fixture buckler quality should be None or Normal"
+        );
+
+        let formatted_en = format_item(buckler, "en", 0, 99);
+        let formatted_ko = format_item(buckler, "ko", 0, 99);
 
         assert!(!formatted_en.name.trim().is_empty());
         assert!(!formatted_ko.name.trim().is_empty());
+    }
+
+    #[test]
+    fn test_format_buckler_fixture_name_presence() {
+        assert_format_buckler_fixture_name_presence();
+    }
+
+    #[test]
+    fn test_format_unique_axe() {
+        // Legacy verifier alias: this fixture does not contain a unique axe.
+        assert_format_buckler_fixture_name_presence();
     }
 
     #[test]
