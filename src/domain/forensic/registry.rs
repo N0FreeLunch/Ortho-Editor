@@ -15,6 +15,10 @@ pub struct AlphaForensics {
     #[serde(default)]
     pub forced_runeword_codes: Option<Vec<String>>,
     #[serde(default)]
+    pub force_summary_rhythm_codes: Option<Vec<String>>,
+    #[serde(default)]
+    pub effective_codes: HashMap<String, String>,
+    #[serde(default)]
     pub compact_code_encoding: Option<String>,
     #[serde(default)]
     pub mercenary_class_map: HashMap<u8, String>,

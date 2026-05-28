@@ -248,9 +248,12 @@ impl StatsAxiom {
         if !self.is_alpha() {
             return 0;
         }
-        // Forensic: Resolved variable gaps in Alpha v105 (e.g., 8wc Idx 1 -> 96 bits)
-        if _code.trim() == "8wc" {
-            return 96;
+        let trimmed = _code.trim();
+        let reg = get_registry();
+        if let Some(overrides) = &reg.item_overrides {
+            if let Some(map) = overrides.get(trimmed) {
+                if let Some(&gap) = map.get("header_gap") { return gap; }
+            }
         }
         0
     }
@@ -270,10 +273,20 @@ impl StatsAxiom {
              return w_axiom.summary_item_fixed_width() as u64;
         }
 
-        if self.save_is_alpha && current_len == 72 && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
-             if self.idx % 2 != 0 {
-                 return 73;
-             }
+        if self.save_is_alpha {
+            let reg = get_registry();
+            let trimmed = self.code.trim();
+            if let Some(overrides) = &reg.item_overrides {
+                if let Some(map) = overrides.get(trimmed) {
+                    if let Some(&alt) = map.get("is_alternating_rhythm") {
+                        if alt != 0 && current_len == 72 {
+                             if self.idx % 2 != 0 {
+                                 return 73;
+                             }
+                        }
+                    }
+                }
+            }
         }
         current_len
     }

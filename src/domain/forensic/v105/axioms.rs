@@ -661,7 +661,9 @@ impl V105PropertyWidthAxiom {
 
         // 2. Check registry for explicit forced compact
         if let Some(codes) = &reg.forced_compact_codes {
-            if codes.iter().any(|c| c == trimmed) { return true; }
+            if codes.iter().any(|c| c == trimmed) {
+                return true;
+            }
         }
 
         if self.is_summary_rhythm_forced(version, code) {

@@ -101,12 +101,19 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     let mut header_candidate =
                         peek_item_header_at(bytes, scan_pos, huffman, alpha, 0);
                     if alpha {
+                        let reg = crate::domain::forensic::registry::get_registry();
                         for alt_gap in [6u64, 35, 46] {
                             if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) =
                                 peek_item_header_at_specific_gap(bytes, scan_pos, huffman, alpha, alt_gap)
                             {
                                 let trimmed_alt = code.trim();
-                                if matches!(trimmed_alt, "xrs" | "c8xr" | "rhd") {
+                                let mut is_auth = false;
+                                if let Some(overrides) = &reg.item_overrides {
+                                    if let Some(map) = overrides.get(trimmed_alt) {
+                                        if let Some(&val) = map.get("is_authority_overlap") { is_auth = val != 0; }
+                                    }
+                                }
+                                if is_auth {
                                     header_candidate = Some((
                                         mode,
                                         location,
@@ -131,9 +138,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
                             let trimmed_code = code.trim();
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
-                                || crate::domain::item::serialization::item_template(&code).is_some()
-                                || code == "acww"
-                                || code == "bcww";
+                                || crate::domain::item::serialization::item_template(&code).is_some();
                             let reg = crate::domain::forensic::registry::get_registry();
                             let override_noncompact = reg.item_overrides.as_ref()
                                 .and_then(|overrides| overrides.get(trimmed_code))
@@ -154,10 +159,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 is_forced = true;
                             }
 
-                            let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) || code == "Þ.";
-                            if alpha && trimmed_code == "ww" && (flags & (1 << 26)) == 0 {
-                                continue;
-                            }
+                            let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code);
                             
                             // Axiom 0344: Forced 80-bit slot check for Alpha v105 summary items (potions, etc.)
                             let mut forced_80 = false;
@@ -174,7 +176,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             }
 
                             let mut confidence = if is_known { 500 } else { 50 };
-                            let is_alpha_runeword_candidate = alpha && (trimmed_code == "xrs" || (flags & (1 << 26)) != 0);
+                            let header_axiom = crate::domain::header::entity::HeaderAxiom::new(version, alpha);
+                            let is_alpha_runeword_candidate = alpha && header_axiom.is_runeword(flags, Some(&code));
                             if override_noncompact {
                                 confidence += 300;
                             }
@@ -188,11 +191,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             if alpha && (trimmed_code == "hp1" || trimmed_code == "xrs") {
                                 confidence += 200;
                             }
-                            if alpha && (flags & (1 << 26)) != 0 && trimmed_code == "xrs" {
+                            if alpha && header_axiom.is_runeword(flags, Some(&code)) && trimmed_code == "xrs" {
                                 confidence += 300;
-                            }
-                            if alpha && trimmed_code == "ww" && (flags & (1 << 26)) == 0 {
-                                continue;
                             }
                             if alpha && version == 5 {
                                 confidence += 100;
