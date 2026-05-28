@@ -94,7 +94,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 
 | Tool Name | Scope | Description & Primary Usage |
 | :--- | :--- | :--- |
-| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating and `--dump-residue-map` for visual residue/gap mapping. |
+| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating and `--dump-residue-map` for visual residue/gap mapping (with `--json` support for deterministic tables). |
 | **`d2save_batch`**  | Save | **Batch Runner**: Orchestrates `d2save_verify` and `SymmetryBitDiff` at scale with categorization. |
 | **`d2save_map`**    | Save | Dumps the memory map of a `.d2s` file (JM offsets, item counts). |
 | **`d2save_gap`**    | Save | **GAP Core**: Brute-forces header lengths and calculates alignment scores. |
