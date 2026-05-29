@@ -693,7 +693,7 @@ impl Item {
             .modules
             .iter()
             .any(|m| matches!(m, ItemModule::Opaque(_) | ItemModule::Residue(_)));
-        if is_placeholder_opaque || (has_opaque_module && !is_authority_overlap_code && !is_compact_tail_overlap_code) {
+        if is_placeholder_opaque {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
@@ -914,7 +914,9 @@ impl Item {
             let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
             let preserve_raw_tsc_layout = alpha_mode && self.code.trim() == "tsc";
             let should_emit_summary_code = if is_summary {
-                self.body.alpha_header_gap_bits.len() < 16 && !preserve_raw_tsc_layout
+                (self.body.alpha_header_gap_bits.len() < 16
+                    || (self.is_residue() && self.body.alpha_header_gap_bits.len() >= 32))
+                    && !preserve_raw_tsc_layout
             } else {
                 true
             };
@@ -1219,7 +1221,7 @@ impl Item {
         // Append trailing preservation modules for non-placeholder items.
         // These bits are captured when parsing with a wider recovery limit and must be
         // retained after the structured body has been re-emitted.
-        if is_authority_overlap_code {
+        if has_opaque_module && !is_placeholder_opaque {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
@@ -1249,7 +1251,7 @@ impl Item {
             };
             pad_seg.emit(emitter)?;
         }
-        if (is_authority_overlap_code || is_compact_tail_overlap_code) && has_opaque_module {
+        if has_opaque_module && !is_placeholder_opaque {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
