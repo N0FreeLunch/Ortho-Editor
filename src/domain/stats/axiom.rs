@@ -329,19 +329,15 @@ impl StatsAxiom {
                     has_extra_terminal_bit: false,
                 };
             }
+            if self.is_alpha() {
+                return PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: None,
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                };
+            } else {
 
-            // Axiom 0365: Alpha equipment and residue markers use 9-bit IDs and have a terminal bit
-            // if they are part of a rhythm-enforced sequence. (Slice 42)
-            let has_terminal = (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 5 || self.version == 6)
-                && (self.code.trim() == "ww" || self.code.trim() == "gcw" || !is_compact);
-
-            PropertyRhythm {
-                id_bits: 9,
-                value_bits: None,
-                has_terminal_bit: has_terminal,
-                has_extra_terminal_bit: false,
-            }
-        } else {
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None,
