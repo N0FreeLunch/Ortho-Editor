@@ -912,11 +912,9 @@ impl Item {
             }
         } else {
             let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
-            let preserve_raw_tsc_layout = alpha_mode && self.code.trim() == "tsc";
             let should_emit_summary_code = if is_summary {
-                (self.body.alpha_header_gap_bits.len() < 16
-                    || (self.is_residue() && self.body.alpha_header_gap_bits.len() >= 32))
-                    && !preserve_raw_tsc_layout
+                self.body.alpha_header_gap_bits.len() < 16
+                    || (self.is_residue() && self.body.alpha_header_gap_bits.len() >= 32)
             } else {
                 true
             };
