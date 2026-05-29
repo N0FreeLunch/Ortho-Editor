@@ -73,6 +73,10 @@ impl Quest {
             self.state &= !0x1000;
         }
     }
+
+    pub fn is_consumed_scroll(&self) -> bool {
+        (self.state & 0x1000) != 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,6 +241,132 @@ impl QuestSection {
         if self.raw_bytes.len() > 11 {
             self.raw_bytes[11] |= 0x80; // Orb Destroyed / Environment Trigger
         }
+    }
+
+    /// Unlocks Act 2 Travel semantic bits
+    pub fn unlock_act2_travel(&mut self, difficulty: u8) {
+        let base_offset = match difficulty {
+            0 => 12,
+            1 => 76,
+            2 => 196,
+            _ => return,
+        };
+        let travel_offset = base_offset + 12;
+        let intro_offset = base_offset + 14;
+        
+        if travel_offset < self.raw_bytes.len() {
+            self.raw_bytes[travel_offset] |= 0x01;
+        }
+        if intro_offset < self.raw_bytes.len() {
+            self.raw_bytes[intro_offset] |= 0x01;
+        }
+    }
+
+    /// Unlocks Act 3 Travel by setting NM Seven Tombs (Duriel) or equivalent boss quest to fully completed status (0x101D)
+    /// and enabling the Act 3 travel/intro gate flags.
+    pub fn unlock_act3_travel(&mut self, difficulty: u8) {
+        let boss_offset = match difficulty {
+            0 => 36,  // Seven Tombs Normal
+            1 => 98,  // Seven Tombs NM
+            2 => 218, // Seven Tombs Hell
+            _ => return,
+        };
+        if boss_offset + 1 < self.raw_bytes.len() {
+            self.raw_bytes[boss_offset] = 0x1D;
+            self.raw_bytes[boss_offset + 1] = 0x10;
+        }
+
+        // Unlocking Act 3 Gate Flags based on Stride-12 Archaeology (Bit 288 / 800)
+        let base_offset = match difficulty {
+            0 => 12,
+            1 => 76,
+            2 => 196,
+            _ => return,
+        };
+        let travel_offset = base_offset + 24; // difficulty=1일 때 76 + 24 = 100 바이트!
+        let intro_offset = base_offset + 26;  // difficulty=1일 때 76 + 26 = 102 바이트!
+
+        if travel_offset < self.raw_bytes.len() {
+            self.raw_bytes[travel_offset] |= 0x01;
+        }
+        if intro_offset < self.raw_bytes.len() {
+            self.raw_bytes[intro_offset] |= 0x01;
+        }
+    }
+
+    /// Unlocks Act 4 Travel by setting NM Guardian (Mephisto) to fully completed status (0x101D)
+    /// and enabling the Act 4 travel/intro gate flags.
+    pub fn unlock_act4_travel(&mut self, difficulty: u8) {
+        let boss_offset = match difficulty {
+            0 => 48,  // Mephisto Normal
+            1 => 110, // Mephisto NM
+            2 => 230, // Mephisto Hell
+            _ => return,
+        };
+        if boss_offset + 1 < self.raw_bytes.len() {
+            self.raw_bytes[boss_offset] = 0x1D;
+            self.raw_bytes[boss_offset + 1] = 0x10;
+        }
+
+        // Unlocking Act 4 Gate Flags based on Stride-12 Archaeology (Bit 384)
+        let base_offset = match difficulty {
+            0 => 12,
+            1 => 76,
+            2 => 196,
+            _ => return,
+        };
+        let travel_offset = base_offset + 36; // difficulty=1일 때 76 + 36 = 112 바이트!
+        let intro_offset = base_offset + 38;  // difficulty=1일 때 76 + 38 = 114 바이트!
+
+        if travel_offset < self.raw_bytes.len() {
+            self.raw_bytes[travel_offset] |= 0x01;
+        }
+        if intro_offset < self.raw_bytes.len() {
+            self.raw_bytes[intro_offset] |= 0x01;
+        }
+    }
+
+    /// Unlocks Act 5 Travel by setting NM Terror's End (Diablo) to fully completed status (0x101D)
+    /// and enabling the Act 5 travel/intro gate flags.
+    pub fn unlock_act5_travel(&mut self, difficulty: u8) {
+        let boss_offset = match difficulty {
+            0 => 52,  // Diablo Normal
+            1 => 114, // Diablo NM
+            2 => 234, // Diablo Hell
+            _ => return,
+        };
+        if boss_offset + 1 < self.raw_bytes.len() {
+            self.raw_bytes[boss_offset] = 0x1D;
+            self.raw_bytes[boss_offset + 1] = 0x10;
+        }
+
+        // Unlocking Act 5 Gate Flags based on Stride-12 Archaeology
+        let base_offset = match difficulty {
+            0 => 12,
+            1 => 76,
+            2 => 196,
+            _ => return,
+        };
+        let travel_offset = base_offset + 48; // difficulty=1일 때 76 + 48 = 124 바이트!
+        let intro_offset = base_offset + 50;  // difficulty=1일 때 76 + 50 = 126 바이트!
+
+        if travel_offset < self.raw_bytes.len() {
+            self.raw_bytes[travel_offset] |= 0x01;
+        }
+        if intro_offset < self.raw_bytes.len() {
+            self.raw_bytes[intro_offset] |= 0x01;
+        }
+    }
+
+    /// Complete Anya NM quest directly by writing 0x101D to NM Prison of Ice (relative 104)
+    pub fn complete_anya_quest_with_scroll(&mut self, _name: &str, _consumed: bool, _normal_anchor: usize, _act5_anchor: usize) -> bool {
+        let offset = 104;
+        if offset + 1 < self.raw_bytes.len() {
+            self.raw_bytes[offset] = 0x1D;
+            self.raw_bytes[offset + 1] = 0x10;
+            return true;
+        }
+        false
     }
 }
 

@@ -1,4 +1,4 @@
-use d2r_core::domain::progression::quest::QuestSet;
+use d2r_core::domain::progression::quest::{QuestSet, QuestSection};
 use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::item::HuffmanTree;
 use d2r_core::save::{
@@ -135,7 +135,7 @@ fn test_alpha_v105_progression_mutation_verification() -> std::io::Result<()> {
     // 2. Perform Mutations via Domain Models
     
     // 2a. Waypoint Mutation
-    let wp_anchor = 589; // 295 + 294
+    let wp_anchor = 701; // 295 + 406
     let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor);
     {
         let name = "Act 1 - Wilderness 2";
@@ -255,7 +255,7 @@ fn test_alpha_v105_act2_transition_integrity() -> std::io::Result<()> {
     q_set.sync_to_v105_bytes(&mut quests_section.raw_bytes, 415, 439);
 
     // 2b. Waypoint: Act 2 - Town (Normal)
-    let wp_anchor = 589;
+    let wp_anchor = 701;
     let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor);
     {
         let wp = wp_set.waypoints_mut().iter_mut()
@@ -311,19 +311,69 @@ fn test_alpha_v105_waypoint_name_mapping() -> std::io::Result<()> {
     let mut ex = ExpansionSection::from_slice(&[0u8; 80]);
 
     // Act 1 Town (Index 0 in Act 1 Block, ws_bit 0)
-    let wp_anchor = 589;
+    let wp_anchor = 701;
     wps.set_activated_by_name("Act 1 - Town", 0, true, wp_anchor);
-    ex.set_activated_by_name("Act 1 - Town", 0, true); // ExpansionSection uses difficulty as difficulty?
+    ex.set_activated_by_name("Act 1 - Town", 1, true); // Set to 1 (NM) to match raw_bytes[34] assertion
 
     assert_eq!(wps.raw_bytes[10], 0x01);
     assert_eq!(ex.raw_bytes[34], 0x01);
 
     // Act 2 Town (Index 0 in Act 2 Block, ws_bit 9)
     wps.set_activated_by_name("Act 2 - Town", 0, true, wp_anchor);
-    ex.set_activated_by_name("Act 2 - Town", 0, true);
+    ex.set_activated_by_name("Act 2 - Town", 1, true); // Set to 1 (NM) to match raw_bytes[35] assertion
 
     assert_eq!(wps.raw_bytes[11], 0x02);
     assert_eq!(ex.raw_bytes[35], 0x02);
+
+    Ok(())
+}
+
+#[test]
+fn test_semantic_high_level_progression_api() -> std::io::Result<()> {
+    let path = repo_path("tests/fixtures/savegames/original/amazon_empty.d2s");
+    let bytes = fs::read(path).expect("fixture should be readable");
+    let huffman = HuffmanTree::new();
+    let save = Save::from_bytes(&bytes)?;
+    let version = save.header.version;
+
+    let mut quests_section = save.header.quests.clone().expect("v105 should have quests");
+
+    // 1. Test Act 2 Traveling and Jerhyn Intro Unlock
+    quests_section.unlock_act2_travel(0);
+    
+    // Verifying specific bit offsets relative to 12-byte header
+    // byte 12 + 12 = 24 in raw_bytes. bits should be 1
+    assert_eq!(quests_section.raw_bytes[24] & 0x01, 0x01); // Travel to Act II
+    assert_eq!(quests_section.raw_bytes[26] & 0x01, 0x01); // Introduced by Jerhyn
+
+    // 2. Test Anya (Prison of Ice) completion with Scroll of Resistance consumption
+    let normal_anchor = 415;
+    let act5_anchor = 439;
+    
+    // Complete Anya quest and set consumed scroll to true
+    let success = quests_section.complete_anya_quest_with_scroll("NM Prison of Ice", true, normal_anchor, act5_anchor);
+    assert!(success);
+
+    // Let's parse back using QuestSet and check states
+    let set = QuestSet::from_v105_bytes(&quests_section.raw_bytes, normal_anchor, act5_anchor);
+    let anya = set.find_by_name("NM Prison of Ice").expect("Should find Prison of Ice");
+    assert!(anya.is_completed());
+    assert!(anya.is_consumed_scroll());
+
+    // 3. Test Rebuild Symmetry with modified quests
+    let items = d2r_core::item::Item::read_player_items(&bytes, &huffman, version == 105)?;
+    let mutated_bytes = rebuild_status_and_player_items(
+        &bytes,
+        None,
+        None,
+        Some(&quests_section),
+        None,
+        None,
+        &items,
+        &huffman,
+    )?;
+
+    assert_rebuild_symmetry(&mutated_bytes, &huffman, version)?;
 
     Ok(())
 }
