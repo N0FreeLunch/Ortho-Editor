@@ -1358,7 +1358,23 @@ impl Item {
                 dynamic_limit += 128; // Safety buffer (Retail only)
             }
 
-            let parse_code_hint = peek_code_hint.as_deref().unwrap_or(marker.code.as_str());
+            let reg = crate::domain::forensic::registry::get_registry();
+            let marker_code_trimmed = marker.code.trim();
+            let marker_is_forced_summary = reg
+                .force_summary_rhythm_codes
+                .as_ref()
+                .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
+                .unwrap_or(false)
+                || reg
+                    .forced_compact_codes
+                    .as_ref()
+                    .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
+                    .unwrap_or(false);
+            let parse_code_hint = if marker_is_forced_summary {
+                marker.code.as_str()
+            } else {
+                peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
+            };
             let parse_limit = Some(dynamic_limit);
 
             let parse_result = if reject_candidate {

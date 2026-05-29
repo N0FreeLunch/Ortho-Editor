@@ -849,7 +849,6 @@ impl Item {
         // EXCEPT for Alpha equipment which might have property residue/nudges. (Axiom 0365)
         let is_header_only = s_axiom.is_header_only(self.header.flags, &self.code);
         let is_v105_blank = alpha_mode && self.code.trim().is_empty();
-
         if is_header_only
             && (is_v105_blank
                 || !(alpha_mode
@@ -913,8 +912,9 @@ impl Item {
             }
         } else {
             let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
+            let preserve_raw_tsc_layout = alpha_mode && self.code.trim() == "tsc";
             let should_emit_summary_code = if is_summary {
-                self.body.alpha_header_gap_bits.len() < 16
+                self.body.alpha_header_gap_bits.len() < 16 && !preserve_raw_tsc_layout
             } else {
                 true
             };
@@ -981,7 +981,11 @@ impl Item {
             if final_bits > (current_bits - start_bit) {
                 let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
                 let pad_seg = AlphaHeaderGap {
-                    bits: vec![false; padding_needed as usize],
+                    bits: if !self.body.alpha_alignment_padding.is_empty() {
+                        self.body.alpha_alignment_padding.clone()
+                    } else {
+                        vec![false; padding_needed as usize]
+                    },
                 };
                 pad_seg.emit(emitter)?;
             }
@@ -1803,22 +1807,6 @@ pub fn parse_item_body<R: BitRead>(
             }
         }
 
-        alpha_code_bits = if alpha_mode && w_axiom.is_summary_item(header.version, &code) {
-            let code_end = cursor.pos();
-            if code_end > code_start {
-                cursor
-                    .recorded_bits()
-                    .iter()
-                    .filter(|bit| bit.offset >= code_start && bit.offset < code_end)
-                    .map(|bit| bit.bit)
-                    .collect()
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
-
         let mut alpha_nudge = None;
         if alpha_mode {
             if h_axiom.is_alpha()
@@ -1836,6 +1824,22 @@ pub fn parse_item_body<R: BitRead>(
                 }
             }
         }
+
+        alpha_code_bits = if alpha_mode && w_axiom.is_summary_item(header.version, &code) {
+            let code_end = cursor.pos();
+            if code_end > code_start {
+                cursor
+                    .recorded_bits()
+                    .iter()
+                    .filter(|bit| bit.offset >= code_start && bit.offset < code_end)
+                    .map(|bit| bit.bit)
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
 
         if w_axiom.needs_post_body_byte_alignment(header.version, header.is_compact)
             && AlphaV105PostBodyAlignment::align_required()
