@@ -1115,29 +1115,17 @@ impl Item {
             }
             let mut start = marker.offset; // marker.offset is relative to section_bytes
 
-            if alpha_mode {
-                let reg = crate::domain::forensic::registry::get_registry();
-                if let Some(nudges) = &reg.scanner_nudges {
-                    if let Some(&nudged_start) = nudges.get(&start.to_string()) {
-                        start = nudged_start;
-                    }
-                }
-            }
-
-            if alpha_mode && i > 0 {
-                // Rhythmic Realignment (Slice 7):
-                // In Alpha v105, items often have a dynamic rhythm.
-                // If the marker is 1 or 2 bits off from the predicted boundary, snap it.
-                if (start as i64 - next_expected_start as i64).abs() <= 2 {
-                    start = next_expected_start;
-                }
-            }
-
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
+            if alpha_mode {
+                eprintln!("[DEBUG-OVERRUN] marker_loop i={} start={} start_offset={} item_count={} non_residue={}", 
+                    i, start, start_offset, item_count, non_residue_count);
+            }
             if non_residue_count >= top_level_count as usize {
+                if alpha_mode { eprintln!("[DEBUG-OVERRUN] Breaking loop at count {}", non_residue_count); }
                 break;
             }
             if start < start_offset {
+                if alpha_mode { eprintln!("[DEBUG-OVERRUN] Skipping marker at {} (already passed)", start); }
                 continue;
             }
 
@@ -1172,6 +1160,7 @@ impl Item {
                             && !recovered_item.is_residue()
                             && recovered_consumed <= start - start_offset
                         {
+                            if alpha_mode { eprintln!("[DEBUG-OVERRUN] RECOVERED item at {}: code='{}' bits={}", start_offset, recovered_item.code, recovered_consumed); }
                             if !recovery_code.trim().is_empty()
                                 && crate::domain::forensic::v105::axioms::is_v105_summary_code(
                                     &recovery_code,

@@ -913,8 +913,12 @@ impl Item {
         } else {
             let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
             let should_emit_summary_code = if is_summary {
-                self.body.alpha_header_gap_bits.len() < 16
-                    || (self.is_residue() && self.body.alpha_header_gap_bits.len() >= 32)
+                if alpha_mode && (self.code.trim() == "ww" || self.code.trim() == "gcw") {
+                    true // Always emit WW/GCW markers for Alpha rhythm (Slice 42)
+                } else {
+                    self.body.alpha_header_gap_bits.len() < 16
+                        || (self.is_residue() && self.body.alpha_header_gap_bits.len() >= 32)
+                }
             } else {
                 true
             };

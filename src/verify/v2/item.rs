@@ -102,16 +102,27 @@ impl DomainVerifier for ItemVerifier {
 
             if mismatch_idx.is_some() || original_bits.len() != emitted_bits.len() {
                 let idx = mismatch_idx.unwrap_or(len);
+                let abs_mismatch = item.range.start + idx as u64;
+                
+                let mut dna_info = String::new();
+                if let Ok(diag) = crate::verify::symmetry_analyzer::analyze_item_dna(item, abs_mismatch) {
+                    dna_info = format!(
+                        " | DNA Diagnosis: Rupture Point: '{}', DNA Class: '{}', Prescription: {}",
+                        diag.rupture_field, diag.dna_class, diag.prescription
+                    );
+                }
+
                 issues.push(ReportIssue {
                     kind: "item_parity".to_string(),
                     message: format!(
-                        "Item parity mismatch ({}): mismatch at bit {} (Orig Len: {}, Emit Len: {}). Bits near mismatch: Original: {}, Emitted: {}",
+                        "Item parity mismatch ({}): mismatch at bit {} (Orig Len: {}, Emit Len: {}). Bits near mismatch: Original: {}, Emitted: {}{}",
                         item.code.trim(),
                         idx,
                         original_bits.len(),
                         emitted_bits.len(),
                         format_bits_at(&original_bits, idx, 32),
-                        format_bits_at(&emitted_bits, idx, 32)
+                        format_bits_at(&emitted_bits, idx, 32),
+                        dna_info
                     ),
                     bit_offset: Some(item.range.start),
                 });

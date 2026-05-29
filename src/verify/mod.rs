@@ -5,6 +5,7 @@ pub mod mutation;
 pub mod sba;
 pub mod save_integrity;
 pub mod symmetry;
+pub mod symmetry_analyzer;
 pub mod v2;
 pub mod delta;
 

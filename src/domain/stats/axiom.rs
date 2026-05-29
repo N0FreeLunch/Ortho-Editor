@@ -295,7 +295,7 @@ impl StatsAxiom {
         self.is_alpha() && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
     }
 
-    pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, _is_compact: bool, stat_id: u32) -> PropertyRhythm {
+    pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, is_compact: bool, stat_id: u32) -> PropertyRhythm {
         if self.is_alpha() {
             if stat_id == 320 || self.map_alpha_id(stat_id) == 320 {
                 return PropertyRhythm {
@@ -330,19 +330,15 @@ impl StatsAxiom {
                 };
             }
 
-            if self.version == 5 {
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: Some(6),
-                    has_terminal_bit: false,
-                    has_extra_terminal_bit: false,
-                };
-            }
-            
+            // Axiom 0365: Alpha equipment and residue markers use 9-bit IDs and have a terminal bit
+            // if they are part of a rhythm-enforced sequence. (Slice 42)
+            let has_terminal = (self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 5 || self.version == 6)
+                && (self.code.trim() == "ww" || self.code.trim() == "gcw" || !is_compact);
+
             PropertyRhythm {
                 id_bits: 9,
                 value_bits: None,
-                has_terminal_bit: false,
+                has_terminal_bit: has_terminal,
                 has_extra_terminal_bit: false,
             }
         } else {

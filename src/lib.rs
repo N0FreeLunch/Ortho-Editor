@@ -83,7 +83,10 @@ mod tests {
         let items = load_player_items("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
         let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
 
-        assert_eq!(real_items.len(), 11);
+        // 16 is the physical bit-perfect item count for amazon_10_scrolls.d2s 
+        // (4 hp1 + 10 tsc + 1 jav + 1 opaque buc = 16 items). 
+        // Previous buggy is_residue logic swallowed opaque modules, which led to a stale count of 11.
+        assert_eq!(real_items.len(), 16);
         assert!(real_items.iter().all(|item| item.socketed_items.is_empty()));
     }
 
