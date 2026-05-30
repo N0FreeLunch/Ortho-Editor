@@ -1,9 +1,9 @@
-use std::env;
-use std::fs;
-use std::path::{Path};
-use serde::Serialize;
 use d2r_core::verify::args::ArgParser;
 use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use serde::Serialize;
+use std::env;
+use std::fs;
+use std::path::Path;
 
 #[derive(Serialize, Clone)]
 struct EnvVariable {
@@ -53,7 +53,7 @@ fn check_variable(name: &str) -> Option<EnvVariable> {
     let path = Path::new(&value);
     let exists = path.exists();
     let is_sanitized = !value.contains('\\');
-    
+
     let canonical = if exists {
         fs::canonicalize(path).ok().map(|p| p.display().to_string())
     } else {
@@ -72,21 +72,19 @@ fn check_variable(name: &str) -> Option<EnvVariable> {
 fn main() {
     let parser = ArgParser::new("d2-env-health")
         .description("Diagnoses D2R Workspace Environment & .env hygiene");
-    
+
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
-        Err(err) => {
-            match err {
-                d2r_core::verify::args::ArgError::Help(h) => {
-                    println!("{}", h);
-                    std::process::exit(0);
-                }
-                d2r_core::verify::args::ArgError::Error(e) => {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
+        Err(err) => match err {
+            d2r_core::verify::args::ArgError::Help(h) => {
+                println!("{}", h);
+                std::process::exit(0);
             }
-        }
+            d2r_core::verify::args::ArgError::Error(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        },
     };
 
     let hygiene = check_hygiene();
@@ -119,29 +117,45 @@ fn main() {
     } else {
         println!("D2R Environment Health Report");
         println!("============================");
-        
+
         if hygiene.env_found {
             print!("- .env file: FOUND");
-            if hygiene.has_bom { print!(" (Warning: HAS BOM)"); }
-            if !hygiene.is_utf8 { print!(" (Error: NOT UTF-8)"); }
+            if hygiene.has_bom {
+                print!(" (Warning: HAS BOM)");
+            }
+            if !hygiene.is_utf8 {
+                print!(" (Error: NOT UTF-8)");
+            }
             println!();
         } else {
-            println!("- .env file: NOT FOUND in CWD ({})", env::current_dir().unwrap().display());
+            println!(
+                "- .env file: NOT FOUND in CWD ({})",
+                env::current_dir().unwrap().display()
+            );
         }
 
         println!("\nVariables:");
         for var in variables {
             let status = if var.exists { "OK" } else { "MISSING" };
-            let sanitized = if var.is_sanitized { "SANITY: OK" } else { "WARNING: Contains backslashes" };
-            println!("  [{}] {} = {} ({})", status, var.name, var.value, sanitized);
+            let sanitized = if var.is_sanitized {
+                "SANITY: OK"
+            } else {
+                "WARNING: Contains backslashes"
+            };
+            println!(
+                "  [{}] {} = {} ({})",
+                status, var.name, var.value, sanitized
+            );
             if let Some(can) = var.canonical {
                 println!("    -> Canonical: {}", can);
             }
         }
 
-        let all_ok = hygiene.env_found && !hygiene.has_bom && hygiene.is_utf8 && 
-                      health.variables.iter().all(|v| v.exists && v.is_sanitized);
-        
+        let all_ok = hygiene.env_found
+            && !hygiene.has_bom
+            && hygiene.is_utf8
+            && health.variables.iter().all(|v| v.exists && v.is_sanitized);
+
         if all_ok {
             println!("\nResult: HEALTHY");
         } else {

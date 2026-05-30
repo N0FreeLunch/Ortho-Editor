@@ -1,9 +1,9 @@
+use d2r_core::verify::args::{ArgError, ArgParser};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use serde::Serialize;
 use std::env;
 use std::fs;
-use std::path::{Path};
-use serde::Serialize;
-use d2r_core::verify::args::{ArgParser, ArgError};
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use std::path::Path;
 
 #[derive(Serialize)]
 struct BinMapping {
@@ -81,7 +81,8 @@ fn main() {
         }
     }
 
-    let orphaned_entries: Vec<String> = explicit_mappings.iter()
+    let orphaned_entries: Vec<String> = explicit_mappings
+        .iter()
         .filter(|m| !m.exists)
         .map(|m| format!("{} ({})", m.name, m.path))
         .collect();
@@ -94,14 +95,19 @@ fn main() {
 
     if parsed.is_json() {
         let metadata = ReportMetadata::new("d2_binary_target_auditor", cargo_toml_path, "0.1.0");
-        let report = Report::new(metadata, ReportStatus::Ok)
-            .with_results(results);
+        let report = Report::new(metadata, ReportStatus::Ok).with_results(results);
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     } else {
         println!("Binary Target Audit Report\n==========================");
         println!("\nExplicit Mappings:");
         for m in &results.explicit_mappings {
-            let status = if !m.exists { " [MISSING]" } else if m.is_mismatch { " [MISMATCH]" } else { "" };
+            let status = if !m.exists {
+                " [MISSING]"
+            } else if m.is_mismatch {
+                " [MISMATCH]"
+            } else {
+                ""
+            };
             println!("  {} -> {}{}", m.name, m.path, status);
         }
 
@@ -123,9 +129,12 @@ fn main() {
 
 fn create_mapping(name: &str, path: &str) -> BinMapping {
     let exists = Path::new(path).exists();
-    let file_stem = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let file_stem = Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
     let is_mismatch = file_stem != name;
-    
+
     BinMapping {
         name: name.to_string(),
         path: path.to_string(),

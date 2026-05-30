@@ -54,7 +54,6 @@ fn report_issue(label: &str, detail: &str) {
     println!("[issue] {label}: {detail}");
 }
 
-
 fn main() {
     let parser = ArgParser::new("d2r-env-check");
     let _ = parser.parse(env::args_os().skip(1).collect());
