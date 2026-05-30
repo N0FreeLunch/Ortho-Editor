@@ -753,32 +753,6 @@ impl Item {
             }
         }
 
-        if alpha_mode
-            && self.header.save_is_alpha
-            && self.total_bits > 0
-            && !self.bits.is_empty()
-            && trimmed_code == "buc"
-            && self.properties.is_empty()
-        {
-            // Alpha v105 `buc` behaves like a compact tail seam in this fixture family.
-            // Preserve the recorded prefix to keep the header/gap rhythm identical.
-            let start_offset = self.bits[0].offset;
-            let end_offset = start_offset + self.total_bits;
-            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
-            for rb in &self.bits {
-                if rb.offset >= end_offset {
-                    break;
-                }
-                if rb.offset >= start_offset {
-                    prefix_bits.push(rb.bit);
-                }
-            }
-            if prefix_bits.len() == self.total_bits as usize {
-                emitter.extend_bits(prefix_bits)?;
-                return Ok(());
-            }
-        }
-
         // Seam safeguard:
         // For compact Alpha overlap seams with a stable logical width and no parsed properties,
         // prefer original recorded prefix bits to avoid re-synthesizing header/code boundary drift.

@@ -327,9 +327,6 @@ mod roundtrip_tests {
 
         let filter = std::env::var("D2R_FIXTURE_FILTER").ok();
         let huffman = HuffmanTree::new();
-        unsafe {
-            std::env::set_var("D2R_ITEM_TRACE", "1");
-        }
         for fixture in fixtures {
             if let Some(ref f) = filter {
                 if !fixture.contains(f) {
@@ -346,7 +343,6 @@ mod roundtrip_tests {
             let quests = parse_quest_section(&bytes, &map)?;
             let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
             let items = Item::read_player_items(&bytes, &huffman, version == 105)?;
-            println!("[FULL-SAVE-DEBUG] Fixture: {}, version: {}, items.len(): {}", fixture, version, items.len());
 
             // 2. Rebuild the entire save
             let rebuilt_gf = attributes.to_bytes(version == 105)?;
@@ -356,9 +352,6 @@ mod roundtrip_tests {
             } else {
                 map.if_pos + section_axiom.if_len() + d2r_core::save::SKILL_SECTION_LEN
             };
-            println!("[FULL-SAVE-DEBUG] gf original len: {}, rebuilt len: {}", map.if_pos - map.gf_pos, rebuilt_gf.len());
-            println!("[FULL-SAVE-DEBUG] if+skills original len: {}, rebuilt len: {}", skill_end - map.if_pos, d2r_core::save::SKILL_SECTION_LEN + section_axiom.if_len());
-            println!("[FULL-SAVE-DEBUG] quest/gap original len: {}, rebuilt len: {}", map.jm_positions[0] - skill_end, if map.jm_positions[0] > skill_end { map.jm_positions[0] - skill_end } else { 0 });
 
             let rebuilt = rebuild_status_and_player_items(
                 &bytes,

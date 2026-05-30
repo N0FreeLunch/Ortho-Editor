@@ -643,9 +643,9 @@ impl V105PropertyWidthAxiom {
         if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
             return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
-        if trimmed.is_empty() {
-            // Axiom 0344: Blank codes ("    ") are classified as summary items in Alpha v105 
-            // to preserve the 80-bit rhythm and item count parity.
+        if trimmed.is_empty() && code.chars().any(|c| c.is_whitespace()) {
+            // Axiom 0344: Whitespace-only blank codes are classified as summary items
+            // in Alpha v105 to preserve the 80-bit rhythm and item count parity.
             return true;
         }
         if trimmed == "hp1" || trimmed == "mp1" {

@@ -1,7 +1,6 @@
 // This software is licensed under the PolyForm Noncommercial License 1.0.0.
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
-// TEST COMMENT FOR PERSISTENCE
 use crate::item::{HuffmanTree, Item};
 pub use crate::domain::progression::axiom::PROG_START_FILE;
 pub use crate::domain::header::axiom::{
@@ -692,16 +691,6 @@ pub fn rebuild_item_section(
     } else {
         jm1 + jm_axiom.header_len()
     };
-
-    let section_start = jm1 + jm_axiom.header_len();
-    let original_section_len = section_end - section_start;
-    
-    if crate::item::item_trace_enabled() {
-        eprintln!("[DEBUG Rebuild] jm1: {}, section_end: {}, len: {}", jm1, section_end, original_section_len);
-        if let Some(last) = items.last() {
-            eprintln!("[DEBUG Rebuild] Last Item range.end: {}", last.range.end);
-        }
-    }
 
     let mut serialized_section = Item::serialize_section(items, huffman, alpha_mode)?;
 
