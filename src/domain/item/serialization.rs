@@ -1350,12 +1350,20 @@ impl Item {
                 || reg
                     .forced_compact_codes
                     .as_ref()
-                    .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
-                    .unwrap_or(false);
+                .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
+                .unwrap_or(false);
+            if alpha_mode && marker_code_trimmed == "buc" {
+                dynamic_limit = dynamic_limit.min(114);
+            }
             let parse_code_hint = if marker_is_forced_summary {
                 marker.code.as_str()
             } else {
                 peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
+            };
+            let forced_compact_for_parse = if is_compact_final || marker_code_trimmed == "buc" {
+                Some(true)
+            } else {
+                None
             };
             let parse_limit = Some(dynamic_limit);
 
@@ -1379,7 +1387,7 @@ impl Item {
                     item_count,
                     alpha_mode,
                     parse_limit,
-                    if is_compact_final { Some(true) } else { None },
+                    forced_compact_for_parse,
                     Some(parse_code_hint),
                 )
                 .map_err(|e| e) // Compatibility
@@ -1437,7 +1445,7 @@ impl Item {
                             item_count,
                             alpha_mode,
                             Some(section_bits - start),
-                            if is_compact_final { Some(true) } else { None },
+                            forced_compact_for_parse,
                             Some(parse_code_hint),
                         ) {
                             final_item = retry_item;
@@ -1518,7 +1526,7 @@ impl Item {
                                 {
                                     // Axiom 0345: Proximity Snap. Consume the drift as alignment padding to recover boundary.
                                     let preserve_padding =
-                                        !matches!(final_item.code.trim(), "hp1" | "mp1");
+                                        !matches!(final_item.code.trim(), "hp1" | "mp1" | "buc");
                                     if preserve_padding {
                                         actual_consumed += drift;
                                         final_item
@@ -2549,12 +2557,7 @@ impl Item {
         // Slice 9: Alpha v105 runewords are shadow containers and skip standard extended stats.
         let skip_ext_stats = header.save_is_alpha && detected_runeword;
 
-        let mut ext_axiom = axiom.clone();
-        if header.save_is_alpha && matches!(body.code.trim(), "buc") {
-            // Buckler keeps the compact header shape, but its extended stats still
-            // carry armor fields that must be parsed with non-compact width gates.
-            ext_axiom.is_compact = false;
-        }
+        let ext_axiom = axiom.clone();
 
         let ext_data = if !rhythm_recovery && !skip_ext_stats {
             match crate::domain::item::entity::ExtendedStatsData::read_from_cursor(
@@ -2668,7 +2671,7 @@ impl Item {
                 alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd");
 
             // Slice 11: Handle JM-to-Body alignment gap
-            let gap_len = if matches!(item.header.version, 1) {
+            let gap_len = if item.code.trim() == "buc" || matches!(item.header.version, 1) {
                 0
             } else {
                 axiom.header_gap(&item.code, item.header.flags)
@@ -2690,7 +2693,10 @@ impl Item {
                 let is_authority = item.body.code.trim() == "xrs"
                     || item.body.code.trim() == "c8xr"
                     || item.body.code.trim() == "rhd";
-                if is_authority && (item.header.version == 1 || item.header.version == 0) {
+                if item.body.code.trim() == "buc" {
+                    // Buckler keeps the compact-tail shape and must not consume the generic
+                    // alpha residue nudge that applies to other v105 bodies.
+                } else if is_authority && (item.header.version == 1 || item.header.version == 0) {
                     // forensic-1363: Map the authority shadow block directly to the 7873 property anchor.
                     let target_stats_pos = 7873u64;
                     if cursor.pos() < target_stats_pos {
