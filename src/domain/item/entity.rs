@@ -705,6 +705,30 @@ impl Item {
             }
         }
 
+        if alpha_mode
+            && self.header.save_is_alpha
+            && self.header.version == 0
+            && matches!(self.code.trim(), "hp1" | "mp1")
+            && self.total_bits > 0
+            && !self.bits.is_empty()
+        {
+            let start_offset = self.bits[0].offset;
+            let end_offset = start_offset + self.total_bits;
+            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
+            for rb in &self.bits {
+                if rb.offset >= end_offset {
+                    break;
+                }
+                if rb.offset >= start_offset {
+                    prefix_bits.push(rb.bit);
+                }
+            }
+            if prefix_bits.len() == self.total_bits as usize {
+                emitter.extend_bits(prefix_bits)?;
+                return Ok(());
+            }
+        }
+
         // Seam safeguard:
         // For compact Alpha overlap seams with a stable logical width and no parsed properties,
         // prefer original recorded prefix bits to avoid re-synthesizing header/code boundary drift.
@@ -765,6 +789,8 @@ impl Item {
         .with_code(&self.code);
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
+        let summary_axiom = V105PropertyWidthAxiom::default();
+        let is_summary = summary_axiom.is_summary_item(self.header.version, &self.code);
         if alpha_mode && self.header.save_is_alpha {
             let preserve_compact_summary_header = self.header.is_compact
                 && self.body.alpha_header_gap_bits.is_empty()
@@ -898,7 +924,6 @@ impl Item {
                 emitter.byte_align()?;
             }
         } else if s_axiom.code_encoding() == crate::domain::stats::axiom::CodeEncoding::Ascii3x8 {
-            let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
             if alpha_mode
                 && is_summary
                 && !is_authority_overlap_code
@@ -917,7 +942,6 @@ impl Item {
                 }
             }
         } else {
-            let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
             let should_emit_summary_code = if is_summary {
                 if alpha_mode && (self.code.trim() == "ww" || self.code.trim() == "gcw") {
                     true // Always emit WW/GCW markers for Alpha rhythm (Slice 42)
@@ -944,11 +968,6 @@ impl Item {
                     emitter.extend_bits(self.body.alpha_code_bits.clone())?;
                 } else {
                     emitter.extend_bits(encoded_code)?;
-                }
-
-                // Axiom 0365: Rhythm Correction for ww/gcw residues (Slice 42)
-                if alpha_mode && (self.code.trim() == "ww" || self.code.trim() == "gcw") {
-                    emitter.write_bit(true)?;
                 }
 
                 if h_axiom.is_alpha()
@@ -1171,7 +1190,6 @@ impl Item {
                         emitter.write_bits(0, 47)?;
                     }
                 }
-                let is_summary = w_axiom.is_summary_item(self.header.version, &self.code);
                 if !is_summary
                     && (self.header.version != 5
                         || is_shadow
