@@ -1,11 +1,11 @@
-﻿use std::env;
-use std::fs;
+use anyhow::{Context, Result};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use serde::Serialize;
-use anyhow::{Result, Context};
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use std::env;
+use std::fs;
 
-use d2r_core::save::{Save, map_core_sections, AttributeSection, class_name};
-use d2r_core::item::{Item, HuffmanTree};
+use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::save::{AttributeSection, Save, class_name, map_core_sections};
 
 #[derive(Serialize)]
 struct DiffResult {
@@ -19,10 +19,26 @@ fn main() -> Result<()> {
     let mut parser = ArgParser::new("d2save_ssa")
         .description("Semantic Save-Game Auditor for comparing character stats and items between two D2R save files");
 
-    parser.add_spec(ArgSpec::positional("file1", "path to the first save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("file2", "path to the second save file (.d2s)"));
-    parser.add_spec(ArgSpec::flag("stats", Some('s'), Some("stats"), "enable character stats comparison (default if no flags)"));
-    parser.add_spec(ArgSpec::flag("items", Some('i'), Some("items"), "enable player items comparison"));
+    parser.add_spec(ArgSpec::positional(
+        "file1",
+        "path to the first save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::positional(
+        "file2",
+        "path to the second save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "stats",
+        Some('s'),
+        Some("stats"),
+        "enable character stats comparison (default if no flags)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "items",
+        Some('i'),
+        Some("items"),
+        "enable player items comparison",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -40,7 +56,7 @@ fn main() -> Result<()> {
     let file1_path = parsed.get("file1").unwrap();
     let file2_path = parsed.get("file2").unwrap();
     let use_json = parsed.is_json();
-    
+
     let mut diff_stats = parsed.is_set("stats");
     let diff_items = parsed.is_set("items");
 
@@ -87,18 +103,32 @@ fn main() -> Result<()> {
         // 2. Attribute Section Diff
         let map1 = map_core_sections(&bytes1).context("Failed to map sections for file 1")?;
         let map2 = map_core_sections(&bytes2).context("Failed to map sections for file 2")?;
-        let attr1 = AttributeSection::parse(&bytes1, map1.gf_pos, map1.if_pos).context("Failed to parse attributes for file 1")?;
-        let attr2 = AttributeSection::parse(&bytes2, map2.gf_pos, map2.if_pos).context("Failed to parse attributes for file 2")?;
+        let attr1 = AttributeSection::parse(&bytes1, map1.gf_pos, map1.if_pos)
+            .context("Failed to parse attributes for file 1")?;
+        let attr2 = AttributeSection::parse(&bytes2, map2.gf_pos, map2.if_pos)
+            .context("Failed to parse attributes for file 2")?;
 
         let is_alpha1 = save1.header.version == 105;
         let is_alpha2 = save2.header.version == 105;
 
         // Common stats to check
         let stat_ids = vec![
-            (0, "Strength"), (1, "Energy"), (2, "Dexterity"), (3, "Vitality"),
-            (4, "StatPoints"), (5, "SkillPoints"), (6, "Life"), (7, "MaxLife"),
-            (8, "Mana"), (9, "MaxMana"), (10, "Stamina"), (11, "MaxStamina"),
-            (12, "Level"), (13, "Experience"), (14, "Gold"), (15, "StashGold"),
+            (0, "Strength"),
+            (1, "Energy"),
+            (2, "Dexterity"),
+            (3, "Vitality"),
+            (4, "StatPoints"),
+            (5, "SkillPoints"),
+            (6, "Life"),
+            (7, "MaxLife"),
+            (8, "Mana"),
+            (9, "MaxMana"),
+            (10, "Stamina"),
+            (11, "MaxStamina"),
+            (12, "Level"),
+            (13, "Experience"),
+            (14, "Gold"),
+            (15, "StashGold"),
         ];
 
         for (id, name) in stat_ids {
@@ -109,8 +139,12 @@ fn main() -> Result<()> {
                 results.push(DiffResult {
                     section: "Attributes".to_string(),
                     field: name.to_string(),
-                    old_value: val1.map(|v| v.to_string()).unwrap_or_else(|| "N/A".to_string()),
-                    new_value: val2.map(|v| v.to_string()).unwrap_or_else(|| "N/A".to_string()),
+                    old_value: val1
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    new_value: val2
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "N/A".to_string()),
                 });
             }
         }
@@ -174,13 +208,25 @@ fn main() -> Result<()> {
         if results.is_empty() {
             println!("No semantic differences found.");
         } else {
-            println!("+------------+----------------------+----------------------+----------------------+");    
-            println!("| {:<10} | {:<20} | {:<20} | {:<20} |", "Section", "Field", "Value A", "Value B");        
-            println!("+------------+----------------------+----------------------+----------------------+");    
+            println!(
+                "+------------+----------------------+----------------------+----------------------+"
+            );
+            println!(
+                "| {:<10} | {:<20} | {:<20} | {:<20} |",
+                "Section", "Field", "Value A", "Value B"
+            );
+            println!(
+                "+------------+----------------------+----------------------+----------------------+"
+            );
             for res in results {
-                println!("| {:<10} | {:<20} | {:<20} | {:<20} |", res.section, res.field, res.old_value, res.new_value);
+                println!(
+                    "| {:<10} | {:<20} | {:<20} | {:<20} |",
+                    res.section, res.field, res.old_value, res.new_value
+                );
             }
-            println!("+------------+----------------------+----------------------+----------------------+");    
+            println!(
+                "+------------+----------------------+----------------------+----------------------+"
+            );
         }
     }
 

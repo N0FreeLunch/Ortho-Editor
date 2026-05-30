@@ -47,24 +47,31 @@ fn classify_offset(offset: usize, jm0: Option<usize>) -> &'static str {
     } else if (V105_NPC_OFFSET..V105_HEADER_LEN).contains(&offset) {
         "NPC"
     } else if let Some(j) = jm0 {
-        if offset >= j {
-            "Items"
-        } else {
-            "Other"
-        }
+        if offset >= j { "Items" } else { "Other" }
     } else {
         "Other"
     }
 }
 
 fn main() {
-    let mut parser = ArgParser::new("d2save_structural_diff")
-        .description("Compares two D2R save files with Alpha v105 subsystem awareness and checksum masking");
+    let mut parser = ArgParser::new("d2save_structural_diff").description(
+        "Compares two D2R save files with Alpha v105 subsystem awareness and checksum masking",
+    );
 
     parser.add_spec(ArgSpec::positional("file_a", "First save file"));
     parser.add_spec(ArgSpec::positional("file_b", "Second save file"));
-    parser.add_spec(ArgSpec::flag("all", Some('a'), Some("all"), "Show masked differences"));
-    parser.add_spec(ArgSpec::flag("details", Some('d'), Some("details"), "Show detailed offset list"));
+    parser.add_spec(ArgSpec::flag(
+        "all",
+        Some('a'),
+        Some("all"),
+        "Show masked differences",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "details",
+        Some('d'),
+        Some("details"),
+        "Show detailed offset list",
+    ));
 
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -94,13 +101,14 @@ fn main() {
     let jm_ref = jm_a.or(jm_b);
 
     let mut details = Vec::new();
-    let mut section_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut section_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for i in 0..common_len {
         if bytes_a[i] != bytes_b[i] {
             let label = classify_offset(i, jm_ref);
             let is_masked = label == "Checksum";
-            
+
             *section_counts.entry(label.to_string()).or_insert(0) += 1;
 
             details.push(DiffDetail {
@@ -117,13 +125,14 @@ fn main() {
     let length_delta = bytes_b.len() as i64 - bytes_a.len() as i64;
 
     if is_json {
-        let mut sections: Vec<_> = section_counts.into_iter().map(|(name, diff_count)| {
-            SectionSummary {
+        let mut sections: Vec<_> = section_counts
+            .into_iter()
+            .map(|(name, diff_count)| SectionSummary {
                 is_masked: name == "Checksum",
                 name,
                 diff_count,
-            }
-        }).collect();
+            })
+            .collect();
         sections.sort_by(|a, b| a.name.cmp(&b.name));
 
         let payload = StructuralDiffPayload {
@@ -131,10 +140,10 @@ fn main() {
             unmasked_diff_bytes: unmasked_count,
             length_delta,
             sections,
-            details: if show_all { 
-                details 
-            } else { 
-                details.into_iter().filter(|d| !d.is_masked).collect() 
+            details: if show_all {
+                details
+            } else {
+                details.into_iter().filter(|d| !d.is_masked).collect()
             },
         };
 
@@ -147,7 +156,8 @@ fn main() {
         let report = Report::new(
             ReportMetadata::new("d2save_structural_diff", path_a, "Alpha v105"),
             status,
-        ).with_results(payload);
+        )
+        .with_results(payload);
 
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     } else {
@@ -174,23 +184,37 @@ fn main() {
 
             if show_details || show_all {
                 println!("[DETAILED DIFFS]");
-                println!("  {:>8}  {:<12}  {:>8}  {:>8}", "Offset", "Section", "A", "B");
+                println!(
+                    "  {:>8}  {:<12}  {:>8}  {:>8}",
+                    "Offset", "Section", "A", "B"
+                );
                 println!("  {:->8}  {:->12}  {:->8}  {:->8}", "", "", "", "");
-                
+
                 for d in &details {
                     if !show_all && d.is_masked {
                         continue;
                     }
-                    println!("  {:>8}  {:<12}  {:>8}  {:>8}", d.offset, d.label, d.a_hex, d.b_hex);
+                    println!(
+                        "  {:>8}  {:<12}  {:>8}  {:>8}",
+                        d.offset, d.label, d.a_hex, d.b_hex
+                    );
                 }
-                
+
                 if !show_all && details.len() > unmasked_count {
-                    println!("  ... ({} masked bytes hidden, use --all to see)", details.len() - unmasked_count);
+                    println!(
+                        "  ... ({} masked bytes hidden, use --all to see)",
+                        details.len() - unmasked_count
+                    );
                 }
             } else if unmasked_count == 0 && !details.is_empty() {
-                println!("  [INFO] Only masked sections (Checksum) differ. Use --all to see details.");
+                println!(
+                    "  [INFO] Only masked sections (Checksum) differ. Use --all to see details."
+                );
             } else if unmasked_count > 0 {
-                println!("  [INFO] {} unmasked differences found. Use --details to see offset list.", unmasked_count);
+                println!(
+                    "  [INFO] {} unmasked differences found. Use --details to see offset list.",
+                    unmasked_count
+                );
             }
         }
     }

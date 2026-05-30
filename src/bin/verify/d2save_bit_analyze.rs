@@ -1,16 +1,19 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::HuffmanTree;
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::io::Cursor;
 use std::process;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn main() {
     let mut parser = ArgParser::new("d2save_bit_analyze")
         .description("Scans bit offsets for known item codes in a D2R save file");
 
-    parser.add_spec(ArgSpec::positional("save_file", "path to the save file (.d2s)"));
+    parser.add_spec(ArgSpec::positional(
+        "save_file",
+        "path to the save file (.d2s)",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {

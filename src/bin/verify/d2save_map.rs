@@ -1,7 +1,7 @@
+use d2r_core::verify::args::{ArgError, ArgParser};
+use serde_json::json;
 use std::env;
 use std::fs;
-use d2r_core::verify::args::{ArgParser, ArgError};
-use serde_json::json;
 
 use d2r_core::save::{
     ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET, CHAR_NAME_OFFSET,
@@ -13,10 +13,24 @@ fn main() -> anyhow::Result<()> {
         .description("Maps and summarizes the major sections and JM markers of a D2R save file");
 
     parser.add_arg("save_file", "path to the save file (.d2s)");
-    parser.add_flag("alpha-rhythm-grid", "display 72/80-bit rhythmic grid for Alpha v105").long("alpha-rhythm-grid");
-    parser.add_flag("verbose-markers", "display internal scanner confidence scores and rejected markers").long("verbose-markers");
-    parser.add_flag("items-only", "print item inventory only (text)").long("items-only");
-    parser.add_flag("json-items", "print item inventory only (JSON)").long("json-items");
+    parser
+        .add_flag(
+            "alpha-rhythm-grid",
+            "display 72/80-bit rhythmic grid for Alpha v105",
+        )
+        .long("alpha-rhythm-grid");
+    parser
+        .add_flag(
+            "verbose-markers",
+            "display internal scanner confidence scores and rejected markers",
+        )
+        .long("verbose-markers");
+    parser
+        .add_flag("items-only", "print item inventory only (text)")
+        .long("items-only");
+    parser
+        .add_flag("json-items", "print item inventory only (JSON)")
+        .long("json-items");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -39,7 +53,8 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("--items-only and --json-items cannot be used together");
     }
     let bytes = fs::read(path).map_err(|e| anyhow::anyhow!("Cannot read '{}': {}", path, e))?;
-    let save = Save::from_bytes(&bytes).map_err(|err| anyhow::anyhow!("Cannot parse D2R header: {}", err))?;
+    let save = Save::from_bytes(&bytes)
+        .map_err(|err| anyhow::anyhow!("Cannot parse D2R header: {}", err))?;
 
     if items_only || json_items {
         let (inventory, errors, total_jm_sections) =
@@ -120,20 +135,55 @@ fn main() -> anyhow::Result<()> {
     if let Ok(map) = map_core_sections(&bytes) {
         println!();
         println!("[CORE SECTIONS]");
-        println!("  gf_pos:  Offset {:>5} (bit {:>6}) | Attributes", map.gf_pos, map.gf_pos * 8);
-        println!("  if_pos:  Offset {:>5} (bit {:>6}) | Skills", map.if_pos, map.if_pos * 8);
+        println!(
+            "  gf_pos:  Offset {:>5} (bit {:>6}) | Attributes",
+            map.gf_pos,
+            map.gf_pos * 8
+        );
+        println!(
+            "  if_pos:  Offset {:>5} (bit {:>6}) | Skills",
+            map.if_pos,
+            map.if_pos * 8
+        );
         let gf_len = map.if_pos.saturating_sub(map.gf_pos);
         println!("  (gf delta: {} bytes / {} bits)", gf_len, gf_len * 8);
 
         if save.header.version == 105 {
             println!();
             println!("[FORENSIC MARKERS (Alpha v105)]");
-            if let Some(pos) = map.woo_pos { println!("  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)", pos * 8); }
-            if let Some(pos) = map.ws_pos { println!("  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)", pos * 8); }
-            if let Some(pos) = map.w4_pos { println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data", pos * 8); }
-            if let Some(pos) = map.jf_pos { println!("  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker", pos * 8); }
-            if let Some(pos) = map.kf_pos { println!("  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer Start", pos * 8); }
-            if let Some(pos) = map.lf_pos { println!("  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer End", pos * 8); }
+            if let Some(pos) = map.woo_pos {
+                println!(
+                    "  [Woo!] Offset {pos:>5} (bit {:>6}) | Progression (Quests)",
+                    pos * 8
+                );
+            }
+            if let Some(pos) = map.ws_pos {
+                println!(
+                    "  [WS  ] Offset {pos:>5} (bit {:>6}) | Progression (Waypoints)",
+                    pos * 8
+                );
+            }
+            if let Some(pos) = map.w4_pos {
+                println!("  [w4  ] Offset {pos:>5} (bit {:>6}) | NPC Data", pos * 8);
+            }
+            if let Some(pos) = map.jf_pos {
+                println!(
+                    "  [jf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Marker",
+                    pos * 8
+                );
+            }
+            if let Some(pos) = map.kf_pos {
+                println!(
+                    "  [kf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer Start",
+                    pos * 8
+                );
+            }
+            if let Some(pos) = map.lf_pos {
+                println!(
+                    "  [lf  ] Offset {pos:>5} (bit {:>6}) | Mercenary Footer End",
+                    pos * 8
+                );
+            }
         }
     }
 
@@ -165,16 +215,27 @@ fn main() -> anyhow::Result<()> {
         );
         if idx > 0 {
             let delta = pos - last_jm_pos;
-            println!("    (Delta from prev JM: {} bytes / {} bits)", delta, delta * 8);
+            println!(
+                "    (Delta from prev JM: {} bytes / {} bits)",
+                delta,
+                delta * 8
+            );
         }
         last_jm_pos = pos;
 
         if item_count > 0 || section_size > 6 {
-            use d2r_core::item::{Item, HuffmanTree};
+            use d2r_core::item::{HuffmanTree, Item};
             let huffman = HuffmanTree::new();
             let is_alpha = save.header.version == 105;
             let section_data = &bytes[pos..next_pos];
-            match Item::read_section(section_data, pos as u64 * 8, item_count, &huffman, is_alpha, verbose_markers) {
+            match Item::read_section(
+                section_data,
+                pos as u64 * 8,
+                item_count,
+                &huffman,
+                is_alpha,
+                verbose_markers,
+            ) {
                 Ok(items) => {
                     println!("    Parsed {} items:", items.len());
                     for (item_idx, item) in items.iter().enumerate() {
@@ -182,15 +243,26 @@ fn main() -> anyhow::Result<()> {
                             Some(q) => format!("{:?}", q),
                             None => "None".to_string(),
                         };
-                        println!("      [{}] {} (v={}, quality={}, mode={}, loc={}) at bit {}", 
-                            item_idx, item.code.trim(), item.header.version, quality_str, item.mode, item.location, item.range.start);
+                        println!(
+                            "      [{}] {} (v={}, quality={}, mode={}, loc={}) at bit {}",
+                            item_idx,
+                            item.code.trim(),
+                            item.header.version,
+                            quality_str,
+                            item.mode,
+                            item.location,
+                            item.range.start
+                        );
                         if item.code == "Opaque" {
                             println!("        [Opaque] {} bits", item.total_bits);
                         }
                         for module in &item.modules {
                             match module {
                                 d2r_core::item::ItemModule::SemiOpaque { reason, .. } => {
-                                    println!("        [SemiOpaque] {} bits | Reason: {}", item.total_bits, reason);
+                                    println!(
+                                        "        [SemiOpaque] {} bits | Reason: {}",
+                                        item.total_bits, reason
+                                    );
                                 }
                                 d2r_core::item::ItemModule::Residue(_) => {
                                     println!("        [Residue] {} bits", item.total_bits);
@@ -201,7 +273,14 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     if alpha_grid || verbose_markers {
-                        render_heatmap(section_data, &items, pos as u64 * 8, is_alpha, alpha_grid, verbose_markers);
+                        render_heatmap(
+                            section_data,
+                            &items,
+                            pos as u64 * 8,
+                            is_alpha,
+                            alpha_grid,
+                            verbose_markers,
+                        );
                     }
                 }
                 Err(e) => {
@@ -221,7 +300,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(&first_jm) = jm_positions.first() {
         println!("  Header + pre-item data: {} bytes", first_jm);
     }
-    
+
     Ok(())
 }
 
@@ -251,7 +330,10 @@ fn collect_item_inventory(
             .copied()
             .unwrap_or("Unknown Section");
         let item_count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
-        let next_pos = jm_positions.get(section_index + 1).copied().unwrap_or(bytes.len());
+        let next_pos = jm_positions
+            .get(section_index + 1)
+            .copied()
+            .unwrap_or(bytes.len());
         let section_data = &bytes[pos..next_pos];
 
         if item_count == 0 && (next_pos - pos) <= 6 {
@@ -312,24 +394,29 @@ fn collect_item_inventory(
 }
 
 fn render_heatmap(
-    data: &[u8], 
-    items: &[d2r_core::item::Item], 
-    section_bit_offset: u64, 
-    alpha: bool, 
-    show_grid: bool, 
-    show_markers: bool
+    data: &[u8],
+    items: &[d2r_core::item::Item],
+    section_bit_offset: u64,
+    alpha: bool,
+    show_grid: bool,
+    show_markers: bool,
 ) {
-    use d2r_core::item::ItemModule;
     use colored::Colorize;
+    use d2r_core::item::ItemModule;
 
     println!("\n    [BIT HEATMAP]");
-    
+
     // 1. Display expected vs parsed count
-    let expected_count = if data.len() >= 4 { u16::from_le_bytes([data[2], data[3]]) } else { 0 };
+    let expected_count = if data.len() >= 4 {
+        u16::from_le_bytes([data[2], data[3]])
+    } else {
+        0
+    };
     let parsed_count = items.iter().filter(|it| !it.is_residue()).count();
-    println!("      JM Expected: {} | Parsed: {} | Delta: {}", 
-        expected_count, 
-        parsed_count, 
+    println!(
+        "      JM Expected: {} | Parsed: {} | Delta: {}",
+        expected_count,
+        parsed_count,
         (parsed_count as i32 - expected_count as i32)
     );
 
@@ -339,7 +426,14 @@ fn render_heatmap(
         // Re-run scanner in verbose mode to get all markers
         use d2r_core::domain::item::scanner::{self, MarkerStatus};
         let huffman = d2r_core::item::HuffmanTree::new();
-        let markers = scanner::scan_item_markers(data, &huffman, true, section_bit_offset, Some(expected_count), true);
+        let markers = scanner::scan_item_markers(
+            data,
+            &huffman,
+            true,
+            section_bit_offset,
+            Some(expected_count),
+            true,
+        );
         for marker in markers {
             let status_str = format!("{:?}", marker.status);
             let status_colored = match marker.status {
@@ -347,7 +441,8 @@ fn render_heatmap(
                 MarkerStatus::Rejected => status_str.yellow(),
                 MarkerStatus::Phantom => status_str.red(),
             };
-            println!("        - Bit {:5}: [{:<4}] Score: {:4} | Status: {}", 
+            println!(
+                "        - Bit {:5}: [{:<4}] Score: {:4} | Status: {}",
                 marker.offset, marker.code, marker.score, status_colored
             );
         }
@@ -358,7 +453,7 @@ fn render_heatmap(
         println!("      Bitstream (80-bit periodic grid):");
         let total_bits = (data.len() * 8) as u64;
         let mut bit_pos = 0;
-        
+
         while bit_pos < total_bits {
             if bit_pos % 80 == 0 {
                 print!("{}", "|".bright_black());
@@ -373,12 +468,20 @@ fn render_heatmap(
                 bit_pos >= rel_start && bit_pos < rel_end
             });
 
-            let bit_val = if (data[(bit_pos / 8) as usize] & (1 << (bit_pos % 8))) != 0 { "1" } else { "0" };
-            
+            let bit_val = if (data[(bit_pos / 8) as usize] & (1 << (bit_pos % 8))) != 0 {
+                "1"
+            } else {
+                "0"
+            };
+
             if let Some(it) = item {
                 if it.is_residue() {
                     print!("{}", bit_val.truecolor(80, 80, 80)); // Dark Gray for residue
-                } else if it.modules.iter().any(|m| matches!(m, ItemModule::SemiOpaque { .. })) {
+                } else if it
+                    .modules
+                    .iter()
+                    .any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
+                {
                     print!("{}", bit_val.yellow()); // Yellow for SemiOpaque
                 } else if it.is_opaque() {
                     print!("{}", bit_val.red()); // Red for Opaque

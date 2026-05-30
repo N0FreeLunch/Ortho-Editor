@@ -1,7 +1,7 @@
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::process;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn find_first_jm(bytes: &[u8]) -> Option<usize> {
     for i in 0..bytes.len().saturating_sub(1) {
@@ -13,11 +13,18 @@ fn find_first_jm(bytes: &[u8]) -> Option<usize> {
 }
 
 fn main() {
-    let mut parser = ArgParser::new("d2save_item_diff")
-        .description("Compares item sections of two D2R save files after aligning to the first JM marker");
+    let mut parser = ArgParser::new("d2save_item_diff").description(
+        "Compares item sections of two D2R save files after aligning to the first JM marker",
+    );
 
-    parser.add_spec(ArgSpec::positional("file_a", "path to the first save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("file_b", "path to the second save file (.d2s)"));
+    parser.add_spec(ArgSpec::positional(
+        "file_a",
+        "path to the first save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::positional(
+        "file_b",
+        "path to the second save file (.d2s)",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
