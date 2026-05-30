@@ -1,8 +1,10 @@
-use crate::domain::item::quality::ItemQuality;
-use crate::domain::item::axiom_meta::{ForensicAxiom, ForensicMetadata, Confidence, Intentionality};
-use crate::domain::forensic::v105::{V105NudgeAxiom, V105ShadowAxiom, V105HeaderGapAxiom};
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
+use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105NudgeAxiom, V105ShadowAxiom};
 use crate::domain::header::entity::{HeaderAxiom, HeaderGeometry};
+use crate::domain::item::axiom_meta::{
+    Confidence, ForensicAxiom, ForensicMetadata, Intentionality,
+};
+use crate::domain::item::quality::ItemQuality;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsAxiom {
@@ -18,7 +20,16 @@ pub struct StatsAxiom {
 
 impl StatsAxiom {
     pub fn new(version: u8, quality: ItemQuality, save_is_alpha: bool) -> Self {
-        Self { version, quality, save_is_alpha, is_personalized: false, is_compact: false, is_socketed: false, code: String::new(), idx: 0 }
+        Self {
+            version,
+            quality,
+            save_is_alpha,
+            is_personalized: false,
+            is_compact: false,
+            is_socketed: false,
+            code: String::new(),
+            idx: 0,
+        }
     }
 
     pub fn with_index(mut self, idx: usize) -> Self {
@@ -41,10 +52,18 @@ impl StatsAxiom {
         let trimmed = self.code.trim();
         if self.save_is_alpha {
             let reg = get_registry();
-            let mut is_compact = self.is_compact || crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
-            
-            if trimmed.is_empty() && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) { 
-                is_compact = true; 
+            let mut is_compact = self.is_compact
+                || crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
+
+            if trimmed.is_empty()
+                && (self.version == 5
+                    || self.version == 0
+                    || self.version == 1
+                    || self.version == 2
+                    || self.version == 4
+                    || self.version == 6)
+            {
+                is_compact = true;
             } else {
                 if let Some(overrides) = &reg.item_overrides {
                     if let Some(map) = overrides.get(trimmed) {
@@ -62,7 +81,7 @@ impl StatsAxiom {
                     }
                 }
             }
-            
+
             self.is_compact = is_compact;
         }
         self
@@ -88,15 +107,18 @@ impl ForensicAxiom for StatsAxiom {
                 ForensicMetadata::new(
                     Confidence::StrongPattern,
                     Intentionality::Structural,
-                    format!("Alpha v105 Version {} Stat mapping and property rhythm rules", self.version)
-                )
+                    format!(
+                        "Alpha v105 Version {} Stat mapping and property rhythm rules",
+                        self.version
+                    ),
+                ),
             ];
             ForensicMetadata::aggregate(&parts)
         } else {
             ForensicMetadata::new(
                 Confidence::VerifiedTruth,
                 Intentionality::Structural,
-                "Standard Retail item bitstream layout (1.10 - 1.14d)"
+                "Standard Retail item bitstream layout (1.10 - 1.14d)",
             )
         }
     }
@@ -124,12 +146,25 @@ pub enum CodeEncoding {
 
 impl StatsAxiom {
     pub fn is_alpha(&self) -> bool {
-        self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 4 || self.version == 6)
+        self.save_is_alpha
+            && (self.version == 5
+                || self.version == 1
+                || self.version == 2
+                || self.version == 0
+                || self.version == 4
+                || self.version == 6)
     }
 
     /// Whitelist for Alpha stat mapping (includes version 7).
     pub fn uses_alpha_mapping(&self) -> bool {
-        self.save_is_alpha && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
+        self.save_is_alpha
+            && (self.version == 5
+                || self.version == 1
+                || self.version == 2
+                || self.version == 0
+                || self.version == 7
+                || self.version == 4
+                || self.version == 6)
     }
 
     /// Maps an Alpha v105 raw stat ID to its effective (standard) ID.
@@ -144,7 +179,7 @@ impl StatsAxiom {
             .unwrap_or(raw_id)
     }
 
-    /// Determines if a specific Alpha v105 version/item-type requires 9-bit TVS padding 
+    /// Determines if a specific Alpha v105 version/item-type requires 9-bit TVS padding
     /// after the property terminator (511).
     pub fn has_tvs_padding(&self, is_runeword: bool) -> bool {
         if !self.is_alpha() {
@@ -162,16 +197,24 @@ impl StatsAxiom {
 
     pub fn is_runeword(&self, flags: u32) -> bool {
         let trimmed = self.code.trim();
-        if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" { return true; }
-        if (flags & (1 << 26)) != 0 { return true; }
+        if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
+            return true;
+        }
+        if (flags & (1 << 26)) != 0 {
+            return true;
+        }
         if self.save_is_alpha {
             let reg = get_registry();
             if let Some(codes) = &reg.forced_runeword_codes {
-                if codes.iter().any(|c| c == trimmed) { return true; }
+                if codes.iter().any(|c| c == trimmed) {
+                    return true;
+                }
             }
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(map) = overrides.get(trimmed) {
-                    if let Some(&val) = map.get("is_runeword") { return val != 0; }
+                    if let Some(&val) = map.get("is_runeword") {
+                        return val != 0;
+                    }
                 }
             }
         }
@@ -205,34 +248,42 @@ impl StatsAxiom {
     pub fn code_encoding(&self) -> CodeEncoding {
         if self.save_is_alpha && self.is_compact {
             // Axiom 0391: Encoding Duality for Alpha v105 summary items.
-            // Items identified as summary codes use raw 3x8 bit ASCII encoding 
+            // Items identified as summary codes use raw 3x8 bit ASCII encoding
             // ONLY if they are explicitly compact or in higher versions.
             // In Version 0, they often remain Huffman encoded.
-            if self.version != 0 && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code) {
+            if self.version != 0
+                && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code)
+            {
                 // Forensic (Slice 3): Potions and some markers often use Huffman even in Version 1/2.
                 // ASCII 3x8 is typically used for 'xrs' and specific quest items.
                 let trimmed = self.code.trim();
                 if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
                     return CodeEncoding::Ascii3x8;
                 }
-                
+
                 // If it matches a known stealth pattern (e.g. 0xCF 0x4F for hp1), it MUST be Huffman.
-                if crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_item(self.version, &self.code) {
-                     // Check if it should be ASCII based on registry or other rules.
-                     // For now, default to Huffman for potions/scrolls in v1/v2 if not explicitly forced.
+                if crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default()
+                    .is_summary_item(self.version, &self.code)
+                {
+                    // Check if it should be ASCII based on registry or other rules.
+                    // For now, default to Huffman for potions/scrolls in v1/v2 if not explicitly forced.
                 }
             }
 
             let reg = get_registry();
             if let Some(enc) = &reg.compact_code_encoding {
-                if enc == "ascii_3x8" { return CodeEncoding::Ascii3x8; }
+                if enc == "ascii_3x8" {
+                    return CodeEncoding::Ascii3x8;
+                }
             }
         }
         CodeEncoding::Huffman
     }
 
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
-        if self.is_runeword(_flags) { return false; }
+        if self.is_runeword(_flags) {
+            return false;
+        }
 
         // Alpha v105 forensic: Shadow items are truly header-only (no code, no stats).
         // They are identified by flags (bit 26/27) and have NO item code.
@@ -252,14 +303,23 @@ impl StatsAxiom {
         let reg = get_registry();
         if let Some(overrides) = &reg.item_overrides {
             if let Some(map) = overrides.get(trimmed) {
-                if let Some(&gap) = map.get("header_gap") { return gap; }
+                if let Some(&gap) = map.get("header_gap") {
+                    return gap;
+                }
             }
         }
         0
     }
 
     pub fn compact_layout_policy(&self) -> CompactLayoutPolicy {
-        if self.save_is_alpha && (self.version == 5 || self.version == 0 || self.version == 1 || self.version == 2 || self.version == 4 || self.version == 6) {
+        if self.save_is_alpha
+            && (self.version == 5
+                || self.version == 0
+                || self.version == 1
+                || self.version == 2
+                || self.version == 4
+                || self.version == 6)
+        {
             CompactLayoutPolicy::AlphaV105
         } else {
             CompactLayoutPolicy::Retail
@@ -270,7 +330,7 @@ impl StatsAxiom {
     pub fn resolve_compact_rhythm(&self, current_len: u64) -> u64 {
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
         if self.save_is_alpha && w_axiom.is_summary_rhythm_forced(self.version, &self.code) {
-             return w_axiom.summary_item_fixed_width() as u64;
+            return w_axiom.summary_item_fixed_width() as u64;
         }
 
         if self.save_is_alpha {
@@ -280,9 +340,9 @@ impl StatsAxiom {
                 if let Some(map) = overrides.get(trimmed) {
                     if let Some(&alt) = map.get("is_alternating_rhythm") {
                         if alt != 0 && current_len == 72 {
-                             if self.idx % 2 != 0 {
-                                 return 73;
-                             }
+                            if self.idx % 2 != 0 {
+                                return 73;
+                            }
                         }
                     }
                 }
@@ -295,7 +355,13 @@ impl StatsAxiom {
         self.is_alpha() && ((flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0)
     }
 
-    pub fn property_rhythm(&self, _is_runeword: bool, _is_shadow: bool, is_compact: bool, stat_id: u32) -> PropertyRhythm {
+    pub fn property_rhythm(
+        &self,
+        _is_runeword: bool,
+        _is_shadow: bool,
+        is_compact: bool,
+        stat_id: u32,
+    ) -> PropertyRhythm {
         if self.is_alpha() {
             if stat_id == 320 || self.map_alpha_id(stat_id) == 320 {
                 return PropertyRhythm {
@@ -318,10 +384,15 @@ impl StatsAxiom {
                 };
             }
 
-            if self.version == 2 || self.version == 4 || self.version == 6 || _is_runeword || self.code.trim() == "Opaque" {
-                 return PropertyRhythm {
-                     id_bits: 9,
-                     // Alpha v105 legacy alpha stat rows are generally 9-bit,
+            if self.version == 2
+                || self.version == 4
+                || self.version == 6
+                || _is_runeword
+                || self.code.trim() == "Opaque"
+            {
+                return PropertyRhythm {
+                    id_bits: 9,
+                    // Alpha v105 legacy alpha stat rows are generally 9-bit,
                     // but version 0 and 1 rows are handled by the narrower guard above
                     // to preserve the observed 17-bit property rhythm.
                     value_bits: Some(9),
@@ -347,32 +418,54 @@ impl StatsAxiom {
 
     pub fn resolve_flag_padding(&self, flags: u32, is_socketed: bool) -> u64 {
         let mut padding = 0;
-        if is_socketed { padding += 8; }
-        if (flags & 0x00000008) != 0 { padding += 8; }
-        if (flags & 0x00000010) != 0 { padding += 16; }
-        if (flags & 0x00000020) != 0 { padding += 24; }
-        if (flags & 0x00000040) != 0 { padding += 32; }
+        if is_socketed {
+            padding += 8;
+        }
+        if (flags & 0x00000008) != 0 {
+            padding += 8;
+        }
+        if (flags & 0x00000010) != 0 {
+            padding += 16;
+        }
+        if (flags & 0x00000020) != 0 {
+            padding += 24;
+        }
+        if (flags & 0x00000040) != 0 {
+            padding += 32;
+        }
         padding
     }
-pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
-    if self.save_is_alpha {
-        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(self.version, code, flags, Some(self.idx)) as u64;
-        if target_width > 0 {
-            return target_width;
+    pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
+        if self.save_is_alpha {
+            let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(
+                self.version,
+                code,
+                flags,
+                Some(self.idx),
+            ) as u64;
+            if target_width > 0 {
+                return target_width;
+            }
         }
-    }    if !self.is_compact {
-        let aligned = (current_len + 7) / 8 * 8;
-        return aligned;
+        if !self.is_compact {
+            let aligned = (current_len + 7) / 8 * 8;
+            return aligned;
+        }
+        current_len
     }
-    current_len
-}
 
     // Alpha v105 still stores these fields for the relevant templates; the
     // template gate in ExtendedStatsData already prevents unrelated items from
     // consuming the wrong widths.
-    pub fn reads_defense(&self) -> bool { !self.is_compact }
-    pub fn reads_durability(&self) -> bool { !self.is_compact }
-    pub fn reads_quantity(&self) -> bool { !self.is_compact }
+    pub fn reads_defense(&self) -> bool {
+        !self.is_compact
+    }
+    pub fn reads_durability(&self) -> bool {
+        !self.is_compact
+    }
+    pub fn reads_quantity(&self) -> bool {
+        !self.is_compact
+    }
 
     pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<MappingInfo> {
         let reg = get_registry();
@@ -381,26 +474,37 @@ pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u
 
     pub fn lookup_alpha_map_by_effective(&self, effective_id: u32) -> Option<MappingInfo> {
         let reg = get_registry();
-        reg.mappings.values().find(|m| m.effective_id == effective_id).cloned()
+        reg.mappings
+            .values()
+            .find(|m| m.effective_id == effective_id)
+            .cloned()
     }
 
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
         if self.is_alpha() {
             let trimmed = self.code.trim();
-            if default_width == 9 && trimmed != "acww" { return 9; }
+            if default_width == 9 && trimmed != "acww" {
+                return 9;
+            }
 
             let reg = get_registry();
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(item_map) = overrides.get(trimmed) {
-                    if let Some(&width) = item_map.get(&raw_id.to_string()) { return width; }
+                    if let Some(&width) = item_map.get(&raw_id.to_string()) {
+                        return width;
+                    }
                 }
             }
 
             if let Some(mapping) = self.lookup_alpha_map_by_raw(raw_id) {
-                if let Some(bits) = mapping.save_bits { return bits; }
+                if let Some(bits) = mapping.save_bits {
+                    return bits;
+                }
             }
 
-            if let Some(stat_info) = reg.stats.get(&raw_id.to_string()) { return stat_info.width; }
+            if let Some(stat_info) = reg.stats.get(&raw_id.to_string()) {
+                return stat_info.width;
+            }
         }
         default_width
     }

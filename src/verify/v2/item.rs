@@ -1,5 +1,5 @@
 use super::{DomainReport, DomainVerifier};
-use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
+use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 use crate::item::{HuffmanTree, Item, ParsingError};
 use crate::save::find_jm_markers;
 use crate::verify::ReportIssue;
@@ -54,8 +54,8 @@ impl DomainVerifier for ItemVerifier {
         // 2. Round-trip validation
         for (idx, item) in items.iter().enumerate() {
             forensic_audit.extend(item.forensic_audit.clone());
-            
-            // Slice 4: Opaque/SemiOpaque items are preserved as-is; skip round-trip parse check 
+
+            // Slice 4: Opaque/SemiOpaque items are preserved as-is; skip round-trip parse check
             // if we already know they are in a forensic isolation state.
             if item.is_opaque() || item.is_semi_opaque() {
                 continue;
@@ -90,7 +90,7 @@ impl DomainVerifier for ItemVerifier {
 
             let original_bits: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
             let emitted_bits = item_bits_vec;
-            
+
             let mut mismatch_idx = None;
             let len = original_bits.len().min(emitted_bits.len());
             for i in 0..len {
@@ -103,9 +103,11 @@ impl DomainVerifier for ItemVerifier {
             if mismatch_idx.is_some() || original_bits.len() != emitted_bits.len() {
                 let idx = mismatch_idx.unwrap_or(len);
                 let abs_mismatch = item.range.start + idx as u64;
-                
+
                 let mut dna_info = String::new();
-                if let Ok(diag) = crate::verify::symmetry_analyzer::analyze_item_dna(item, abs_mismatch) {
+                if let Ok(diag) =
+                    crate::verify::symmetry_analyzer::analyze_item_dna(item, abs_mismatch)
+                {
                     dna_info = format!(
                         " | DNA Diagnosis: Rupture Point: '{}', DNA Class: '{}', Prescription: {}",
                         diag.rupture_field, diag.dna_class, diag.prescription
@@ -124,7 +126,7 @@ impl DomainVerifier for ItemVerifier {
                         format_bits_at(&emitted_bits, idx, 32),
                         dna_info
                     ),
-                    bit_offset: Some(item.range.start),
+                    bit_offset: Some(abs_mismatch),
                 });
             }
         }
@@ -153,7 +155,10 @@ impl DomainVerifier for ItemVerifier {
         if total_expected != semantic_count {
             issues.push(ReportIssue {
                 kind: "jm_coherence".into(),
-                message: format!("Total JM header count ({}) != parsed items ({})", total_expected, semantic_count),
+                message: format!(
+                    "Total JM header count ({}) != parsed items ({})",
+                    total_expected, semantic_count
+                ),
                 bit_offset: jm_markers.first().map(|&pos| (pos + 2) as u64 * 8),
             });
         }
@@ -165,11 +170,17 @@ impl DomainVerifier for ItemVerifier {
         let mut alpha_items_count = 0;
         if alpha_mode {
             for item in &items {
-                if item.is_residue() { continue; }
+                if item.is_residue() {
+                    continue;
+                }
                 alpha_items_count += 1;
-                
+
                 // Check if the item was naturally aligned (no nudge recorded)
-                let has_nudge = item.forensic_audit.findings.iter().any(|f| f.rationale.contains("Active rhythmic nudge"));
+                let has_nudge = item
+                    .forensic_audit
+                    .findings
+                    .iter()
+                    .any(|f| f.rationale.contains("Active rhythmic nudge"));
                 if !has_nudge && !item.is_opaque() && !item.is_semi_opaque() {
                     aligned_count += 1;
                 }
@@ -194,10 +205,16 @@ fn format_bits_at(bits: &[bool], start: usize, count: usize) -> String {
     let mut s = String::new();
     let display_start = if start > 8 { start - 8 } else { 0 };
     for i in display_start..(start + count).min(bits.len()) {
-        if i == start { s.push('['); }
+        if i == start {
+            s.push('[');
+        }
         s.push(if bits[i] { '1' } else { '0' });
-        if i == start { s.push(']'); }
-        if (i + 1) % 8 == 0 { s.push(' '); }
+        if i == start {
+            s.push(']');
+        }
+        if (i + 1) % 8 == 0 {
+            s.push(' ');
+        }
     }
     s
 }

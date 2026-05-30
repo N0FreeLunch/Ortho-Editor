@@ -1,11 +1,14 @@
-use crate::domain::header::axiom::{ACTIVE_ACT_OFFSET, EXPANSION_FLAG_OFFSET, PROGRESS_FLAG_OFFSET};
+use crate::domain::header::axiom::{
+    ACTIVE_ACT_OFFSET, EXPANSION_FLAG_OFFSET, PROGRESS_FLAG_OFFSET,
+};
+use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 use crate::domain::progression::axiom::{V105_NPC_OFFSET, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET};
-use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
 use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save};
+use crate::verify::v2::{
+    header::HeaderVerifier, item::ItemVerifier, progression::ProgressionVerifier, DomainVerifier,
+};
 use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction};
-use crate::verify::v2::{DomainVerifier, header::HeaderVerifier, progression::ProgressionVerifier, item::ItemVerifier};
-use serde::{Serialize, Deserialize};
-
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResidueMapEntry {
@@ -60,7 +63,9 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
                 ReportStatus::Fail,
             )
             .with_issues(issues)
-            .with_hints(vec!["Header is corrupted or in an unsupported format.".to_string()])
+            .with_hints(vec![
+                "Header is corrupted or in an unsupported format.".to_string()
+            ])
             .with_results(D2SaveVerifyPayload {
                 header_version: 0,
                 alpha_mode: false,
@@ -164,9 +169,13 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     let hints = synthesize_hints(&issues);
     let actions = triage_actions(&issues);
     let issue_count = issues.len();
-    let status = if fail { ReportStatus::Fail } else { ReportStatus::Ok };
+    let status = if fail {
+        ReportStatus::Fail
+    } else {
+        ReportStatus::Ok
+    };
     let version = format!("0x{:04X}", save.header.version);
-    
+
     let stored_checksum = save.header.checksum;
     let calculated_checksum_opt = recalculate_checksum(bytes).ok();
 
@@ -211,7 +220,6 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     (report, fail)
 }
 
-
 fn synthesize_hints(issues: &[ReportIssue]) -> Vec<String> {
     let mut hints = Vec::new();
     for issue in issues {
@@ -246,14 +254,18 @@ fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
 
     for issue in issues {
         if issue.kind == "item_parity" {
+            if let Some(diagnosis) = extract_dna_diagnosis(&issue.message) {
+                actions.push(build_self_heal_action(issue, &diagnosis));
+            }
+
             if let Some(caps) = re_parity.captures(&issue.message) {
                 let orig_str = caps.get(1).map(|m| m.as_str()).unwrap_or("0");
                 let emit_str = caps.get(2).map(|m| m.as_str()).unwrap_or("0");
-                
+
                 if let (Ok(orig), Ok(emit)) = (orig_str.parse::<i64>(), emit_str.parse::<i64>()) {
                     let diff_len = (orig - emit).abs();
                     let bit_offset = issue.bit_offset.unwrap_or(0);
-                    
+
                     if diff_len == 16 {
                         actions.push(SuggestedAction {
                             kind: "property_alignment".to_string(),
@@ -277,7 +289,7 @@ fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
             }
         }
     }
-    
+
     if actions.is_empty() && !issues.is_empty() {
         actions.push(SuggestedAction {
             kind: "investigate".to_string(),
@@ -285,6 +297,77 @@ fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
             confidence: 0.3,
         });
     }
-    
+
     actions
+}
+
+#[derive(Debug, Clone)]
+struct DnaDiagnosis {
+    rupture_field: String,
+    dna_class: String,
+    prescription: String,
+}
+
+fn extract_dna_diagnosis(message: &str) -> Option<DnaDiagnosis> {
+    let marker = " | DNA Diagnosis: Rupture Point: '";
+    let start = message.find(marker)? + marker.len();
+    let after_rupture = &message[start..];
+    let rupture_end = after_rupture.find("', DNA Class: '")?;
+    let rupture_field = after_rupture[..rupture_end].to_string();
+
+    let after_class = &after_rupture[rupture_end + "', DNA Class: '".len()..];
+    let class_end = after_class.find("', Prescription: ")?;
+    let dna_class = after_class[..class_end].to_string();
+    let prescription = after_class[class_end + "', Prescription: ".len()..]
+        .trim()
+        .to_string();
+
+    Some(DnaDiagnosis {
+        rupture_field,
+        dna_class,
+        prescription,
+    })
+}
+
+fn build_self_heal_action(issue: &ReportIssue, diagnosis: &DnaDiagnosis) -> SuggestedAction {
+    let bit_offset = issue.bit_offset.unwrap_or(0);
+    let command = match diagnosis.dna_class.as_str() {
+        "stat_alignment_drift" => format!("d2item_desync_detector --bit-offset {}", bit_offset),
+        "compact_geometry_shift" => format!("d2item_alignment_oracle --bit-offset {}", bit_offset),
+        _ => format!("d2save_verify --dump-bits {} 128", bit_offset),
+    };
+
+    SuggestedAction {
+        kind: format!("self_heal_{}", diagnosis.dna_class),
+        command: format!(
+            "{}  # {} | rupture_field={}",
+            command, diagnosis.prescription, diagnosis.rupture_field
+        ),
+        confidence: 0.95,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn triage_actions_promotes_dna_prescription_over_equal_length_parity() {
+        let issues = vec![ReportIssue {
+            kind: "item_parity".to_string(),
+            message: "Item parity mismatch (tsc): mismatch at bit 48 (Orig Len: 80, Emit Len: 80). Bits near mismatch: Original: 00000000 [0]0000111 10011111 10010000 00000000 , Emitted: 00000000 [1]1110011 11110010 00000000 00000000 | DNA Diagnosis: Rupture Point: 'AlphaPropertyResidueNudge', DNA Class: 'compact_geometry_shift', Prescription: Rupture at 'AlphaPropertyResidueNudge'. Verify if this item type uses a different compact layout (is_compact) or alignment padding.".to_string(),
+            bit_offset: Some(7328),
+        }];
+
+        let actions = triage_actions(&issues);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, "self_heal_compact_geometry_shift");
+        assert!(actions[0]
+            .command
+            .contains("d2item_alignment_oracle --bit-offset 7328"));
+        assert!(actions[0].command.contains("alignment padding"));
+        assert!(actions[0]
+            .command
+            .contains("rupture_field=AlphaPropertyResidueNudge"));
+    }
 }
