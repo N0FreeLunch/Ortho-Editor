@@ -1,20 +1,20 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use syn::parse::Parser;
 use quote::quote;
+use syn::parse::Parser;
 
 /// Custom attribute for Category B bitstream serialization symmetry governance.
 #[proc_macro_attribute]
 pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr2 = proc_macro2::TokenStream::from(attr);
     let item2 = proc_macro2::TokenStream::from(item);
-    
+
     let input: syn::Item = match syn::parse2(item2.clone()) {
         Ok(parsed) => parsed,
         Err(err) => return err.to_compile_error().into(),
     };
-    
+
     let mut align = None;
     let mut checksum = None;
     let mut seed = None;
@@ -58,7 +58,7 @@ pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStre
     if !align_val && checksum.is_some() {
         let err = syn::Error::new(
             proc_macro2::Span::call_site(),
-            "Hashing verification requires post-eval byte alignment constraints.\nSelf-Healing Hint: Hashing verification requires post-eval byte alignment constraints. When 'align' is set to false, you cannot specify a 'checksum' parameter. To resolve this, either remove 'checksum' or set 'align = true'."
+            "Hashing verification requires post-eval byte alignment constraints.\nSelf-Healing Hint: Hashing verification requires post-eval byte alignment constraints. When 'align' is set to false, you cannot specify a 'checksum' parameter. To resolve this, either remove 'checksum' or set 'align = true'.",
         );
         return err.to_compile_error().into();
     }
@@ -67,7 +67,7 @@ pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStre
     if seed.is_some() && checksum.is_none() {
         let err = syn::Error::new(
             proc_macro2::Span::call_site(),
-            "Checksum verification seed requires an explicitly bound algorithm parameter.\nSelf-Healing Hint: Checksum verification seed requires an explicitly bound algorithm parameter. If you specify a 'seed' parameter, you must also specify a valid 'checksum' algorithm parameter (e.g. checksum = \"Xor8\")."
+            "Checksum verification seed requires an explicitly bound algorithm parameter.\nSelf-Healing Hint: Checksum verification seed requires an explicitly bound algorithm parameter. If you specify a 'seed' parameter, you must also specify a valid 'checksum' algorithm parameter (e.g. checksum = \"Xor8\").",
         );
         return err.to_compile_error().into();
     }
@@ -80,7 +80,7 @@ pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStre
         _ => {
             let err = syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "Attribute #[serialization_symmetry] can only be applied to structs, enums, or unions."
+                "Attribute #[serialization_symmetry] can only be applied to structs, enums, or unions.",
             );
             return err.to_compile_error().into();
         }
@@ -136,12 +136,12 @@ pub fn serialization_symmetry(attr: TokenStream, item: TokenStream) -> TokenStre
 pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr2 = proc_macro2::TokenStream::from(attr);
     let item2 = proc_macro2::TokenStream::from(item);
-    
+
     let input: syn::Item = match syn::parse2(item2.clone()) {
         Ok(parsed) => parsed,
         Err(err) => return err.to_compile_error().into(),
     };
-    
+
     let mut width = None;
     let mut gap = None;
     let mut versions = Vec::new();
@@ -158,7 +158,11 @@ pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
             let value: syn::Expr = meta.value()?.parse()?;
             if let syn::Expr::Array(expr_array) = value {
                 for elem in expr_array.elems {
-                    if let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit_int), .. }) = elem {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Int(lit_int),
+                        ..
+                    }) = elem
+                    {
                         let num: u32 = lit_int.base10_parse()?;
                         versions.push(num);
                     } else {
@@ -166,7 +170,9 @@ pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 }
             } else {
-                return Err(meta.error("versions must be an array of integers, e.g. versions = [0, 1, 5]"));
+                return Err(
+                    meta.error("versions must be an array of integers, e.g. versions = [0, 1, 5]")
+                );
             }
         } else {
             return Err(meta.error("unsupported rhythm_alignment property"));
@@ -181,34 +187,40 @@ pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
     if width.is_none() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "#[rhythm_alignment] requires a 'width' parameter."
-        ).to_compile_error().into();
+            "#[rhythm_alignment] requires a 'width' parameter.",
+        )
+        .to_compile_error()
+        .into();
     }
 
     if let Some(w) = width {
         if w == 0 {
             return syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "#[rhythm_alignment] 'width' must be greater than 0."
-            ).to_compile_error().into();
+                "#[rhythm_alignment] 'width' must be greater than 0.",
+            )
+            .to_compile_error()
+            .into();
         }
         if w % 2 != 0 {
             return syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "#[rhythm_alignment] 'width' must be an even number."
-            ).to_compile_error().into();
+                "#[rhythm_alignment] 'width' must be an even number.",
+            )
+            .to_compile_error()
+            .into();
         }
     }
 
     if let syn::Item::Struct(ref item_struct) = input {
         let name = &item_struct.ident;
         let width_val = width.unwrap();
-        
+
         let gap_expr = match gap {
             Some(g) => quote! { Some(#g) },
             None => quote! { None },
         };
-        
+
         let versions_expr = quote! { &[#(#versions),*] };
 
         let expanded = quote! {
@@ -218,7 +230,7 @@ pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
                 pub const RHYTHM_WIDTH: u32 = #width_val;
                 pub const RHYTHM_GAP: Option<&'static str> = #gap_expr;
                 pub const RHYTHM_VERSIONS: &'static [u32] = #versions_expr;
-                
+
                 pub fn slot_width() -> u32 {
                     #width_val
                 }
@@ -241,12 +253,12 @@ pub fn rhythm_alignment(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn forensic_sensor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr2 = proc_macro2::TokenStream::from(attr);
     let item2 = proc_macro2::TokenStream::from(item);
-    
+
     let input: syn::Item = match syn::parse2(item2.clone()) {
         Ok(parsed) => parsed,
         Err(err) => return err.to_compile_error().into(),
     };
-    
+
     let mut target = None;
     let mut trigger = None;
     let mut _bit_offset = None;
@@ -279,34 +291,40 @@ pub fn forensic_sensor(attr: TokenStream, item: TokenStream) -> TokenStream {
     if target.is_none() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "#[forensic_sensor] requires a 'target' parameter."
-        ).to_compile_error().into();
+            "#[forensic_sensor] requires a 'target' parameter.",
+        )
+        .to_compile_error()
+        .into();
     }
 
     if let Some(t) = &trigger {
         if t != "on_desync" && t != "always" {
             return syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "#[forensic_sensor] 'trigger' must be either \"on_desync\" or \"always\"."
-            ).to_compile_error().into();
+                "#[forensic_sensor] 'trigger' must be either \"on_desync\" or \"always\".",
+            )
+            .to_compile_error()
+            .into();
         }
     } else {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "#[forensic_sensor] requires a 'trigger' parameter."
-        ).to_compile_error().into();
+            "#[forensic_sensor] requires a 'trigger' parameter.",
+        )
+        .to_compile_error()
+        .into();
     }
 
     if let syn::Item::Struct(ref item_struct) = input {
         let name = &item_struct.ident;
         let target_str = target.clone().unwrap();
         let target_ident = syn::Ident::new(&target_str, proc_macro2::Span::call_site());
-        
+
         let trigger_expr = match &trigger {
             Some(t) => quote! { Some(#t) },
             None => quote! { None },
         };
-        
+
         let label_expr = match &_label {
             Some(l) => quote! { Some(#l) },
             None => quote! { None },
