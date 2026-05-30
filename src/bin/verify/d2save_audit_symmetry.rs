@@ -15,13 +15,19 @@ fn main() {
     println!("Auditing Alpha v105 Quests...");
     for (i, entry) in V105_QUESTS.iter().enumerate() {
         if entry.v105_offset < METADATA_GROUNDING_ANCHOR {
-            println!("  [FAIL] Quest[{}]: {} offset {} is below grounding anchor {}", i, entry.name, entry.v105_offset, METADATA_GROUNDING_ANCHOR);
+            println!(
+                "  [FAIL] Quest[{}]: {} offset {} is below grounding anchor {}",
+                i, entry.name, entry.v105_offset, METADATA_GROUNDING_ANCHOR
+            );
             failures += 1;
         } else {
             let relative = entry.v105_offset - METADATA_GROUNDING_ANCHOR;
             if relative % 2 != 0 {
                 // Verified in Discussion 0230: Alpha v105 uses 2-byte stride (u16)
-                println!("  [FAIL] Quest[{}]: {} offset {} is not 2-byte aligned relative to anchor {}", i, entry.name, entry.v105_offset, METADATA_GROUNDING_ANCHOR);
+                println!(
+                    "  [FAIL] Quest[{}]: {} offset {} is not 2-byte aligned relative to anchor {}",
+                    i, entry.name, entry.v105_offset, METADATA_GROUNDING_ANCHOR
+                );
                 failures += 1;
             }
         }
@@ -33,10 +39,13 @@ fn main() {
     // 2. Waypoint Audit
     println!("Auditing Alpha v105 Waypoints...");
     // Alpha v105 has 24 bytes per difficulty for waypoints (192 bits).
-    let max_ws_bit = 24 * 8; 
+    let max_ws_bit = 24 * 8;
     for (i, entry) in WAYPOINTS.iter().enumerate() {
         if entry.ws_bit as usize >= max_ws_bit {
-            println!("  [FAIL] Waypoint[{}]: {} ws_bit {} exceeds difficulty stride {}", i, entry.name, entry.ws_bit, max_ws_bit);
+            println!(
+                "  [FAIL] Waypoint[{}]: {} ws_bit {} exceeds difficulty stride {}",
+                i, entry.name, entry.ws_bit, max_ws_bit
+            );
             failures += 1;
         }
     }

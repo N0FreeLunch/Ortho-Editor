@@ -1,24 +1,45 @@
-use std::fs;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
+use d2r_core::item::{HuffmanTree, Item, ItemEditorExt};
 use d2r_core::save::{map_core_sections, rebuild_status_and_player_items};
-use d2r_core::item::{Item, HuffmanTree, ItemEditorExt};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
+use std::fs;
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_mutate");
     parser.add_arg("input", "Input save file (.d2s)");
-    parser.add_opt("output", "Output save file (.d2s)").short('o').long("output").required();
-    
+    parser
+        .add_opt("output", "Output save file (.d2s)")
+        .short('o')
+        .long("output")
+        .required();
+
     // Legacy marker mutations
-    parser.add_opt("shift-marker", "Shift marker <NAME> <OFFSET>").long("shift-marker").value_count(2);
-    parser.add_opt("delete-marker", "Delete marker <NAME>").long("delete-marker").value_count(1);
-    
+    parser
+        .add_opt("shift-marker", "Shift marker <NAME> <OFFSET>")
+        .long("shift-marker")
+        .value_count(2);
+    parser
+        .add_opt("delete-marker", "Delete marker <NAME>")
+        .long("delete-marker")
+        .value_count(1);
+
     // New item mutations
-    parser.add_opt("item-index", "0-based index of the item to mutate").long("item-index");
+    parser
+        .add_opt("item-index", "0-based index of the item to mutate")
+        .long("item-index");
     parser.add_opt("stat", "Stat ID to mutate").long("stat");
-    parser.add_opt("value", "New value for the stat").long("value");
-    parser.add_opt("defense", "Set defense value").long("defense");
-    parser.add_flag("force-fix", "Force checksum and size finalization (required for v105 logic updates)").long("force-fix");
+    parser
+        .add_opt("value", "New value for the stat")
+        .long("value");
+    parser
+        .add_opt("defense", "Set defense value")
+        .long("defense");
+    parser
+        .add_flag(
+            "force-fix",
+            "Force checksum and size finalization (required for v105 logic updates)",
+        )
+        .long("force-fix");
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -35,7 +56,7 @@ fn main() -> anyhow::Result<()> {
     let output_path = parsed.get("output").unwrap();
 
     let mut bytes = fs::read(input_path).context("Failed to read input file")?;
-    
+
     // Validate version 105
     if bytes.len() < 8 {
         bail!("Input file is too small");
@@ -46,7 +67,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let map = map_core_sections(&bytes).context("Failed to map core sections")?;
-    
+
     let huffman = HuffmanTree::new();
     let is_alpha = version == 105;
     let force_fix = parsed.is_set("force-fix");
@@ -60,16 +81,28 @@ fn main() -> anyhow::Result<()> {
         mutate_marker(&mut bytes, &map, name, None)?;
     } else if let Some(item_idx_str) = parsed.get("item-index") {
         let idx: usize = item_idx_str.parse().context("Invalid item index")?;
-        let mut items = Item::read_player_items(&bytes, &huffman, is_alpha).context("Failed to read items")?;
-        
+        let mut items =
+            Item::read_player_items(&bytes, &huffman, is_alpha).context("Failed to read items")?;
+
         if idx >= items.len() {
-            bail!("Item index {} out of bounds (found {} items)", idx, items.len());
+            bail!(
+                "Item index {} out of bounds (found {} items)",
+                idx,
+                items.len()
+            );
         }
-        
+
         {
             // Slice 2: Prevent mutating Opaque items
-            if items[idx].modules.iter().any(|m| matches!(m, d2r_core::item::ItemModule::Opaque(_))) {
-                bail!("Cannot mutate an Opaque (unparsable) item at index {}.", idx);
+            if items[idx]
+                .modules
+                .iter()
+                .any(|m| matches!(m, d2r_core::item::ItemModule::Opaque(_)))
+            {
+                bail!(
+                    "Cannot mutate an Opaque (unparsable) item at index {}.",
+                    idx
+                );
             }
 
             let mut editor = items[idx].edit();
@@ -89,22 +122,33 @@ fn main() -> anyhow::Result<()> {
             }
 
             if !modified {
-                bail!("Item index provided but no mutation operation specified (--stat/--value or --defense).");
+                bail!(
+                    "Item index provided but no mutation operation specified (--stat/--value or --defense)."
+                );
             }
             editor.commit();
         }
 
-        println!("Mutating item at index {} (code: {})", idx, items[idx].body.code);
+        println!(
+            "Mutating item at index {} (code: {})",
+            idx, items[idx].body.code
+        );
 
-        let mut rebuilt = rebuild_status_and_player_items(
-            &bytes, None, None, None, None, None, &items, &huffman
-        ).context("Failed to rebuild save with mutated items")?;
-        
-        d2r_core::save::finalize_save_bytes(&mut rebuilt, force_fix).context("Failed to finalize save bytes")?;
+        let mut rebuilt =
+            rebuild_status_and_player_items(&bytes, None, None, None, None, None, &items, &huffman)
+                .context("Failed to rebuild save with mutated items")?;
+
+        d2r_core::save::finalize_save_bytes(&mut rebuilt, force_fix)
+            .context("Failed to finalize save bytes")?;
         bytes = rebuilt;
-        println!("Successfully rebuilt save with mutated item (force_fix={}).", force_fix);
+        println!(
+            "Successfully rebuilt save with mutated item (force_fix={}).",
+            force_fix
+        );
     } else {
-        bail!("No mutation operation specified. Use --shift-marker, --delete-marker, or --item-index.");
+        bail!(
+            "No mutation operation specified. Use --shift-marker, --delete-marker, or --item-index."
+        );
     }
 
     fs::write(output_path, &bytes).context("Failed to write output file")?;
@@ -113,7 +157,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn mutate_marker(bytes: &mut [u8], map: &d2r_core::save::SaveSectionMap, name: &str, shift: Option<isize>) -> anyhow::Result<()> {
+fn mutate_marker(
+    bytes: &mut [u8],
+    map: &d2r_core::save::SaveSectionMap,
+    name: &str,
+    shift: Option<isize>,
+) -> anyhow::Result<()> {
     let (pos, marker_bytes) = match name {
         "Woo!" => (map.woo_pos, b"Woo!".as_slice()),
         "WS" => (map.ws_pos, b"WS".as_slice()),
@@ -121,10 +170,16 @@ fn mutate_marker(bytes: &mut [u8], map: &d2r_core::save::SaveSectionMap, name: &
         _ => bail!("Unknown marker name: {}. Supported: Woo!, WS, w4", name),
     };
 
-    let original_pos = pos.ok_or_else(|| anyhow::anyhow!("Marker {} not found in input file", name))?;
+    let original_pos =
+        pos.ok_or_else(|| anyhow::anyhow!("Marker {} not found in input file", name))?;
     let len = marker_bytes.len();
 
-    println!("Original marker {} at range 0x{:X}..0x{:X}", name, original_pos, original_pos + len);
+    println!(
+        "Original marker {} at range 0x{:X}..0x{:X}",
+        name,
+        original_pos,
+        original_pos + len
+    );
 
     // Zero out original
     for i in 0..len {
@@ -140,11 +195,16 @@ fn mutate_marker(bytes: &mut [u8], map: &d2r_core::save::SaveSectionMap, name: &
         if new_pos + len > bytes.len() {
             bail!("Shifted marker {} out of bounds (beyond EOF)", name);
         }
-        
+
         for i in 0..len {
             bytes[new_pos + i] = marker_bytes[i];
         }
-        println!("Shifted marker {} to range 0x{:X}..0x{:X}", name, new_pos, new_pos + len);
+        println!(
+            "Shifted marker {} to range 0x{:X}..0x{:X}",
+            name,
+            new_pos,
+            new_pos + len
+        );
     } else {
         println!("Deleted marker {} (zero-filled)", name);
     }

@@ -1,6 +1,6 @@
-﻿use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
+use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
 use d2r_core::engine::checksum::Checksum;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::io::Cursor;
@@ -26,14 +26,29 @@ fn load_item_bits_from_d2i(d2i_path: &str) -> Vec<bool> {
 }
 
 fn main() {
-    let mut parser = ArgParser::new("d2save_inject")
-        .description("Injects multiple copies of an item template (.d2i) into a D2R save file (.d2s)");
+    let mut parser = ArgParser::new("d2save_inject").description(
+        "Injects multiple copies of an item template (.d2i) into a D2R save file (.d2s)",
+    );
 
-    parser.add_spec(ArgSpec::positional("input_d2s", "path to the source D2R save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("item_d2i", "path to the item template file (.d2i)"));
+    parser.add_spec(ArgSpec::positional(
+        "input_d2s",
+        "path to the source D2R save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::positional(
+        "item_d2i",
+        "path to the item template file (.d2i)",
+    ));
     parser.add_spec(ArgSpec::positional("count", "number of copies to inject"));
-    parser.add_spec(ArgSpec::positional("output_d2s", "path to the output save file (.d2s)"));
-    parser.add_spec(ArgSpec::flag("no-align", Some('n'), Some("no-align"), "disable byte-alignment per item (bit-packed mode)"));
+    parser.add_spec(ArgSpec::positional(
+        "output_d2s",
+        "path to the output save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "no-align",
+        Some('n'),
+        Some("no-align"),
+        "disable byte-alignment per item (bit-packed mode)",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -50,10 +65,13 @@ fn main() {
 
     let input_path = parsed.get("input_d2s").unwrap();
     let d2i_path = parsed.get("item_d2i").unwrap();
-    let count: usize = parsed.get("count").and_then(|s| s.parse().ok()).unwrap_or_else(|| {
-        eprintln!("[ERROR] count must be a positive integer");
-        process::exit(1);
-    });
+    let count: usize = parsed
+        .get("count")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            eprintln!("[ERROR] count must be a positive integer");
+            process::exit(1);
+        });
     let output_path = parsed.get("output_d2s").unwrap();
     let no_align = parsed.is_set("no-align");
 

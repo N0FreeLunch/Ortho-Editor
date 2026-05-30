@@ -1,12 +1,30 @@
-use std::fs;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
+use std::fs;
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_poison");
-    parser.add_spec(ArgSpec::option("input", Some('i'), Some("input"), "Input save file (.d2s)").required());
-    parser.add_spec(ArgSpec::option("bit-offset", Some('b'), Some("bit-offset"), "Bit offset to flip (absolute)").required());
-    parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Output save file (.d2s)").required());
+    parser.add_spec(
+        ArgSpec::option("input", Some('i'), Some("input"), "Input save file (.d2s)").required(),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "bit-offset",
+            Some('b'),
+            Some("bit-offset"),
+            "Bit offset to flip (absolute)",
+        )
+        .required(),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "output",
+            Some('o'),
+            Some("output"),
+            "Output save file (.d2s)",
+        )
+        .required(),
+    );
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -22,13 +40,19 @@ fn main() -> anyhow::Result<()> {
     let input_path = parsed.get("input").unwrap();
     let output_path = parsed.get("output").unwrap();
     let bit_offset_raw = parsed.get("bit-offset").unwrap();
-    let bit_offset: u64 = bit_offset_raw.parse().context("Invalid bit-offset format")?;
+    let bit_offset: u64 = bit_offset_raw
+        .parse()
+        .context("Invalid bit-offset format")?;
 
     let mut bytes = fs::read(input_path).context("Failed to read input file")?;
     let total_bits = (bytes.len() as u64) * 8;
 
     if bit_offset >= total_bits {
-        bail!("Bit offset {} is out of bounds (0..{})", bit_offset, total_bits);
+        bail!(
+            "Bit offset {} is out of bounds (0..{})",
+            bit_offset,
+            total_bits
+        );
     }
 
     let byte_idx = (bit_offset / 8) as usize;
