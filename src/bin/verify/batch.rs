@@ -1,11 +1,11 @@
+use d2r_core::verify::FailureCategory;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::save_integrity::verify_save_integrity;
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff};
-use d2r_core::verify::FailureCategory;
+use d2r_core::verify::symmetry::{ItemDiff, calculate_symmetry_diff};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Clone)]
 struct MismatchRow {
@@ -41,7 +41,12 @@ struct BatchReport {
     mismatch_rows: Vec<MismatchRow>,
 }
 
-fn collect_mismatches(item: &ItemDiff, parent_label: &str, file_name: &str, rows: &mut Vec<MismatchRow>) {
+fn collect_mismatches(
+    item: &ItemDiff,
+    parent_label: &str,
+    file_name: &str,
+    rows: &mut Vec<MismatchRow>,
+) {
     let current_label = if parent_label.is_empty() {
         item.label.clone()
     } else {
@@ -89,9 +94,24 @@ fn audit_baseline(original_bytes: &[u8], actual_bytes: &[u8]) -> (bool, usize) {
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_batch");
-    parser.add_spec(ArgSpec::option("dir", None, Some("dir"), "Directory that contains .d2s files"));
-    parser.add_spec(ArgSpec::option("report", None, Some("report"), "Output Markdown report file"));
-    parser.add_spec(ArgSpec::flag("refexp", None, Some("refexp"), "Use experimental next-gen engine and show shadow comparison"));
+    parser.add_spec(ArgSpec::option(
+        "dir",
+        None,
+        Some("dir"),
+        "Directory that contains .d2s files",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "report",
+        None,
+        Some("report"),
+        "Output Markdown report file",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "refexp",
+        None,
+        Some("refexp"),
+        "Use experimental next-gen engine and show shadow comparison",
+    ));
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -102,13 +122,18 @@ fn main() -> anyhow::Result<()> {
         Err(ArgError::Error(e)) => anyhow::bail!("error: {}\n\n{}", e, parser.usage()),
     };
 
-    let dir_str = parsed.get("dir").ok_or_else(|| anyhow::anyhow!("--dir <PATH> is required"))?;
+    let dir_str = parsed
+        .get("dir")
+        .ok_or_else(|| anyhow::anyhow!("--dir <PATH> is required"))?;
     let report_path = parsed.get("report");
     let mut entries = Vec::new();
     let mut all_mismatch_rows = Vec::new();
 
     let dir_path = Path::new(dir_str);
-    let original_dir = dir_path.parent().map(|p| p.join("original")).unwrap_or_else(|| PathBuf::from("tests/fixtures/savegames/original"));
+    let original_dir = dir_path
+        .parent()
+        .map(|p| p.join("original"))
+        .unwrap_or_else(|| PathBuf::from("tests/fixtures/savegames/original"));
 
     for entry in fs::read_dir(dir_path)? {
         let entry = entry?;
@@ -139,14 +164,14 @@ fn main() -> anyhow::Result<()> {
 
         // Phase 1: Integrity
         let (integrity_report, integrity_failed) = verify_save_integrity(&file_name, &bytes);
-        
+
         // Phase 2: Symmetry
         let symmetry_res = calculate_symmetry_diff(
             &bytes,
             None,
             d2r_core::verify::symmetry::SymmetryOptions::roundtrip(true),
         );
-        
+
         // Phase 3: Baseline
         let mut baseline_match = None;
         let mut baseline_mismatch_count = 0;
@@ -202,7 +227,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     let total_files = entries.len();
-    let success_files = entries.iter().filter(|e| e.integrity_ok && e.symmetry_ok).count();
+    let success_files = entries
+        .iter()
+        .filter(|e| e.integrity_ok && e.symmetry_ok)
+        .count();
     let report = BatchReport {
         dir: dir_str.to_string(),
         total_files,
@@ -225,17 +253,34 @@ fn generate_markdown_report(report: &BatchReport, path: &str) -> anyhow::Result<
     let mut md = String::new();
     md.push_str("# Symmetry Forensic Report\n\n");
     md.push_str("## Summary\n\n");
-    md.push_str(&format!("- **Total Files Processed:** {}\n", report.total_files));
-    md.push_str(&format!("- **Failed/Mismatch Files:** {}\n", report.failed_files));
-    md.push_str(&format!("- **Total Mismatch Rows:** {}\n\n", report.mismatch_rows.len()));
+    md.push_str(&format!(
+        "- **Total Files Processed:** {}\n",
+        report.total_files
+    ));
+    md.push_str(&format!(
+        "- **Failed/Mismatch Files:** {}\n",
+        report.failed_files
+    ));
+    md.push_str(&format!(
+        "- **Total Mismatch Rows:** {}\n\n",
+        report.mismatch_rows.len()
+    ));
 
     md.push_str("## File Integrity Summary\n\n");
     md.push_str("| File | Integrity | Symmetry | Baseline | Shadow | Bits | Note |\n");
     md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n");
 
     for entry in &report.entries {
-        let int_status = if entry.integrity_ok { "✅ OK" } else { "❌ FAIL" };
-        let sym_status = if entry.symmetry_ok { "✅ OK" } else { "❌ FAIL" };
+        let int_status = if entry.integrity_ok {
+            "✅ OK"
+        } else {
+            "❌ FAIL"
+        };
+        let sym_status = if entry.symmetry_ok {
+            "✅ OK"
+        } else {
+            "❌ FAIL"
+        };
         let base_status = match entry.baseline_match {
             Some(true) => "✅ OK",
             Some(false) => "❌ FAIL",
@@ -246,20 +291,26 @@ fn generate_markdown_report(report: &BatchReport, path: &str) -> anyhow::Result<
             Some(false) => "❌ FAIL",
             None => "-",
         };
-        let bits = if entry.baseline_match.is_none() && entry.shadow_match.is_none() { 
-            "-".to_string() 
-        } else { 
-            format!("{}/{}", entry.baseline_mismatch_count, entry.shadow_mismatch_count)
+        let bits = if entry.baseline_match.is_none() && entry.shadow_match.is_none() {
+            "-".to_string()
+        } else {
+            format!(
+                "{}/{}",
+                entry.baseline_mismatch_count, entry.shadow_mismatch_count
+            )
         };
-        let note = if entry.symmetry_ok && entry.baseline_match == Some(false) { 
-            "⚠️ **Semantic Shift Risk**" 
+        let note = if entry.symmetry_ok && entry.baseline_match == Some(false) {
+            "⚠️ **Semantic Shift Risk**"
         } else if entry.shadow_match == Some(false) {
             "⚠️ **Engine Divergence**"
-        } else { 
-            "" 
+        } else {
+            ""
         };
-        
-        md.push_str(&format!("| {} | {} | {} | {} | {} | {} | {} |\n", entry.file, int_status, sym_status, base_status, shadow_status, bits, note));
+
+        md.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
+            entry.file, int_status, sym_status, base_status, shadow_status, bits, note
+        ));
     }
     md.push_str("\n");
 
@@ -278,7 +329,11 @@ fn generate_markdown_report(report: &BatchReport, path: &str) -> anyhow::Result<
         let mut segments: Vec<_> = segment_counts.into_iter().collect();
         segments.sort_by(|a, b| b.1.cmp(&a.1));
         for (seg, count) in segments {
-            let label = if seg.is_empty() { "Unknown Segment" } else { &seg };
+            let label = if seg.is_empty() {
+                "Unknown Segment"
+            } else {
+                &seg
+            };
             md.push_str(&format!("| {} | {} |\n", label, count));
         }
         md.push_str("\n");
@@ -304,15 +359,30 @@ fn generate_markdown_report(report: &BatchReport, path: &str) -> anyhow::Result<
         md.push_str("| File | Item Label | Code | Segment | Offset | Type |\n");
         md.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
         for row in &report.mismatch_rows {
-            let offset = row.first_mismatch_offset.map(|o| o.to_string()).unwrap_or_else(|| "-".to_string());
-            md.push_str(&format!("| {} | {} | `{}` | {} | {} | {} |\n", 
-                row.file, row.item_label, row.code, 
-                if row.segment.is_empty() { "-" } else { &row.segment },
+            let offset = row
+                .first_mismatch_offset
+                .map(|o| o.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            md.push_str(&format!(
+                "| {} | {} | `{}` | {} | {} | {} |\n",
+                row.file,
+                row.item_label,
+                row.code,
+                if row.segment.is_empty() {
+                    "-"
+                } else {
+                    &row.segment
+                },
                 offset,
-                if row.mismatch_type.is_empty() { "-" } else { &row.mismatch_type }));
+                if row.mismatch_type.is_empty() {
+                    "-"
+                } else {
+                    &row.mismatch_type
+                }
+            ));
         }
         md.push_str("\n");
-        
+
         md.push_str("## Actionable Clues\n\n");
         md.push_str("1. **Content Mismatches** in specific segments (e.g., `Stats`) usually indicate a field size or mapping error.\n");
         md.push_str("2. **Length Mismatches** often point to missing or extra bits in the bitstream serialization.\n");
