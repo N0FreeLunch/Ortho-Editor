@@ -1,6 +1,6 @@
-﻿use bitstream_io::{BitRead, BitReader, LittleEndian};
+use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::save::{gf_payload_range, map_core_sections};
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::io::{self, Cursor};
@@ -31,12 +31,32 @@ fn parse_range(s: &str) -> Option<(u32, u32)> {
 }
 
 fn main() -> io::Result<()> {
-    let mut parser = ArgParser::new("d2gf_oracle")
-        .description("Value-bit width sweep oracle for discovering unknown stat bit widths in GF sections");
+    let mut parser = ArgParser::new("d2gf_oracle").description(
+        "Value-bit width sweep oracle for discovering unknown stat bit widths in GF sections",
+    );
 
-    parser.add_spec(ArgSpec::positional("save_path", "path to the D2R save file (.d2s)"));
-    parser.add_spec(ArgSpec::option("stat-id", Some('i'), Some("stat-id"), "target stat ID to oracle (default: 80)").with_default("80"));
-    parser.add_spec(ArgSpec::option("width-range", Some('w'), Some("width-range"), "value-bit width range to sweep (default: 0..16)").with_default("0..16"));
+    parser.add_spec(ArgSpec::positional(
+        "save_path",
+        "path to the D2R save file (.d2s)",
+    ));
+    parser.add_spec(
+        ArgSpec::option(
+            "stat-id",
+            Some('i'),
+            Some("stat-id"),
+            "target stat ID to oracle (default: 80)",
+        )
+        .with_default("80"),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "width-range",
+            Some('w'),
+            Some("width-range"),
+            "value-bit width range to sweep (default: 0..16)",
+        )
+        .with_default("0..16"),
+    );
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -52,9 +72,13 @@ fn main() -> io::Result<()> {
     };
 
     let path = parsed.get("save_path").unwrap();
-    let target_id: u32 = parsed.get("stat-id").and_then(|s| s.parse().ok()).unwrap_or(80);
-    
-    let (start_width, end_width) = parsed.get("width-range")
+    let target_id: u32 = parsed
+        .get("stat-id")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(80);
+
+    let (start_width, end_width) = parsed
+        .get("width-range")
         .and_then(|s| parse_range(s))
         .unwrap_or((0, 16));
 

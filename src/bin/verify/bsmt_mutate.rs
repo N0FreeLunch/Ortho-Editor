@@ -1,13 +1,15 @@
 // This software is licensed under the PolyForm Noncommercial License 1.0.0.
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
-use std::{env, fs};
-use std::path::Path;
-use d2r_core::verify::mutation::{mutate_absolute_bit_and_finalize, MutationMode, resolve_logical_address};      
+use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::Save;
-use d2r_core::item::{Item, HuffmanTree};
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::mutation::{
+    MutationMode, mutate_absolute_bit_and_finalize, resolve_logical_address,
+};
+use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
+use std::path::Path;
+use std::{env, fs};
 
 #[derive(serde::Serialize)]
 struct MutationDiagnostic {
@@ -20,9 +22,23 @@ fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("bsmt_mutate")
         .description("Safely mutates D2R save files in an isolated environment (tmp/forensics/) for testing and exploration");
 
-    parser.add_spec(ArgSpec::positional("save_file", "path to the D2R save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("target", "bit offset (absolute) or logical address (e.g. Header.Checksum)"));
-    parser.add_spec(ArgSpec::option("mode", Some('m'), Some("mode"), "mutation mode: 'absolute' (default) or 'logical'").with_default("absolute"));
+    parser.add_spec(ArgSpec::positional(
+        "save_file",
+        "path to the D2R save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::positional(
+        "target",
+        "bit offset (absolute) or logical address (e.g. Header.Checksum)",
+    ));
+    parser.add_spec(
+        ArgSpec::option(
+            "mode",
+            Some('m'),
+            Some("mode"),
+            "mutation mode: 'absolute' (default) or 'logical'",
+        )
+        .with_default("absolute"),
+    );
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -58,7 +74,10 @@ fn main() -> anyhow::Result<()> {
     let forensics_dir = Path::new("tmp/forensics");
     fs::create_dir_all(forensics_dir)?;
 
-    let file_stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+    let file_stem = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
     let dest_filename = format!("{}_mutated_{}.d2s", file_stem, bit_offset);
     let dest_path = forensics_dir.join(dest_filename);
     let dest_path_str = dest_path.to_string_lossy().to_string();
@@ -73,7 +92,7 @@ fn main() -> anyhow::Result<()> {
     if !is_json {
         println!("Mutation applied at bit offset: {}", bit_offset);
     }
-    
+
     let mutated_bytes = match mutate_absolute_bit_and_finalize(&original_bytes, bit_offset) {
         Ok(bytes) => bytes,
         Err(e) => anyhow::bail!("Error during mutation/finalization: {}", e),
@@ -84,7 +103,11 @@ fn main() -> anyhow::Result<()> {
     let parse_check = if issue.is_some() { "fail" } else { "ok" };
 
     if is_json {
-        let status = if issue.is_some() { ReportStatus::Fail } else { ReportStatus::Ok };
+        let status = if issue.is_some() {
+            ReportStatus::Fail
+        } else {
+            ReportStatus::Ok
+        };
         let metadata = ReportMetadata::new("bsmt_mutate", input_path_str, "Alpha v105 | Legacy");
         let results = MutationDiagnostic {
             bit_offset,
@@ -119,12 +142,11 @@ fn main() -> anyhow::Result<()> {
 
 fn resolve_bit_offset(target: &str, mode: MutationMode) -> anyhow::Result<usize> {
     match mode {
-        MutationMode::Absolute => {
-            target.parse::<usize>().map_err(|_| anyhow::anyhow!("target must be a positive integer in absolute mode."))
-        }
-        MutationMode::Logical => {
-            resolve_logical_address(target).map_err(|e| anyhow::anyhow!("Error resolving logical address: {}", e))
-        }
+        MutationMode::Absolute => target
+            .parse::<usize>()
+            .map_err(|_| anyhow::anyhow!("target must be a positive integer in absolute mode.")),
+        MutationMode::Logical => resolve_logical_address(target)
+            .map_err(|e| anyhow::anyhow!("Error resolving logical address: {}", e)),
     }
 }
 
@@ -139,7 +161,10 @@ fn run_diagnostic_logic(mutated_bytes: &[u8]) -> anyhow::Result<Option<ReportIss
                 Ok(items) => {
                     // Find JM #0 to get the expected count from the header
                     if let Some(jm_pos) = mutated_bytes.windows(2).position(|w| w == b"JM") {
-                        let expected_count = u16::from_le_bytes([mutated_bytes[jm_pos + 2], mutated_bytes[jm_pos + 3]]) as usize;
+                        let expected_count = u16::from_le_bytes([
+                            mutated_bytes[jm_pos + 2],
+                            mutated_bytes[jm_pos + 3],
+                        ]) as usize;
 
                         if items.len() != expected_count {
                             return Ok(Some(ReportIssue {

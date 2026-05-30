@@ -1,11 +1,14 @@
+use anyhow::Result;
+use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use syn::{visit::{self, Visit}, ItemMacro, ItemImpl, Expr, Lit, parse2};
+use syn::Token;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::Token;
-use serde::Serialize;
-use anyhow::Result;
+use syn::{
+    Expr, ItemImpl, ItemMacro, Lit, parse2,
+    visit::{self, Visit},
+};
 
 #[derive(Debug, Serialize, Clone)]
 struct AxiomInfo {
@@ -38,8 +41,10 @@ struct AxiomVisitor {
 impl<'ast> Visit<'ast> for AxiomVisitor {
     fn visit_item_macro(&mut self, i: &'ast ItemMacro) {
         let path = &i.mac.path;
-        let is_target = path.is_ident("impl_forensic_axiom") || 
-           (path.segments.len() == 2 && path.segments[0].ident == "crate" && path.segments[1].ident == "impl_forensic_axiom");
+        let is_target = path.is_ident("impl_forensic_axiom")
+            || (path.segments.len() == 2
+                && path.segments[0].ident == "crate"
+                && path.segments[1].ident == "impl_forensic_axiom");
 
         if is_target {
             let tokens = i.mac.tokens.clone();
@@ -69,7 +74,12 @@ impl<'ast> Visit<'ast> for AxiomVisitor {
         if let Some((_, path, _)) = &i.trait_ {
             if path.segments.iter().any(|s| s.ident == "ForensicAxiom") {
                 let name = match &*i.self_ty {
-                    syn::Type::Path(tp) => tp.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default(),
+                    syn::Type::Path(tp) => tp
+                        .path
+                        .segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default(),
                     _ => "unknown".to_string(),
                 };
 
@@ -83,7 +93,9 @@ impl<'ast> Visit<'ast> for AxiomVisitor {
                         if m.sig.ident == "metadata" {
                             // Basic search for ForensicMetadata::new pattern in the function body
                             let body_str = quote::quote!(#m.block).to_string();
-                            if body_str.contains("ForensicMetadata :: new") || body_str.contains("new") {
+                            if body_str.contains("ForensicMetadata :: new")
+                                || body_str.contains("new")
+                            {
                                 // For MVP, we'll mark as Manual implementation if it's not a simple macro
                                 rationale = "Manual ForensicAxiom implementation found (Check source for details)".to_string();
                             }
@@ -107,17 +119,16 @@ impl<'ast> Visit<'ast> for AxiomVisitor {
 
 fn expr_to_string(expr: &Expr) -> String {
     match expr {
-        Expr::Path(p) => {
-            p.path.segments.iter()
-                .map(|s| s.ident.to_string())
-                .collect::<Vec<_>>()
-                .join("::")
-        },
-        Expr::Lit(l) => {
-            match &l.lit {
-                Lit::Str(s) => s.value(),
-                _ => quote::quote!(#l).to_string(),
-            }
+        Expr::Path(p) => p
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        Expr::Lit(l) => match &l.lit {
+            Lit::Str(s) => s.value(),
+            _ => quote::quote!(#l).to_string(),
         },
         _ => quote::quote!(#expr).to_string(),
     }
@@ -182,9 +193,9 @@ fn extract_module_name(path: &str) -> String {
     if parts.len() >= 3 {
         // e.g. "src/domain/forensic/v105/axioms.rs" -> "forensic/v105"
         if parts[2] == "forensic" && parts.len() >= 5 {
-             format!("{}/{}", parts[2], parts[3])
+            format!("{}/{}", parts[2], parts[3])
         } else {
-             parts[2].to_string()
+            parts[2].to_string()
         }
     } else {
         "unknown".to_string()
@@ -193,14 +204,18 @@ fn extract_module_name(path: &str) -> String {
 
 fn print_knowledge_map(axioms: &[AxiomInfo]) {
     println!("\n=== d2r Forensic Knowledge Map ===");
-    println!("{:<20} | {:<25} | {:<15} | {}", "Module", "Axiom Name", "Confidence", "Rationale");
+    println!(
+        "{:<20} | {:<25} | {:<15} | {}",
+        "Module", "Axiom Name", "Confidence", "Rationale"
+    );
     println!("{:-<130}", "");
 
     for ax in axioms {
-        println!("{:<20} | {:<25} | {:<15} | {}", 
-            ax.module, 
-            ax.name, 
-            ax.confidence.replace("Confidence::", ""), 
+        println!(
+            "{:<20} | {:<25} | {:<15} | {}",
+            ax.module,
+            ax.name,
+            ax.confidence.replace("Confidence::", ""),
             ax.rationale
         );
     }

@@ -1,20 +1,46 @@
+use anyhow::{Context, Result};
 use std::env;
 use std::fs;
-use anyhow::{Result, Context};
 
+use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::Save;
-use d2r_core::item::{Item, HuffmanTree};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use d2r_core::verify::sba::{SbaBaseline, SbaJsonPayload, flatten_item, verify_baseline};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("sba");
-    parser.add_spec(ArgSpec::option("fixture", None, Some("fixture"), "Path to the savegame fixture (.d2s)").required());
-    parser.add_spec(ArgSpec::option("baseline", None, Some("baseline"), "Path to the JSON baseline file").required());
-    parser.add_spec(ArgSpec::flag("generate", None, Some("generate"), "Generate a new baseline from the fixture"));
-    parser.add_spec(ArgSpec::flag("verify", None, Some("verify"), "Verify the fixture against an existing baseline"));
+    parser.add_spec(
+        ArgSpec::option(
+            "fixture",
+            None,
+            Some("fixture"),
+            "Path to the savegame fixture (.d2s)",
+        )
+        .required(),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "baseline",
+            None,
+            Some("baseline"),
+            "Path to the JSON baseline file",
+        )
+        .required(),
+    );
+    parser.add_spec(ArgSpec::flag(
+        "generate",
+        None,
+        Some("generate"),
+        "Generate a new baseline from the fixture",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "verify",
+        None,
+        Some("verify"),
+        "Verify the fixture against an existing baseline",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     use d2r_core::verify::args::ArgError;
@@ -48,13 +74,12 @@ fn main() -> Result<()> {
 
     let bytes = fs::read(&fixture_path)
         .with_context(|| format!("Failed to read fixture: {}", fixture_path))?;
-    
-    let save = Save::from_bytes(&bytes)
-        .context("Failed to parse save header")?;
-    
+
+    let save = Save::from_bytes(&bytes).context("Failed to parse save header")?;
+
     let huffman = HuffmanTree::new();
     let is_alpha = save.header.version == 105;
-    
+
     let items = Item::read_player_items(&bytes, &huffman, is_alpha)
         .map_err(|e| anyhow::anyhow!("{}", e))
         .context("Failed to read items")?;
@@ -76,7 +101,11 @@ fn main() -> Result<()> {
         fs::write(&baseline_path, json)
             .with_context(|| format!("Failed to write baseline: {}", baseline_path))?;
         if !is_json {
-            println!("Generated baseline for {} items to {}", current_baseline.items.len(), baseline_path);
+            println!(
+                "Generated baseline for {} items to {}",
+                current_baseline.items.len(),
+                baseline_path
+            );
         }
     } else if is_verify {
         let baseline_json = fs::read_to_string(&baseline_path)
@@ -88,20 +117,35 @@ fn main() -> Result<()> {
                 return Err(e);
             }
         }
-        
+
         if !is_json {
-            println!("Verification successful: 0 segment mismatches across {} items.", current_baseline.items.len());
+            println!(
+                "Verification successful: 0 segment mismatches across {} items.",
+                current_baseline.items.len()
+            );
         }
     }
 
     if is_json {
-        let status = if issues.is_empty() { ReportStatus::Ok } else { ReportStatus::Fail };
-        let version = if is_alpha { "105".to_string() } else { format!("0x{:04X}", save.header.version) };
+        let status = if issues.is_empty() {
+            ReportStatus::Ok
+        } else {
+            ReportStatus::Fail
+        };
+        let version = if is_alpha {
+            "105".to_string()
+        } else {
+            format!("0x{:04X}", save.header.version)
+        };
         let metadata = ReportMetadata::new("sba", &fixture_path, &version);
         let payload = SbaJsonPayload {
             fixture: current_baseline.fixture,
             baseline: baseline_path,
-            mode: if is_generate { "generate".to_string() } else { "verify".to_string() },
+            mode: if is_generate {
+                "generate".to_string()
+            } else {
+                "verify".to_string()
+            },
             item_count: current_baseline.items.len(),
             mismatch_count: issues.len(),
         };

@@ -1,9 +1,9 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use std::env;
 use std::fs;
 use std::io::Cursor;
-use std::env;
 use std::process;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn read_bits<R: BitRead>(reader: &mut R, n: u32) -> u32 {
     let mut value = 0u32;
@@ -18,14 +18,21 @@ fn read_bits<R: BitRead>(reader: &mut R, n: u32) -> u32 {
 }
 
 fn main() {
-    let mut parser = ArgParser::new("d2item_find_fixed")
-        .description("Exploratory tool to sweep start_bit and id_bits for fixed-width properties (Total 24bits)");
+    let mut parser = ArgParser::new("d2item_find_fixed").description(
+        "Exploratory tool to sweep start_bit and id_bits for fixed-width properties (Total 24bits)",
+    );
 
     parser.add_arg("save_file", "path to the save file to inspect");
     parser.add_arg("start_bit_min", "inclusive lower bound for the sweep");
     parser.add_arg("start_bit_max", "inclusive upper bound for the sweep");
-    parser.add_opt("id_bits_min", "optional lower bound for stat-id width (default: 7)");
-    parser.add_opt("id_bits_max", "optional upper bound for stat-id width (default: 11)");
+    parser.add_opt(
+        "id_bits_min",
+        "optional lower bound for stat-id width (default: 7)",
+    );
+    parser.add_opt(
+        "id_bits_max",
+        "optional upper bound for stat-id width (default: 11)",
+    );
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -41,10 +48,24 @@ fn main() {
     };
 
     let save_file = parsed.get("save_file").unwrap();
-    let start_bit_min: u32 = parsed.get("start_bit_min").unwrap().parse().expect("start_bit_min must be a number");
-    let start_bit_max: u32 = parsed.get("start_bit_max").unwrap().parse().expect("start_bit_max must be a number");
-    let id_bits_min: u32 = parsed.get("id_bits_min").map(|s| s.parse().expect("id_bits_min must be a number")).unwrap_or(7);
-    let id_bits_max: u32 = parsed.get("id_bits_max").map(|s| s.parse().expect("id_bits_max must be a number")).unwrap_or(11);
+    let start_bit_min: u32 = parsed
+        .get("start_bit_min")
+        .unwrap()
+        .parse()
+        .expect("start_bit_min must be a number");
+    let start_bit_max: u32 = parsed
+        .get("start_bit_max")
+        .unwrap()
+        .parse()
+        .expect("start_bit_max must be a number");
+    let id_bits_min: u32 = parsed
+        .get("id_bits_min")
+        .map(|s| s.parse().expect("id_bits_min must be a number"))
+        .unwrap_or(7);
+    let id_bits_max: u32 = parsed
+        .get("id_bits_max")
+        .map(|s| s.parse().expect("id_bits_max must be a number"))
+        .unwrap_or(11);
 
     let bytes = fs::read(save_file).unwrap_or_else(|e| {
         eprintln!("Error reading save file {}: {}", save_file, e);
@@ -61,7 +82,7 @@ fn main() {
         for start_bit in start_bit_min..=start_bit_max {
             let byte_offset = start_bit / 8;
             let bit_offset = start_bit % 8;
-            
+
             if byte_offset as usize >= bytes.len() {
                 continue;
             }

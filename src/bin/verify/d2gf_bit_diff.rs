@@ -1,10 +1,10 @@
 use d2r_core::algo::alignment::{AlignmentResult, BitAligner};
 use d2r_core::save::{gf_payload_range, map_core_sections};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::io;
 use std::process;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
     let mut bits = Vec::with_capacity(bytes.len() * 8);
@@ -20,8 +20,14 @@ fn main() -> io::Result<()> {
     let mut parser = ArgParser::new("d2gf_bit_diff")
         .description("Performs bit-level alignment and diffing of character status sections between two D2R save files");
 
-    parser.add_spec(ArgSpec::positional("file_a", "path to the first save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("file_b", "path to the second save file (.d2s)"));
+    parser.add_spec(ArgSpec::positional(
+        "file_a",
+        "path to the first save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::positional(
+        "file_b",
+        "path to the second save file (.d2s)",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {

@@ -1,10 +1,10 @@
 // This software is licensed under the PolyForm Noncommercial License 1.0.0.
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
-use std::{env, fs, process};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
-use serde::{Serialize, Deserialize};
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use std::{env, fs, process};
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiffCategory {
@@ -67,10 +67,24 @@ fn main() {
     let mut parser = ArgParser::new("d2bit_diff")
         .description("Mutation-Aware Bit-Diff Auditor (MABA) for D2R save files");
 
-    parser.add_spec(ArgSpec::positional("original_d2s", "path to the original D2R save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("mutated_d2s", "path to the mutated D2R save file (.d2s)"));
-    parser.add_spec(ArgSpec::repeated_positional("intended_bits", "optional explicit intended bit offsets"));
-    parser.add_spec(ArgSpec::option("sba-baseline", None, Some("sba-baseline"), "path to SBA baseline JSON"));
+    parser.add_spec(ArgSpec::positional(
+        "original_d2s",
+        "path to the original D2R save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::positional(
+        "mutated_d2s",
+        "path to the mutated D2R save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::repeated_positional(
+        "intended_bits",
+        "optional explicit intended bit offsets",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "sba-baseline",
+        None,
+        Some("sba-baseline"),
+        "path to SBA baseline JSON",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -90,10 +104,14 @@ fn main() {
     let is_json = parsed.is_json();
     let sba_path = parsed.get("sba-baseline");
 
-    let intended_bits: Vec<usize> = parsed.get_vec("intended_bits")
+    let intended_bits: Vec<usize> = parsed
+        .get_vec("intended_bits")
         .unwrap_or(&vec![])
         .iter()
-        .map(|s| s.parse::<usize>().expect("intended_bits must be positive integers"))
+        .map(|s| {
+            s.parse::<usize>()
+                .expect("intended_bits must be positive integers")
+        })
         .collect();
 
     // Load SBA baseline if provided
@@ -196,10 +214,22 @@ fn main() {
         }
         println!("--------------------------------------------------");
         println!("Total differences (bits): {}", report.total_diffs);
-        
-        let unintended = report.categories.get(&DiffCategory::UnintendedCorruption).copied().unwrap_or(0);
-        let expected = report.categories.get(&DiffCategory::ExpectedCollateral).copied().unwrap_or(0);
-        let intended = report.categories.get(&DiffCategory::Intended).copied().unwrap_or(0);
+
+        let unintended = report
+            .categories
+            .get(&DiffCategory::UnintendedCorruption)
+            .copied()
+            .unwrap_or(0);
+        let expected = report
+            .categories
+            .get(&DiffCategory::ExpectedCollateral)
+            .copied()
+            .unwrap_or(0);
+        let intended = report
+            .categories
+            .get(&DiffCategory::Intended)
+            .copied()
+            .unwrap_or(0);
 
         println!("- Intended:            {}", intended);
         println!("- Expected Collateral: {}", expected);
@@ -207,19 +237,23 @@ fn main() {
         println!("--------------------------------------------------");
 
         if report.total_diffs > 0 {
-            println!("{:<10} {:<10} {:<5} {:<5} -> {:<5} {:<25} {}", "Bit", "Byte", "InB", "Orig", "Muta", "Category", "Reason");
+            println!(
+                "{:<10} {:<10} {:<5} {:<5} -> {:<5} {:<25} {}",
+                "Bit", "Byte", "InB", "Orig", "Muta", "Category", "Reason"
+            );
             for diff in &report.diffs {
                 let category_str = match diff.category {
                     DiffCategory::Intended => "Intended",
                     DiffCategory::ExpectedCollateral => "Expected Collateral",
                     DiffCategory::UnintendedCorruption => "Unintended Corruption",
                 };
-                println!("{:<10} {:<10} {:<5} {:<5} -> {:<5} {:<25} {}", 
-                    diff.bit_offset, 
-                    diff.byte_offset, 
-                    diff.bit_in_byte, 
-                    diff.original_value, 
-                    diff.mutated_value, 
+                println!(
+                    "{:<10} {:<10} {:<5} {:<5} -> {:<5} {:<25} {}",
+                    diff.bit_offset,
+                    diff.byte_offset,
+                    diff.bit_in_byte,
+                    diff.original_value,
+                    diff.mutated_value,
                     category_str,
                     diff.reason.as_deref().unwrap_or("")
                 );
@@ -227,7 +261,11 @@ fn main() {
         }
     }
 
-    let unintended = report.categories.get(&DiffCategory::UnintendedCorruption).copied().unwrap_or(0);
+    let unintended = report
+        .categories
+        .get(&DiffCategory::UnintendedCorruption)
+        .copied()
+        .unwrap_or(0);
     if unintended > 0 {
         process::exit(1);
     } else {
