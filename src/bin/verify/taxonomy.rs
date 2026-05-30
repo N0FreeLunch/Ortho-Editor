@@ -36,8 +36,18 @@ struct FixtureResult {
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_taxonomy");
-    parser.add_spec(ArgSpec::option("dir", None, Some("dir"), "Directory that contains .d2s files"));
-    parser.add_spec(ArgSpec::option("report", None, Some("report"), "Output Markdown report file"));
+    parser.add_spec(ArgSpec::option(
+        "dir",
+        None,
+        Some("dir"),
+        "Directory that contains .d2s files",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "report",
+        None,
+        Some("report"),
+        "Output Markdown report file",
+    ));
 
     let parsed = match parser.parse(std::env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -48,12 +58,18 @@ fn main() -> anyhow::Result<()> {
         Err(ArgError::Error(e)) => anyhow::bail!("error: {}\n\n{}", e, parser.usage()),
     };
 
-    let dir_str = parsed.get("dir").map(|v| v.as_str()).unwrap_or("tests/fixtures/savegames/original");
-    let report_path = parsed.get("report").map(|v| v.as_str()).unwrap_or("antigravity/outputs/batch_audit/taxonomy_report.md");
+    let dir_str = parsed
+        .get("dir")
+        .map(|v| v.as_str())
+        .unwrap_or("tests/fixtures/savegames/original");
+    let report_path = parsed
+        .get("report")
+        .map(|v| v.as_str())
+        .unwrap_or("antigravity/outputs/batch_audit/taxonomy_report.md");
 
     let start_time = Instant::now();
     let dir_path = Path::new(dir_str);
-    
+
     if !dir_path.exists() {
         anyhow::bail!("Directory not found: {}", dir_str);
     }
@@ -70,24 +86,26 @@ fn main() -> anyhow::Result<()> {
         .map(|entry| {
             let path = entry.path();
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-            
+
             let bytes = match fs::read(&path) {
                 Ok(b) => b,
-                Err(_) => return FixtureResult {
-                    file: file_name,
-                    taxonomy: Taxonomy::Other,
-                    fidelity: 0.0,
-                    issue_count: 0,
-                },
+                Err(_) => {
+                    return FixtureResult {
+                        file: file_name,
+                        taxonomy: Taxonomy::Other,
+                        fidelity: 0.0,
+                        issue_count: 0,
+                    };
+                }
             };
 
             let (report, failed) = verify_save_integrity(&file_name, &bytes);
-            
+
             let mut taxonomy = if !failed {
                 Taxonomy::Success
             } else {
                 let mut tax = Taxonomy::Other;
-                
+
                 // Check for ChecksumMismatch
                 if let Some(res) = &report.scan_results {
                     if let Some(calculated) = &res.checksum_calculated {
@@ -99,7 +117,8 @@ fn main() -> anyhow::Result<()> {
 
                 if tax == Taxonomy::Other {
                     // Map issues to taxonomy
-                    let kinds: std::collections::HashSet<_> = report.issues.iter().map(|i| i.kind.as_str()).collect();
+                    let kinds: std::collections::HashSet<_> =
+                        report.issues.iter().map(|i| i.kind.as_str()).collect();
                     if kinds.contains("item_parse") {
                         tax = Taxonomy::ParseFailure;
                     } else if kinds.contains("item_parity") {
@@ -112,7 +131,11 @@ fn main() -> anyhow::Result<()> {
             FixtureResult {
                 file: file_name,
                 taxonomy,
-                fidelity: report.scan_results.as_ref().map(|r| r.fidelity_score).unwrap_or(0.0),
+                fidelity: report
+                    .scan_results
+                    .as_ref()
+                    .map(|r| r.fidelity_score)
+                    .unwrap_or(0.0),
                 issue_count: report.issues.len(),
             }
         })
@@ -140,8 +163,18 @@ fn generate_report(results: &[FixtureResult], path: &str) -> anyhow::Result<()> 
     md.push_str("## Summary Statistics\n\n");
     md.push_str("| Taxonomy | Count |\n");
     md.push_str("| :--- | :--- |\n");
-    for tax in &[Taxonomy::Success, Taxonomy::ParseFailure, Taxonomy::BitstreamDesync, Taxonomy::ChecksumMismatch, Taxonomy::Other] {
-        md.push_str(&format!("| {} | {} |\n", tax.as_str(), stats.get(tax).unwrap_or(&0)));
+    for tax in &[
+        Taxonomy::Success,
+        Taxonomy::ParseFailure,
+        Taxonomy::BitstreamDesync,
+        Taxonomy::ChecksumMismatch,
+        Taxonomy::Other,
+    ] {
+        md.push_str(&format!(
+            "| {} | {} |\n",
+            tax.as_str(),
+            stats.get(tax).unwrap_or(&0)
+        ));
     }
     md.push_str("\n");
 
@@ -153,8 +186,13 @@ fn generate_report(results: &[FixtureResult], path: &str) -> anyhow::Result<()> 
     sorted_results.sort_by(|a, b| a.file.cmp(&b.file));
 
     for res in sorted_results {
-        md.push_str(&format!("| {} | {} | {:.1} | {} |\n", 
-            res.file, res.taxonomy.as_str(), res.fidelity, res.issue_count));
+        md.push_str(&format!(
+            "| {} | {} | {:.1} | {} |\n",
+            res.file,
+            res.taxonomy.as_str(),
+            res.fidelity,
+            res.issue_count
+        ));
     }
 
     if let Some(parent) = Path::new(path).parent() {

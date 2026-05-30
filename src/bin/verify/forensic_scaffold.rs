@@ -1,9 +1,9 @@
+use anyhow::{Context, Result, anyhow};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use serde::Serialize;
 use std::env;
 use std::fs;
 use std::path::Path;
-use anyhow::{Result, Context, anyhow};
-use serde::Serialize;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 #[derive(Serialize)]
 struct ScaffoldOutcome {
@@ -77,7 +77,15 @@ fn main() -> Result<()> {
     let mut parser = ArgParser::new("forensic_scaffold")
         .description("Generator for forensic verifier boilerplate");
 
-    parser.add_spec(ArgSpec::option("name", Some('n'), Some("name"), "Name of the new verifier tool").required());
+    parser.add_spec(
+        ArgSpec::option(
+            "name",
+            Some('n'),
+            Some("name"),
+            "Name of the new verifier tool",
+        )
+        .required(),
+    );
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -96,9 +104,18 @@ fn main() -> Result<()> {
     let is_json = parsed.is_json();
 
     // Validate name: lowercase ASCII letters, digits, and underscores; first character must be a letter.
-    if !name.chars().next().map_or(false, |c| c.is_ascii_lowercase()) || 
-       !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-        return Err(anyhow!("Invalid tool name: '{}'. Must be lowercase ASCII, starting with a letter, and only containing letters, digits, or underscores.", name));
+    if !name
+        .chars()
+        .next()
+        .map_or(false, |c| c.is_ascii_lowercase())
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(anyhow!(
+            "Invalid tool name: '{}'. Must be lowercase ASCII, starting with a letter, and only containing letters, digits, or underscores.",
+            name
+        ));
     }
 
     let output_path = format!("src/bin/verify/{}.rs", name);
@@ -117,7 +134,7 @@ fn main() -> Result<()> {
     if Path::new(cargo_path).exists() {
         let cargo_content = fs::read_to_string(cargo_path)
             .with_context(|| format!("Failed to read {}", cargo_path))?;
-        
+
         let search_str = format!("name = \"{}\"", name);
         if cargo_content.contains(&search_str) {
             // Already registered
@@ -128,7 +145,7 @@ fn main() -> Result<()> {
             new_cargo_content.push_str("\n\n[[bin]]\n");
             new_cargo_content.push_str(&format!("name = \"{}\"\n", name));
             new_cargo_content.push_str(&format!("path = \"src/bin/verify/{}.rs\"\n", name));
-            
+
             fs::write(cargo_path, new_cargo_content)
                 .with_context(|| format!("Failed to update {}", cargo_path))?;
             registered = true;
@@ -140,9 +157,15 @@ fn main() -> Result<()> {
         path: output_path.clone(),
         registered,
         hint: if registered {
-            format!("Registered verifier boilerplate created at {} and registered in Cargo.toml.", output_path)
+            format!(
+                "Registered verifier boilerplate created at {} and registered in Cargo.toml.",
+                output_path
+            )
         } else {
-            format!("Verifier boilerplate created at {}. NOTE: Cargo.toml not found, manual registration required.", output_path)
+            format!(
+                "Verifier boilerplate created at {}. NOTE: Cargo.toml not found, manual registration required.",
+                output_path
+            )
         },
     };
 

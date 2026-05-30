@@ -29,9 +29,12 @@ fn is_justified(bit_offset: usize) -> bool {
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     let json_mode = args.iter().any(|arg| arg == "--json");
-    
+
     // Filter out flags to get positional args
-    let positional_args: Vec<&String> = args[1..].iter().filter(|arg| !arg.starts_with("--")).collect();
+    let positional_args: Vec<&String> = args[1..]
+        .iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .collect();
 
     if positional_args.len() < 2 {
         if json_mode {
@@ -41,7 +44,10 @@ fn main() -> Result<()> {
                 noise_count: 0,
                 mismatches: vec![],
                 ignored_mismatches: vec![],
-                error: Some("Usage: d2save_baseline_audit <original.d2s> <reconstructed.d2s> [--json]".to_string()),
+                error: Some(
+                    "Usage: d2save_baseline_audit <original.d2s> <reconstructed.d2s> [--json]"
+                        .to_string(),
+                ),
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
@@ -55,8 +61,12 @@ fn main() -> Result<()> {
 
     let original_bytes = fs::read(original_path)
         .with_context(|| format!("Failed to read original file: {:?}", original_path))?;
-    let reconstructed_bytes = fs::read(reconstructed_path)
-        .with_context(|| format!("Failed to read reconstructed file: {:?}", reconstructed_path))?;
+    let reconstructed_bytes = fs::read(reconstructed_path).with_context(|| {
+        format!(
+            "Failed to read reconstructed file: {:?}",
+            reconstructed_path
+        )
+    })?;
 
     let mut mismatches = Vec::new();
     let mut ignored_mismatches = Vec::new();
@@ -86,7 +96,11 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    for (i, (&orig, &recon)) in original_bytes.iter().zip(reconstructed_bytes.iter()).enumerate() {
+    for (i, (&orig, &recon)) in original_bytes
+        .iter()
+        .zip(reconstructed_bytes.iter())
+        .enumerate()
+    {
         if orig != recon {
             let xor = orig ^ recon;
             for bit in 0..8 {
@@ -140,9 +154,14 @@ fn main() -> Result<()> {
             println!("Total justified noise: {}", noise_count);
             println!("First 10 unjustified mismatches:");
             for m in &mismatches {
-                println!("  Bit Offset {:<8} | Original: {} | Actual: {}", m.bit_offset, m.original, m.actual);
+                println!(
+                    "  Bit Offset {:<8} | Original: {} | Actual: {}",
+                    m.bit_offset, m.original, m.actual
+                );
             }
-            println!("\n[CRITICAL] Semantic Shift suspected (reconstruction diverged from baseline).");
+            println!(
+                "\n[CRITICAL] Semantic Shift suspected (reconstruction diverged from baseline)."
+            );
         }
     }
 

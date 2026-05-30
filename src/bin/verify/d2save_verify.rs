@@ -6,18 +6,30 @@ use std::{env, fs, io::Cursor, process};
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_verify");
-    parser.add_opt("dump-bits", "Dump raw bits from start <bit> and count <bits>")
+    parser
+        .add_opt(
+            "dump-bits",
+            "Dump raw bits from start <bit> and count <bits>",
+        )
         .long("dump-bits")
         .value_count(2);
-    parser.add_flag("fix", "Automatically fix checksums if mismatch is detected")
+    parser
+        .add_flag("fix", "Automatically fix checksums if mismatch is detected")
         .short('f')
         .long("fix");
-    parser.add_flag("dump-residue-map", "Visualize unparsed 'gap' bits between valid items")
+    parser
+        .add_flag(
+            "dump-residue-map",
+            "Visualize unparsed 'gap' bits between valid items",
+        )
         .long("dump-residue-map");
-    parser.add_opt("diff-baseline", "Path to a baseline JSON report for regression checking")
+    parser
+        .add_opt(
+            "diff-baseline",
+            "Path to a baseline JSON report for regression checking",
+        )
         .long("diff-baseline");
-    parser.add_arg("files", "Save files to verify")
-        .repeated();
+    parser.add_arg("files", "Save files to verify").repeated();
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -33,7 +45,6 @@ fn main() -> anyhow::Result<()> {
     let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &parsed);
     let is_json = om.is_json();
     let diff_baseline_path = parsed.get("diff-baseline");
-
 
     if let Some(bits_args) = parsed.get_vec("dump-bits") {
         if files.is_empty() {
@@ -77,7 +88,10 @@ fn main() -> anyhow::Result<()> {
                     }]);
                     om.json(&serde_json::to_string(&report)?);
                 } else {
-                    om.println(&format!("=== {} ===\n  [ERROR] Cannot read file: {}", path, e));
+                    om.println(&format!(
+                        "=== {} ===\n  [ERROR] Cannot read file: {}",
+                        path, e
+                    ));
                 }
                 all_ok = false;
                 continue;
@@ -102,12 +116,24 @@ fn main() -> anyhow::Result<()> {
             if let Some(results) = report.scan_results.as_ref() {
                 om.println(&format!(
                     "  version=0x{:04X} alpha={} size={} checksum={}",
-                    results.header_version, results.alpha_mode, results.file_size_actual, results.checksum_stored
+                    results.header_version,
+                    results.alpha_mode,
+                    results.file_size_actual,
+                    results.checksum_stored
                 ));
-                
-                om.println(&format!("  Fidelity Score: {:.1}% ({:?})", results.fidelity_score * 100.0, results.forensic_audit.combined_confidence));
-                
-                if let Ok(prog_res) = d2r_core::domain::progression::Progression::from_bytes(&bytes, results.alpha_mode).value {
+
+                om.println(&format!(
+                    "  Fidelity Score: {:.1}% ({:?})",
+                    results.fidelity_score * 100.0,
+                    results.forensic_audit.combined_confidence
+                ));
+
+                if let Ok(prog_res) = d2r_core::domain::progression::Progression::from_bytes(
+                    &bytes,
+                    results.alpha_mode,
+                )
+                .value
+                {
                     let diff_str = match prog_res.difficulty {
                         0 => "Normal",
                         1 => "Nightmare",
@@ -122,15 +148,20 @@ fn main() -> anyhow::Result<()> {
                     let mut unique_findings = std::collections::HashSet::new();
                     for finding in &results.forensic_audit.findings {
                         // For Alpha, show everything. For others, show only speculative/fragile.
-                        if results.alpha_mode || finding.confidence < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth {
-                            let line = format!("    - [{:?}] [{:?}] {}", finding.confidence, finding.intentionality, finding.rationale);
+                        if results.alpha_mode
+                            || finding.confidence
+                                < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth
+                        {
+                            let line = format!(
+                                "    - [{:?}] [{:?}] {}",
+                                finding.confidence, finding.intentionality, finding.rationale
+                            );
                             if unique_findings.insert(line.clone()) {
                                 om.println(&line);
                             }
                         }
                     }
                 }
-
             }
             for issue in &report.issues {
                 om.println(&format!(
@@ -144,7 +175,10 @@ fn main() -> anyhow::Result<()> {
                 ));
             }
             for action in &report.suggested_actions {
-                om.println(&format!("  [ACTION] ({:.2}) {}: {}", action.confidence, action.kind, action.command));
+                om.println(&format!(
+                    "  [ACTION] ({:.2}) {}: {}",
+                    action.confidence, action.kind, action.command
+                ));
             }
             om.println("");
         }
@@ -160,20 +194,32 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(baseline_path) = diff_baseline_path {
-        let baseline_json = fs::read_to_string(baseline_path).context("Failed to read baseline file")?;
-        let baseline_report: d2r_core::verify::Report<d2r_core::verify::save_integrity::D2SaveVerifyPayload> = serde_json::from_str(&baseline_json).context("Failed to parse baseline JSON")?;
-        
+        let baseline_json =
+            fs::read_to_string(baseline_path).context("Failed to read baseline file")?;
+        let baseline_report: d2r_core::verify::Report<
+            d2r_core::verify::save_integrity::D2SaveVerifyPayload,
+        > = serde_json::from_str(&baseline_json).context("Failed to parse baseline JSON")?;
+
         // We only support diffing the first file in this slice
         if let Some(first_path) = files.first() {
             let bytes = fs::read(first_path)?;
             let (current_report, _) = verify_save_integrity(first_path, &bytes);
-            let delta = d2r_core::verify::delta::FidelityDelta::compare(&baseline_report, &current_report);
-            
+            let delta =
+                d2r_core::verify::delta::FidelityDelta::compare(&baseline_report, &current_report);
+
             om.summary("\n=== FIDELITY DELTA ===");
             om.summary(&format!("  Status: {:?}", delta.status));
-            om.summary(&format!("  Score Change: {:.2}% -> {:.2}%", delta.prev_score * 100.0, delta.curr_score * 100.0));
-            om.summary(&format!("  Issues: Fixed={}, New={}", delta.fixed_issues.len(), delta.new_issues.len()));
-            
+            om.summary(&format!(
+                "  Score Change: {:.2}% -> {:.2}%",
+                delta.prev_score * 100.0,
+                delta.curr_score * 100.0
+            ));
+            om.summary(&format!(
+                "  Issues: Fixed={}, New={}",
+                delta.fixed_issues.len(),
+                delta.new_issues.len()
+            ));
+
             if delta.status == d2r_core::verify::delta::DeltaStatus::Regressed {
                 om.summary("  [REGRESSION DETECTED] Exiting with non-zero status.");
                 process::exit(1);
@@ -188,10 +234,17 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-
-fn dump_bits(om: &mut d2r_core::verify::OutputManager, path: &str, start_bit: u64, count: u64) -> anyhow::Result<()> {
+fn dump_bits(
+    om: &mut d2r_core::verify::OutputManager,
+    path: &str,
+    start_bit: u64,
+    count: u64,
+) -> anyhow::Result<()> {
     let bytes = fs::read(path)?;
-    om.summary(&format!("Dumping {} bits starting at {}:", count, start_bit));
+    om.summary(&format!(
+        "Dumping {} bits starting at {}:",
+        count, start_bit
+    ));
     let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
     reader.skip(start_bit as u32)?;
     let mut line = String::new();
@@ -226,7 +279,7 @@ fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> any
         for (i, item) in items.iter().enumerate() {
             let start = item.range.start;
             let len = item.total_bits;
-            
+
             let entry = if item.is_residue() || item.is_opaque() {
                 let mut bits = String::new();
                 for b in &item.bits {
@@ -259,18 +312,18 @@ fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> any
             results.residue_map = Some(residue_map);
             report.scan_results = Some(results);
         }
-        
+
         om.json(&serde_json::to_string(&report)?);
         return Ok(());
     }
 
     om.summary(&format!("Residue Gap Map for {}:", path));
-    
+
     for (i, item) in items.iter().enumerate() {
         let start = item.range.start;
         let len = item.total_bits;
         let end = item.range.end;
-        
+
         if item.is_residue() || item.is_opaque() {
             let mut bits = String::new();
             for (bi, b) in item.bits.iter().enumerate() {
@@ -279,11 +332,20 @@ fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> any
                     bits.push(' ');
                 }
             }
-            om.println(&format!("[{:>3}] [GAP: {:>5} bits] [0x{:08X} - 0x{:08X}] bits: {}", i, len, start, end, bits));
+            om.println(&format!(
+                "[{:>3}] [GAP: {:>5} bits] [0x{:08X} - 0x{:08X}] bits: {}",
+                i, len, start, end, bits
+            ));
         } else {
-            om.println(&format!("[{:>3}] [CLAIMED: {:>4}] [0x{:08X} - 0x{:08X}]", i, item.code.trim(), start, end));
+            om.println(&format!(
+                "[{:>3}] [CLAIMED: {:>4}] [0x{:08X} - 0x{:08X}]",
+                i,
+                item.code.trim(),
+                start,
+                end
+            ));
         }
     }
-    
+
     Ok(())
 }
