@@ -330,19 +330,19 @@ impl StatsAxiom {
                 };
             }
             if self.is_alpha() {
-                return PropertyRhythm {
+                PropertyRhythm {
                     id_bits: 9,
                     value_bits: None,
                     has_terminal_bit: false,
                     has_extra_terminal_bit: false,
-                };
+                }
             } else {
-
-            PropertyRhythm {
-                id_bits: 9,
-                value_bits: None,
-                has_terminal_bit: true,
-                has_extra_terminal_bit: false,
+                PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: None,
+                    has_terminal_bit: true,
+                    has_extra_terminal_bit: false,
+                }
             }
         }
     }

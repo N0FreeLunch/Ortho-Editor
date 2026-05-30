@@ -940,6 +940,11 @@ impl Item {
                     emitter.extend_bits(encoded_code)?;
                 }
 
+                // Axiom 0365: Rhythm Correction for ww/gcw residues (Slice 42)
+                if alpha_mode && (self.code.trim() == "ww" || self.code.trim() == "gcw") {
+                    emitter.write_bit(true)?;
+                }
+
                 if h_axiom.is_alpha()
                     && (self.header.version == 5
                         || self.header.version == 0
