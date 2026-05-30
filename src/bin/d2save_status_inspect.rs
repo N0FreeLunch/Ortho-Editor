@@ -1,5 +1,5 @@
-use d2r_core::save::{AttributeSection, Save, map_core_sections, class_skill_base_id};
 use d2r_core::domain::character::skills::parse_skill_section;
+use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
 use std::env;
 use std::fs;
 
@@ -71,7 +71,10 @@ fn main() {
                             .find(|s| s.id == skill_level.skill_id)
                             .map(|s| s.key)
                             .unwrap_or("Unknown Skill");
-                        println!("  SkillID {:>3} {:<20}: Level={}", skill_level.skill_id, skill_name, skill_level.level);
+                        println!(
+                            "  SkillID {:>3} {:<20}: Level={}",
+                            skill_level.skill_id, skill_name, skill_level.level
+                        );
                     }
                 }
             } else {
@@ -94,6 +97,12 @@ fn main() {
         } else {
             0
         };
-        println!("  JM[{}]: offset={} (bit {}), count={}", i, pos, pos * 8, count);
+        println!(
+            "  JM[{}]: offset={} (bit {}), count={}",
+            i,
+            pos,
+            pos * 8,
+            count
+        );
     }
 }

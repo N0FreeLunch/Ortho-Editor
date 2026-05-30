@@ -1,5 +1,5 @@
-use d2r_core::verify::args::{ArgParser, ArgError};
-use d2r_core::save::{map_core_sections, find_jm_markers};
+use d2r_core::save::{find_jm_markers, map_core_sections};
+use d2r_core::verify::args::{ArgError, ArgParser};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -20,15 +20,18 @@ fn main() -> anyhow::Result<()> {
         .description("Dump raw bits relative to section anchors (if, gf, JM)");
 
     parser.add_arg("save_file", "path to the save file (.d2s)");
-    parser.add_opt("anchor", "anchor name (if, gf, jm0, jm1, ...)")
+    parser
+        .add_opt("anchor", "anchor name (if, gf, jm0, jm1, ...)")
         .short('a')
         .long("anchor")
         .default("gf");
-    parser.add_opt("offset", "bit offset relative to anchor")
+    parser
+        .add_opt("offset", "bit offset relative to anchor")
         .short('o')
         .long("offset")
         .default("0");
-    parser.add_opt("length", "number of bits to dump")
+    parser
+        .add_opt("length", "number of bits to dump")
         .short('l')
         .long("length")
         .default("64");
@@ -52,7 +55,8 @@ fn main() -> anyhow::Result<()> {
     let is_json = parsed.is_json();
 
     let bytes = fs::read(path)?;
-    let map = map_core_sections(&bytes).map_err(|e| anyhow::anyhow!("Failed to map sections: {}", e))?;
+    let map =
+        map_core_sections(&bytes).map_err(|e| anyhow::anyhow!("Failed to map sections: {}", e))?;
     let jm_markers = find_jm_markers(&bytes);
 
     let anchor_bit_pos = match anchor_name.to_lowercase().as_str() {
@@ -65,8 +69,12 @@ fn main() -> anyhow::Result<()> {
         "kf" => (map.kf_pos.unwrap_or(0) as u64) * 8,
         "lf" => (map.lf_pos.unwrap_or(0) as u64) * 8,
         name if name.starts_with("jm") => {
-            let idx: usize = name[2..].parse().map_err(|_| anyhow::anyhow!("Invalid JM index: {}", name))?;
-            let pos = jm_markers.get(idx).ok_or_else(|| anyhow::anyhow!("JM marker index {} not found", idx))?;
+            let idx: usize = name[2..]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid JM index: {}", name))?;
+            let pos = jm_markers
+                .get(idx)
+                .ok_or_else(|| anyhow::anyhow!("JM marker index {} not found", idx))?;
             (*pos as u64) * 8
         }
         _ => anyhow::bail!("Unknown anchor: {}", anchor_name),
@@ -117,9 +125,12 @@ fn main() -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
         println!("Anchor: {} at bit {}", anchor_name, anchor_bit_pos);
-        println!("Dumping {} bits from bit {} (relative {})...", bit_length, target_start, bit_offset);
+        println!(
+            "Dumping {} bits from bit {} (relative {})...",
+            bit_length, target_start, bit_offset
+        );
         println!("{:-<60}", "");
-        
+
         for (i, c) in bits_str.chars().enumerate() {
             print!("{}", c);
             if (i + 1) % 8 == 0 {
