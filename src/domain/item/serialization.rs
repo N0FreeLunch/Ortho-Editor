@@ -535,12 +535,6 @@ pub fn peek_item_header_at_with_base(
                         confidence += 150;
                     }
 
-                    if crate::item::item_trace_enabled()
-                        && (trimmed == "tsc" || trimmed == "us g" || trimmed == "jav")
-                    {
-                        eprintln!("[DEBUG-JAV-TRIAL] is_compact={} gap={} code='{}' confidence={} matches_registry_gap={} skip={}", is_compact, gap, trimmed, confidence, matches_registry_gap, trial_total_skip);
-                    }
-
                     let is_compact_trial = is_compact;
                     if confidence > max_confidence
                         || (confidence == max_confidence && is_compact_trial)
@@ -922,10 +916,6 @@ pub fn read_player_items(
             continue;
         }
 
-        if alpha {
-            // println!("[DEBUG-JM] pos={} count={}", pos, count);
-        }
-
         // Alpha v105 can contain JM-like patterns inside item payloads.
         // We MUST respect the boundary derived from the next JM marker
         // to prevent over-reading into subsequent sections.
@@ -1272,11 +1262,6 @@ impl Item {
             {
                 peek_code_hint = Some(code.clone());
                 is_compact_final = is_compact;
-                if crate::item::item_trace_enabled()
-                    && (code.trim() == "jav" || code.trim() == "us g")
-                {
-                    eprintln!("[DEBUG-READ-SECTION-JAV] code='{}' is_compact_peeked={} is_compact_final={} start={}", code, is_compact, is_compact_final, start);
-                }
                 version_peek = version;
                 flags_peek = flags;
                 let _trimmed_code = code.trim();
@@ -1307,14 +1292,6 @@ impl Item {
                             is_compact_final = true;
                         }
                     }
-                }
-                if crate::item::item_trace_enabled()
-                    && (code.trim() == "jav" || code.trim() == "us g")
-                {
-                    eprintln!(
-                        "[DEBUG-READ-SECTION-JAV-POST] code='{}' is_compact_final={} start={}",
-                        code, is_compact_final, start
-                    );
                 }
             }
 
@@ -1393,41 +1370,9 @@ impl Item {
                 .map_err(|e| e) // Compatibility
             };
 
-            if crate::item::item_trace_enabled() && matches!(parse_code_hint.trim(), "jav" | "buc")
-            {
-                if let Err(ref e) = parse_result {
-                    eprintln!(
-                        "[DEBUG-READ-SECTION-ERR] code_hint={:?} start={} limit={} error={:?}",
-                        parse_code_hint, start, dynamic_limit, e
-                    );
-                }
-            }
-
             match parse_result {
                 Ok((item, mut consumed_bits)) => {
                     let mut final_item = item.clone();
-
-                    if crate::item::item_trace_enabled()
-                        && matches!(parse_code_hint.trim(), "jav" | "buc")
-                    {
-                        let semiopaque_reason = final_item.modules.iter().find_map(|module| {
-                            if let crate::domain::item::ItemModule::SemiOpaque { reason, .. } =
-                                module
-                            {
-                                Some(reason.as_str())
-                            } else {
-                                None
-                            }
-                        });
-                        eprintln!(
-                            "[DEBUG-READ-SECTION] code={:?} consumed_bits={} item_range_end={} start={} semiopaque={:?}",
-                            final_item.code,
-                            consumed_bits,
-                            final_item.range.end,
-                            start,
-                            semiopaque_reason
-                        );
-                    }
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
@@ -1588,15 +1533,6 @@ impl Item {
                         }
                     }
 
-                    if crate::item::item_trace_enabled()
-                        && alpha_mode
-                        && (marker.code.trim() == "jav" || marker.code.trim() == "us g")
-                    {
-                        eprintln!(
-                            "[DEBUG-JAV-PARSE-ERR] error={:?} start={} code={:?}",
-                            e, start, marker.code
-                        );
-                    }
                     // Marker was plausible but parsing failed or was rejected. Capture raw bits as Opaque item.
                     // Slice 7: Dynamic Interval Capture. Scan for next JM to bound the Opaque block.
                     let mut actual_limit = limit;
@@ -2429,14 +2365,6 @@ impl Item {
             {
                 // Slice 6: Huffman resolution failure or drift in Alpha v105.
                 // Trigger 9+9 property rhythm recovery.
-                if crate::item::item_trace_enabled()
-                    && matches!(code_peek.map(|s| s.trim()), Some("jav") | Some("buc"))
-                {
-                    eprintln!(
-                        "[DEBUG-BODY-ERR] code_hint={:?} start={} error={:?}",
-                        code_peek, start_bit, e
-                    );
-                }
                 rhythm_recovery = true;
                 let mut b = crate::domain::item::entity::ItemBody::default();
                 b.code = "    ".to_string();
@@ -2533,17 +2461,6 @@ impl Item {
             let trimmed_code = body.code.trim();
             if let Some(eff) = reg.effective_codes.get(trimmed_code) {
                 body.code = eff.clone();
-            }
-        }
-        if crate::item::item_trace_enabled()
-        {
-            let trimmed = body.code.trim();
-            let reg = crate::domain::forensic::registry::get_registry();
-            if reg.effective_codes.contains_key(trimmed) || reg.forced_runeword_codes.as_ref().map(|v| v.iter().any(|c| c == trimmed)).unwrap_or(false) {
-                eprintln!(
-                    "[DEBUG-BODY] code={:?} header_compact={} header_runeword={} header_socketed={}",
-                    body.code, header.is_compact, header.is_runeword, header.is_socketed
-                );
             }
         }
         body.alpha_header_gap = alpha_header_gap;

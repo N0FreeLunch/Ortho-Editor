@@ -729,6 +729,56 @@ impl Item {
             }
         }
 
+        let trimmed_code = self.code.trim();
+        if alpha_mode
+            && self.header.save_is_alpha
+            && self.total_bits > 0
+            && !self.bits.is_empty()
+            && matches!(trimmed_code, "ww" | "gcw")
+        {
+            let start_offset = self.bits[0].offset;
+            let end_offset = start_offset + self.total_bits;
+            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
+            for rb in &self.bits {
+                if rb.offset >= end_offset {
+                    break;
+                }
+                if rb.offset >= start_offset {
+                    prefix_bits.push(rb.bit);
+                }
+            }
+            if prefix_bits.len() == self.total_bits as usize {
+                emitter.extend_bits(prefix_bits)?;
+                return Ok(());
+            }
+        }
+
+        if alpha_mode
+            && self.header.save_is_alpha
+            && self.total_bits > 0
+            && !self.bits.is_empty()
+            && trimmed_code == "buc"
+            && self.properties.is_empty()
+        {
+            // Alpha v105 `buc` behaves like a compact tail seam in this fixture family.
+            // Preserve the recorded prefix to keep the header/gap rhythm identical.
+            let start_offset = self.bits[0].offset;
+            let end_offset = start_offset + self.total_bits;
+            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
+            for rb in &self.bits {
+                if rb.offset >= end_offset {
+                    break;
+                }
+                if rb.offset >= start_offset {
+                    prefix_bits.push(rb.bit);
+                }
+            }
+            if prefix_bits.len() == self.total_bits as usize {
+                emitter.extend_bits(prefix_bits)?;
+                return Ok(());
+            }
+        }
+
         // Seam safeguard:
         // For compact Alpha overlap seams with a stable logical width and no parsed properties,
         // prefer original recorded prefix bits to avoid re-synthesizing header/code boundary drift.
@@ -1606,16 +1656,6 @@ pub fn parse_item_body<R: BitRead>(
 ) -> ParsingResult<(ItemBody, Option<u8>, Option<u8>, Option<String>)> {
     let code_hint = code_hint.map(crate::item::normalize_alpha_code_hint);
     let w_axiom = V105PropertyWidthAxiom::default();
-    let debug_hint = code_hint.map(|s| s.trim());
-    let debug_compact_probe = crate::item::item_trace_enabled()
-        && alpha_mode
-        && matches!(debug_hint, Some("jav") | Some("buc"));
-    if crate::item::item_trace_enabled() && alpha_mode && code_hint == Some("jav") {
-        println!(
-            "[DEBUG-JAV-PARSE] version={} is_compact={} has_checksum={} flags={:08X}",
-            header.version, header.is_compact, header.has_checksum, header.flags
-        );
-    }
     let h_axiom = HeaderAxiom::new(header.version, alpha_mode);
     let is_ear = header.is_ear;
     let mut alpha_code_bits = Vec::new();
@@ -1656,14 +1696,6 @@ pub fn parse_item_body<R: BitRead>(
                 }
             } else {
                 cursor.rollback(saved_pos);
-            }
-            if debug_compact_probe {
-                eprintln!(
-                    "[DBG-STEALTH] hint={:?} code={:?} pos={}",
-                    debug_hint,
-                    code,
-                    cursor.pos()
-                );
             }
         }
 
@@ -1716,14 +1748,6 @@ pub fn parse_item_body<R: BitRead>(
         }
 
         if alpha_mode && header.is_compact && code.is_empty() {
-            if debug_compact_probe {
-                eprintln!(
-                    "[DBG-COMPACT-ENTER] hint={:?} code_empty={} pos={}",
-                    debug_hint,
-                    code.is_empty(),
-                    cursor.pos()
-                );
-            }
             if let Some(hint) = code_hint {
                 let trimmed_hint = hint.trim();
                 let trusted_compact_hint =
@@ -1760,12 +1784,6 @@ pub fn parse_item_body<R: BitRead>(
                         let saved_pos = cursor.pos();
                         if cursor.read_bits_as_vec(consume_len).is_ok() {
                             code = normalized_hint;
-                            if debug_compact_probe {
-                                eprintln!(
-                                    "[DBG-COMPACT-READ] hint={:?} read_ok=true len={}",
-                                    debug_hint, consume_len
-                                );
-                            }
                         } else {
                             cursor.rollback(saved_pos);
                             if trusted_compact_hint {
@@ -1780,21 +1798,7 @@ pub fn parse_item_body<R: BitRead>(
                                     }
                                 }
                             }
-                            if debug_compact_probe {
-                                eprintln!(
-                                    "[DBG-COMPACT-READ] hint={:?} read_ok=false len={} fallback_code={:?}",
-                                    debug_hint,
-                                    consume_len,
-                                    code
-                                );
-                            }
                         }
-                    }
-                    if debug_compact_probe {
-                        eprintln!(
-                            "[DBG-COMPACT-EXIT] hint={:?} code={:?} consume_len={}",
-                            debug_hint, code, consume_len
-                        );
                     }
                 }
             }

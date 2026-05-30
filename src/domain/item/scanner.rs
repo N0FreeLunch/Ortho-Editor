@@ -38,8 +38,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         return Vec::new();
     }
 
-    let debug_scan = verbose || std::env::var_os("D2R_DEBUG_SCAN").is_some();
-
     // Tier 1: Parallel Structural Indexing using Rayon
     // We split the byte stream into chunks and scan each chunk in parallel.
     // To avoid missing markers straddling chunk boundaries, we overlap chunks slightly.
@@ -413,10 +411,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                  status = MarkerStatus::Phantom;
              }
             }
-
-        if crate::item::item_trace_enabled() {
-            eprintln!("[DEBUG-SLICE13] marker processed: offset={}, code='{}', confidence={}, score={}, status={:?}", best_offset, best_code_str, best_confidence, max_score, status);
-        }
 
         if status == MarkerStatus::Accepted || status == MarkerStatus::Phantom {
             if status == MarkerStatus::Accepted {
