@@ -1116,16 +1116,10 @@ impl Item {
             let mut start = marker.offset; // marker.offset is relative to section_bytes
 
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
-            if alpha_mode {
-                eprintln!("[DEBUG-OVERRUN] marker_loop i={} start={} start_offset={} item_count={} non_residue={}", 
-                    i, start, start_offset, item_count, non_residue_count);
-            }
             if non_residue_count >= top_level_count as usize {
-                if alpha_mode { eprintln!("[DEBUG-OVERRUN] Breaking loop at count {}", non_residue_count); }
                 break;
             }
             if start < start_offset {
-                if alpha_mode { eprintln!("[DEBUG-OVERRUN] Skipping marker at {} (already passed)", start); }
                 continue;
             }
 
@@ -1160,7 +1154,6 @@ impl Item {
                             && !recovered_item.is_residue()
                             && recovered_consumed <= start - start_offset
                         {
-                            if alpha_mode { eprintln!("[DEBUG-OVERRUN] RECOVERED item at {}: code='{}' bits={}", start_offset, recovered_item.code, recovered_consumed); }
                             if !recovery_code.trim().is_empty()
                                 && crate::domain::forensic::v105::axioms::is_v105_summary_code(
                                     &recovery_code,
