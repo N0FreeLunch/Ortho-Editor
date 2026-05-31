@@ -301,6 +301,11 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
             }
 
             // Alpha v105 forensic: Potions and scrolls usually follow an 80-bit slotted rhythm.
+            // Scrolls (tsc/isc) are often 72-bit (Slice 27).
+            let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+            if trimmed == "tsc" || trimmed == "isc" {
+                return 72;
+            }
             return 80;
         }
 
@@ -745,10 +750,10 @@ impl V105PropertyWidthAxiom {
     
     pub fn flags_bits(&self) -> u32 { 32 }
     pub fn checksum_bits(&self) -> u32 { 8 }
-    pub fn version_bits(&self) -> u32 { 3 }
-    pub fn mode_bits(&self) -> u32 { 3 }
-    pub fn location_bits(&self) -> u32 { 3 }
-    pub fn x_bits(&self) -> u32 { 4 }
+    pub fn version_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 3 } }
+    pub fn mode_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 3 } }
+    pub fn location_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 3 } }
+    pub fn x_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 4 } }
     pub fn nudge_bits(&self, version: u8) -> u32 {
         if version == 1 { 0 } else { 2 }
     }

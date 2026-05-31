@@ -787,18 +787,18 @@ impl Item {
         use crate::domain::item::serialization::write_player_name;
         let mut flags_to_write = self.header.flags;
         emitter.write_bits(flags_to_write, 32)?;
+        let w_axiom = V105PropertyWidthAxiom::default();
         if alpha_mode && self.header.has_checksum {
             let checksum = self.header.alpha_checksum.unwrap_or_else(|| {
                 calculate_alpha_v105_checksum(flags_to_write, self.header.version)
             });
             emitter.write_bits(checksum as u32, 8)?;
         }
-        emitter.write_bits(self.header.version as u32, 3)?;
-        emitter.write_bits(self.header.mode as u32, 3)?;
-        emitter.write_bits(self.header.location as u32, 3)?;
-        emitter.write_bits(self.header.x as u32, 4)?;
+        emitter.write_bits(self.header.version as u32, w_axiom.version_bits(alpha_mode) as u32)?;
+        emitter.write_bits(self.header.mode as u32, w_axiom.mode_bits(alpha_mode) as u32)?;
+        emitter.write_bits(self.header.location as u32, w_axiom.location_bits(alpha_mode) as u32)?;
+        emitter.write_bits(self.header.x as u32, w_axiom.x_bits(alpha_mode) as u32)?;
 
-        let w_axiom = V105PropertyWidthAxiom::default();
         let s_axiom = StatsAxiom::new(
             self.header.version,
             self.header.quality.unwrap_or(ItemQuality::Normal),
@@ -1010,6 +1010,11 @@ impl Item {
         let is_v105_summary =
             alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
         if is_v105_summary {
+            // Alpha v105 Summary Items (Axiom 0365) carry a 16-bit ID for scrolls (tsc/isc).
+            if self.code.trim() == "tsc" || self.code.trim() == "isc" {
+                emitter.write_bits(self.id.unwrap_or(0), 16)?;
+            }
+
             let authority_tail_bits = if is_authority_overlap_code {
                 self.modules
                     .iter()
@@ -1408,17 +1413,17 @@ pub fn parse_item_header<R: BitRead>(
             if hint {
                 let ck = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32)?;
                 alpha_checksum = Some(ck);
-                let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+                let v = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0);
                 (v, true)
-            } else {
-                let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+                } else {
+                let v = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0);
                 (v, false)
-            }
-        } else {
-            let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
-            let v_res = cursor.read_bits::<u8>(w_axiom.version_bits() as u32);
+                }
+                } else {
+                let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
+                let v_res = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32);
 
-            if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
+                if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
                 let expected = calculate_alpha_v105_checksum(flags, v);
                 if (checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2))
                     || (alpha_mode && (v == 5 || v == 0 || v == 1 || v == 2))
@@ -1427,23 +1432,23 @@ pub fn parse_item_header<R: BitRead>(
                     (v, true)
                 } else {
                     cursor.rollback(saved_pos);
-                    let v = cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8;
+                    let v = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0);
                     (v, false)
                 }
-            } else {
+                } else {
                 cursor.rollback(saved_pos);
                 (
-                    cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8,
+                    cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0),
                     false,
                 )
-            }
-        }
-    } else {
-        (
-            cursor.read_bits::<u8>(w_axiom.version_bits() as u32)? as u8,
-            false,
-        )
-    };
+                }
+                }
+                } else {
+                (
+                cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0),
+                false,
+                )
+                };
     let mut flags = flags;
     if alpha_mode {
         if let Some(code) = code_hint {
@@ -1452,9 +1457,9 @@ pub fn parse_item_header<R: BitRead>(
             }
         }
     }
-    let mode = cursor.read_bits::<u8>(w_axiom.mode_bits() as u32)? as u8;
-    let location = cursor.read_bits::<u8>(w_axiom.location_bits() as u32)? as u8;
-    let x = cursor.read_bits::<u8>(w_axiom.x_bits() as u32)? as u8;
+    let mode = cursor.read_bits::<u8>(w_axiom.mode_bits(alpha_mode) as u32).unwrap_or(0);
+    let location = cursor.read_bits::<u8>(w_axiom.location_bits(alpha_mode) as u32).unwrap_or(0);
+    let x = cursor.read_bits::<u8>(w_axiom.x_bits(alpha_mode) as u32).unwrap_or(0);
 
     let item_alpha_mode = alpha_mode;
     let h_axiom = HeaderAxiom::new(version, item_alpha_mode);
@@ -1942,7 +1947,12 @@ impl ExtendedStatsData {
         }
         if axiom.is_alpha() {
             if h_axiom.is_alpha() && w_axiom.is_summary_item(version, trimmed_code) {
-                data.id = Some(0);
+                // Alpha v105 Summary Items (Axiom 0365) carry a 16-bit ID for scrolls (tsc/isc).
+                if trimmed_code == "tsc" || trimmed_code == "isc" {
+                    data.id = Some(read_or_truncate!(cursor.read_bits::<u32>(16)));
+                } else {
+                    data.id = Some(0);
+                }
                 cursor.end_segment();
                 return Ok(data);
             }

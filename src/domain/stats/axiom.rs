@@ -246,34 +246,32 @@ impl StatsAxiom {
     }
 
     pub fn code_encoding(&self) -> CodeEncoding {
-        if self.save_is_alpha && self.is_compact {
-            // Axiom 0391: Encoding Duality for Alpha v105 summary items.
-            // Items identified as summary codes use raw 3x8 bit ASCII encoding
-            // ONLY if they are explicitly compact or in higher versions.
-            // In Version 0, they often remain Huffman encoded.
-            if self.version != 0
-                && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code)
-            {
-                // Forensic (Slice 3): Potions and some markers often use Huffman even in Version 1/2.
-                // ASCII 3x8 is typically used for 'xrs' and specific quest items.
-                let trimmed = self.code.trim();
-                if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
-                    return CodeEncoding::Ascii3x8;
-                }
-
-                // If it matches a known stealth pattern (e.g. 0xCF 0x4F for hp1), it MUST be Huffman.
-                if crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default()
-                    .is_summary_item(self.version, &self.code)
-                {
-                    // Check if it should be ASCII based on registry or other rules.
-                    // For now, default to Huffman for potions/scrolls in v1/v2 if not explicitly forced.
-                }
+        if self.save_is_alpha {
+            let trimmed = self.code.trim();
+            if trimmed == "tsc" || trimmed == "isc" {
+                return CodeEncoding::Ascii3x8;
             }
 
-            let reg = get_registry();
-            if let Some(enc) = &reg.compact_code_encoding {
-                if enc == "ascii_3x8" {
-                    return CodeEncoding::Ascii3x8;
+            if self.is_compact {
+                // Axiom 0391: Encoding Duality for Alpha v105 summary items.
+                // Items identified as summary codes use raw 3x8 bit ASCII encoding
+                // ONLY if they are explicitly compact or in higher versions.
+                // In Version 0, they often remain Huffman encoded.
+                if self.version != 0
+                    && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code)
+                {
+                    // Forensic (Slice 3): Potions and some markers often use Huffman even in Version 1/2.
+                    // ASCII 3x8 is typically used for 'xrs' and specific quest items.
+                    if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
+                        return CodeEncoding::Ascii3x8;
+                    }
+                }
+
+                let reg = get_registry();
+                if let Some(enc) = &reg.compact_code_encoding {
+                    if enc == "ascii_3x8" {
+                        return CodeEncoding::Ascii3x8;
+                    }
                 }
             }
         }
