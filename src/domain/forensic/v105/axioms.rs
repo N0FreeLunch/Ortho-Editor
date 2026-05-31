@@ -263,7 +263,7 @@ impl V105MarkerProximityAxiom {
 }
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    V105PropertyWidthAxiom::default().is_summary_item(0, code)
+    V105PropertyWidthAxiom::default().is_summary_item(5, code)
 }
 #[derive(Debug, Clone, Default)]
 pub struct V105AlignmentAxiom;
@@ -662,6 +662,10 @@ impl V105PropertyWidthAxiom {
         // 2. Check registry for explicit forced compact
         if let Some(codes) = &reg.forced_compact_codes {
             if codes.iter().any(|c| c == trimmed) {
+                // Alpha v105 Forensic: ww/gcw in version 0/2 are often full equipment (Slice 48)
+                if (version == 0 || version == 2) && (trimmed == "ww" || trimmed == "gcw") {
+                    return false;
+                }
                 return true;
             }
         }

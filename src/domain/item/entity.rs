@@ -666,7 +666,7 @@ impl Item {
         let trimmed = self.code.trim();
         let reg = crate::domain::forensic::registry::get_registry();
         let mut is_authority_overlap_code =
-            alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2");
+            alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw");
         let mut is_compact_tail_overlap_code = alpha_mode && matches!(trimmed, "jav" | "buc");
         let mut is_v105_shadow_override = alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd");
         if alpha_mode {
@@ -729,9 +729,12 @@ impl Item {
             }
         }
 
-        let trimmed_code = self.code.trim();
+        let trimmed_code = self
+            .code
+            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
         if alpha_mode
             && self.header.save_is_alpha
+            && self.header.version == 5
             && self.total_bits > 0
             && !self.bits.is_empty()
             && matches!(trimmed_code, "ww" | "gcw")
@@ -961,7 +964,10 @@ impl Item {
             }
         } else {
             let should_emit_summary_code = if is_summary {
-                if alpha_mode && (self.code.trim() == "ww" || self.code.trim() == "gcw") {
+                if alpha_mode
+                    && self.header.version == 5
+                    && (self.code.trim() == "ww" || self.code.trim() == "gcw")
+                {
                     true // Always emit WW/GCW markers for Alpha rhythm (Slice 42)
                 } else {
                     self.body.alpha_header_gap_bits.len() < 16
@@ -1082,7 +1088,7 @@ impl Item {
                 }
             }
 
-            if !is_item_alpha {
+            if !is_item_alpha || (alpha_mode && (self.header.version == 0 || self.header.version == 2)) {
                 emitter.write_bits(self.id.unwrap_or(0), 32)?;
                 emitter.write_bits(self.level.unwrap_or(0) as u32, 7)?;
                 emitter.write_bits(quality_val as u32, 4)?;
@@ -1414,7 +1420,9 @@ pub fn parse_item_header<R: BitRead>(
 
             if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
                 let expected = calculate_alpha_v105_checksum(flags, v);
-                if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2) {
+                if (checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2))
+                    || (alpha_mode && (v == 5 || v == 0 || v == 1 || v == 2))
+                {
                     alpha_checksum = Some(checksum);
                     (v, true)
                 } else {

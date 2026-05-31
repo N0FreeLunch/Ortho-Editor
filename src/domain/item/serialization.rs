@@ -584,8 +584,8 @@ pub fn peek_item_header_at_specific_gap(
     let is_compact_flag = (flags & 0x00200000) != 0;
 
     // Alpha Forensic (Axiom 0365): Some summary items use 0 as a checksum sentinel, or have corrupted checksums when stacked.
-    let (version, mode, loc, x_val, base_header_len, has_checksum) = if (v == 5 || v == 7)
-        && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag)))
+    let (version, mode, loc, x_val, base_header_len, has_checksum) = if (v == 5 || v == 7 || v == 0 || v == 2)
+        && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
     {
         let m = alpha_reader.read::<3, u8>().ok()?;
         let l = alpha_reader.read::<3, u8>().ok()?;
@@ -2585,7 +2585,7 @@ impl Item {
         if !is_v105_summary {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code));
             let authority_runeword_hint =
-                alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd");
+                alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "ww" | "gcw");
 
             // Slice 11: Handle JM-to-Body alignment gap
             let gap_len = if item.code.trim() == "buc" || matches!(item.header.version, 1) {
@@ -2609,7 +2609,9 @@ impl Item {
             if item.header.save_is_alpha {
                 let is_authority = item.body.code.trim() == "xrs"
                     || item.body.code.trim() == "c8xr"
-                    || item.body.code.trim() == "rhd";
+                    || item.body.code.trim() == "rhd"
+                    || item.body.code.trim() == "ww"
+                    || item.body.code.trim() == "gcw";
                 if item.body.code.trim() == "buc" {
                     // Buckler keeps the compact-tail shape and must not consume the generic
                     // alpha residue nudge that applies to other v105 bodies.
