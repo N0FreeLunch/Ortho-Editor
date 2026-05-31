@@ -783,12 +783,6 @@ impl Item {
 
         use crate::domain::item::serialization::write_player_name;
         let mut flags_to_write = self.header.flags;
-        if self.header.save_is_alpha
-            && self.header.is_compact
-            && self.code.trim() == "buc"
-        {
-            flags_to_write |= 1 << 23;
-        }
         emitter.write_bits(flags_to_write, 32)?;
         if alpha_mode && self.header.has_checksum {
             let checksum = self.header.alpha_checksum.unwrap_or_else(|| {
