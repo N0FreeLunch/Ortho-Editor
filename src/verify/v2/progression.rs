@@ -126,10 +126,10 @@ mod tests {
         let res = Progression::from_bytes(&bytes, true);
         let mut prog = res.value.unwrap();
         
-        prog.difficulty = 2; // Nightmare
+        prog.difficulty = 2; // Hell
         prog.sync_to_bytes(&mut bytes, true);
         
-        assert_eq!((bytes[PROG_START_FILE + 21] & 0x18) >> 3, 2);
+        assert_eq!((bytes[21] & 0x18) >> 3, 2);
     }
 
     #[test]

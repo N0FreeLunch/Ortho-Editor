@@ -58,5 +58,5 @@ crate::impl_forensic_axiom!(
     V105WaypointAxiom,
     Confidence::VerifiedTruth,
     Intentionality::Structural,
-    "Alpha v105 waypoint offset 0x126 (294) is relative to progression section (0x127). Verification from Discussion 0230."
+    "Alpha v105 waypoint offset 0x196 (406) is relative to progression section (0x127). Verification from Discussion 0230."
 );

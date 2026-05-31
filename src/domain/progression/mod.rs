@@ -20,10 +20,10 @@ impl Progression {
         let mut audit = ForensicAudit::new();
         
         if alpha_mode {
-            let difficulty = if bytes.len() > PROG_START_FILE + 21 {
+            let difficulty = if bytes.len() > 21 {
                 let diff_axiom = AlphaDifficultyAxiom;
                 audit.record(diff_axiom.metadata());
-                (bytes[PROG_START_FILE + 21] & 0x18) >> 3
+                (bytes[21] & 0x18) >> 3
             } else { 
                 0 
             };
@@ -73,8 +73,8 @@ impl Progression {
 
     pub fn sync_to_bytes(&self, bytes: &mut [u8], alpha_mode: bool) {
         if alpha_mode {
-            if bytes.len() > PROG_START_FILE + 21 {
-                bytes[PROG_START_FILE + 21] = (bytes[PROG_START_FILE + 21] & !0x18) | ((self.difficulty & 0x03) << 3);
+            if bytes.len() > 21 {
+                bytes[21] = (bytes[21] & !0x18) | ((self.difficulty & 0x03) << 3);
             }
 
             let normal_anchor = PROG_START_FILE + V105QuestAxiom::normal_start();
