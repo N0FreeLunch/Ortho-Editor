@@ -11,9 +11,10 @@ pub(crate) fn item_trace_enabled() -> bool {
 }
 
 pub fn normalize_alpha_code_hint(code: &str) -> &str {
-    match code.trim() {
+    let trimmed = code.trim();
+    match trimmed {
         "us g" | "k g" => "jav",
-        other => other,
+        _ => trimmed,
     }
 }
 
