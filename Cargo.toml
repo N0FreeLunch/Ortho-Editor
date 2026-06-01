@@ -323,6 +323,10 @@ name = "d2save_fix_checksum"
 path = "src/bin/verify/d2save_fix_checksum.rs"
 
 [[bin]]
+name = "classic_stub_gen"
+path = "src/bin/verify/classic_stub_gen.rs"
+
+[[bin]]
 name = "d2item_desync_detector"
 path = "src/bin/verify/d2item_desync_detector.rs"
 
