@@ -1,12 +1,14 @@
+use bitstream_io::{BitRead, BitReader, LittleEndian};
 use std::env;
 use std::fs;
-use bitstream_io::{BitRead, BitReader, LittleEndian};
 use std::io::Cursor;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 4 {
-        println!("Usage: v105_attribute_search <file_path> <start_byte_offset> <target_value> [bit_width] [search_limit_bytes]");
+        println!(
+            "Usage: v105_attribute_search <file_path> <start_byte_offset> <target_value> [bit_width] [search_limit_bytes]"
+        );
         return Ok(());
     }
 
@@ -17,18 +19,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let limit_bytes: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(200);
 
     let buffer = fs::read(file_path)?;
-    println!("[Forensic] Searching for value {} (width {} bits) starting from byte offset {} (limit {} bytes)", target_value, bit_width, start_offset, limit_bytes);
+    println!(
+        "[Forensic] Searching for value {} (width {} bits) starting from byte offset {} (limit {} bytes)",
+        target_value, bit_width, start_offset, limit_bytes
+    );
 
     let max_bits = limit_bytes * 8;
-    
+
     let mut found = false;
     for bit_idx in 0..max_bits {
         let slice = &buffer[start_offset..];
         let mut probe = BitReader::endian(Cursor::new(slice), LittleEndian);
-        
+
         // Skip to current bit
         for _ in 0..bit_idx {
-            if probe.read_bit().is_err() { break; }
+            if probe.read_bit().is_err() {
+                break;
+            }
         }
 
         // Manual read_bits implementation for compatibility
@@ -49,8 +56,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if ok && val == target_value {
-            println!("MATCH FOUND: Bit Offset {} (Raw Bit Index {}, Byte-Relative {})", 
-                (start_offset * 8) + bit_idx, 
+            println!(
+                "MATCH FOUND: Bit Offset {} (Raw Bit Index {}, Byte-Relative {})",
+                (start_offset * 8) + bit_idx,
                 bit_idx,
                 format!("{}.{}", bit_idx / 8, bit_idx % 8)
             );
@@ -59,7 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if !found {
-        println!("No matches found for value {} in the search range.", target_value);
+        println!(
+            "No matches found for value {} in the search range.",
+            target_value
+        );
     }
 
     Ok(())
