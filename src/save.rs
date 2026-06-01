@@ -366,13 +366,20 @@ pub fn patch_skill_section(
 #[derive(Debug, Clone)]
 pub struct ExpansionSection {
     pub raw_bytes: Vec<u8>,
+    pub is_expansion: bool,
 }
 
 impl ExpansionSection {
     pub fn from_slice(slice: &[u8]) -> Self {
         ExpansionSection {
             raw_bytes: slice.to_vec(),
+            is_expansion: true, // Default to true for backward compatibility
         }
+    }
+
+    pub fn with_expansion(mut self, is_expansion: bool) -> Self {
+        self.is_expansion = is_expansion;
+        self
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -383,7 +390,7 @@ impl ExpansionSection {
         if let Some(entry) = crate::data::waypoints::WAYPOINTS.iter().find(|e| e.name == name) {
             // ExpansionSection implementation for waypoints (fallback/legacy)
             // It assumes raw_bytes starts at 'WS' marker (0x2BD) or follows standard WS mapping.
-            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(true);
+            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(self.is_expansion);
             let global_bit_idx = (difficulty as usize * axiom.difficulty_stride_bits) + (10 * 8) + entry.ws_bit as usize;
             let byte_idx = global_bit_idx / 8;
             let bit_in_byte = global_bit_idx % 8;
@@ -396,7 +403,7 @@ impl ExpansionSection {
 
     pub fn set_activated_by_name(&mut self, name: &str, difficulty: u8, active: bool) -> bool {
         if let Some(entry) = crate::data::waypoints::WAYPOINTS.iter().find(|e| e.name == name) {
-            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(true);
+            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(self.is_expansion);
             let global_bit_idx = (difficulty as usize * axiom.difficulty_stride_bits) + (10 * 8) + entry.ws_bit as usize;
             let byte_idx = global_bit_idx / 8;
             let bit_in_byte = global_bit_idx % 8;
@@ -533,6 +540,16 @@ impl Save {
         );
         let char_name = parse_ascii_field(bytes, CHAR_NAME_OFFSET, CHAR_NAME_LEN)?;
 
+        let is_expansion = if version == 105 {
+            if bytes.len() > EXPANSION_FLAG_OFFSET {
+                (bytes[EXPANSION_FLAG_OFFSET] & 0x20) != 0
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+
         let header = Header {
             magic,
             version,
@@ -568,11 +585,6 @@ impl Save {
                 let start = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
                 let end = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
                 if bytes.len() >= start + 2 {
-                    let is_expansion = if bytes.len() > EXPANSION_FLAG_OFFSET {
-                        (bytes[EXPANSION_FLAG_OFFSET] & 0x20) != 0
-                    } else {
-                        true
-                    };
                     Some(WaypointSection::from_slice(&bytes[start..end.min(bytes.len())]).with_expansion(is_expansion))
                 } else {
                     None
@@ -585,7 +597,7 @@ impl Save {
                 let start = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
                 let end = V105SectionMarkerAxiom::V105_HEADER_LEN;
                 if bytes.len() >= start + 2 {
-                    Some(ExpansionSection::from_slice(&bytes[start..end.min(bytes.len())]))
+                    Some(ExpansionSection::from_slice(&bytes[start..end.min(bytes.len())]).with_expansion(is_expansion))
                 } else {
                     None
                 }
