@@ -1,17 +1,27 @@
+use anyhow::{Context, Result};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::sba::SbaBaseline;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use anyhow::{Result, Context};
-use d2r_core::verify::sba::SbaBaseline;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("d2item_atlas_diff")
         .description("Structural differential auditor for SBA baseline JSON files");
-    
-    parser.add_spec(ArgSpec::option("base", None, Some("base"), "Path to base SBA baseline JSON").required());
-    parser.add_spec(ArgSpec::option("target", None, Some("target"), "Path to target SBA baseline JSON").required());
-    
+
+    parser.add_spec(
+        ArgSpec::option("base", None, Some("base"), "Path to base SBA baseline JSON").required(),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "target",
+            None,
+            Some("target"),
+            "Path to target SBA baseline JSON",
+        )
+        .required(),
+    );
+
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
         Ok(p) => p,
@@ -32,7 +42,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("Failed to read base file: {}", base_path))?;
     let target_content = fs::read_to_string(target_path)
         .with_context(|| format!("Failed to read target file: {}", target_path))?;
-    
+
     let base: SbaBaseline = serde_json::from_str(&base_content)
         .with_context(|| "Failed to parse base SBA baseline JSON")?;
     let target: SbaBaseline = serde_json::from_str(&target_content)
@@ -71,8 +81,12 @@ fn main() -> Result<()> {
                 if b.range.start != t.range.start || b.range.end != t.range.end {
                     item_diffs.push(format!(
                         "  [RANGE SHIFT] Start: {} -> {} ({:+}), End: {} -> {} ({:+})",
-                        b.range.start, t.range.start, t.range.start as i64 - b.range.start as i64,
-                        b.range.end, t.range.end, t.range.end as i64 - b.range.end as i64
+                        b.range.start,
+                        t.range.start,
+                        t.range.start as i64 - b.range.start as i64,
+                        b.range.end,
+                        t.range.end,
+                        t.range.end as i64 - b.range.end as i64
                     ));
                 }
 
@@ -88,18 +102,33 @@ fn main() -> Result<()> {
                                 seg_changes.push(format!("Label: {} -> {}", bs.label, ts.label));
                             }
                             if bs.start != ts.start {
-                                seg_changes.push(format!("Start: {} -> {} ({:+})", bs.start, ts.start, ts.start as i32 - bs.start as i32));
+                                seg_changes.push(format!(
+                                    "Start: {} -> {} ({:+})",
+                                    bs.start,
+                                    ts.start,
+                                    ts.start as i32 - bs.start as i32
+                                ));
                             }
                             if bs.end != ts.end {
-                                seg_changes.push(format!("End: {} -> {} ({:+})", bs.end, ts.end, ts.end as i32 - bs.end as i32));
+                                seg_changes.push(format!(
+                                    "End: {} -> {} ({:+})",
+                                    bs.end,
+                                    ts.end,
+                                    ts.end as i32 - bs.end as i32
+                                ));
                             }
 
                             if !seg_changes.is_empty() {
-                                item_diffs.push(format!("  [SEGMENT DIFF] Index {}: {}", i, seg_changes.join(", ")));
+                                item_diffs.push(format!(
+                                    "  [SEGMENT DIFF] Index {}: {}",
+                                    i,
+                                    seg_changes.join(", ")
+                                ));
                             }
                         }
                         (Some(bs), None) => {
-                            item_diffs.push(format!("  [SEGMENT REMOVED] Index {}: {}", i, bs.label));
+                            item_diffs
+                                .push(format!("  [SEGMENT REMOVED] Index {}: {}", i, bs.label));
                         }
                         (None, Some(ts)) => {
                             item_diffs.push(format!("  [SEGMENT NEW] Index {}: {}", i, ts.label));

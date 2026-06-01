@@ -1,6 +1,6 @@
 use bitstream_io::{BitRead, BitReader as IoBitReader, LittleEndian};
 use d2r_core::data::bit_cursor::BitCursor;
-use d2r_core::item::{BitSegment, HuffmanTree, Item, find_next_item_match};
+use d2r_core::item::{BitSegment, HuffmanTree, Item};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
 use serde::Serialize;
@@ -271,21 +271,26 @@ fn main() {
                         }
 
                         if let Some((
-                          mode,
-                          location,
-                          _x,
-                          code,
-                          flags,
-                          version,
-                          _is_compact,
-                          _header_bits,
-                          _nudge,
-                          _has_checksum,
-                        )) = d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true, 0)
-
+                            mode,
+                            location,
+                            _x,
+                            code,
+                            flags,
+                            version,
+                            _is_compact,
+                            _header_bits,
+                            _nudge,
+                            _has_checksum,
+                        )) =
+                            d2r_core::item::peek_item_header_at(&bytes, probe, &huffman, true, 0)
                         {
                             if d2r_core::item::is_plausible_item_header(
-                                mode, location, code.as_bytes(), flags, version, true,
+                                mode,
+                                location,
+                                code.as_bytes(),
+                                flags,
+                                version,
+                                true,
                             ) {
                                 let gap_from_start = probe as i64 - bit_start as i64;
                                 println!(

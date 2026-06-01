@@ -1,12 +1,13 @@
-use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::domain::stats::parser::{
-    clear_socket_recovery_trace_events, set_socket_recovery_trace_enabled, take_socket_recovery_trace_events,
+    clear_socket_recovery_trace_events, set_socket_recovery_trace_enabled,
+    take_socket_recovery_trace_events,
 };
+use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use serde::Serialize;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::env;
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -69,12 +70,54 @@ struct SocketFuzzerReport {
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2item_socket_fuzzer");
     parser.add_spec(ArgSpec::positional("fixture", "Path to the save file (.d2s)").optional());
-    parser.add_spec(ArgSpec::option("parent-code", None, Some("parent-code"), "Item code to track for socket-child recovery").with_default("xrs"));
-    parser.add_spec(ArgSpec::option("expected-children", None, Some("expected-children"), "Expected socket child count for the tracked parent").with_default("3"));
-    parser.add_spec(ArgSpec::option("shift-start", None, Some("shift-start"), "First shift to probe").with_default("0"));
-    parser.add_spec(ArgSpec::option("shift-end", None, Some("shift-end"), "Last shift to probe (inclusive)").with_default("48"));
-    parser.add_spec(ArgSpec::option("seam-bit", None, Some("seam-bit"), "Override the discovered seam bit offset"));
-    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+    parser.add_spec(
+        ArgSpec::option(
+            "parent-code",
+            None,
+            Some("parent-code"),
+            "Item code to track for socket-child recovery",
+        )
+        .with_default("xrs"),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "expected-children",
+            None,
+            Some("expected-children"),
+            "Expected socket child count for the tracked parent",
+        )
+        .with_default("3"),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "shift-start",
+            None,
+            Some("shift-start"),
+            "First shift to probe",
+        )
+        .with_default("0"),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "shift-end",
+            None,
+            Some("shift-end"),
+            "Last shift to probe (inclusive)",
+        )
+        .with_default("48"),
+    );
+    parser.add_spec(ArgSpec::option(
+        "seam-bit",
+        None,
+        Some("seam-bit"),
+        "Override the discovered seam bit offset",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Output results in JSON format",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -89,16 +132,16 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let fixture_path = parsed
-        .get("fixture")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let mut p = PathBuf::from("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
-            if !p.exists() {
-                p = PathBuf::from("d2r-core/tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
-            }
-            p
-        });
+    let fixture_path = parsed.get("fixture").map(PathBuf::from).unwrap_or_else(|| {
+        let mut p =
+            PathBuf::from("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        if !p.exists() {
+            p = PathBuf::from(
+                "d2r-core/tests/fixtures/savegames/original/amazon_authority_runeword.d2s",
+            );
+        }
+        p
+    });
 
     if !fixture_path.exists() {
         anyhow::bail!("fixture path not found: {}", fixture_path.display());
@@ -120,12 +163,11 @@ fn main() -> anyhow::Result<()> {
         .get("shift-end")
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(48);
-    let seam_override = parsed
-        .get("seam-bit")
-        .and_then(|s| s.parse::<u64>().ok());
+    let seam_override = parsed.get("seam-bit").and_then(|s| s.parse::<u64>().ok());
     let use_json = parsed.is_set("json");
 
-    let bytes = fs::read(&fixture_path).map_err(|e| anyhow::anyhow!("Failed to read {}: {}", fixture_path.display(), e))?;
+    let bytes = fs::read(&fixture_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", fixture_path.display(), e))?;
 
     if bytes.len() < 2 {
         anyhow::bail!("fixture is too small to contain a JM anchor");
@@ -139,14 +181,8 @@ fn main() -> anyhow::Result<()> {
     let huffman = HuffmanTree::new();
     let is_alpha = true;
 
-    let initial_items = Item::read_section_ext(
-        &bytes[jm_byte_pos..],
-        anchor,
-        15,
-        &huffman,
-        is_alpha,
-        false,
-    )?;
+    let initial_items =
+        Item::read_section_ext(&bytes[jm_byte_pos..], anchor, 15, &huffman, is_alpha, false)?;
 
     let parent = select_parent(&initial_items, &parent_code)
         .ok_or_else(|| anyhow::anyhow!("No items found to determine seam"))?;
@@ -185,38 +221,37 @@ fn main() -> anyhow::Result<()> {
                 let fallback_entry = filter_trace(&traces, "fallback_entry");
                 let post_loop = filter_trace(&traces, "post_loop");
                 let expected_next_marker = pre_loop.first().and_then(|e| e.next_marker);
-                let observed_next_marker = per_child.first().and_then(|e| e.observed_marker).or_else(|| post_loop.first().and_then(|e| e.observed_marker));
-                let marker_940_actionable = per_child.iter().any(|e| e.observed_marker == Some(940));
+                let observed_next_marker = per_child
+                    .first()
+                    .and_then(|e| e.observed_marker)
+                    .or_else(|| post_loop.first().and_then(|e| e.observed_marker));
+                let marker_940_actionable =
+                    per_child.iter().any(|e| e.observed_marker == Some(940));
                 let exact_parent = find_parent(&items, &parent_code);
                 let fallback_parent = exact_parent.or_else(|| fallback_parent(&items));
                 let selected = fallback_parent;
 
-                let (status, parent_code_seen, mode, parsed_children, child_codes) = if let Some(p) = selected {
-                    let exact = exact_parent.is_some();
-                    let status = if exact {
-                        ProbeStatus::Ok
+                let (status, parent_code_seen, mode, parsed_children, child_codes) =
+                    if let Some(p) = selected {
+                        let exact = exact_parent.is_some();
+                        let status = if exact {
+                            ProbeStatus::Ok
+                        } else {
+                            ProbeStatus::FallbackParent
+                        };
+                        (
+                            status,
+                            Some(p.code().trim().to_string()),
+                            Some(p.header.mode.to_string()),
+                            p.socketed_items.len(),
+                            p.socketed_items
+                                .iter()
+                                .map(|child| child.code().trim().to_string())
+                                .collect::<Vec<_>>(),
+                        )
                     } else {
-                        ProbeStatus::FallbackParent
+                        (ProbeStatus::NoParent, None, None, 0, Vec::new())
                     };
-                    (
-                        status,
-                        Some(p.code().trim().to_string()),
-                        Some(p.header.mode.to_string()),
-                        p.socketed_items.len(),
-                        p.socketed_items
-                            .iter()
-                            .map(|child| child.code().trim().to_string())
-                            .collect::<Vec<_>>(),
-                    )
-                } else {
-                    (
-                        ProbeStatus::NoParent,
-                        None,
-                        None,
-                        0,
-                        Vec::new(),
-                    )
-                };
 
                 probes.push(ShiftProbe {
                     shift,
@@ -286,19 +321,16 @@ fn main() -> anyhow::Result<()> {
     println!("Fixture: {}", report.fixture.display());
     println!(
         "Anchor (JM): {} (byte {}), Seam: {} (source: {})",
-        report.anchor_bit,
-        report.jm_byte_pos,
-        report.seam.bit_offset,
-        report.seam.source
+        report.anchor_bit, report.jm_byte_pos, report.seam.bit_offset, report.seam.source
     );
     println!(
         "Parent code: '{}' expected_children: {} shifts: {}..={}",
-        report.parent_code,
-        report.expected_children,
-        report.shift_start,
-        report.shift_end
+        report.parent_code, report.expected_children, report.shift_start, report.shift_end
     );
-    println!("{:>5} | {:>14} | {:>10} | {:>24} | {:>6}", "Shift", "Status", "Children", "Child codes", "Mode");
+    println!(
+        "{:>5} | {:>14} | {:>10} | {:>24} | {:>6}",
+        "Shift", "Status", "Children", "Child codes", "Mode"
+    );
     println!("{:-<76}", "");
 
     for probe in &report.probes {
@@ -325,11 +357,9 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    if let Some(best) = report
-        .probes
-        .iter()
-        .find(|p| matches!(p.status, ProbeStatus::Ok) && p.parsed_children == report.expected_children)
-    {
+    if let Some(best) = report.probes.iter().find(|p| {
+        matches!(p.status, ProbeStatus::Ok) && p.parsed_children == report.expected_children
+    }) {
         println!(
             "\nFirst exact match: shift={} children={}/{} codes={}",
             best.shift,
@@ -380,7 +410,11 @@ fn discover_seam(bits: &[bool], parent: &Item, anchor: u64) -> SeamDiscovery {
 
 fn select_parent<'a>(items: &'a [Item], parent_code: &str) -> Option<&'a Item> {
     find_parent(items, parent_code)
-        .or_else(|| items.iter().find(|it| it.header.is_runeword && !it.socketed_items.is_empty()))
+        .or_else(|| {
+            items
+                .iter()
+                .find(|it| it.header.is_runeword && !it.socketed_items.is_empty())
+        })
         .or_else(|| items.first())
 }
 
@@ -406,19 +440,19 @@ fn inject_bits(original: &[u8], at_bit: u64, count: u32) -> Vec<u8> {
             bits.push((b >> i) & 1 == 1);
         }
     }
-    
+
     let mut new_bits = Vec::new();
     if at_bit > bits.len() as u64 {
         return original.to_vec();
     }
     let at_bit = at_bit as usize;
-    
+
     new_bits.extend_from_slice(&bits[..at_bit]);
     for _ in 0..count {
         new_bits.push(false); // Inject zeros
     }
     new_bits.extend_from_slice(&bits[at_bit..]);
-    
+
     // Convert back to bytes
     let mut out_bytes = Vec::new();
     for chunk in new_bits.chunks(8) {
@@ -444,18 +478,20 @@ fn to_bits(bytes: &[u8]) -> Vec<bool> {
 }
 
 fn find_marker(bits: &[bool], start_at: usize) -> Option<usize> {
-    if bits.len() < 16 || start_at + 16 > bits.len() { return None; }
+    if bits.len() < 16 || start_at + 16 > bits.len() {
+        return None;
+    }
     // JM marker is 0x4A, 0x4D
     // In bits (LSB first):
     // 0x4A = 01001010 => 0, 1, 0, 1, 0, 0, 1, 0
     // 0x4D = 01001101 => 1, 0, 1, 1, 0, 0, 1, 0
     let marker_bits = [
-        false, true, false, true, false, false, true, false,
-        true, false, true, true, false, false, true, false,
+        false, true, false, true, false, false, true, false, true, false, true, true, false, false,
+        true, false,
     ];
-    
+
     for i in (start_at..=(bits.len() - 16)).step_by(1) {
-        if bits[i..i+16] == marker_bits {
+        if bits[i..i + 16] == marker_bits {
             return Some(i);
         }
     }
@@ -463,7 +499,9 @@ fn find_marker(bits: &[bool], start_at: usize) -> Option<usize> {
 }
 
 fn find_terminator_at(bits: &[bool], start_at: usize) -> Option<usize> {
-    if bits.len() < 9 || start_at + 9 > bits.len() { return None; }
+    if bits.len() < 9 || start_at + 9 > bits.len() {
+        return None;
+    }
     for i in start_at..=(bits.len() - 9) {
         let mut all_ones = true;
         for j in 0..9 {

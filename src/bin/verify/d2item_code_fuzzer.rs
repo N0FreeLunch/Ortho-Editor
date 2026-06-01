@@ -1,5 +1,5 @@
-use d2r_core::verify::args::{ArgParser, ArgError};
 use d2r_core::save::find_jm_markers;
+use d2r_core::verify::args::{ArgError, ArgParser};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -32,11 +32,13 @@ fn main() -> anyhow::Result<()> {
         .description("Fuzzy search for ASCII item codes after JM markers using bit-shifting");
 
     parser.add_arg("save_file", "path to the save file (.d2s)");
-    parser.add_opt("range", "bit range to scan after each JM marker")
+    parser
+        .add_opt("range", "bit range to scan after each JM marker")
         .short('r')
         .long("range")
         .default("1024");
-    parser.add_flag("strict", "restrict printable characters to A-Z, 0-9")
+    parser
+        .add_flag("strict", "restrict printable characters to A-Z, 0-9")
         .short('s')
         .long("strict");
 
@@ -70,7 +72,7 @@ fn main() -> anyhow::Result<()> {
 
         for shift in 0..scan_range {
             let current_bit = start_bit + shift;
-            
+
             for len in [3, 4] {
                 let bit_len = len * 8;
                 if current_bit + bit_len > (bytes.len() * 8) as u64 {
@@ -79,7 +81,7 @@ fn main() -> anyhow::Result<()> {
 
                 let mut code_bytes = Vec::new();
                 let mut valid = true;
-                
+
                 for i in 0..len {
                     let char_start_bit = current_bit + (i * 8);
                     let mut char_byte: u8 = 0;
@@ -90,7 +92,7 @@ fn main() -> anyhow::Result<()> {
                         let bit = (bytes[byte_idx] >> bit_idx) & 1;
                         char_byte |= bit << b;
                     }
-                    
+
                     if is_printable(char_byte, strict) {
                         code_bytes.push(char_byte);
                     } else {
@@ -102,8 +104,9 @@ fn main() -> anyhow::Result<()> {
                 if valid {
                     let code = String::from_utf8_lossy(&code_bytes).to_string();
                     // Basic heuristic: check if it looks like a code
-                    let looks_like_code = code.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ');
-                    
+                    let looks_like_code =
+                        code.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ');
+
                     if looks_like_code {
                         candidates.push(Candidate {
                             bit_offset: current_bit,
@@ -123,7 +126,9 @@ fn main() -> anyhow::Result<()> {
                 let current_bit = start_bit + shift;
                 for len in [3, 4] {
                     let bit_len = len * 8;
-                    if current_bit + bit_len > (bytes.len() * 8) as u64 { continue; }
+                    if current_bit + bit_len > (bytes.len() * 8) as u64 {
+                        continue;
+                    }
                     let mut code_bytes = Vec::new();
                     let mut valid = true;
                     for i in 0..len {
@@ -136,12 +141,22 @@ fn main() -> anyhow::Result<()> {
                             let bit = (bytes[byte_idx] >> bit_idx) & 1;
                             char_byte |= bit << b;
                         }
-                        if is_printable(char_byte, true) { code_bytes.push(char_byte); } else { valid = false; break; }
+                        if is_printable(char_byte, true) {
+                            code_bytes.push(char_byte);
+                        } else {
+                            valid = false;
+                            break;
+                        }
                     }
                     if valid {
                         let code = String::from_utf8_lossy(&code_bytes).to_string();
                         if code.chars().all(|c| c.is_ascii_alphanumeric()) {
-                            strict_candidates.push(Candidate { bit_offset: current_bit, bit_shift: shift, code, hex: hex::encode(&code_bytes) });
+                            strict_candidates.push(Candidate {
+                                bit_offset: current_bit,
+                                bit_shift: shift,
+                                code,
+                                hex: hex::encode(&code_bytes),
+                            });
                         }
                     }
                 }
@@ -162,7 +177,10 @@ fn main() -> anyhow::Result<()> {
         for res in all_results {
             println!("[JM #{}] at bit {}", res.jm_index, res.jm_bit_pos);
             for cand in res.candidates {
-                println!("  Offset {} | Shift {} | Candidate '{}' | Hex {}", cand.bit_offset, cand.bit_shift, cand.code, cand.hex);
+                println!(
+                    "  Offset {} | Shift {} | Candidate '{}' | Hex {}",
+                    cand.bit_offset, cand.bit_shift, cand.code, cand.hex
+                );
             }
             println!("{:-<60}", "");
         }

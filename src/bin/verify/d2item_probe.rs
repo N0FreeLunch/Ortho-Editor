@@ -1,5 +1,5 @@
 use d2r_core::item::{HuffmanTree, Item};
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -19,9 +19,20 @@ struct ProbeResult {
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2item_probe");
     parser = parser.description("Probes bit-level semantics of items in a D2R save file.");
-    parser.add_spec(ArgSpec::positional("fixture", "Path to the .d2s fixture file"));
-    parser.add_spec(ArgSpec::option("offset", Some('o'), Some("offset"), "Bit offset to probe (relative to JM payload)").required());
-    
+    parser.add_spec(ArgSpec::positional(
+        "fixture",
+        "Path to the .d2s fixture file",
+    ));
+    parser.add_spec(
+        ArgSpec::option(
+            "offset",
+            Some('o'),
+            Some("offset"),
+            "Bit offset to probe (relative to JM payload)",
+        )
+        .required(),
+    );
+
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
         Err(ArgError::Help(h)) => {
@@ -35,7 +46,9 @@ fn main() -> anyhow::Result<()> {
 
     let fixture_path = parsed.get("fixture").unwrap();
     let offset_str = parsed.get("offset").unwrap();
-    let offset: u64 = offset_str.parse().map_err(|_| anyhow::anyhow!("Invalid offset: {}", offset_str))?;
+    let offset: u64 = offset_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid offset: {}", offset_str))?;
     let is_json = parsed.is_json();
 
     let bytes = fs::read(fixture_path)?;
@@ -46,14 +59,17 @@ fn main() -> anyhow::Result<()> {
     let items = match Item::read_player_items(&bytes, &huffman, alpha) {
         Ok(items) => items,
         Err(e) => {
-             if is_json {
-                println!("{}", serde_json::to_string(&ProbeResult {
-                    status: "error_parsing_items".to_string(),
-                    offset,
-                    item_index: None,
-                    item_code: None,
-                    label: Some(format!("{:?}", e)),
-                })?);
+            if is_json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&ProbeResult {
+                        status: "error_parsing_items".to_string(),
+                        offset,
+                        item_index: None,
+                        item_code: None,
+                        label: Some(format!("{:?}", e)),
+                    })?
+                );
                 return Ok(());
             } else {
                 anyhow::bail!("Failed to read player items: {:?}", e);
@@ -72,7 +88,11 @@ fn main() -> anyhow::Result<()> {
     if let Some((idx, item)) = found_item {
         let semantic = item.query_bit(offset);
         let result = ProbeResult {
-            status: if semantic.is_some() { "ok".to_string() } else { "unmapped".to_string() },
+            status: if semantic.is_some() {
+                "ok".to_string()
+            } else {
+                "unmapped".to_string()
+            },
             offset,
             item_index: Some(idx),
             item_code: Some(item.code.clone()),
@@ -85,7 +105,10 @@ fn main() -> anyhow::Result<()> {
             println!("Hit found at offset {}:", offset);
             println!("  Item Index: {}", idx);
             println!("  Item Code:  {}", item.code);
-            println!("  Label:      {}", result.label.as_deref().unwrap_or("Unmapped/Unknown"));
+            println!(
+                "  Label:      {}",
+                result.label.as_deref().unwrap_or("Unmapped/Unknown")
+            );
         }
     } else {
         let result = ProbeResult {

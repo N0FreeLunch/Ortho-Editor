@@ -201,8 +201,18 @@ fn main() {
     let mut parser = ArgParser::new("d2item_inspect")
         .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
     parser.add_spec(ArgSpec::positional("file", "Path to .d2i or .d2s file"));
-    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
-    parser.add_spec(ArgSpec::option("bit-offset", None, Some("bit-offset"), "Start parsing at specific bit offset"));
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Output results in JSON format",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "bit-offset",
+        None,
+        Some("bit-offset"),
+        "Start parsing at specific bit offset",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -218,13 +228,18 @@ fn main() {
 
     let path = parsed.get("file").unwrap();
     let is_json = parsed.is_json();
-    let bit_offset = parsed.get("bit-offset").and_then(|s| s.parse::<usize>().ok());
+    let bit_offset = parsed
+        .get("bit-offset")
+        .and_then(|s| s.parse::<usize>().ok());
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) => {
             if is_json {
-                println!("{}", json!({"errors": [format!("Failed to read file: {}", e)]}));
+                println!(
+                    "{}",
+                    json!({"errors": [format!("Failed to read file: {}", e)]})
+                );
             } else {
                 eprintln!("Failed to read file: {}", e);
             }
@@ -248,18 +263,33 @@ fn main() {
                 let bit_end = reader.position_in_bits().unwrap_or(0) as usize;
 
                 if is_json {
-                    println!("{}", json!({ "item": item_to_json(&item), "errors": [], "range": {"start": offset, "end": bit_end} }));
+                    println!(
+                        "{}",
+                        json!({ "item": item_to_json(&item), "errors": [], "range": {"start": offset, "end": bit_end} })
+                    );
                 } else {
-                    println!("Parsed item at offset {}: '{}' bits {}-{} loc={} quality={:?}", offset, item.code, offset, bit_end, item.location, item.header.quality);
+                    println!(
+                        "Parsed item at offset {}: '{}' bits {}-{} loc={} quality={:?}",
+                        offset, item.code, offset, bit_end, item.location, item.header.quality
+                    );
                     for prop in &item.properties {
-                        println!("  Prop: id={} value={} param={} bits {}-{}", 
-                            prop.stat_id, prop.raw_value, prop.param, prop.range.start, prop.range.end);
+                        println!(
+                            "  Prop: id={} value={} param={} bits {}-{}",
+                            prop.stat_id,
+                            prop.raw_value,
+                            prop.param,
+                            prop.range.start,
+                            prop.range.end
+                        );
                     }
                 }
             }
             Err(e) => {
                 if is_json {
-                    println!("{}", json!({ "errors": [format!("Error at offset {}: {}", offset, e)] }));
+                    println!(
+                        "{}",
+                        json!({ "errors": [format!("Error at offset {}: {}", offset, e)] })
+                    );
                 } else {
                     eprintln!("Error at offset {}: {}", offset, e);
                     analyze_non_compact_item(&bytes, offset, &huffman);
@@ -276,19 +306,29 @@ fn main() {
             println!("{}", json!({"items": item_objs, "errors": []}));
             return;
         }
-        
+
         println!(
             "Library parse recovered {} top-level items from player section",
             items.len()
         );
         for (i, item) in items.iter().enumerate() {
             println!(
-                "Item {:2}: '{:4}' mode={} loc={} flags=0x{:08X} name={:?} children={} range={}-{}", 
-                i, item.code, item.header.mode, item.header.location, item.flags, item.personalized_player_name, item.socketed_items.len(), item.range.start, item.range.end
+                "Item {:2}: '{:4}' mode={} loc={} flags=0x{:08X} name={:?} children={} range={}-{}",
+                i,
+                item.code,
+                item.header.mode,
+                item.header.location,
+                item.flags,
+                item.personalized_player_name,
+                item.socketed_items.len(),
+                item.range.start,
+                item.range.end
             );
             for prop in &item.properties {
-                println!("  Prop: id={} value={} param={} bits {}-{}", 
-                    prop.stat_id, prop.raw_value, prop.param, prop.range.start, prop.range.end);
+                println!(
+                    "  Prop: id={} value={} param={} bits {}-{}",
+                    prop.stat_id, prop.raw_value, prop.param, prop.range.start, prop.range.end
+                );
             }
 
             for (socket_index, child) in item.socketed_items.iter().enumerate() {
@@ -302,13 +342,13 @@ fn main() {
     }
 
     // 2. Fallback: search for JM markers or treat as raw item
-    let jm_pos = (0..bytes.len().saturating_sub(2))
-        .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M');
+    let jm_pos =
+        (0..bytes.len().saturating_sub(2)).find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M');
 
     let (section_bytes, jm_offset_bits, item_count) = if let Some(pos) = jm_pos {
         let count = u16::from_le_bytes([
             bytes.get(pos + 2).cloned().unwrap_or(0),
-            bytes.get(pos + 3).cloned().unwrap_or(0)
+            bytes.get(pos + 3).cloned().unwrap_or(0),
         ]);
         let next_jm = (pos + 4..bytes.len().saturating_sub(1))
             .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
@@ -340,7 +380,10 @@ fn main() {
                     if let Some((_, _, parent)) = visible_items.last_mut() {
                         parent.socketed_items.push(item);
                     } else {
-                        errors.push(format!("Error at raw item {}: socketed item without a parent", raw_index));
+                        errors.push(format!(
+                            "Error at raw item {}: socketed item without a parent",
+                            raw_index
+                        ));
                         break;
                     }
                 } else {
@@ -362,7 +405,10 @@ fn main() {
     }
 
     if is_json {
-        let item_objs: Vec<_> = visible_items.iter().map(|(_, _, it)| item_to_json(it)).collect();
+        let item_objs: Vec<_> = visible_items
+            .iter()
+            .map(|(_, _, it)| item_to_json(it))
+            .collect();
         if item_objs.len() == 1 {
             println!("{}", json!({ "item": item_objs[0], "errors": errors }));
         } else {

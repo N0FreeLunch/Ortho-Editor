@@ -1,18 +1,24 @@
 use bitstream_io::{BitReader, LittleEndian};
 use d2r_core::data::bit_cursor::BitCursor;
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::io::{self, Cursor};
 use std::process;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn main() {
-    let mut parser = ArgParser::new("d2item_bit_align")
-        .description("Analyzes bit-level similarity between actual item bits and expected re-serialized bits");
+    let mut parser = ArgParser::new("d2item_bit_align").description(
+        "Analyzes bit-level similarity between actual item bits and expected re-serialized bits",
+    );
 
-    parser.add_spec(ArgSpec::positional("save_file", "path to the save file (.d2s)"));
-    parser.add_spec(ArgSpec::positional("item_index", "optional index of the item to align").optional());
+    parser.add_spec(ArgSpec::positional(
+        "save_file",
+        "path to the save file (.d2s)",
+    ));
+    parser.add_spec(
+        ArgSpec::positional("item_index", "optional index of the item to align").optional(),
+    );
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -28,7 +34,9 @@ fn main() {
     };
 
     let path = parsed.get("save_file").unwrap();
-    let target_idx = parsed.get("item_index").and_then(|s| s.parse::<usize>().ok());
+    let target_idx = parsed
+        .get("item_index")
+        .and_then(|s| s.parse::<usize>().ok());
     let mut om = d2r_core::verify::OutputManager::new("d2item_bit_align", &parsed);
 
     let bytes = fs::read(path).expect("failed to read save file");
@@ -46,7 +54,12 @@ fn main() {
     }
 }
 
-fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree, om: &mut d2r_core::verify::OutputManager) -> io::Result<()> {
+fn run_align_report(
+    items: &[Item],
+    item_index: usize,
+    huffman: &HuffmanTree,
+    om: &mut d2r_core::verify::OutputManager,
+) -> io::Result<()> {
     let item = &items[item_index];
     let actual: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
 
@@ -70,7 +83,12 @@ fn run_align_report(items: &[Item], item_index: usize, huffman: &HuffmanTree, om
     let aligner = BitAligner::new(2, -1, -3, -1);
     let result = aligner.align(&actual, &expected);
 
-    om.summary(&format!("Item {} [{}]: Similarity {}%", item_index, item.code.trim(), result.similarity_pct()));
+    om.summary(&format!(
+        "Item {} [{}]: Similarity {}%",
+        item_index,
+        item.code.trim(),
+        result.similarity_pct()
+    ));
     Ok(())
 }
 
@@ -83,16 +101,27 @@ struct BitAligner {
 
 impl BitAligner {
     fn new(m: i32, mis: i32, go: i32, ge: i32) -> Self {
-        BitAligner { match_score: m, mismatch_score: mis, gap_open: go, gap_extend: ge }
+        BitAligner {
+            match_score: m,
+            mismatch_score: mis,
+            gap_open: go,
+            gap_extend: ge,
+        }
     }
 
     fn align(&self, a: &[bool], b: &[bool]) -> AlignResult {
         // Simple mock aligner for now
         let mut matches = 0;
         for i in 0..a.len().min(b.len()) {
-            if a[i] == b[i] { matches += 1; }
+            if a[i] == b[i] {
+                matches += 1;
+            }
         }
-        AlignResult { matches, a_len: a.len(), b_len: b.len() }
+        AlignResult {
+            matches,
+            a_len: a.len(),
+            b_len: b.len(),
+        }
     }
 }
 

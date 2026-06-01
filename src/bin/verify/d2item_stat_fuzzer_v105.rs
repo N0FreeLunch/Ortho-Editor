@@ -24,10 +24,30 @@ struct Candidate {
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2item_stat_fuzzer_v105");
-    parser.add_spec(ArgSpec::option("fixture", Some('f'), Some("fixture"), "Path to the save game fixture"));
-    parser.add_spec(ArgSpec::option("stat", Some('s'), Some("stat"), "Stat ID to fuzz"));
-    parser.add_spec(ArgSpec::option("range", Some('r'), Some("range"), "Bit width range (e.g. 8..32)"));
-    parser.add_spec(ArgSpec::option("item-index", Some('i'), Some("item-index"), "Target specific item index"));
+    parser.add_spec(ArgSpec::option(
+        "fixture",
+        Some('f'),
+        Some("fixture"),
+        "Path to the save game fixture",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "stat",
+        Some('s'),
+        Some("stat"),
+        "Stat ID to fuzz",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "range",
+        Some('r'),
+        Some("range"),
+        "Bit width range (e.g. 8..32)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "item-index",
+        Some('i'),
+        Some("item-index"),
+        "Target specific item index",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -56,7 +76,10 @@ fn main() -> anyhow::Result<()> {
         vec![range_str.parse().expect("Invalid range value")]
     };
 
-    println!("Fuzzing stat {} over range {:?} using fixture {}", stat_id, range, fixture_path);
+    println!(
+        "Fuzzing stat {} over range {:?} using fixture {}",
+        stat_id, range, fixture_path
+    );
 
     let mut results = FuzzResult {
         stat_id,
@@ -85,7 +108,10 @@ fn main() -> anyhow::Result<()> {
         let temp_constants_dir = temp_dir.join("constants");
         fs::create_dir_all(&temp_constants_dir)?;
         let temp_json_path = temp_constants_dir.join("alpha_v105_forensics.json");
-        fs::write(&temp_json_path, serde_json::to_string_pretty(&temp_registry)?)?;
+        fs::write(
+            &temp_json_path,
+            serde_json::to_string_pretty(&temp_registry)?,
+        )?;
 
         // Run audit
         let mut cmd = Command::new("cargo");
@@ -96,7 +122,7 @@ fn main() -> anyhow::Result<()> {
             .arg("--")
             .arg(fixture_path)
             .arg("--json");
-        
+
         if let Some(idx) = item_index {
             cmd.arg("--target").arg(idx);
         }
@@ -105,14 +131,14 @@ fn main() -> anyhow::Result<()> {
 
         let output = cmd.output()?;
         let exit_code = output.status.code().unwrap_or(-1);
-        
+
         let mut is_match = false;
         let mut fidelity = 0.0;
 
         if output.status.success() || !output.stdout.is_empty() {
             if let Ok(report) = serde_json::from_slice::<Value>(&output.stdout) {
                 is_match = report["success"].as_bool().unwrap_or(false);
-                
+
                 // If targeting an item, check if THAT item matches
                 if item_index.is_some() {
                     if let Some(items) = report["items"].as_array() {
@@ -170,7 +196,10 @@ fn patch_registry(registry: &mut Value, stat_id: u32, width: u32) {
     // 3. If neither exists, add to stats as a new entry
     if let Some(stats) = registry["stats"].as_object_mut() {
         let mut new_stat = serde_json::Map::new();
-        new_stat.insert("name".to_string(), Value::from(format!("fuzzed_stat_{}", stat_id)));
+        new_stat.insert(
+            "name".to_string(),
+            Value::from(format!("fuzzed_stat_{}", stat_id)),
+        );
         new_stat.insert("width".to_string(), Value::from(width));
         stats.insert(stat_id_str, Value::Object(new_stat));
     }

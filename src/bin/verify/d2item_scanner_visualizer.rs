@@ -1,8 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use d2r_core::domain::forensic::registry::get_registry;
+use d2r_core::domain::item::scanner::{ItemMarker, MarkerStatus, scan_item_markers};
 use d2r_core::domain::stats::lookup_alpha_map_by_raw;
-use d2r_core::domain::item::scanner::{scan_item_markers, ItemMarker, MarkerStatus};
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -100,7 +100,12 @@ fn main() -> Result<()> {
         .description("Timeline visualization of scanner markers vs parser boundaries");
 
     parser.add_spec(ArgSpec::positional("file", "Path to D2S save file").required());
-    parser.add_spec(ArgSpec::flag("alpha", Some('a'), Some("alpha"), "Enable Alpha v105 mode"));
+    parser.add_spec(ArgSpec::flag(
+        "alpha",
+        Some('a'),
+        Some("alpha"),
+        "Enable Alpha v105 mode",
+    ));
     parser.add_spec(ArgSpec::flag(
         "visual-gap",
         None,
@@ -136,8 +141,8 @@ fn main() -> Result<()> {
         bail!("--visual-gap and --json-timeline cannot be used together");
     }
 
-    let bytes = fs::read(file_path)
-        .with_context(|| format!("Failed to read file: {}", file_path))?;
+    let bytes =
+        fs::read(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
 
     let huffman = HuffmanTree::new();
     let registry = get_registry();
@@ -281,7 +286,8 @@ fn build_timeline(
 
     for marker in &context.markers {
         let absolute_offset = context.section_bit_offset + marker.offset;
-        let orphan_status = marker_orphan_status(marker, absolute_offset, &context.items, &parsed_ranges);
+        let orphan_status =
+            marker_orphan_status(marker, absolute_offset, &context.items, &parsed_ranges);
         timeline.push(TimelineEntry {
             offset: absolute_offset,
             event: TimelineEvent::ScannerMarker {
@@ -326,7 +332,11 @@ fn summarize_section(context: &SectionContext) -> SectionSummary {
         .filter(|m| m.status == MarkerStatus::Phantom)
         .count();
 
-    let item_ranges: Vec<(u64, u64)> = context.items.iter().map(|item| (item.range.start, item.range.end)).collect();
+    let item_ranges: Vec<(u64, u64)> = context
+        .items
+        .iter()
+        .map(|item| (item.range.start, item.range.end))
+        .collect();
     let marker_inside_item_range = context
         .markers
         .iter()
@@ -365,7 +375,11 @@ fn summarize_section(context: &SectionContext) -> SectionSummary {
         rejected_markers,
         phantom_markers,
         items: context.items.len(),
-        residue_items: context.items.iter().filter(|item| item.is_residue()).count(),
+        residue_items: context
+            .items
+            .iter()
+            .filter(|item| item.is_residue())
+            .count(),
         marker_inside_item_range,
         accepted_markers_outside_range,
         item_starts_without_accepted_marker,
@@ -392,7 +406,10 @@ fn marker_orphan_status(
     None
 }
 
-fn build_registry_tags(code: &str, registry: &d2r_core::domain::forensic::registry::AlphaForensics) -> Vec<String> {
+fn build_registry_tags(
+    code: &str,
+    registry: &d2r_core::domain::forensic::registry::AlphaForensics,
+) -> Vec<String> {
     let trimmed = code.trim();
     let mut tags = Vec::new();
 
@@ -431,7 +448,13 @@ fn build_registry_tags(code: &str, registry: &d2r_core::domain::forensic::regist
 
     if let Some(overrides) = &registry.item_overrides {
         if let Some(item_map) = overrides.get(trimmed) {
-            for key in ["fixed_width", "header_gap", "is_compact", "is_shadow", "is_authority_overlap"] {
+            for key in [
+                "fixed_width",
+                "header_gap",
+                "is_compact",
+                "is_shadow",
+                "is_authority_overlap",
+            ] {
                 if let Some(value) = item_map.get(key) {
                     tags.push(format!("override:{}={}", key, value));
                 }
@@ -439,7 +462,11 @@ fn build_registry_tags(code: &str, registry: &d2r_core::domain::forensic::regist
         }
     }
 
-    if let Some(nudge) = registry.scanner_nudges.as_ref().and_then(|nudges| nudges.get(trimmed)) {
+    if let Some(nudge) = registry
+        .scanner_nudges
+        .as_ref()
+        .and_then(|nudges| nudges.get(trimmed))
+    {
         tags.push(format!("scanner_nudge={}", nudge));
     }
 
@@ -467,7 +494,11 @@ fn build_stat_validation_tags(item: &Item) -> (Vec<String>, bool) {
             if prop.name.trim().is_empty() {
                 tags.push(format!("{source}:{}->unmapped", prop.stat_id));
             } else {
-                tags.push(format!("{source}:{}->{} [unmapped]", prop.stat_id, prop.name.trim()));
+                tags.push(format!(
+                    "{source}:{}->{} [unmapped]",
+                    prop.stat_id,
+                    prop.name.trim()
+                ));
             }
         }
     }
@@ -503,14 +534,13 @@ fn print_text_report(
     println!("Found {} JM sections", section_reports.len());
 
     for report in section_reports {
-        let section_size_bits = report.section_end_bit.saturating_sub(report.section_bit_offset);
+        let section_size_bits = report
+            .section_end_bit
+            .saturating_sub(report.section_bit_offset);
         let section_label = section_label(report.index);
         println!(
             "\nSection {} ({section_label} | JM at byte {} | offset {} bits, count={})",
-            report.index,
-            report.jm_offset,
-            report.section_bit_offset,
-            report.expected_count
+            report.index, report.jm_offset, report.section_bit_offset, report.expected_count
         );
         if let Some(err) = &report.parse_error {
             println!("  [ERROR] Failed to parse items: {}", err);
@@ -531,11 +561,7 @@ fn print_text_report(
                 alpha_mode,
             );
 
-            let visual_cell = if visual_gap {
-                visual
-            } else {
-                String::new()
-            };
+            let visual_cell = if visual_gap { visual } else { String::new() };
 
             let line = format!(
                 "{:<10} | {:<12} | {:<30} | {:<18} | {:<20}",
@@ -552,7 +578,8 @@ fn print_text_report(
         if visual_gap {
             println!("\n    [GAP GRID]");
             for entry in &report.timeline {
-                let (label, bar, style) = render_gap_bar(entry, report.section_bit_offset, report.section_end_bit);
+                let (label, bar, style) =
+                    render_gap_bar(entry, report.section_bit_offset, report.section_end_bit);
                 if let Some(style_fn) = style {
                     println!("    {:<16} {}", label, style_fn(&bar));
                 } else {
@@ -674,7 +701,13 @@ fn render_text_entry(
                 content.push_str(&format!(", stat_tags={}", stat_tags.join("|")));
             }
             visual = if visual_gap {
-                render_span_bar(section_start, section_end, *range_start, *range_end, *is_residue)
+                render_span_bar(
+                    section_start,
+                    section_end,
+                    *range_start,
+                    *range_end,
+                    *is_residue,
+                )
             } else {
                 String::new()
             };
@@ -710,7 +743,13 @@ fn render_text_entry(
                 content.push_str(&format!(", stat_tags={}", stat_tags.join("|")));
             }
             visual = if visual_gap {
-                render_span_bar(section_start, section_end, *range_start, *range_end, *is_residue)
+                render_span_bar(
+                    section_start,
+                    section_end,
+                    *range_start,
+                    *range_end,
+                    *is_residue,
+                )
             } else {
                 String::new()
             };
@@ -749,7 +788,13 @@ fn render_gap_bar(
             ..
         } => {
             let label = format!("item {}", code.trim());
-            let bar = render_span_bar(section_start, section_end, *range_start, *range_end, *is_residue);
+            let bar = render_span_bar(
+                section_start,
+                section_end,
+                *range_start,
+                *range_end,
+                *is_residue,
+            );
             let style = Some(if *is_residue {
                 |s: &str| s.yellow().to_string()
             } else {
@@ -765,7 +810,13 @@ fn render_gap_bar(
             ..
         } => {
             let label = format!("item-end {}", code.trim());
-            let bar = render_span_bar(section_start, section_end, *range_start, *range_end, *is_residue);
+            let bar = render_span_bar(
+                section_start,
+                section_end,
+                *range_start,
+                *range_end,
+                *is_residue,
+            );
             let style = Some(if *is_residue {
                 |s: &str| s.yellow().to_string()
             } else {
@@ -776,7 +827,12 @@ fn render_gap_bar(
     }
 }
 
-fn render_point_bar(section_start: u64, section_end: u64, point: u64, status: &MarkerStatus) -> String {
+fn render_point_bar(
+    section_start: u64,
+    section_end: u64,
+    point: u64,
+    status: &MarkerStatus,
+) -> String {
     let mut bar = build_grid_bar(section_start, section_end);
     let pos = relative_position(section_start, section_end, point);
     if !bar.is_empty() {
@@ -790,7 +846,13 @@ fn render_point_bar(section_start: u64, section_end: u64, point: u64, status: &M
     }
 }
 
-fn render_span_bar(section_start: u64, section_end: u64, start: u64, end: u64, residue: bool) -> String {
+fn render_span_bar(
+    section_start: u64,
+    section_end: u64,
+    start: u64,
+    end: u64,
+    residue: bool,
+) -> String {
     let mut bar = build_grid_bar(section_start, section_end);
     let start_pos = relative_position(section_start, section_end, start);
     let end_pos = relative_position(section_start, section_end, end.saturating_sub(1).max(start));

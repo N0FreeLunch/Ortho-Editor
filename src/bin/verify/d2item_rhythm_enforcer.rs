@@ -1,19 +1,41 @@
-use std::fs;
-use std::env;
-use std::process;
-use d2r_core::verify::args::{ArgParser, ArgError};
 use d2r_core::engine::checksum::Checksum;
+use d2r_core::verify::args::{ArgError, ArgParser};
+use std::env;
+use std::fs;
+use std::process;
 
 fn main() {
-    let mut parser = ArgParser::new("d2item_rhythm_enforcer")
-        .description("Surgically inserts or removes padding bytes in a save file to realign bitstream rhythms.");
+    let mut parser = ArgParser::new("d2item_rhythm_enforcer").description(
+        "Surgically inserts or removes padding bytes in a save file to realign bitstream rhythms.",
+    );
 
     parser.add_arg("input", "Path to the input save file (.d2s)");
     parser.add_arg("output", "Path to the output save file");
-    parser.add_opt("insert", "Insert N bytes of 0x00 at OFFSET. Format: OFFSET[:COUNT]").short('i').long("insert");
-    parser.add_opt("remove", "Remove N bytes at OFFSET. Format: OFFSET[:COUNT]").short('r').long("remove");
-    parser.add_flag("fix-checksum", "Recalculate and update the D2S checksum after surgery").short('c').long("fix-checksum");
-    parser.add_flag("fix-size", "Update the file size field in the D2S header after surgery").short('s').long("fix-size");
+    parser
+        .add_opt(
+            "insert",
+            "Insert N bytes of 0x00 at OFFSET. Format: OFFSET[:COUNT]",
+        )
+        .short('i')
+        .long("insert");
+    parser
+        .add_opt("remove", "Remove N bytes at OFFSET. Format: OFFSET[:COUNT]")
+        .short('r')
+        .long("remove");
+    parser
+        .add_flag(
+            "fix-checksum",
+            "Recalculate and update the D2S checksum after surgery",
+        )
+        .short('c')
+        .long("fix-checksum");
+    parser
+        .add_flag(
+            "fix-size",
+            "Update the file size field in the D2S header after surgery",
+        )
+        .short('s')
+        .long("fix-size");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -30,16 +52,20 @@ fn main() {
 
     let input_path = parsed.get("input").unwrap();
     let output_path = parsed.get("output").unwrap();
-    
+
     let mut bytes = fs::read(input_path).expect("Failed to read input file");
-    
+
     let mut ops = Vec::new();
 
     if let Some(inserts) = parsed.get_all("insert") {
         for s in inserts {
             let parts: Vec<&str> = s.split(':').collect();
             let offset = parts[0].parse::<usize>().expect("Invalid insert offset");
-            let count = if parts.len() > 1 { parts[1].parse::<usize>().expect("Invalid insert count") } else { 1 };
+            let count = if parts.len() > 1 {
+                parts[1].parse::<usize>().expect("Invalid insert count")
+            } else {
+                1
+            };
             ops.push((offset, count, true));
         }
     }
@@ -48,7 +74,11 @@ fn main() {
         for s in removes {
             let parts: Vec<&str> = s.split(':').collect();
             let offset = parts[0].parse::<usize>().expect("Invalid remove offset");
-            let count = if parts.len() > 1 { parts[1].parse::<usize>().expect("Invalid remove count") } else { 1 };
+            let count = if parts.len() > 1 {
+                parts[1].parse::<usize>().expect("Invalid remove count")
+            } else {
+                1
+            };
             ops.push((offset, count, false));
         }
     }
@@ -59,7 +89,11 @@ fn main() {
     for (offset, count, is_insert) in ops {
         if is_insert {
             if offset > bytes.len() {
-                eprintln!("[WARN] Insert offset {} is beyond file size {}, skipping.", offset, bytes.len());
+                eprintln!(
+                    "[WARN] Insert offset {} is beyond file size {}, skipping.",
+                    offset,
+                    bytes.len()
+                );
                 continue;
             }
             let padding = vec![0u8; count];
@@ -67,7 +101,12 @@ fn main() {
             println!("[SURGERY] Inserted {} bytes at offset {}", count, offset);
         } else {
             if offset + count > bytes.len() {
-                eprintln!("[WARN] Remove range {}-{} is beyond file size {}, skipping.", offset, offset + count, bytes.len());
+                eprintln!(
+                    "[WARN] Remove range {}-{} is beyond file size {}, skipping.",
+                    offset,
+                    offset + count,
+                    bytes.len()
+                );
                 continue;
             }
             bytes.drain(offset..offset + count);

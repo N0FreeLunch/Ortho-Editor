@@ -1,18 +1,31 @@
 use bitstream_io::BitRead;
 use d2r_core::item::{HuffmanTree, Item, ItemQuality};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::io;
 use std::process;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
 
 fn main() -> io::Result<()> {
     let mut parser = ArgParser::new("d2item_chunk_verify")
         .description("Analyzes save file structure and character progression, with optional item detail/range view");
 
-    parser.add_spec(ArgSpec::positional("save_file", "path to the save file (.d2s)"));
-    parser.add_spec(ArgSpec::option("range", Some('r'), Some("range"), "scan summary range encoded as START..END (default: 0..10)"));
-    parser.add_spec(ArgSpec::option("detail", Some('d'), Some("detail"), "item index for detail view"));
+    parser.add_spec(ArgSpec::positional(
+        "save_file",
+        "path to the save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "range",
+        Some('r'),
+        Some("range"),
+        "scan summary range encoded as START..END (default: 0..10)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "detail",
+        Some('d'),
+        Some("detail"),
+        "item index for detail view",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -210,9 +223,11 @@ fn main() -> io::Result<()> {
         println!("Completed Quests:");
         let mut completed_any = false;
         if let Some(ref quests) = save.header.quests {
-            let normal_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE + d2r_core::domain::progression::axiom::V105QuestAxiom::normal_start();
-            let act5_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE + d2r_core::domain::progression::axiom::V105QuestAxiom::act5_start();
-            
+            let normal_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE
+                + d2r_core::domain::progression::axiom::V105QuestAxiom::normal_start();
+            let act5_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE
+                + d2r_core::domain::progression::axiom::V105QuestAxiom::act5_start();
+
             for quest in d2r_core::data::quests::V105_QUESTS {
                 if quests.is_v105_completed_by_name(quest.name, normal_anchor, act5_anchor) {
                     let diff_str = match quest.difficulty {
@@ -234,7 +249,8 @@ fn main() -> io::Result<()> {
         // Waypoints
         println!("Activated Waypoints:");
         let mut wp_any = false;
-        let wp_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE + d2r_core::domain::progression::axiom::V105WaypointAxiom::start_offset();
+        let wp_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE
+            + d2r_core::domain::progression::axiom::V105WaypointAxiom::start_offset();
 
         for diff in 0..3 {
             let mut diff_wps = Vec::new();
@@ -331,7 +347,8 @@ fn main() -> io::Result<()> {
             }
 
             let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-            let result = Item::read_section(section_data, 0, count_val, &huffman, version == 105, false);        
+            let result =
+                Item::read_section(section_data, 0, count_val, &huffman, version == 105, false);
 
             match result {
                 Ok(sect_items) => all_items.extend(sect_items),

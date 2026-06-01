@@ -41,7 +41,8 @@ fn main() {
 
     let bytes = fs::read(file_path).expect("failed to read save file");
 
-    let mut reader = IoBitReader::endian(Cursor::new(&bytes[(offset / 8) as usize..]), LittleEndian);
+    let mut reader =
+        IoBitReader::endian(Cursor::new(&bytes[(offset / 8) as usize..]), LittleEndian);
     let mut recorder = BitCursor::new(&mut reader);
     let _ = recorder.skip_and_record((offset % 8) as u32);
 

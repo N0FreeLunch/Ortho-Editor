@@ -1,6 +1,6 @@
 use d2r_core::algo::alignment::BitAligner;
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -9,12 +9,37 @@ use std::process;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2item_bit_diff")
         .description("Semantic and bit-level differential auditor for items");
-    
-    parser.add_spec(ArgSpec::option("save1", None, Some("save1"), "Path to first save file").required());
-    parser.add_spec(ArgSpec::option("index1", None, Some("index1"), "Item index in first save file").required());
-    parser.add_spec(ArgSpec::option("save2", None, Some("save2"), "Path to second save file").required());
-    parser.add_spec(ArgSpec::option("index2", None, Some("index2"), "Item index in second save file").required());
-    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+
+    parser.add_spec(
+        ArgSpec::option("save1", None, Some("save1"), "Path to first save file").required(),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "index1",
+            None,
+            Some("index1"),
+            "Item index in first save file",
+        )
+        .required(),
+    );
+    parser.add_spec(
+        ArgSpec::option("save2", None, Some("save2"), "Path to second save file").required(),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "index2",
+            None,
+            Some("index2"),
+            "Item index in second save file",
+        )
+        .required(),
+    );
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Output results in JSON format",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -30,9 +55,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let save1_path = parsed.get("save1").unwrap();
-    let index1: usize = parsed.get("index1").unwrap().parse().expect("index1 must be a number");
+    let index1: usize = parsed
+        .get("index1")
+        .unwrap()
+        .parse()
+        .expect("index1 must be a number");
     let save2_path = parsed.get("save2").unwrap();
-    let index2: usize = parsed.get("index2").unwrap().parse().expect("index2 must be a number");
+    let index2: usize = parsed
+        .get("index2")
+        .unwrap()
+        .parse()
+        .expect("index2 must be a number");
     let use_json = parsed.is_set("json");
 
     let bytes1 = fs::read(save1_path)?;
@@ -69,13 +102,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("--- Bitstream Alignment Diff ---");
         println!(
             "Item A: {} #{} ({})",
-            Path::new(save1_path).file_name().unwrap_or_default().to_string_lossy(),
+            Path::new(save1_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             index1,
             item1.code.trim()
         );
         println!(
             "Item B: {} #{} ({})",
-            Path::new(save2_path).file_name().unwrap_or_default().to_string_lossy(),
+            Path::new(save2_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             index2,
             item2.code.trim()
         );
@@ -95,14 +134,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("--------------------------------");
         println!("{}", result.pretty_print());
         println!("--------------------------------");
-        
+
         println!("\n--- Semantic Diff ---");
         print_semantic_diff(item1, item2);
         println!("--------------------------------");
     } else {
         let mut diffs = Vec::new();
         get_semantic_diffs(item1, item2, &mut diffs);
-        
+
         let output = serde_json::json!({
             "score": result.score,
             "similarity": result.similarity_pct(),
@@ -126,7 +165,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn get_semantic_diffs(a: &Item, b: &Item, diffs: &mut Vec<String>) {
     if a.header.version != b.header.version {
-        diffs.push(format!("[HEADER] Version: {} -> {}", a.header.version, b.header.version));
+        diffs.push(format!(
+            "[HEADER] Version: {} -> {}",
+            a.header.version, b.header.version
+        ));
     }
     if a.code != b.code {
         diffs.push(format!("[CODE] {} -> {}", a.code.trim(), b.code.trim()));
@@ -135,33 +177,58 @@ fn get_semantic_diffs(a: &Item, b: &Item, diffs: &mut Vec<String>) {
         diffs.push(format!("[ID] {:?} -> {:?}", a.header.id, b.header.id));
     }
     if a.header.level != b.header.level {
-        diffs.push(format!("[LEVEL] {:?} -> {:?}", a.header.level, b.header.level));
+        diffs.push(format!(
+            "[LEVEL] {:?} -> {:?}",
+            a.header.level, b.header.level
+        ));
     }
     if a.header.quality != b.header.quality {
-        diffs.push(format!("[QUALITY] {:?} -> {:?}", a.header.quality, b.header.quality));
+        diffs.push(format!(
+            "[QUALITY] {:?} -> {:?}",
+            a.header.quality, b.header.quality
+        ));
     }
     if a.header.flags != b.header.flags {
-        diffs.push(format!("[FLAGS] 0x{:08X} -> 0x{:08X}", a.header.flags, b.header.flags));
+        diffs.push(format!(
+            "[FLAGS] 0x{:08X} -> 0x{:08X}",
+            a.header.flags, b.header.flags
+        ));
     }
-    
+
     if a.defense != b.defense {
         diffs.push(format!("[DEFENSE] {:?} -> {:?}", a.defense, b.defense));
     }
     if a.max_durability != b.max_durability {
-        diffs.push(format!("[MAX DUR] {:?} -> {:?}", a.max_durability, b.max_durability));
+        diffs.push(format!(
+            "[MAX DUR] {:?} -> {:?}",
+            a.max_durability, b.max_durability
+        ));
     }
     if a.current_durability != b.current_durability {
-        diffs.push(format!("[CUR DUR] {:?} -> {:?}", a.current_durability, b.current_durability));
+        diffs.push(format!(
+            "[CUR DUR] {:?} -> {:?}",
+            a.current_durability, b.current_durability
+        ));
     }
     if a.quantity != b.quantity {
         diffs.push(format!("[QUANTITY] {:?} -> {:?}", a.quantity, b.quantity));
     }
-    
+
     append_property_diffs("Properties", &a.properties, &b.properties, diffs);
-    append_property_diffs("Runeword Attributes", &a.runeword_attributes, &b.runeword_attributes, diffs);
+    append_property_diffs(
+        "Runeword Attributes",
+        &a.runeword_attributes,
+        &b.runeword_attributes,
+        diffs,
+    );
 }
 
-fn append_property_diffs(label: &str, a: &[ItemProperty], b: &[ItemProperty], diffs: &mut Vec<String>) {
+fn append_property_diffs(
+    label: &str,
+    a: &[ItemProperty],
+    b: &[ItemProperty],
+    diffs: &mut Vec<String>,
+) {
     if a == b {
         return;
     }
@@ -173,17 +240,29 @@ fn append_property_diffs(label: &str, a: &[ItemProperty], b: &[ItemProperty], di
             (Some(p1), Some(p2)) => {
                 if p1 != p2 {
                     if p1.stat_id != p2.stat_id {
-                        diffs.push(format!("[{}] {}: StatID {} ({}) -> StatID {} ({})", label, i, p1.stat_id, p1.name, p2.stat_id, p2.name));
+                        diffs.push(format!(
+                            "[{}] {}: StatID {} ({}) -> StatID {} ({})",
+                            label, i, p1.stat_id, p1.name, p2.stat_id, p2.name
+                        ));
                     } else {
-                        diffs.push(format!("[{}] {}: {} (ID {}) Value {} -> {}", label, i, p1.name, p1.stat_id, p1.value, p2.value));
+                        diffs.push(format!(
+                            "[{}] {}: {} (ID {}) Value {} -> {}",
+                            label, i, p1.name, p1.stat_id, p1.value, p2.value
+                        ));
                     }
                 }
             }
             (Some(p1), None) => {
-                diffs.push(format!("[{}] {}: {} (ID {}) REMOVED", label, i, p1.name, p1.stat_id));
+                diffs.push(format!(
+                    "[{}] {}: {} (ID {}) REMOVED",
+                    label, i, p1.name, p1.stat_id
+                ));
             }
             (None, Some(p2)) => {
-                diffs.push(format!("[{}] {}: {} (ID {}) NEW", label, i, p2.name, p2.stat_id));
+                diffs.push(format!(
+                    "[{}] {}: {} (ID {}) NEW",
+                    label, i, p2.name, p2.stat_id
+                ));
             }
             (None, None) => unreachable!(),
         }

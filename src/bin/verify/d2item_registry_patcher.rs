@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::PathBuf;
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
-use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 struct Recommendation {
@@ -20,9 +20,24 @@ struct RecommendationReport {
 
 fn main() {
     let mut parser = ArgParser::new("d2item_registry_patcher");
-    parser.add_spec(ArgSpec::option("input", Some('i'), Some("input"), "Path to recommendations JSON"));
-    parser.add_spec(ArgSpec::option("registry", None, Some("registry"), "Path to alpha_v105_forensics.json"));
-    parser.add_spec(ArgSpec::flag("dry-run", None, Some("dry-run"), "Show changes without writing"));
+    parser.add_spec(ArgSpec::option(
+        "input",
+        Some('i'),
+        Some("input"),
+        "Path to recommendations JSON",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "registry",
+        None,
+        Some("registry"),
+        "Path to alpha_v105_forensics.json",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "dry-run",
+        None,
+        Some("dry-run"),
+        "Show changes without writing",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -37,7 +52,10 @@ fn main() {
         }
     };
 
-    let input_path = parsed.get("input").map(PathBuf::from).expect("Input path required via --input");
+    let input_path = parsed
+        .get("input")
+        .map(PathBuf::from)
+        .expect("Input path required via --input");
     let registry_path = if let Some(reg) = parsed.get("registry") {
         PathBuf::from(reg)
     } else {
@@ -56,12 +74,16 @@ fn main() {
     }
 
     // Read recommendations
-    let rec_content = fs::read_to_string(&input_path).expect("Failed to read input recommendations JSON");
-    let report: RecommendationReport = serde_json::from_str(&rec_content).expect("Failed to parse recommendations JSON");
+    let rec_content =
+        fs::read_to_string(&input_path).expect("Failed to read input recommendations JSON");
+    let report: RecommendationReport =
+        serde_json::from_str(&rec_content).expect("Failed to parse recommendations JSON");
 
     // Read registry
-    let reg_content = fs::read_to_string(&registry_path).expect("Failed to read forensic registry JSON");
-    let mut registry: Value = serde_json::from_str(&reg_content).expect("Failed to parse forensic registry JSON");
+    let reg_content =
+        fs::read_to_string(&registry_path).expect("Failed to read forensic registry JSON");
+    let mut registry: Value =
+        serde_json::from_str(&reg_content).expect("Failed to parse forensic registry JSON");
 
     let mut patch_count = 0;
 
@@ -77,7 +99,10 @@ fn main() {
                 if let Some(width_val) = stat_val.get_mut("width") {
                     let old_width = width_val.as_u64().unwrap_or(0);
                     if old_width != target_width as u64 {
-                        println!("  [PATCH] stats.{}: width {} -> {} ({:?})", key, old_width, target_width, rec.reason);
+                        println!(
+                            "  [PATCH] stats.{}: width {} -> {} ({:?})",
+                            key, old_width, target_width, rec.reason
+                        );
                         *width_val = Value::from(target_width);
                         patch_count += 1;
                     }
@@ -98,13 +123,19 @@ fn main() {
                 if let Some(bits_val) = map_val.get_mut("save_bits") {
                     let old_bits = bits_val.as_u64();
                     if old_bits != Some(target_width as u64) {
-                        println!("  [PATCH] mappings.{}: save_bits {:?} -> {} ({:?})", key, old_bits, target_width, rec.reason);
+                        println!(
+                            "  [PATCH] mappings.{}: save_bits {:?} -> {} ({:?})",
+                            key, old_bits, target_width, rec.reason
+                        );
                         *bits_val = Value::from(target_width);
                         patch_count += 1;
                     }
                 } else if let Some(obj) = map_val.as_object_mut() {
                     if obj.get("save_bits").is_none() {
-                        println!("  [PATCH] mappings.{}: setting save_bits to {} ({:?})", key, target_width, rec.reason);
+                        println!(
+                            "  [PATCH] mappings.{}: setting save_bits to {} ({:?})",
+                            key, target_width, rec.reason
+                        );
                         obj.insert("save_bits".to_string(), Value::from(target_width));
                         patch_count += 1;
                     }
@@ -119,20 +150,29 @@ fn main() {
     }
 
     if dry_run {
-        println!("\nDry-run complete: {} potential patches identified.", patch_count);
+        println!(
+            "\nDry-run complete: {} potential patches identified.",
+            patch_count
+        );
     } else {
         // Create backup
         let backup_path = registry_path.with_extension("json.bak");
         fs::copy(&registry_path, &backup_path).expect("Failed to create registry backup (*.bak)");
-        
+
         // Serialize with pretty printer (2-space indent as per original)
         let mut formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
         let mut ser = serde_json::Serializer::with_formatter(Vec::new(), formatter);
-        registry.serialize(&mut ser).expect("Failed to serialize patched registry");
-        let out_content = String::from_utf8(ser.into_inner()).expect("Serialized content is not valid UTF-8");
-        
+        registry
+            .serialize(&mut ser)
+            .expect("Failed to serialize patched registry");
+        let out_content =
+            String::from_utf8(ser.into_inner()).expect("Serialized content is not valid UTF-8");
+
         fs::write(&registry_path, out_content).expect("Failed to write patched registry to disk");
-        println!("\nSuccessfully patched {} entries in registry.", patch_count);
+        println!(
+            "\nSuccessfully patched {} entries in registry.",
+            patch_count
+        );
         println!("Backup saved to: {:?}", backup_path);
     }
 }

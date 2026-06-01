@@ -1,7 +1,7 @@
 use d2r_core::domain::header::entity::calculate_alpha_v105_checksum;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, SymmetryOptions};
+use d2r_core::verify::symmetry::{SymmetryOptions, calculate_symmetry_diff};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -36,7 +36,14 @@ fn get_all_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Vec
             .unwrap_or(bytes.len());
         let section_bytes = &bytes[pos + 4..next_pos];
         let section_bit_offset = (pos as u64 + 4) * 8;
-        let markers = d2r_core::domain::item::scanner::scan_item_markers(section_bytes, huffman, alpha, section_bit_offset, None, false);
+        let markers = d2r_core::domain::item::scanner::scan_item_markers(
+            section_bytes,
+            huffman,
+            alpha,
+            section_bit_offset,
+            None,
+            false,
+        );
         for m in markers {
             all_markers.push((pos as u64 + 4) * 8 + m.offset);
         }
@@ -105,7 +112,10 @@ fn main() {
         .unwrap_or("0")
         .parse()
         .unwrap_or(0);
-    let bit_range_str = parsed.get("bit-range").map(|v| v.as_str()).unwrap_or("0..1");
+    let bit_range_str = parsed
+        .get("bit-range")
+        .map(|v| v.as_str())
+        .unwrap_or("0..1");
     let parse_verify = parsed.is_set("parse-verify");
     let detect_drift = parsed.is_set("detect-drift");
     let output_json = parsed.get("output-json").cloned();
@@ -122,8 +132,9 @@ fn main() {
 
     let huffman = HuffmanTree::new();
     let is_alpha_mode = is_alpha(&original_bytes);
-    let original_items = Item::read_player_items(&original_bytes, &huffman, is_alpha_mode).unwrap_or_default();
-    
+    let original_items =
+        Item::read_player_items(&original_bytes, &huffman, is_alpha_mode).unwrap_or_default();
+
     if target_idx >= original_items.len() {
         eprintln!(
             "[ERROR] Target item index {} out of range (found {} items).",
@@ -140,7 +151,9 @@ fn main() {
     println!("Fixture: {}", file_path);
     println!(
         "Target Item: #{} ({} at bit {})",
-        target_idx, target_item.code.trim(), item_bit_offset
+        target_idx,
+        target_item.code.trim(),
+        item_bit_offset
     );
     println!("Fuzzing Bit Range: {}..{}", bit_start, bit_end);
 
@@ -189,7 +202,11 @@ fn main() {
             };
 
             if let Ok(report) = calculate_symmetry_diff(&mutated, None, options) {
-                if let Some(item_diff) = report.items.iter().find(|i| i.label == format!("Item {}", target_idx)) {
+                if let Some(item_diff) = report
+                    .items
+                    .iter()
+                    .find(|i| i.label == format!("Item {}", target_idx))
+                {
                     fidelity = item_diff.fidelity_score * 100.0;
                     is_match = item_diff.is_match;
                     if !item_diff.is_match {
@@ -204,8 +221,13 @@ fn main() {
             let mutated_markers = get_all_item_markers(&mutated, &huffman, is_alpha_mode);
             if mutated_markers.len() < original_markers.len() {
                 is_swallowed = true;
-                drift_info = format!(" | SWALLOWED={}", original_markers.len() - mutated_markers.len());
-            } else if target_idx + 1 < original_markers.len() && target_idx + 1 < mutated_markers.len() {
+                drift_info = format!(
+                    " | SWALLOWED={}",
+                    original_markers.len() - mutated_markers.len()
+                );
+            } else if target_idx + 1 < original_markers.len()
+                && target_idx + 1 < mutated_markers.len()
+            {
                 let orig_next = original_markers[target_idx + 1];
                 let mut_next = mutated_markers[target_idx + 1];
                 if orig_next != mut_next {
@@ -222,7 +244,10 @@ fn main() {
             "MUTATED"
         };
 
-        println!("  Bit {:>4}: FIDELITY={:>5.1}% [{}] {}{}", bit_offset, fidelity, status, mismatch_info, drift_info);
+        println!(
+            "  Bit {:>4}: FIDELITY={:>5.1}% [{}] {}{}",
+            bit_offset, fidelity, status, mismatch_info, drift_info
+        );
 
         results.push(FuzzResult {
             bit_offset,
@@ -254,7 +279,9 @@ fn main() {
 }
 
 fn is_alpha(bytes: &[u8]) -> bool {
-    if bytes.len() < 8 { return false; }
+    if bytes.len() < 8 {
+        return false;
+    }
     let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
     version == 105 || version == 6
 }

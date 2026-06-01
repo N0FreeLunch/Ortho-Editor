@@ -1,7 +1,7 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::{HuffmanTree, is_plausible_item_header, peek_item_header_at};
 use d2r_core::save::find_jm_markers;
-use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -27,11 +27,37 @@ fn main() -> io::Result<()> {
     let mut parser = ArgParser::new("d2item_oracle_mapper")
         .description("Mathematically infer item bit-widths and map JM anchors in D2R save files");
 
-    parser.add_spec(ArgSpec::positional("save_path", "path to the D2R save file (.d2s)"));
-    parser.add_spec(ArgSpec::flag("list-anchors", None, Some("list-anchors"), "list all plausible JM item anchors"));
-    parser.add_spec(ArgSpec::flag("auto-map", None, Some("auto-map"), "mathematically infer bit-widths for all items"));
-    parser.add_spec(ArgSpec::flag("heatmap", None, Some("heatmap"), "show a bit-level heatmap for found items"));
-    parser.add_spec(ArgSpec::option("width", Some('w'), Some("width"), "heatmap display width (default: 10)").with_default("10"));
+    parser.add_spec(ArgSpec::positional(
+        "save_path",
+        "path to the D2R save file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "list-anchors",
+        None,
+        Some("list-anchors"),
+        "list all plausible JM item anchors",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "auto-map",
+        None,
+        Some("auto-map"),
+        "mathematically infer bit-widths for all items",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "heatmap",
+        None,
+        Some("heatmap"),
+        "show a bit-level heatmap for found items",
+    ));
+    parser.add_spec(
+        ArgSpec::option(
+            "width",
+            Some('w'),
+            Some("width"),
+            "heatmap display width (default: 10)",
+        )
+        .with_default("10"),
+    );
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -52,7 +78,10 @@ fn main() -> io::Result<()> {
     let heatmap = parsed.is_set("heatmap");
     let mut om = d2r_core::verify::OutputManager::new("d2item_oracle_mapper", &parsed);
     let show_json = om.is_json();
-    let heatmap_width: u32 = parsed.get("width").and_then(|s| s.parse().ok()).unwrap_or(10);
+    let heatmap_width: u32 = parsed
+        .get("width")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
 
     let bytes = fs::read(path)?;
     let huffman = HuffmanTree::new();
@@ -66,9 +95,19 @@ fn main() -> io::Result<()> {
         let section_end = (bytes.len() * 8) as u64;
 
         while bit_cursor < section_end {
-            if let Some((mode, location, _, code, flags, version, _is_compact, header_bits, _nudge, _has_checksum)) =
-                            peek_item_header_at(&bytes, bit_cursor, &huffman, true, 0)
-                        {
+            if let Some((
+                mode,
+                location,
+                _,
+                code,
+                flags,
+                version,
+                _is_compact,
+                header_bits,
+                _nudge,
+                _has_checksum,
+            )) = peek_item_header_at(&bytes, bit_cursor, &huffman, true, 0)
+            {
                 if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, true) {
                     let mut record = ScanAnchor {
                         bit_offset: bit_cursor,
@@ -87,8 +126,11 @@ fn main() -> io::Result<()> {
                         } else {
                             0
                         };
-                        let (width, score) =
-                            infer_bit_width(&bytes, bit_cursor + header_bits + stats_offset, version);
+                        let (width, score) = infer_bit_width(
+                            &bytes,
+                            bit_cursor + header_bits + stats_offset,
+                            version,
+                        );
                         record.best_width = Some(width);
                         record.score = Some(score);
                     }

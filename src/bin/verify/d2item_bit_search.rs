@@ -13,12 +13,12 @@ fn main() {
     let bit_count: u64 = args[3].parse().expect("Invalid bit_count");
 
     let bytes = fs::read(save_file).expect("Failed to read save file");
-    
+
     println!("Dumping {} bits from bit {}...", bit_count, start_bit);
-    
+
     let start_byte = (start_bit / 8) as usize;
     let bit_offset = (start_bit % 8) as u32;
-    
+
     if start_byte >= bytes.len() {
         println!("Error: start_bit is out of range.");
         return;
@@ -37,13 +37,16 @@ fn main() {
             break;
         }
     }
-    
+
     let bit_string: String = bits.iter().collect();
-    
+
     // Look for various terminators (9 bits)
     for terminator in ["111111111", "1111111110"] {
         if let Some(pos) = bit_string.find(terminator) {
-            println!("Found pattern {} at relative bit offset {}", terminator, pos);
+            println!(
+                "Found pattern {} at relative bit offset {}",
+                terminator, pos
+            );
         }
     }
 
@@ -51,7 +54,9 @@ fn main() {
     for (i, chunk) in bits.chunks(8).enumerate() {
         let s: String = chunk.iter().collect();
         print!("{} ", s);
-        if (i + 1) % 4 == 0 { println!(); }
+        if (i + 1) % 4 == 0 {
+            println!();
+        }
     }
     println!();
 }

@@ -1,10 +1,10 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, SymmetryOptions, ItemDiff};
+use d2r_core::verify::symmetry::{ItemDiff, SymmetryOptions, calculate_symmetry_diff};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 enum FailureFamily {
@@ -17,13 +17,16 @@ enum FailureFamily {
 
 impl FailureFamily {
     fn as_tag(&self) -> String {
-        format!("[{}]", match self {
-            Self::Geometry => "Geometry",
-            Self::RWSet => "RW/Set",
-            Self::Stat => "Stat",
-            Self::Nudge => "Nudge",
-            Self::Unknown => "Unknown",
-        })
+        format!(
+            "[{}]",
+            match self {
+                Self::Geometry => "Geometry",
+                Self::RWSet => "RW/Set",
+                Self::Stat => "Stat",
+                Self::Nudge => "Nudge",
+                Self::Unknown => "Unknown",
+            }
+        )
     }
 
     fn from_str(s: &str) -> Option<Self> {
@@ -80,7 +83,11 @@ fn classify_failure(diff: &ItemDiff) -> FailureFamily {
     // Alpha v105 specific RW/Shadow check (approximation)
     let is_rw_or_shadow = if version == 5 || version == 1 {
         let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-        let is_rw = !is_shadow && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0);
+        let is_rw = !is_shadow
+            && ((flags & (1 << 11)) != 0
+                || (flags & (1 << 12)) != 0
+                || (flags & (1 << 13)) != 0
+                || (flags & 0x800) != 0);
         is_rw || is_shadow
     } else {
         (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0
@@ -112,8 +119,11 @@ fn classify_failure(diff: &ItemDiff) -> FailureFamily {
 
 fn generate_markdown_report(report: &GlobalAuditReport) -> String {
     let mut md = String::new();
-    md.push_str(&format!("# Global Item Symmetry Audit: {}\n\n", report.target_dir));
-    
+    md.push_str(&format!(
+        "# Global Item Symmetry Audit: {}\n\n",
+        report.target_dir
+    ));
+
     md.push_str("## SUMMARY\n\n");
     md.push_str("| Metric | Value |\n");
     md.push_str("| :--- | :--- |\n");
@@ -121,7 +131,10 @@ fn generate_markdown_report(report: &GlobalAuditReport) -> String {
     md.push_str(&format!("| Total Pass | {} |\n", report.total_pass));
     md.push_str(&format!("| Total Fail | {} |\n", report.total_fail));
     md.push_str(&format!("| Total Items | {} |\n", report.total_items));
-    md.push_str(&format!("| Global Fidelity | {:.2}% |\n\n", report.global_avg_fidelity));
+    md.push_str(&format!(
+        "| Global Fidelity | {:.2}% |\n\n",
+        report.global_avg_fidelity
+    ));
 
     if !report.failure_breakdown.is_empty() {
         md.push_str("## FAILURE BREAKDOWN\n\n");
@@ -130,7 +143,10 @@ fn generate_markdown_report(report: &GlobalAuditReport) -> String {
         let mut families: Vec<_> = report.failure_breakdown.keys().collect();
         families.sort();
         for family in families {
-            md.push_str(&format!("| {} | {} |\n", family, report.failure_breakdown[family]));
+            md.push_str(&format!(
+                "| {} | {} |\n",
+                family, report.failure_breakdown[family]
+            ));
         }
         md.push_str("\n");
     }
@@ -144,7 +160,7 @@ fn generate_markdown_report(report: &GlobalAuditReport) -> String {
             res.status, res.filename, res.item_count, res.avg_fidelity, res.hint
         ));
     }
-    
+
     md
 }
 
@@ -163,7 +179,11 @@ fn process_file(
     file_path: &Path,
     failure_breakdown: &mut HashMap<FailureFamily, usize>,
 ) -> AuditResult {
-    let file_name = file_path.file_name().unwrap().to_string_lossy().into_owned();
+    let file_name = file_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
 
     let bytes = match fs::read(file_path) {
         Ok(b) => b,
@@ -190,7 +210,7 @@ fn process_file(
         Ok(report) => {
             let status = if report.success { "[PASS]" } else { "[FAIL]" };
             let item_count = report.items.len();
-            
+
             let avg_fidelity = if item_count > 0 {
                 let sum: f32 = report.items.iter().map(|it| it.fidelity_score).sum();
                 sum / item_count as f32
@@ -224,7 +244,11 @@ fn process_file(
                     let family = classify_failure(first_fail);
                     first_fail_family = Some(family);
                     *failure_breakdown.entry(family).or_insert(0) += 1;
-                    format!("{} {}", family.as_tag(), first_fail.mismatch_type.as_deref().unwrap_or("Mismatch"))
+                    format!(
+                        "{} {}",
+                        family.as_tag(),
+                        first_fail.mismatch_type.as_deref().unwrap_or("Mismatch")
+                    )
                 } else {
                     "Unknown failure".to_string()
                 }
@@ -274,7 +298,7 @@ struct StabilityDashboard {
 
 fn extract_metadata(path: &Path) -> (String, String, String) {
     let path_str = path.to_string_lossy().to_lowercase();
-    
+
     let diff = if path_str.contains("hell") {
         "Hell"
     } else if path_str.contains("nightmare") || path_str.contains("nm") {
@@ -283,15 +307,32 @@ fn extract_metadata(path: &Path) -> (String, String, String) {
         "Normal"
     };
 
-    let act = if path_str.contains("act1") || path_str.contains("andariel") || path_str.contains("akara") || path_str.contains("cain") {
+    let act = if path_str.contains("act1")
+        || path_str.contains("andariel")
+        || path_str.contains("akara")
+        || path_str.contains("cain")
+    {
         "Act 1"
-    } else if path_str.contains("act2") || path_str.contains("duriel") || path_str.contains("radament") || path_str.contains("jerhyn") {
+    } else if path_str.contains("act2")
+        || path_str.contains("duriel")
+        || path_str.contains("radament")
+        || path_str.contains("jerhyn")
+    {
         "Act 2"
-    } else if path_str.contains("act3") || path_str.contains("mephisto") || path_str.contains("travincal") || path_str.contains("ormus") {
+    } else if path_str.contains("act3")
+        || path_str.contains("mephisto")
+        || path_str.contains("travincal")
+        || path_str.contains("ormus")
+    {
         "Act 3"
-    } else if path_str.contains("act4") || path_str.contains("diablo") || path_str.contains("izual") {
+    } else if path_str.contains("act4") || path_str.contains("diablo") || path_str.contains("izual")
+    {
         "Act 4"
-    } else if path_str.contains("act5") || path_str.contains("baal") || path_str.contains("anya") || path_str.contains("larzuk") {
+    } else if path_str.contains("act5")
+        || path_str.contains("baal")
+        || path_str.contains("anya")
+        || path_str.contains("larzuk")
+    {
         "Act 5"
     } else {
         "Unknown"
@@ -438,24 +479,58 @@ fn generate_html_report(dashboard: &StabilityDashboard) -> String {
 </body>
 </html>";
 
-    html.push_str(&template
-        .replace("{total_files}", &dashboard.global.total.to_string())
-        .replace("{success_rate}", &format!("{:.1}", if dashboard.global.total > 0 { dashboard.global.pass as f32 / dashboard.global.total as f32 * 100.0 } else { 0.0 }))
-        .replace("{avg_fidelity}", &format!("{:.2}", if dashboard.global.total > 0 { dashboard.global.fidelity_sum / dashboard.global.total as f32 } else { 0.0 }))
-        .replace("{total_items}", &dashboard.global.total.to_string()) 
-        .replace("{target_dir}", &dashboard.target_dir)
+    html.push_str(
+        &template
+            .replace("{total_files}", &dashboard.global.total.to_string())
+            .replace(
+                "{success_rate}",
+                &format!(
+                    "{:.1}",
+                    if dashboard.global.total > 0 {
+                        dashboard.global.pass as f32 / dashboard.global.total as f32 * 100.0
+                    } else {
+                        0.0
+                    }
+                ),
+            )
+            .replace(
+                "{avg_fidelity}",
+                &format!(
+                    "{:.2}",
+                    if dashboard.global.total > 0 {
+                        dashboard.global.fidelity_sum / dashboard.global.total as f32
+                    } else {
+                        0.0
+                    }
+                ),
+            )
+            .replace("{total_items}", &dashboard.global.total.to_string())
+            .replace("{target_dir}", &dashboard.target_dir),
     );
-
 
     let mut act_rows = String::new();
     let mut acts: Vec<_> = dashboard.by_act.keys().collect();
     acts.sort();
     for act in acts {
         let group = &dashboard.by_act[act];
-        let rate = if group.total > 0 { group.pass as f32 / group.total as f32 * 100.0 } else { 0.0 };
-        let fidelity = if group.total > 0 { group.fidelity_sum / group.total as f32 } else { 0.0 };
-        let color_class = if fidelity >= 95.0 { "high" } else if fidelity >= 80.0 { "medium" } else { "low" };
-        
+        let rate = if group.total > 0 {
+            group.pass as f32 / group.total as f32 * 100.0
+        } else {
+            0.0
+        };
+        let fidelity = if group.total > 0 {
+            group.fidelity_sum / group.total as f32
+        } else {
+            0.0
+        };
+        let color_class = if fidelity >= 95.0 {
+            "high"
+        } else if fidelity >= 80.0 {
+            "medium"
+        } else {
+            "low"
+        };
+
         act_rows.push_str(&format!(
             "<tr>
                 <td class=\"label-cell\">{}</td>
@@ -468,8 +543,9 @@ fn generate_html_report(dashboard: &StabilityDashboard) -> String {
                     </div>
                 </td>
                 <td><span class=\"rate-badge\">{:.1}%</span></td>
-            </tr>", 
-            act, color_class, fidelity, fidelity, rate));
+            </tr>",
+            act, color_class, fidelity, fidelity, rate
+        ));
     }
     html = html.replace("{act_rows}", &act_rows);
 
@@ -478,10 +554,24 @@ fn generate_html_report(dashboard: &StabilityDashboard) -> String {
     classes.sort();
     for class in classes {
         let group = &dashboard.by_class[class];
-        let rate = if group.total > 0 { group.pass as f32 / group.total as f32 * 100.0 } else { 0.0 };
-        let fidelity = if group.total > 0 { group.fidelity_sum / group.total as f32 } else { 0.0 };
-        let color_class = if fidelity >= 95.0 { "high" } else if fidelity >= 80.0 { "medium" } else { "low" };
-        
+        let rate = if group.total > 0 {
+            group.pass as f32 / group.total as f32 * 100.0
+        } else {
+            0.0
+        };
+        let fidelity = if group.total > 0 {
+            group.fidelity_sum / group.total as f32
+        } else {
+            0.0
+        };
+        let color_class = if fidelity >= 95.0 {
+            "high"
+        } else if fidelity >= 80.0 {
+            "medium"
+        } else {
+            "low"
+        };
+
         class_rows.push_str(&format!(
             "<tr>
                 <td class=\"label-cell\">{}</td>
@@ -494,8 +584,9 @@ fn generate_html_report(dashboard: &StabilityDashboard) -> String {
                     </div>
                 </td>
                 <td><span class=\"rate-badge\">{:.1}%</span></td>
-            </tr>", 
-            class, color_class, fidelity, fidelity, rate));
+            </tr>",
+            class, color_class, fidelity, fidelity, rate
+        ));
     }
     html = html.replace("{class_rows}", &class_rows);
 
@@ -517,14 +608,45 @@ fn find_d2s_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
 
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
-    parser.add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
-    parser.add_spec(ArgSpec::option("filter", None, Some("filter"), "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)"));
-    parser.add_spec(ArgSpec::flag("summary-only", None, Some("summary-only"), "Show only the summary block"));
-    parser.add_spec(ArgSpec::flag("detailed", Some('d'), Some("detailed"), "Report all mismatches in a file, not just the first one"));
-    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
-    parser.add_spec(ArgSpec::option("output", Some('o'), Some("output"), "Save execution output to a file"));
-    parser.add_spec(ArgSpec::option("html", None, Some("html"), "Save HTML dashboard report to a file"));
-    
+    parser
+        .add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
+    parser.add_spec(ArgSpec::option(
+        "filter",
+        None,
+        Some("filter"),
+        "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "summary-only",
+        None,
+        Some("summary-only"),
+        "Show only the summary block",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "detailed",
+        Some('d'),
+        Some("detailed"),
+        "Report all mismatches in a file, not just the first one",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Output results in JSON format",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "output",
+        Some('o'),
+        Some("output"),
+        "Save execution output to a file",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "html",
+        None,
+        Some("html"),
+        "Save HTML dashboard report to a file",
+    ));
+
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
         Err(ArgError::Help(h)) => {
@@ -544,7 +666,9 @@ fn main() {
             .map(|s| s.as_str())
             .unwrap_or("tests/fixtures/savegames/original")
             .to_string(),
-        filter_family: parsed.get("filter").and_then(|s| FailureFamily::from_str(s)),
+        filter_family: parsed
+            .get("filter")
+            .and_then(|s| FailureFamily::from_str(s)),
         summary_only: parsed.is_set("summary-only"),
         detailed: parsed.is_set("detailed"),
         output_json: parsed.is_set("json"),
@@ -554,7 +678,10 @@ fn main() {
 
     let path = Path::new(&args.target_dir);
     if !path.is_dir() {
-        eprintln!("Error: target path '{}' is not a directory.", args.target_dir);
+        eprintln!(
+            "Error: target path '{}' is not a directory.",
+            args.target_dir
+        );
         std::process::exit(1);
     }
 
@@ -595,23 +722,33 @@ fn main() {
         total_files += 1;
         let res = process_file(&args, &path, &mut failure_breakdown);
         let (diff, act, class) = extract_metadata(&path);
-        let act_key = if act == "Unknown" { "Unknown".to_string() } else { format!("{} {}", diff, act) };
+        let act_key = if act == "Unknown" {
+            "Unknown".to_string()
+        } else {
+            format!("{} {}", diff, act)
+        };
 
         // Update dashboard
         {
             let is_pass = res.status == "[PASS]";
             let act_group = dashboard.by_act.entry(act_key).or_default();
             act_group.total += 1;
-            if is_pass { act_group.pass += 1; }
+            if is_pass {
+                act_group.pass += 1;
+            }
             act_group.fidelity_sum += res.avg_fidelity;
 
             let class_group = dashboard.by_class.entry(class).or_default();
             class_group.total += 1;
-            if is_pass { class_group.pass += 1; }
+            if is_pass {
+                class_group.pass += 1;
+            }
             class_group.fidelity_sum += res.avg_fidelity;
 
             dashboard.global.total += 1;
-            if is_pass { dashboard.global.pass += 1; }
+            if is_pass {
+                dashboard.global.pass += 1;
+            }
             dashboard.global.fidelity_sum += res.avg_fidelity;
         }
 
@@ -679,7 +816,7 @@ fn main() {
         } else {
             generate_markdown_report(&global_report)
         };
-        
+
         if let Some(parent) = Path::new(out).parent() {
             if !parent.as_os_str().is_empty() && !parent.exists() {
                 fs::create_dir_all(parent).expect("Failed to create output directory");
@@ -697,7 +834,7 @@ fn main() {
         println!("  Total Fail:        {}", total_fail);
         println!("  Total Items:       {}", total_items);
         println!("  Global Fidelity:   {:.2}%", global_avg_fidelity);
-        
+
         if !failure_breakdown.is_empty() {
             println!("\nFAILURE BREAKDOWN:");
             let mut families: Vec<_> = failure_breakdown.keys().collect();
@@ -713,4 +850,3 @@ fn main() {
         std::process::exit(1);
     }
 }
-

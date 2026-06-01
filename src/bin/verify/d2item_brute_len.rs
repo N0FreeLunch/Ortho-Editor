@@ -7,8 +7,9 @@ use std::io::Cursor;
 use std::process;
 
 fn main() {
-    let mut parser = ArgParser::new("d2item_brute_len")
-        .description("Scans for a 9-bit Terminator (511) in a range of bits from a base bit offset.");
+    let mut parser = ArgParser::new("d2item_brute_len").description(
+        "Scans for a 9-bit Terminator (511) in a range of bits from a base bit offset.",
+    );
     parser.add_spec(ArgSpec::positional("file", "Path to save file"));
     parser.add_spec(ArgSpec::positional("base_bit", "Starting bit offset"));
     parser.add_spec(

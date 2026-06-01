@@ -135,7 +135,10 @@ fn main() -> io::Result<()> {
                 }
             }
             "--auto" => {
-                println!("Note: {} is planned for future slices and not yet implemented.", args[i]);
+                println!(
+                    "Note: {} is planned for future slices and not yet implemented.",
+                    args[i]
+                );
                 i += 1;
             }
             _ => {
@@ -164,10 +167,20 @@ fn main() -> io::Result<()> {
     if show_heatmap || show_simulate || show_json {
         let scan_start = start_bit.saturating_sub(128);
         let scan_end = start_bit + 128;
-        
+
         for bit in scan_start..scan_end {
-            if let Some((mode, loc, _x, code, flags, ver, _compact, header_bits, _nudge, _has_checksum)) =
-                peek_item_header_at(&bytes, bit, &huffman, true, 0)
+            if let Some((
+                mode,
+                loc,
+                _x,
+                code,
+                flags,
+                ver,
+                _compact,
+                header_bits,
+                _nudge,
+                _has_checksum,
+            )) = peek_item_header_at(&bytes, bit, &huffman, true, 0)
             {
                 if is_plausible_item_header(mode, loc, code.as_bytes(), flags, ver, true) {
                     heatmap_candidates.push(HeatmapCandidate {
@@ -180,18 +193,20 @@ fn main() -> io::Result<()> {
                 }
             }
         }
-        
+
         // Detect overlaps
         let candidates_copy = heatmap_candidates.clone();
         for h in &mut heatmap_candidates {
             let start1 = h.bit_offset;
             let end1 = start1 + h.header_bits;
-            
+
             for other in &candidates_copy {
-                if h.bit_offset == other.bit_offset { continue; }
+                if h.bit_offset == other.bit_offset {
+                    continue;
+                }
                 let start2 = other.bit_offset;
                 let end2 = start2 + other.header_bits;
-                
+
                 if (start1 < end2) && (start2 < end1) {
                     h.overlap_with.push(other.bit_offset);
                 }
@@ -201,19 +216,23 @@ fn main() -> io::Result<()> {
 
     if show_simulate || show_json {
         for heatmap_entry in &heatmap_candidates {
-            if simulation_paths.len() > 10 { break; } // limit paths to simulate
+            if simulation_paths.len() > 10 {
+                break;
+            } // limit paths to simulate
             let mut current_bit = heatmap_entry.bit_offset;
             let mut steps = Vec::new();
             let mut items_survived = 0;
             let mut stop_reason = "Sequence complete or reached limit".to_string();
 
-            for _ in 0..16 { // Limit simulation to 16 items
+            for _ in 0..16 {
+                // Limit simulation to 16 items
                 let header = peek_item_header_at(&bytes, current_bit, &huffman, true, 0);
                 if header.is_none() {
                     stop_reason = "Invalid item header".to_string();
                     break;
                 }
-                let (mode, loc, _, code, flags, ver, _, header_bits, _, _has_checksum) = header.unwrap();
+                let (mode, loc, _, code, flags, ver, _, header_bits, _, _has_checksum) =
+                    header.unwrap();
                 if !is_plausible_item_header(mode, loc, code.as_bytes(), flags, ver, true) {
                     stop_reason = format!("Implausible header at {}", current_bit);
                     break;
@@ -221,7 +240,7 @@ fn main() -> io::Result<()> {
 
                 // Header bits for Alpha v105 items are typically ~60-80 bits.
                 // Property stats follow.
-                let stats_offset = 19; 
+                let stats_offset = 19;
                 let prop_start = current_bit + header_bits + stats_offset;
 
                 let mut best_step_width = 0;
@@ -230,7 +249,9 @@ fn main() -> io::Result<()> {
 
                 for width in width_range_start..=width_range_end {
                     let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
-                    if reader.skip(prop_start as u32).is_err() { continue; }
+                    if reader.skip(prop_start as u32).is_err() {
+                        continue;
+                    }
 
                     let mut found_term = false;
                     let mut props_read = 0;
@@ -245,7 +266,9 @@ fn main() -> io::Result<()> {
                             term_at = current_pos;
                             break;
                         }
-                        if reader.skip((width - 9) as u32).is_err() { break; }
+                        if reader.skip((width - 9) as u32).is_err() {
+                            break;
+                        }
                     }
 
                     if found_term {
@@ -275,11 +298,13 @@ fn main() -> io::Result<()> {
                 // Alpha v105 Heuristic: Items are often slotted at 80-bit boundaries.
                 let mut next_header_bit = 0;
                 let mut found_next = false;
-                
+
                 // Try 80/160/etc bit slots first
                 for slots in 1..=2 {
                     let slot_candidate = current_bit + (slots * 80);
-                    if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, slot_candidate, &huffman, true, 0) {
+                    if let Some((m, l, _, c, f, v, _, _, _, _)) =
+                        peek_item_header_at(&bytes, slot_candidate, &huffman, true, 0)
+                    {
                         if is_plausible_item_header(m, l, c.as_bytes(), f, v, true) {
                             next_header_bit = slot_candidate;
                             found_next = true;
@@ -291,7 +316,9 @@ fn main() -> io::Result<()> {
                 if !found_next {
                     let item_end = best_step_term + best_step_width as u64;
                     for bit in item_end..(item_end + 128) {
-                        if let Some((m, l, _, c, f, v, _, _, _, _)) = peek_item_header_at(&bytes, bit, &huffman, true, 0) {
+                        if let Some((m, l, _, c, f, v, _, _, _, _)) =
+                            peek_item_header_at(&bytes, bit, &huffman, true, 0)
+                        {
                             if is_plausible_item_header(m, l, c.as_bytes(), f, v, true) {
                                 next_header_bit = bit;
                                 found_next = true;
@@ -360,7 +387,7 @@ fn main() -> io::Result<()> {
                 if let Err(_) = reader.read_var::<u64>((width - 9) as u32) {
                     stop_reason = "EOF in value".to_string();
                     break;
-                 }
+                }
             }
 
             let score = if found_terminator {
@@ -379,9 +406,7 @@ fn main() -> io::Result<()> {
         }
 
         // Sort candidates for this start_bit: score desc, then width asc (tie-break)
-        candidates.sort_by(|a, b| {
-            b.score.cmp(&a.score).then_with(|| a.width.cmp(&b.width))
-        });
+        candidates.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.width.cmp(&b.width)));
 
         if let Some(best) = candidates.first() {
             if best.score > best_overall_score {
@@ -436,11 +461,19 @@ fn main() -> io::Result<()> {
             println!("| Bit Offset | Code | Header Bits | Status    | Overlaps                  |");
             println!("---------------------------------------------------------------------------");
             for h in &heatmap_candidates {
-                let status = if h.bit_offset == start_bit { "TARGET*" } else { "FOUND" };
+                let status = if h.bit_offset == start_bit {
+                    "TARGET*"
+                } else {
+                    "FOUND"
+                };
                 let overlaps_str = if h.overlap_with.is_empty() {
                     "none".to_string()
                 } else {
-                    h.overlap_with.iter().map(|o: &u64| o.to_string()).collect::<Vec<_>>().join(", ")
+                    h.overlap_with
+                        .iter()
+                        .map(|o: &u64| o.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
                 println!(
                     "| {:10} | {:4} | {:11} | {:9} | {:25} |",
@@ -453,18 +486,27 @@ fn main() -> io::Result<()> {
         if show_simulate && !brute_mode {
             println!("\nSequence Simulation (Best Path Candidate):");
             if let Some(best_path) = simulation_paths.first() {
-                println!("  Winner: Start Bit {}, Survived {} items", best_path.start_bit, best_path.items_survived);
+                println!(
+                    "  Winner: Start Bit {}, Survived {} items",
+                    best_path.start_bit, best_path.items_survived
+                );
                 println!("  Stop Reason: {}", best_path.stop_reason);
-                println!("---------------------------------------------------------------------------");
+                println!(
+                    "---------------------------------------------------------------------------"
+                );
                 println!("| Step | Bit Offset | Code | Width | Terminator Bit |");
-                println!("---------------------------------------------------------------------------");
+                println!(
+                    "---------------------------------------------------------------------------"
+                );
                 for (i, s) in best_path.steps.iter().enumerate() {
                     println!(
                         "| {:4} | {:10} | {:4} | {:5} | {:14} |",
                         i, s.bit_offset, s.code, s.width, s.terminator_bit
                     );
                 }
-                println!("---------------------------------------------------------------------------");
+                println!(
+                    "---------------------------------------------------------------------------"
+                );
             } else {
                 println!("  No simulation paths found.");
             }

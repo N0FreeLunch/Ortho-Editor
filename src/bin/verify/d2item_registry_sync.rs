@@ -6,13 +6,48 @@ use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2item_registry_sync");
-    parser.add_spec(ArgSpec::option("stat", Some('s'), Some("stat"), "Target stat or mapping key"));
-    parser.add_spec(ArgSpec::option("width", Some('w'), Some("width"), "New width (for stats)"));
-    parser.add_spec(ArgSpec::option("save-bits", Some('b'), Some("save-bits"), "New save_bits (for mappings)"));
-    parser.add_spec(ArgSpec::option("description", Some('d'), Some("description"), "New description"));
-    parser.add_spec(ArgSpec::option("fidelity-hint", Some('f'), Some("fidelity-hint"), "New fidelity_hint"));
-    parser.add_spec(ArgSpec::option("registry", None, Some("registry"), "Registry JSON path"));
-    parser.add_spec(ArgSpec::flag("dry-run", None, Some("dry-run"), "Dry run mode"));
+    parser.add_spec(ArgSpec::option(
+        "stat",
+        Some('s'),
+        Some("stat"),
+        "Target stat or mapping key",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "width",
+        Some('w'),
+        Some("width"),
+        "New width (for stats)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "save-bits",
+        Some('b'),
+        Some("save-bits"),
+        "New save_bits (for mappings)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "description",
+        Some('d'),
+        Some("description"),
+        "New description",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "fidelity-hint",
+        Some('f'),
+        Some("fidelity-hint"),
+        "New fidelity_hint",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "registry",
+        None,
+        Some("registry"),
+        "Registry JSON path",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "dry-run",
+        None,
+        Some("dry-run"),
+        "Dry run mode",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -52,7 +87,11 @@ fn main() -> anyhow::Result<()> {
     if let Some(mappings) = registry["mappings"].as_object_mut() {
         if let Some(mapping) = mappings.get_mut(stat_id) {
             if let Some(sb) = save_bits {
-                mapping["save_bits"] = if sb == "null" { Value::Null } else { Value::from(sb.parse::<u32>()?) };
+                mapping["save_bits"] = if sb == "null" {
+                    Value::Null
+                } else {
+                    Value::from(sb.parse::<u32>()?)
+                };
                 patched = true;
             }
             if let Some(desc) = description {
@@ -81,10 +120,14 @@ fn main() -> anyhow::Result<()> {
                 stat["fidelity_hint"] = Value::from(fh.as_str());
                 patched = true;
             }
-        } else if !patched && (width.is_some() || description.is_some() || fidelity_hint.is_some()) {
+        } else if !patched && (width.is_some() || description.is_some() || fidelity_hint.is_some())
+        {
             // 3. Add to stats if it doesn't exist and we have relevant fields
             let mut new_stat = serde_json::Map::new();
-            new_stat.insert("name".to_string(), Value::from(format!("fuzzed_stat_{}", stat_id)));
+            new_stat.insert(
+                "name".to_string(),
+                Value::from(format!("fuzzed_stat_{}", stat_id)),
+            );
             if let Some(w) = width {
                 new_stat.insert("width".to_string(), Value::from(w.parse::<u32>()?));
             }
@@ -107,9 +150,16 @@ fn main() -> anyhow::Result<()> {
         let temp_path = registry_path.with_extension("tmp");
         fs::write(&temp_path, output_json)?;
         fs::rename(&temp_path, &registry_path)?;
-        println!(r#"{{"patched": true, "stat_id": "{}", "registry": "{}"}}"#, stat_id, registry_path.display());
+        println!(
+            r#"{{"patched": true, "stat_id": "{}", "registry": "{}"}}"#,
+            stat_id,
+            registry_path.display()
+        );
     } else {
-        println!(r#"{{"patched": false, "reason": "no matches", "stat_id": "{}"}}"#, stat_id);
+        println!(
+            r#"{{"patched": false, "reason": "no matches", "stat_id": "{}"}}"#,
+            stat_id
+        );
     }
 
     Ok(())
