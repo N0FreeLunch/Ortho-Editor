@@ -1,15 +1,25 @@
-use d2r_core::impl_forensic_axiom;
 use d2r_core::domain::item::axiom_meta::{
-    Confidence, Intentionality, ForensicMetadata, ForensicAxiom, 
-    CompositeForensicAxiom, ForensicAudit, ForensicResult, FidelityScore,
+    CompositeForensicAxiom, Confidence, FidelityScore, ForensicAudit, ForensicAxiom,
+    ForensicMetadata, ForensicResult, Intentionality,
 };
+use d2r_core::impl_forensic_axiom;
 
 // 1. Define some dummy axioms using the macro
 struct BitDriftAxiom;
-impl_forensic_axiom!(BitDriftAxiom, Confidence::Speculative, Intentionality::Artifactual, "Observed 1-bit drift in Larzuk v105 fixtures.");
+impl_forensic_axiom!(
+    BitDriftAxiom,
+    Confidence::Speculative,
+    Intentionality::Artifactual,
+    "Observed 1-bit drift in Larzuk v105 fixtures."
+);
 
 struct HeaderMarkerAxiom;
-impl_forensic_axiom!(HeaderMarkerAxiom, Confidence::VerifiedTruth, Intentionality::Structural, "JM marker is the canonical item start.");
+impl_forensic_axiom!(
+    HeaderMarkerAxiom,
+    Confidence::VerifiedTruth,
+    Intentionality::Structural,
+    "JM marker is the canonical item start."
+);
 
 // 2. Define a composite axiom
 struct ItemAxiomSet {
@@ -19,7 +29,7 @@ struct ItemAxiomSet {
 
 impl ForensicAxiom for ItemAxiomSet {
     fn metadata(&self) -> ForensicMetadata {
-        self.derive_metadata() 
+        self.derive_metadata()
     }
 }
 
@@ -41,27 +51,35 @@ fn main() {
 
     // 4. Demonstrate Pipeline (Railway Pattern)
     println!("Executing Forensic Pipeline...");
-    let pipeline = ForensicResult::ok(100, HeaderMarkerAxiom.metadata())
-        .map_forensic(|val| {
-            // Successive stage adds more metadata
-            (val + 50, BitDriftAxiom.metadata())
-        });
+    let pipeline = ForensicResult::ok(100, HeaderMarkerAxiom.metadata()).map_forensic(|val| {
+        // Successive stage adds more metadata
+        (val + 50, BitDriftAxiom.metadata())
+    });
 
     println!("  Final Value: {:?}", pipeline.value);
-    println!("  Combined Confidence: {:?}\n", pipeline.audit.combined_confidence);
+    println!(
+        "  Combined Confidence: {:?}\n",
+        pipeline.audit.combined_confidence
+    );
 
     // 5. Demonstrate Composite Aggregation
-    let suite = ItemAxiomSet { drift: BitDriftAxiom, marker: HeaderMarkerAxiom };
+    let suite = ItemAxiomSet {
+        drift: BitDriftAxiom,
+        marker: HeaderMarkerAxiom,
+    };
     let suite_meta = suite.metadata();
     println!("Composite Suite:");
-    println!("  Aggregated Confidence: {:?} (Expected: Speculative)", suite_meta.confidence);
+    println!(
+        "  Aggregated Confidence: {:?} (Expected: Speculative)",
+        suite_meta.confidence
+    );
     println!("  Aggregated Rationale:   {}\n", suite_meta.rationale);
 
     // 6. Demonstrate Fidelity Scoring & Reporting
     let mut audit = ForensicAudit::new();
     audit.record(HeaderMarkerAxiom.metadata());
     audit.record(BitDriftAxiom.metadata());
-    
+
     let score = FidelityScore::from_audit(&audit);
     println!("{}", audit.report());
     println!("Final Fidelity Score: {:.2}%", score.value * 100.0);

@@ -15,9 +15,9 @@ fn main() {
     let bit_count: usize = args[3].parse().unwrap();
 
     let bytes = fs::read(file_path).unwrap();
-    
+
     let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
-    
+
     // Skip to bit_offset
     for _ in 0..bit_offset {
         let _ = reader.read_bit().unwrap();
