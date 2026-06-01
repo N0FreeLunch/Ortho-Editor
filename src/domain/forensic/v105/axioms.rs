@@ -669,6 +669,8 @@ impl V105PropertyWidthAxiom {
             || trimmed == "xyz"
             || trimmed == "tsc"
             || trimmed == "isc"
+            || trimmed == "jav"
+            || trimmed == "buc"
         {
             // Alpha v105 potion family are textual summaries even when the raw
             // stealth pattern has already been normalized to a readable code.
@@ -766,10 +768,20 @@ impl V105PropertyWidthAxiom {
     
     pub fn flags_bits(&self) -> u32 { 32 }
     pub fn checksum_bits(&self) -> u32 { 8 }
-    pub fn version_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 3 } }
-    pub fn mode_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 3 } }
-    pub fn location_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 3 } }
-    pub fn x_bits(&self, alpha_mode: bool) -> u32 { if alpha_mode { 0 } else { 4 } }
+    pub fn version_bits(&self, _alpha_mode: bool) -> u32 { 3 }
+    pub fn mode_bits(&self, _alpha_mode: bool) -> u32 { 3 }
+    pub fn location_bits(&self, _alpha_mode: bool) -> u32 { 3 }
+    pub fn x_bits(&self, _alpha_mode: bool) -> u32 { 4 }
+
+    pub fn summary_gap_bits(&self, code: &str) -> u32 {
+        let trimmed = code.trim();
+        if trimmed == "tsc" || trimmed == "isc" {
+            0
+        } else {
+            8
+        }
+    }
+
     pub fn nudge_bits(&self, version: u8) -> u32 {
         if version == 1 { 0 } else { 2 }
     }
