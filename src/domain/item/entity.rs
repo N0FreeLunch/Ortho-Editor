@@ -699,6 +699,13 @@ impl Item {
                 }
             }
         }
+        if alpha_mode && self.header.is_runeword && is_authority_overlap_code && !self.bits.is_empty() {
+            let take = self.total_bits.min(self.bits.len() as u64) as usize;
+            if take > 0 {
+                emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
+                return Ok(());
+            }
+        }
 
         // 1. Write Header fields (Flags, Checksum, Version, Mode, Location, X).
         use crate::domain::item::serialization::write_player_name;
@@ -880,14 +887,44 @@ impl Item {
 
             if final_bits > (current_bits - start_bit) {
                 let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
-                let pad_seg = AlphaHeaderGap {
-                    bits: if !self.body.alpha_alignment_padding.is_empty() {
-                        self.body.alpha_alignment_padding.clone()
+                let fallback_padding = {
+                    let start_idx = (current_bits - start_bit) as usize;
+                    let total_bits = self.total_bits.min(self.bits.len() as u64) as usize;
+                    if total_bits > start_idx && total_bits <= self.bits.len() {
+                        self.bits[start_idx..total_bits]
+                            .iter()
+                            .map(|rb| rb.bit)
+                            .collect::<Vec<bool>>()
                     } else {
-                        vec![false; padding_needed as usize]
-                    },
+                        Vec::new()
+                    }
+                };
+                let mut align_bits = if !fallback_padding.is_empty() {
+                    fallback_padding
+                } else if !self.body.alpha_alignment_padding.is_empty() {
+                    self.body.alpha_alignment_padding.clone()
+                } else {
+                    Vec::new()
+                };
+                if align_bits.len() < padding_needed as usize {
+                    align_bits.resize(padding_needed as usize, false);
+                } else {
+                    align_bits.truncate(padding_needed as usize);
+                }
+                let pad_seg = AlphaHeaderGap {
+                    bits: align_bits,
                 };
                 pad_seg.emit(emitter)?;
+            }
+            if has_opaque_module && !is_placeholder_opaque {
+                for module in &self.modules {
+                    match module {
+                        ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                            emitter.extend_bits(bits.iter().cloned())?;
+                        }
+                        _ => {}
+                    }
+                }
             }
             return Ok(());
         }
@@ -1111,19 +1148,20 @@ impl Item {
         }
         if alpha_mode {
             let current_bits = emitter.written_bits() - start_bit;
-            let padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
-                self.body.alpha_alignment_padding.clone()
+            let start_idx = current_bits as usize;
+            let total_bits = self.total_bits.min(self.bits.len() as u64) as usize;
+            let fallback_padding = if total_bits > start_idx && total_bits <= self.bits.len() {
+                self.bits[start_idx..total_bits]
+                    .iter()
+                    .map(|rb| rb.bit)
+                    .collect::<Vec<bool>>()
             } else {
-                let start_idx = current_bits as usize;
-                let total_bits = self.total_bits.min(self.bits.len() as u64) as usize;
-                if total_bits > start_idx && total_bits <= self.bits.len() {
-                    self.bits[start_idx..total_bits]
-                        .iter()
-                        .map(|rb| rb.bit)
-                        .collect()
-                } else {
-                    Vec::new()
-                }
+                Vec::new()
+            };
+            let padding_bits = if !fallback_padding.is_empty() {
+                fallback_padding
+            } else {
+                self.body.alpha_alignment_padding.clone()
             };
 
             if !padding_bits.is_empty() {
@@ -1217,7 +1255,23 @@ impl Item {
                 }
             }
         }
-        Ok(emitter.into_bytes())
+        if alpha_mode {
+            let bits = emitter.into_bits();
+            let full_bytes = bits.len() / 8;
+            let mut out = Vec::with_capacity(full_bytes);
+            for i in 0..full_bytes {
+                let mut byte = 0u8;
+                for bit in 0..8 {
+                    if bits[i * 8 + bit] {
+                        byte |= 1 << bit;
+                    }
+                }
+                out.push(byte);
+            }
+            Ok(out)
+        } else {
+            Ok(emitter.into_bytes())
+        }
     }
 }
 
