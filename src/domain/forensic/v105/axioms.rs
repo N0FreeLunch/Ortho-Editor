@@ -653,8 +653,20 @@ impl V105PropertyWidthAxiom {
             // in Alpha v105 to preserve the 80-bit rhythm and item count parity.
             return true;
         }
-        if trimmed == "hp1" || trimmed == "mp1" {
-            // Alpha v105 potion aliases are textual summaries even when the raw
+        if trimmed.starts_with('h')
+            || trimmed.starts_with('m')
+            || (trimmed.starts_with('r') && trimmed.len() <= 3)
+            || trimmed == "vps"
+            || trimmed == "yps"
+            || trimmed == "wms"
+            || trimmed.starts_with('o')
+            || trimmed.starts_with('g')
+            || trimmed == "ice"
+            || trimmed == "xyz"
+            || trimmed == "tsc"
+            || trimmed == "isc"
+        {
+            // Alpha v105 potion family are textual summaries even when the raw
             // stealth pattern has already been normalized to a readable code.
             return true;
         }

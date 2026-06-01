@@ -1,5 +1,7 @@
 use crate::data::bit_cursor::BitCursor;
-use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105PropertyWidthAxiom};
+use crate::domain::forensic::v105::{
+    get_v105_target_width, V105HeaderGapAxiom, V105PropertyWidthAxiom,
+};
 use crate::domain::header::entity::{
     calculate_alpha_v105_checksum, HeaderAxiom, ItemHeader, ItemSegmentType,
 };
@@ -667,16 +669,12 @@ impl Item {
         let reg = crate::domain::forensic::registry::get_registry();
         let mut is_authority_overlap_code =
             alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw");
-        let mut is_compact_tail_overlap_code = alpha_mode && matches!(trimmed, "jav" | "buc");
         let mut is_v105_shadow_override = alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd");
         if alpha_mode {
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(map) = overrides.get(trimmed) {
                     if let Some(&val) = map.get("is_authority_overlap") {
                         is_authority_overlap_code = val != 0 || is_authority_overlap_code;
-                    }
-                    if let Some(&val) = map.get("is_compact_tail") {
-                        is_compact_tail_overlap_code = val != 0 || is_compact_tail_overlap_code;
                     }
                     if let Some(&val) = map.get("is_shadow") {
                         is_v105_shadow_override = val != 0 || is_v105_shadow_override;
@@ -685,9 +683,6 @@ impl Item {
             }
         }
         // Slice 2: Opaque pass-through
-        // Only full placeholder items should short-circuit here.
-        // Some real items (e.g. authority seam cases) can carry trailing Opaque/Residue
-        // modules as append-only tails; those must still serialize their real header/body.
         let is_placeholder_opaque = self.code.trim().is_empty() || self.code == "Opaque";
         let has_opaque_module = self
             .modules
@@ -705,87 +700,9 @@ impl Item {
             }
         }
 
-        if alpha_mode
-            && self.header.save_is_alpha
-            && self.header.version == 0
-            && matches!(self.code.trim(), "hp1" | "mp1")
-            && self.total_bits > 0
-            && !self.bits.is_empty()
-        {
-            let start_offset = self.bits[0].offset;
-            let end_offset = start_offset + self.total_bits;
-            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
-            for rb in &self.bits {
-                if rb.offset >= end_offset {
-                    break;
-                }
-                if rb.offset >= start_offset {
-                    prefix_bits.push(rb.bit);
-                }
-            }
-            if prefix_bits.len() == self.total_bits as usize {
-                emitter.extend_bits(prefix_bits)?;
-                return Ok(());
-            }
-        }
-
-        let trimmed_code = self
-            .code
-            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
-        if alpha_mode
-            && self.header.save_is_alpha
-            && self.header.version == 5
-            && self.total_bits > 0
-            && !self.bits.is_empty()
-            && matches!(trimmed_code, "ww" | "gcw")
-        {
-            let start_offset = self.bits[0].offset;
-            let end_offset = start_offset + self.total_bits;
-            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
-            for rb in &self.bits {
-                if rb.offset >= end_offset {
-                    break;
-                }
-                if rb.offset >= start_offset {
-                    prefix_bits.push(rb.bit);
-                }
-            }
-            if prefix_bits.len() == self.total_bits as usize {
-                emitter.extend_bits(prefix_bits)?;
-                return Ok(());
-            }
-        }
-
-        // Seam safeguard:
-        // For compact Alpha overlap seams with a stable logical width and no parsed properties,
-        // prefer original recorded prefix bits to avoid re-synthesizing header/code boundary drift.
-        let can_preserve_recorded_prefix = alpha_mode
-            && self.header.save_is_alpha
-            && (self.header.is_compact || is_authority_overlap_code)
-            && self.properties.is_empty()
-            && self.total_bits > 0
-            && !self.bits.is_empty()
-            && (is_authority_overlap_code || is_compact_tail_overlap_code);
-        if can_preserve_recorded_prefix {
-            let start_offset = self.bits[0].offset;
-            let end_offset = start_offset + self.total_bits;
-            let mut prefix_bits = Vec::with_capacity(self.total_bits as usize);
-            for rb in &self.bits {
-                if rb.offset >= end_offset {
-                    break;
-                }
-                if rb.offset >= start_offset {
-                    prefix_bits.push(rb.bit);
-                }
-            }
-            if prefix_bits.len() == self.total_bits as usize {
-                emitter.extend_bits(prefix_bits)?;
-                return Ok(());
-            }
-        }
-
+        // 1. Write Header fields (Flags, Checksum, Version, Mode, Location, X).
         use crate::domain::item::serialization::write_player_name;
-        let mut flags_to_write = self.header.flags;
+        let flags_to_write = self.header.flags;
         emitter.write_bits(flags_to_write, 32)?;
         let w_axiom = V105PropertyWidthAxiom::default();
         if alpha_mode && self.header.has_checksum {
@@ -810,77 +727,106 @@ impl Item {
         .with_code(&self.code);
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
-        let summary_axiom = V105PropertyWidthAxiom::default();
-        let is_summary = summary_axiom.is_summary_item(self.header.version, &self.code);
+
+        // 2. Handle Alpha v105 summary items (Potions, Scrolls):
+        let is_v105_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
+        if is_v105_summary {
+            // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
+            emitter.write_bits(self.header.y as u32, 3)?;
+            // Write Gap (8 bits).
+            let gap_val = self.body.alpha_header_gap.unwrap_or(0);
+            emitter.write_bits(gap_val, 8)?;
+
+            // Write 16-bit ID (Slice 2): Unified 16-bit ID field.
+            // Prefer original code bits to preserve bit-order/stealth patterns.
+            if !self.body.alpha_code_bits.is_empty() {
+                emitter.extend_bits(self.body.alpha_code_bits.iter().cloned())?;
+            } else {
+                emitter.write_bits(self.id.unwrap_or(0), 16)?;
+            }
+
+            // Align to target width (72 or 80 bits).
+            let current_bits = emitter.written_bits() - start_bit;
+            let target = get_v105_target_width(
+                self.header.version,
+                &self.code,
+                self.header.flags,
+                Some(idx),
+            );
+            if target as u64 > current_bits {
+                let padding_needed = (target as u64 - current_bits) as u32;
+                emitter.write_bits(0, padding_needed)?;
+            }
+
+            // Summary items can still carry trailing preserved tails
+            if is_authority_overlap_code {
+                for module in &self.modules {
+                    match module {
+                        ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                            emitter.extend_bits(bits.iter().cloned())?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        // 3. Handle standard items (including Ear).
         if alpha_mode && self.header.save_is_alpha {
             let preserve_compact_summary_header = self.header.is_compact
                 && self.body.alpha_header_gap_bits.is_empty()
                 && is_v105_shadow_override;
 
-            if preserve_compact_summary_header {
-                // Keep parsed compact header shape as-is for authority overlap seam cases.
-                // Writing additional geometry/gap bits here causes a synthetic 40-bit drift.
-            } else {
-            let is_v105_shadow = h_axiom.is_v105_shadow(self.header.flags, Some(&self.code));
-            let is_rw = h_axiom.is_runeword(self.header.flags, Some(&self.code));
-
-            // Alpha v105 Forensic (Slice 25): Mandatory geometry bits for summary items.
-            // Non-summary Alpha items use packed geometry in the gap.
-            let is_v105_summary = w_axiom.is_summary_item(self.header.version, &self.code);
-            if is_v105_summary && !is_v105_shadow && !is_rw && !geometry.skip_geometry {
-                emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
-                emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-                emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
-            }
-
-            if geometry.target_width > 0 {
-                let current_bits = emitter.written_bits() - start_bit;
-                if current_bits < geometry.target_width as u64 {
-                    let to_write = (geometry.target_width as u64 - current_bits) as u32;
-                    let gap_seg = AlphaHeaderGap {
-                        bits: if !self.body.alpha_header_gap_bits.is_empty() {
-                            self.body.alpha_header_gap_bits.clone()
-                        } else {
-                            let mut b = Vec::new();
-                            let val = self.body.alpha_header_gap.unwrap_or(0);
-                            for i in 0..to_write {
-                                let bit = i < 32 && (val & (1u32 << i)) != 0;
-                                b.push(bit);
-                            }
-                            b
-                        },
-                    };
-                    gap_seg.emit(emitter)?;
+            if !preserve_compact_summary_header {
+                if geometry.target_width > 0 {
+                    let current_bits = emitter.written_bits() - start_bit;
+                    if current_bits < geometry.target_width as u64 {
+                        let to_write = (geometry.target_width as u64 - current_bits) as u32;
+                        let gap_seg = AlphaHeaderGap {
+                            bits: if !self.body.alpha_header_gap_bits.is_empty() {
+                                self.body.alpha_header_gap_bits.clone()
+                            } else {
+                                let mut b = Vec::new();
+                                let val = self.body.alpha_header_gap.unwrap_or(0);
+                                for i in 0..to_write {
+                                    let bit = i < 32 && (val & (1u32 << i)) != 0;
+                                    b.push(bit);
+                                }
+                                b
+                            },
+                        };
+                        gap_seg.emit(emitter)?;
+                    }
+                } else if geometry.has_header_gap
+                    || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5)
+                {
+                    let gap_len = V105HeaderGapAxiom::default().resolve_gap(
+                        self.header.version,
+                        Some(&self.code),
+                        self.header.flags,
+                        idx == 0,
+                        self.header.is_compact,
+                        self.header.has_checksum,
+                        None,
+                    );
+                    if gap_len > 0 || !self.body.alpha_header_gap_bits.is_empty() {
+                        let gap_seg = AlphaHeaderGap {
+                            bits: if !self.body.alpha_header_gap_bits.is_empty() {
+                                self.body.alpha_header_gap_bits.clone()
+                            } else {
+                                let mut b = Vec::new();
+                                let val = self.body.alpha_header_gap.unwrap_or(0);
+                                for i in 0..gap_len as u32 {
+                                    let bit = i < 32 && (val & (1u32 << i)) != 0;
+                                    b.push(bit);
+                                }
+                                b
+                            },
+                        };
+                        gap_seg.emit(emitter)?;
+                    }
                 }
-            } else if geometry.has_header_gap
-                || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5)
-            {
-                let gap_len = V105HeaderGapAxiom::default().resolve_gap(
-                    self.header.version,
-                    Some(&self.code),
-                    self.header.flags,
-                    idx == 0,
-                    self.header.is_compact,
-                    self.header.has_checksum,
-                    None,
-                );
-                if gap_len > 0 || !self.body.alpha_header_gap_bits.is_empty() {
-                    let gap_seg = AlphaHeaderGap {
-                        bits: if !self.body.alpha_header_gap_bits.is_empty() {
-                            self.body.alpha_header_gap_bits.clone()
-                        } else {
-                            let mut b = Vec::new();
-                            let val = self.body.alpha_header_gap.unwrap_or(0);
-                            for i in 0..gap_len as u32 {
-                                let bit = i < 32 && (val & (1u32 << i)) != 0;
-                                b.push(bit);
-                            }
-                            b
-                        },
-                    };
-                    gap_seg.emit(emitter)?;
-                }
-            }
             }
         } else {
             if !geometry.skip_geometry {
@@ -899,7 +845,6 @@ impl Item {
         }
 
         // Alpha v105 forensic: Shadow and blank items are header-only. (Exit after gap)
-        // EXCEPT for Alpha equipment which might have property residue/nudges. (Axiom 0365)
         let is_header_only = s_axiom.is_header_only(self.header.flags, &self.code);
         let is_v105_blank = alpha_mode && self.code.trim().is_empty();
         if is_header_only
@@ -933,149 +878,29 @@ impl Item {
             }
             return Ok(());
         }
+
         if self.header.is_ear {
             emitter.write_bits(self.ear_class.unwrap_or(0) as u32, 3)?;
             emitter.write_bits(self.ear_level.unwrap_or(0) as u32, 7)?;
             write_player_name(
                 emitter,
                 self.ear_player_name.as_deref().unwrap_or(""),
-                alpha_mode && self.header.version == 5,
+                alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1),
             )?;
-            if alpha_mode && self.header.version == 5 && AlphaV105EarAlignment::align_required() {
-                emitter.byte_align()?;
-            }
-        } else if s_axiom.code_encoding() == crate::domain::stats::axiom::CodeEncoding::Ascii3x8 {
-            if alpha_mode
-                && is_summary
-                && !is_authority_overlap_code
-                && !self.body.alpha_code_bits.is_empty()
-            {
-                // Preserve original summary code bits for byte-perfect Alpha roundtrip.
-                emitter.extend_bits(self.body.alpha_code_bits.clone())?;
-            } else {
-                let trimmed = self.code.trim();
-                let chars: Vec<char> = trimmed.chars().collect();
-                for i in 0..3 {
-                    let ch = if i < chars.len() { chars[i] as u32 } else { 0 };
-                    for bit in 0..8 {
-                        emitter.write_bit((ch & (1 << bit)) != 0)?;
-                    }
-                }
-            }
         } else {
-            let should_emit_summary_code = if is_summary {
-                if alpha_mode
-                    && self.header.version == 5
-                    && (self.code.trim() == "ww" || self.code.trim() == "gcw")
-                {
-                    true // Always emit WW/GCW markers for Alpha rhythm (Slice 42)
-                } else {
-                    self.body.alpha_header_gap_bits.len() < 16
-                        || (self.is_residue() && self.body.alpha_header_gap_bits.len() >= 32)
-                }
+            if alpha_mode && !self.body.alpha_code_bits.is_empty() {
+                emitter.extend_bits(self.body.alpha_code_bits.iter().cloned())?;
             } else {
-                true
-            };
+                let code_bits = huffman.encode(&self.code)?;
+                emitter.extend_bits(code_bits)?;
+            }
 
-            if should_emit_summary_code {
-                let code_to_encode = if alpha_mode && self.code.trim() == "jav" {
-                    "us g".to_string()
-                } else {
-                    self.code.clone()
-                };
-                let encoded_code = huffman.encode(&code_to_encode)?;
-                if alpha_mode
-                    && is_summary
-                    && !is_authority_overlap_code
-                    && !self.body.alpha_code_bits.is_empty()
-                {
-                    emitter.extend_bits(self.body.alpha_code_bits.clone())?;
-                } else {
-                    emitter.extend_bits(encoded_code)?;
-                }
-
-                if h_axiom.is_alpha()
-                    && (self.header.version == 5
-                        || self.header.version == 0
-                        || self.header.version == 1)
-                    && !s_axiom.is_compact
-                {
-                    let nudge = self.body.alpha_nudge.unwrap_or(0);
-                    let nudge_bits = w_axiom.nudge_bits(self.header.version) as u32;
-                    emitter.write_bits(nudge as u32, nudge_bits)?;
+            if alpha_mode && h_axiom.is_alpha() && !self.header.is_compact {
+                if let Some(nudge) = self.body.alpha_nudge {
+                    emitter.write_bits(nudge as u32, w_axiom.nudge_bits(self.header.version) as u32)?;
                 }
             }
-        }
 
-        let is_v105_summary =
-            alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
-        if is_v105_summary {
-            // Alpha v105 Summary Items (Axiom 0365) carry a 16-bit ID for scrolls (tsc/isc).
-            if self.code.trim() == "tsc" || self.code.trim() == "isc" {
-                emitter.write_bits(self.id.unwrap_or(0), 16)?;
-            }
-
-            let authority_tail_bits = if is_authority_overlap_code {
-                self.modules
-                    .iter()
-                    .map(|module| match module {
-                        ItemModule::Opaque(bits) | ItemModule::Residue(bits) => bits.len() as u64,
-                        _ => 0,
-                    })
-                    .sum::<u64>()
-            } else {
-                0
-            };
-            let current_bits = emitter.written_bits();
-            let mut final_bits = s_axiom.calculate_alignment(
-                current_bits - start_bit,
-                &self.code,
-                self.header.flags,
-            );
-            let summary_target_bits = if authority_tail_bits > 0 {
-                self.total_bits.saturating_sub(authority_tail_bits)
-            } else {
-                self.total_bits
-            };
-            if summary_target_bits > final_bits {
-                final_bits = summary_target_bits;
-            }
-
-            if final_bits > (current_bits - start_bit) {
-                let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
-                let pad_seg = AlphaHeaderGap {
-                    bits: if !self.body.alpha_alignment_padding.is_empty() {
-                        self.body.alpha_alignment_padding.clone()
-                    } else {
-                        vec![false; padding_needed as usize]
-                    },
-                };
-                pad_seg.emit(emitter)?;
-            }
-
-            // Summary items can still carry trailing preserved tails from widened recovery
-            // windows (e.g. authority overlap seams). Keep those raw bits after the aligned
-            // summary body.
-            if is_authority_overlap_code {
-                for module in &self.modules {
-                    match module {
-                        ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
-                            emitter.extend_bits(bits.iter().cloned())?;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            return Ok(());
-        }
-
-        if (!s_axiom.is_compact && !is_v105_summary)
-            || (alpha_mode
-                && (self.header.version == 0
-                    || self.header.version == 1
-                    || self.header.version == 2)
-                && !is_v105_summary)
-        {
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
 
@@ -1219,7 +1044,7 @@ impl Item {
                         emitter.write_bits(0, 47)?;
                     }
                 }
-                if !is_summary
+                if !is_v105_summary
                     && (self.header.version != 5
                         || is_shadow
                         || self.header.is_runeword
@@ -1278,9 +1103,6 @@ impl Item {
             pad_seg.emit(emitter)?;
         }
 
-        // Append trailing preservation modules for non-placeholder items.
-        // These bits are captured when parsing with a wider recovery limit and must be
-        // retained after the structured body has been re-emitted.
         if has_opaque_module && !is_placeholder_opaque {
             for module in &self.modules {
                 match module {
@@ -1299,7 +1121,6 @@ impl Item {
         let mut final_bits =
             s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
 
-        // Slice 8: Targeted Length Oracle Support
         if self.total_bits > final_bits {
             final_bits = self.total_bits;
         }
@@ -1311,19 +1132,9 @@ impl Item {
             };
             pad_seg.emit(emitter)?;
         }
-        if has_opaque_module && !is_placeholder_opaque {
-            for module in &self.modules {
-                match module {
-                    ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
-                        emitter.extend_bits(bits.iter().cloned())?;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
         Ok(())
     }
+
 
     pub fn serialize_section(
         items: &[Item],
@@ -1388,14 +1199,16 @@ pub fn parse_item_header<R: BitRead>(
     gap_override: Option<usize>,
     is_first_item: bool,
     forced_compact: Option<bool>,
-    has_checksum_hint: Option<bool>,
+    _has_checksum_hint: Option<bool>,
     start_bit_offset: Option<u64>,
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let code_hint = code_hint.map(crate::item::normalize_alpha_code_hint);
     let w_axiom = V105PropertyWidthAxiom::default();
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
-    let flags = cursor.read_bits::<u32>(w_axiom.flags_bits() as u32)?;
+
+    // 1. Read Flags (32 bits).
+    let flags = cursor.read_bits::<u32>(32)?;
     let is_nested = cursor.context_stack().iter().any(|s| s == "nested")
         || crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get());
 
@@ -1405,50 +1218,34 @@ pub fn parse_item_header<R: BitRead>(
             bit_offset: start_bit,
         }));
     }
+
     let mut alpha_checksum = None;
-    let (version, has_checksum) = if alpha_mode {
+    let mut has_checksum = false;
+    let mut version = 0;
+
+    // 2. For Alpha v105:
+    if alpha_mode {
         let saved_pos = cursor.checkpoint();
+        let checksum_res = cursor.read_bits::<u8>(8);
+        let version_res = cursor.read_bits::<u8>(3);
 
-        if let Some(hint) = has_checksum_hint {
-            if hint {
-                let ck = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32)?;
+        if let (Ok(ck), Ok(v)) = (checksum_res, version_res) {
+            if ck == calculate_alpha_v105_checksum(flags, v) {
                 alpha_checksum = Some(ck);
-                let v = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0);
-                (v, true)
-                } else {
-                let v = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0);
-                (v, false)
-                }
-                } else {
-                let checksum_res = cursor.read_bits::<u8>(w_axiom.checksum_bits() as u32);
-                let v_res = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32);
-
-                if let (Ok(checksum), Ok(v)) = (checksum_res, v_res) {
-                let expected = calculate_alpha_v105_checksum(flags, v);
-                if (checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2))
-                    || (alpha_mode && (v == 5 || v == 0 || v == 1 || v == 2))
-                {
-                    alpha_checksum = Some(checksum);
-                    (v, true)
-                } else {
-                    cursor.rollback(saved_pos);
-                    let v = cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0);
-                    (v, false)
-                }
-                } else {
+                has_checksum = true;
+                version = v;
+            } else {
                 cursor.rollback(saved_pos);
-                (
-                    cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0),
-                    false,
-                )
-                }
-                }
-                } else {
-                (
-                cursor.read_bits::<u8>(w_axiom.version_bits(alpha_mode) as u32).unwrap_or(0),
-                false,
-                )
-                };
+                version = cursor.read_bits::<u8>(3).unwrap_or(0);
+            }
+        } else {
+            cursor.rollback(saved_pos);
+            version = cursor.read_bits::<u8>(3).unwrap_or(0);
+        }
+    } else {
+        version = cursor.read_bits::<u8>(3).unwrap_or(0);
+    }
+
     let mut flags = flags;
     if alpha_mode {
         if let Some(code) = code_hint {
@@ -1457,134 +1254,82 @@ pub fn parse_item_header<R: BitRead>(
             }
         }
     }
+
+    // 3. Read Mode, Location, X with correct widths.
     let mode = cursor.read_bits::<u8>(w_axiom.mode_bits(alpha_mode) as u32).unwrap_or(0);
     let location = cursor.read_bits::<u8>(w_axiom.location_bits(alpha_mode) as u32).unwrap_or(0);
     let x = cursor.read_bits::<u8>(w_axiom.x_bits(alpha_mode) as u32).unwrap_or(0);
 
-    let item_alpha_mode = alpha_mode;
-    let h_axiom = HeaderAxiom::new(version, item_alpha_mode);
-    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, item_alpha_mode);
-
+    let h_axiom = HeaderAxiom::new(version, alpha_mode);
+    let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
     let is_compact = forced_compact.unwrap_or_else(|| h_axiom.is_compact(flags, code_hint));
     let is_personalized = s_axiom.is_personalized(flags, is_compact);
 
     let mut y = 0;
     let mut page = 0;
     let mut socket_hint = 0;
-    let geometry = h_axiom.header_geometry(flags, code_hint);
     let mut alpha_header_gap = None;
     let mut alpha_header_gap_bits = Vec::new();
-    if geometry.has_header_gap {
-        if h_axiom.is_alpha() {
-            let is_v105_shadow = h_axiom.is_v105_shadow(flags, code_hint);
-            let is_rw = h_axiom.is_runeword(flags, code_hint);
 
-            let gap_bits = if let Some(go) = gap_override {
-                go
-            } else {
-                V105HeaderGapAxiom::default().resolve_gap(
-                    version,
-                    code_hint,
-                    flags,
-                    is_first_item,
-                    is_compact,
-                    has_checksum,
-                    start_bit_offset,
-                )
-            };
+    // 4. For Alpha v105 Summary Items (use w_axiom.is_summary_item):
+    let is_v105_summary = alpha_mode && code_hint.map(|c| w_axiom.is_summary_item(version, c)).unwrap_or(false);
 
-            let is_v105_summary = if let Some(c) = code_hint {
-                w_axiom.is_summary_item(version, c)
-            } else {
-                is_compact || (version == 0 && (flags & (1 << 22)) != 0)
-            };
-
-            if is_v105_summary && !is_v105_shadow && !is_rw && !geometry.skip_geometry {
-                y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
+    if is_v105_summary {
+        // Read Y (3 bits).
+        y = cursor.read_bits::<u8>(3)?;
+        // Read Gap (8 bits) and store in alpha_header_gap.
+        let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
+            Ok(AlphaHeaderGap::parse(c, 8)?)
+        })?;
+        alpha_header_gap_bits = gap_seg.bits;
+        let mut gap_val = 0u32;
+        for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
+            if i < 32 && bit {
+                gap_val |= 1u32 << i;
             }
-
-            let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
-                Ok(AlphaHeaderGap::parse(c, gap_bits as usize)?)
-            })?;
-            alpha_header_gap_bits = gap_seg.bits;
-
-            if version == 5 && AlphaV105HeaderGapAlignment::align_required() {
-                cursor.byte_align()?;
-            }
-
-            let mut gap = 0u32;
-            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
-                if i < 32 && bit {
-                    gap |= 1u32 << i;
-                }
-            }
-            alpha_header_gap = Some(gap);
-
-            if !is_v105_summary && !is_v105_shadow && !is_rw && gap_bits >= 8 {
-                y = (gap & 0x0F) as u8;
-                page = ((gap >> 4) & 0x07) as u8;
-                socket_hint = ((gap >> 7) & 0x01) as u8;
-            }
-        } else {
-            let is_v105_summary_local =
-                item_alpha_mode && w_axiom.is_summary_item(version, code_hint.unwrap_or(""));
-            if !is_compact || is_v105_summary_local {
-                y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
-                page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
-                socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
-            }
-
-            let gap_bits = if alpha_mode {
-                if let Some(go) = gap_override {
-                    let read_geom = !is_compact || is_v105_summary_local;
-                    let geom_bits = if read_geom {
-                        (geometry.y_bits + geometry.page_bits + geometry.socket_hint_bits) as usize
-                    } else {
-                        0
-                    };
-                    if go >= geom_bits {
-                        go - geom_bits
-                    } else {
-                        8
-                    }
-                } else {
-                    8
-                }
-            } else {
-                8
-            };
-
-            let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
-                Ok(AlphaHeaderGap::parse(c, gap_bits as usize)?)
-            })?;
-            alpha_header_gap_bits = gap_seg.bits;
-            let mut val = 0u32;
-            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
-                if i < 32 && bit {
-                    val |= 1u32 << i;
-                }
-            }
-            alpha_header_gap = Some(val);
         }
-    } else if !geometry.skip_geometry {
-        y = cursor.read_bits::<u8>(geometry.y_bits)? as u8;
-        page = cursor.read_bits::<u8>(geometry.page_bits)? as u8;
-        socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits)? as u8;
-    }
+        alpha_header_gap = Some(gap_val);
+    } else {
+        // 5. For others, read Y, Page, SocketHint as per geometry.
+        let geometry = h_axiom.header_geometry(flags, code_hint);
+        if !geometry.skip_geometry {
+            y = cursor.read_bits::<u8>(geometry.y_bits).unwrap_or(0);
+            page = cursor.read_bits::<u8>(geometry.page_bits).unwrap_or(0);
+            socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits).unwrap_or(0);
+        }
 
-    if item_alpha_mode && geometry.target_width > 0 {
-        let current_bits = (cursor.pos() - start_bit) as u32;
-        if current_bits < geometry.target_width {
-            let to_read = geometry.target_width - current_bits;
-            let available = cursor.remaining() as u32;
-            let actual_read = std::cmp::min(to_read, available);
-            if actual_read > 0 {
-                let pad_seg = cursor.with_context("AlphaHeaderGapPadding", |c| {
-                    Ok(AlphaHeaderGap::parse(c, actual_read as usize)?)
-                })?;
-                for b in pad_seg.bits {
-                    alpha_header_gap_bits.push(b);
+        // Handle Gap for others if required.
+        if geometry.has_header_gap {
+            let gap_bits = if h_axiom.is_alpha() {
+                if let Some(go) = gap_override {
+                    go
+                } else {
+                    V105HeaderGapAxiom::default().resolve_gap(
+                        version,
+                        code_hint,
+                        flags,
+                        is_first_item,
+                        is_compact,
+                        has_checksum,
+                        start_bit_offset,
+                    )
                 }
+            } else if alpha_mode {
+                8
+            } else {
+                0
+            };
+
+            if gap_bits > 0 {
+                let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
+                    Ok(AlphaHeaderGap::parse(c, gap_bits as usize)?)
+                })?;
+                alpha_header_gap_bits = gap_seg.bits;
+
+                if version == 5 && AlphaV105HeaderGapAlignment::align_required() {
+                    let _ = cursor.byte_align();
+                }
+
                 let mut val = 0u32;
                 for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
                     if i < 32 && bit {
@@ -1595,6 +1340,34 @@ pub fn parse_item_header<R: BitRead>(
             }
         }
     }
+
+    if alpha_mode && !is_v105_summary {
+        let geometry = h_axiom.header_geometry(flags, code_hint);
+        if geometry.target_width > 0 {
+            let current_bits = (cursor.pos() - start_bit) as u32;
+            if current_bits < geometry.target_width {
+                let to_read = geometry.target_width - current_bits;
+                let available = cursor.remaining() as u32;
+                let actual_read = std::cmp::min(to_read, available);
+                if actual_read > 0 {
+                    let pad_seg = cursor.with_context("AlphaHeaderGapPadding", |c| {
+                        Ok(AlphaHeaderGap::parse(c, actual_read as usize)?)
+                    })?;
+                    for b in pad_seg.bits {
+                        alpha_header_gap_bits.push(b);
+                    }
+                    let mut val = 0u32;
+                    for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
+                        if i < 32 && bit {
+                            val |= 1u32 << i;
+                        }
+                    }
+                    alpha_header_gap = Some(val);
+                }
+            }
+        }
+    }
+
     cursor.end_segment();
     Ok((
         ItemHeader {
@@ -1621,7 +1394,7 @@ pub fn parse_item_header<R: BitRead>(
             alpha_quality_raw: None,
             alpha_v5_runeword_extra: None,
             alpha_unique_id_raw: None,
-            save_is_alpha: item_alpha_mode,
+            save_is_alpha: alpha_mode,
         },
         alpha_header_gap,
         alpha_header_gap_bits,
@@ -1634,13 +1407,12 @@ pub fn parse_item_body<R: BitRead>(
     header: &ItemHeader,
     alpha_mode: bool,
     code_hint: Option<&str>,
-) -> ParsingResult<(ItemBody, Option<u8>, Option<u8>, Option<String>)> {
+) -> ParsingResult<(ItemBody, Vec<bool>, Option<u8>, Option<u8>, Option<String>)> {
     let code_hint = code_hint.map(crate::item::normalize_alpha_code_hint);
     let w_axiom = V105PropertyWidthAxiom::default();
     let h_axiom = HeaderAxiom::new(header.version, alpha_mode);
     let is_ear = header.is_ear;
-    let mut alpha_code_bits = Vec::new();
-    let (code, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
+    let (code, alpha_code_bits, alpha_nudge, ear_class, ear_level, ear_player_name) = if is_ear {
         let w_axiom = V105PropertyWidthAxiom::default();
         cursor.begin_segment(ItemSegmentType::Unknown);
         let class = Some(cursor.read_bits::<u8>(w_axiom.ear_class_bits() as u32)? as u8);
@@ -1656,13 +1428,26 @@ pub fn parse_item_body<R: BitRead>(
             cursor.byte_align()?;
         }
         cursor.end_segment();
-        (String::new(), None, class, level, name)
+        (String::new(), Vec::new(), None, class, level, name)
     } else {
         cursor.begin_segment(ItemSegmentType::Code);
         let code_start = cursor.pos();
         let mut code = String::new();
+        let mut alpha_code_bits = Vec::new();
         let _s_axiom = StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode)
             .with_compact(header.is_compact);
+
+        if alpha_mode && code.is_empty() {
+            if let Some(hint) = code_hint {
+                if crate::domain::forensic::v105::axioms::is_v105_summary_code(hint) {
+                    code = hint.to_string();
+                    // Capture the 16-bit ID/Stealth bits
+                    if let Ok(bits) = cursor.read_bits_as_vec(16) {
+                        alpha_code_bits = bits;
+                    }
+                }
+            }
+        }
 
         if alpha_mode && code.is_empty() {
             let saved_pos = cursor.pos();
@@ -1843,21 +1628,17 @@ pub fn parse_item_body<R: BitRead>(
             }
         }
 
-        alpha_code_bits = if alpha_mode && w_axiom.is_summary_item(header.version, &code) {
+        if alpha_code_bits.is_empty() {
             let code_end = cursor.pos();
             if code_end > code_start {
-                cursor
+                alpha_code_bits = cursor
                     .recorded_bits()
                     .iter()
                     .filter(|bit| bit.offset >= code_start && bit.offset < code_end)
                     .map(|bit| bit.bit)
-                    .collect()
-            } else {
-                Vec::new()
+                    .collect();
             }
-        } else {
-            Vec::new()
-        };
+        }
 
         if w_axiom.needs_post_body_byte_alignment(header.version, header.is_compact)
             && AlphaV105PostBodyAlignment::align_required()
@@ -1866,7 +1647,7 @@ pub fn parse_item_body<R: BitRead>(
         }
 
         cursor.end_segment();
-        (code, alpha_nudge, None, None, None)
+        (code, alpha_code_bits, alpha_nudge, None, None, None)
     };
 
     Ok((
@@ -1883,7 +1664,7 @@ pub fn parse_item_body<R: BitRead>(
             quantity: None,
             alpha_header_gap: None,
             alpha_header_gap_bits: Vec::new(),
-            alpha_code_bits,
+            alpha_code_bits: alpha_code_bits.clone(),
             v5_runeword_extra: None,
             v105_7mgw_payload: None,
             alpha_nudge,
@@ -1892,6 +1673,7 @@ pub fn parse_item_body<R: BitRead>(
             alpha_body_gap_bits: Vec::new(),
             alpha_alignment_padding: Vec::new(),
         },
+        alpha_code_bits,
         ear_class,
         ear_level,
         ear_player_name,
@@ -1947,12 +1729,9 @@ impl ExtendedStatsData {
         }
         if axiom.is_alpha() {
             if h_axiom.is_alpha() && w_axiom.is_summary_item(version, trimmed_code) {
-                // Alpha v105 Summary Items (Axiom 0365) carry a 16-bit ID for scrolls (tsc/isc).
-                if trimmed_code == "tsc" || trimmed_code == "isc" {
-                    data.id = Some(read_or_truncate!(cursor.read_bits::<u32>(16)));
-                } else {
-                    data.id = Some(0);
-                }
+                // Alpha v105 (Slice 2): Summary items use unified 16-bit ID,
+                // bits already consumed in parse_item_body.
+                data.id = Some(0); 
                 cursor.end_segment();
                 return Ok(data);
             }
@@ -2151,6 +1930,13 @@ fn is_potion_code(code: &str) -> bool {
     trimmed.starts_with('h')
         || trimmed.starts_with('m')
         || (trimmed.starts_with('r') && trimmed.len() <= 3)
+        || trimmed == "vps"
+        || trimmed == "yps"
+        || trimmed == "wms"
+        || trimmed.starts_with('o')
+        || trimmed.starts_with('g')
+        || trimmed == "ice"
+        || trimmed == "xyz"
         || trimmed == "wwsw"
         || trimmed.starts_with('7')
 }
