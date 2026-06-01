@@ -280,21 +280,25 @@ impl ForensicAxiom for V105AlignmentAxiom {
 
 pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<usize>) -> u32 {
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+    let reg = crate::domain::forensic::registry::get_registry();
+
+    // Registry overrides take absolute precedence (Axiom 0365)
+    if let Some(overrides) = &reg.item_overrides {
+        if let Some(map) = overrides.get(trimmed) {
+            if let Some(&width) = map.get("fixed_width") {
+                return width;
+            }
+        }
+    }
+
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_item(version, code);
     
     let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
     let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
     let is_personalized = (flags & (1 << 24)) != 0;
-    let reg = crate::domain::forensic::registry::get_registry();
 
     if is_summary || is_compact_flag {
-        if let Some(overrides) = &reg.item_overrides {
-            if let Some(map) = overrides.get(trimmed) {
-                if let Some(&width) = map.get("fixed_width") { return width; }
-            }
-        }
-
         if is_summary {
             if w_axiom.is_summary_rhythm_forced(version, code) {
                 return w_axiom.summary_item_fixed_width(); // Enforce strict 80-bit slotted boundary

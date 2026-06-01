@@ -829,6 +829,10 @@ pub fn parse_item_at_with_limit(
     cursor.set_pos(absolute_bit);
     cursor.base_pos = base_bit_offset;
     if let Some(l) = limit {
+        #[cfg(debug_assertions)]
+        if alpha && code_hint.map(|c| c.trim() == "jav" || c.trim() == "buc").unwrap_or(false) {
+            println!("DEBUG: parse_item_at_with_limit for {:?}: limit={}", code_hint, l);
+        }
         cursor.set_limit(absolute_bit + l);
     }
     let item = Item::from_reader_with_context(
@@ -1295,16 +1299,17 @@ impl Item {
                 }
             }
 
-            if alpha_mode && is_compact_final {
+            let mut target_width_override = 0u32;
+            if alpha_mode {
                 let parse_code_hint = peek_code_hint.as_deref().unwrap_or(marker.code.as_str());
-                let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(
+                target_width_override = crate::domain::forensic::v105::axioms::get_v105_target_width(
                     version_peek,
                     parse_code_hint,
                     flags_peek,
                     Some(item_count),
                 );
-                if target_width > 0 {
-                    dynamic_limit = target_width as u64;
+                if target_width_override > 0 {
+                    dynamic_limit = target_width_override as u64;
                 }
             }
 
@@ -1329,9 +1334,6 @@ impl Item {
                     .as_ref()
                 .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
                 .unwrap_or(false);
-            if alpha_mode && marker_code_trimmed == "buc" {
-                dynamic_limit = dynamic_limit.min(114);
-            }
             let parse_code_hint = if marker_is_forced_summary {
                 marker.code.as_str()
             } else {
@@ -1377,6 +1379,7 @@ impl Item {
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
                     if alpha_mode
+                        && target_width_override == 0
                         && !final_item.header.is_compact
                         && final_item.header.version == 7
                         && matches!(marker.code.trim(), "buc" | "jav")
@@ -2354,7 +2357,7 @@ impl Item {
         );
 
         let mut rhythm_recovery = false;
-        let (mut body, ear_class, ear_level, ear_player_name) = match body_res {
+        let (mut body, _alpha_code_bits, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,
             Err(e)
                 if header.save_is_alpha
@@ -2369,7 +2372,7 @@ impl Item {
                 let mut b = crate::domain::item::entity::ItemBody::default();
                 b.code = "    ".to_string();
                 cursor.rollback(body_start_bit);
-                (b, None, None, None)
+                (b, Vec::new(), None, None, None)
             }
             Err(e) => {
                 if header.save_is_alpha {
@@ -2581,7 +2584,7 @@ impl Item {
         }
 
         let is_v105_summary =
-            alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&item.code);
+            alpha_mode && crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_item(item.header.version, &item.code);
         if !is_v105_summary {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code));
             let authority_runeword_hint =

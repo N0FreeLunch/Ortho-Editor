@@ -1703,7 +1703,7 @@ impl ExtendedStatsData {
             && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0);
         let is_alpha_early_exit =
             h_axiom.is_alpha() && w_axiom.is_extended_stats_early_exit(version);
-        let soft_truncate_on_limit = alpha_mode && matches!(trimmed_code, "jav" | "buc");
+        let soft_truncate_on_limit = alpha_mode && matches!(trimmed_code, "jav" | "buc" | "ucb8");
         macro_rules! read_or_truncate {
             ($expr:expr) => {{
                 match $expr {
