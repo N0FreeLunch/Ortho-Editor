@@ -199,13 +199,20 @@ impl QuestSet {
 #[derive(Debug, Clone)]
 pub struct QuestSection {
     pub raw_bytes: Vec<u8>,
+    pub is_expansion: bool,
 }
 
 impl QuestSection {
     pub fn from_slice(slice: &[u8]) -> Self {
         QuestSection {
             raw_bytes: slice.to_vec(),
+            is_expansion: true, // Default to true for Alpha v105
         }
+    }
+
+    pub fn with_expansion(mut self, is_expansion: bool) -> Self {
+        self.is_expansion = is_expansion;
+        self
     }
 
     pub fn as_slice(&self) -> &[u8] {

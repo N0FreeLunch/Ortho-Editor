@@ -541,11 +541,9 @@ impl Save {
         let char_name = parse_ascii_field(bytes, CHAR_NAME_OFFSET, CHAR_NAME_LEN)?;
 
         let is_expansion = if version == 105 {
-            if bytes.len() > EXPANSION_FLAG_OFFSET {
-                (bytes[EXPANSION_FLAG_OFFSET] & 0x20) != 0
-            } else {
-                true
-            }
+            true // Alpha v105 is structurally expansion even if offset 271 is 0
+        } else if bytes.len() > EXPANSION_FLAG_OFFSET {
+            (bytes[EXPANSION_FLAG_OFFSET] & 0x20) != 0
         } else {
             true
         };
@@ -573,7 +571,7 @@ impl Save {
                 let start = map.as_ref().and_then(|m| m.woo_pos).unwrap_or(V105SectionMarkerAxiom::V105_QUEST_OFFSET);
                 let end = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
                 if bytes.len() >= start + 12 {
-                    Some(QuestSection::from_slice(&bytes[start..end.min(bytes.len())]))
+                    Some(QuestSection::from_slice(&bytes[start..end.min(bytes.len())]).with_expansion(is_expansion))
                 } else {
                     None
                 }
