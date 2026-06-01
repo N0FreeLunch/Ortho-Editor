@@ -758,7 +758,17 @@ impl Item {
             );
             if target as u64 > current_bits {
                 let padding_needed = (target as u64 - current_bits) as u32;
-                emitter.write_bits(0, padding_needed)?;
+                let padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
+                    let mut bits = self.body.alpha_alignment_padding.clone();
+                    bits.truncate(padding_needed as usize);
+                    if bits.len() < padding_needed as usize {
+                        bits.resize(padding_needed as usize, false);
+                    }
+                    bits
+                } else {
+                    vec![false; padding_needed as usize]
+                };
+                AlphaHeaderGap { bits: padding_bits }.emit(emitter)?;
             }
 
             // Summary items can still carry trailing preserved tails
@@ -1099,11 +1109,27 @@ impl Item {
                 }
             }
         }
-        if alpha_mode && !self.body.alpha_alignment_padding.is_empty() {
-            let pad_seg = AlphaHeaderGap {
-                bits: self.body.alpha_alignment_padding.clone(),
+        if alpha_mode {
+            let current_bits = emitter.written_bits() - start_bit;
+            let padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
+                self.body.alpha_alignment_padding.clone()
+            } else {
+                let start_idx = current_bits as usize;
+                let total_bits = self.total_bits.min(self.bits.len() as u64) as usize;
+                if total_bits > start_idx && total_bits <= self.bits.len() {
+                    self.bits[start_idx..total_bits]
+                        .iter()
+                        .map(|rb| rb.bit)
+                        .collect()
+                } else {
+                    Vec::new()
+                }
             };
-            pad_seg.emit(emitter)?;
+
+            if !padding_bits.is_empty() {
+                let pad_seg = AlphaHeaderGap { bits: padding_bits };
+                pad_seg.emit(emitter)?;
+            }
         }
 
         if has_opaque_module && !is_placeholder_opaque {

@@ -847,6 +847,26 @@ pub fn parse_item_at_with_limit(
     Ok((item, cursor.pos() - absolute_bit))
 }
 
+fn read_alignment_padding_bits(bytes: &[u8], start_bit: u64, bit_count: u64) -> Vec<bool> {
+    if bit_count == 0 {
+        return Vec::new();
+    }
+
+    let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
+    let mut bits = Vec::with_capacity(bit_count as usize);
+
+    if reader.skip(start_bit as u32).is_ok() {
+        for _ in 0..bit_count {
+            match reader.read_bit() {
+                Ok(bit) => bits.push(bit),
+                Err(_) => break,
+            }
+        }
+    }
+
+    bits
+}
+
 pub fn is_likely_jm_section_header(
     bytes: &[u8],
     pos: usize,
@@ -1474,13 +1494,18 @@ impl Item {
                                 {
                                     // Axiom 0345: Proximity Snap. Consume the drift as alignment padding to recover boundary.
                                     let preserve_padding =
-                                        !matches!(final_item.code.trim(), "hp1" | "mp1" | "buc");
+                                        !matches!(final_item.code.trim(), "hp1" | "mp1");
                                     if preserve_padding {
                                         actual_consumed += drift;
+                                        let padding_bits = read_alignment_padding_bits(
+                                            section_bytes,
+                                            current_end,
+                                            drift,
+                                        );
                                         final_item
                                             .body
                                             .alpha_alignment_padding
-                                            .extend(vec![false; drift as usize]);
+                                            .extend(padding_bits);
                                     }
                                     final_item.forensic_audit.record(proximity_axiom.metadata());
                                 }
@@ -1786,10 +1811,16 @@ impl Item {
                                                         !matches!(final_item.code.trim(), "hp1" | "mp1");
                                                     if preserve_padding {
                                                         actual_consumed += drift;
+                                                        let padding_bits =
+                                                            read_alignment_padding_bits(
+                                                                section_bytes,
+                                                                current_end,
+                                                                drift,
+                                                            );
                                                         final_item
                                                             .body
                                                             .alpha_alignment_padding
-                                                            .extend(vec![false; drift as usize]);
+                                                            .extend(padding_bits);
                                                     }
                                                     final_item
                                                         .forensic_audit
@@ -2683,7 +2714,7 @@ impl Item {
             item.header.flags,
             &axiom,
         )?;
-        item.body.alpha_alignment_padding = padding;
+        item.body.alpha_alignment_padding.extend(padding);
         item.range.end = cursor.pos();
         item.total_bits = item.range.end - item.range.start;
 
