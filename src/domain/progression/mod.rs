@@ -20,6 +20,12 @@ impl Progression {
         let mut audit = ForensicAudit::new();
         
         if alpha_mode {
+            let is_expansion = if bytes.len() > crate::domain::header::axiom::EXPANSION_FLAG_OFFSET {
+                (bytes[crate::domain::header::axiom::EXPANSION_FLAG_OFFSET] & 0x20) != 0
+            } else {
+                true // Default to expansion for Alpha v105
+            };
+
             let difficulty = if bytes.len() > 21 {
                 let diff_axiom = AlphaDifficultyAxiom;
                 audit.record(diff_axiom.metadata());
@@ -50,7 +56,7 @@ impl Progression {
             } else {
                 &[]
             };
-            let waypoints = WaypointSet::from_bytes(wp_bytes, difficulty, wp_anchor);
+            let waypoints = WaypointSet::from_bytes(wp_bytes, difficulty, wp_anchor, is_expansion);
             
             // Slice 4: Mercenary Forensic Integration
             let header = &bytes[0..V105_WAYPOINT_OFFSET.min(bytes.len())]; // Rough header approximation
@@ -66,7 +72,7 @@ impl Progression {
         } else {
             let difficulty = if bytes.len() > 0x0257 { bytes[0x0257] } else { 0 };
             let quests = QuestSet::new_v105_empty(); // Placeholder for retail
-            let waypoints = WaypointSet::new_empty(difficulty);
+            let waypoints = WaypointSet::new_empty(difficulty, true);
             ForensicResult { value: Ok(Progression { difficulty, quests, waypoints, audit: audit.clone() }), audit }
         }
     }

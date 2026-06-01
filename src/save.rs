@@ -7,6 +7,7 @@ pub use crate::domain::header::axiom::{
     ACTIVE_ACT_OFFSET, ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET,
     CHAR_NAME_LEN, CHAR_NAME_OFFSET, CHECKSUM_OFFSET, D2S_MAGIC, FILE_SIZE_OFFSET,
     LAST_PLAYED_OFFSET, MAGIC_OFFSET, MIN_HEADER_LEN, PROGRESS_FLAG_OFFSET, VERSION_OFFSET,
+    EXPANSION_FLAG_OFFSET,
 };
 pub use crate::domain::stats::{AttributeSection, AttributeEntry};
 pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
@@ -382,7 +383,8 @@ impl ExpansionSection {
         if let Some(entry) = crate::data::waypoints::WAYPOINTS.iter().find(|e| e.name == name) {
             // ExpansionSection implementation for waypoints (fallback/legacy)
             // It assumes raw_bytes starts at 'WS' marker (0x2BD) or follows standard WS mapping.
-            let global_bit_idx = (difficulty as usize * 24 * 8) + (10 * 8) + entry.ws_bit as usize;
+            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(true);
+            let global_bit_idx = (difficulty as usize * axiom.difficulty_stride_bits) + (10 * 8) + entry.ws_bit as usize;
             let byte_idx = global_bit_idx / 8;
             let bit_in_byte = global_bit_idx % 8;
             if byte_idx < self.raw_bytes.len() {
@@ -394,7 +396,8 @@ impl ExpansionSection {
 
     pub fn set_activated_by_name(&mut self, name: &str, difficulty: u8, active: bool) -> bool {
         if let Some(entry) = crate::data::waypoints::WAYPOINTS.iter().find(|e| e.name == name) {
-            let global_bit_idx = (difficulty as usize * 24 * 8) + (10 * 8) + entry.ws_bit as usize;
+            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(true);
+            let global_bit_idx = (difficulty as usize * axiom.difficulty_stride_bits) + (10 * 8) + entry.ws_bit as usize;
             let byte_idx = global_bit_idx / 8;
             let bit_in_byte = global_bit_idx % 8;
             if byte_idx < self.raw_bytes.len() {
@@ -565,7 +568,12 @@ impl Save {
                 let start = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
                 let end = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
                 if bytes.len() >= start + 2 {
-                    Some(WaypointSection::from_slice(&bytes[start..end.min(bytes.len())]))
+                    let is_expansion = if bytes.len() > EXPANSION_FLAG_OFFSET {
+                        (bytes[EXPANSION_FLAG_OFFSET] & 0x20) != 0
+                    } else {
+                        true
+                    };
+                    Some(WaypointSection::from_slice(&bytes[start..end.min(bytes.len())]).with_expansion(is_expansion))
                 } else {
                     None
                 }

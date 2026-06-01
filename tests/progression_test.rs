@@ -136,7 +136,7 @@ fn test_alpha_v105_progression_mutation_verification() -> std::io::Result<()> {
     
     // 2a. Waypoint Mutation
     let wp_anchor = 701; // 295 + 406
-    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor);
+    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor, true);
     {
         let name = "Act 1 - Wilderness 2";
         let mut wp = wp_set.find_by_name(name).expect("Should find Cold Plains (Wilderness 2)");
@@ -256,7 +256,7 @@ fn test_alpha_v105_act2_transition_integrity() -> std::io::Result<()> {
 
     // 2b. Waypoint: Act 2 - Town (Normal)
     let wp_anchor = 701;
-    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor);
+    let mut wp_set = WaypointSet::from_bytes(&wps_section.raw_bytes, 0, wp_anchor, true);
     {
         let wp = wp_set.waypoints_mut().iter_mut()
             .find(|w| w.name() == "Act 2 - Town")
