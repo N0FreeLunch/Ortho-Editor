@@ -733,9 +733,12 @@ impl Item {
         if is_v105_summary {
             // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
             emitter.write_bits(self.header.y as u32, 3)?;
-            // Write Gap (8 bits).
-            let gap_val = self.body.alpha_header_gap.unwrap_or(0);
-            emitter.write_bits(gap_val, 8)?;
+            // Write Gap.
+            let gap_bits = w_axiom.summary_gap_bits(&self.code);
+            if gap_bits > 0 {
+                let gap_val = self.body.alpha_header_gap.unwrap_or(0);
+                emitter.write_bits(gap_val, gap_bits)?;
+            }
 
             // Write 16-bit ID (Slice 2): Unified 16-bit ID field.
             // Prefer original code bits to preserve bit-order/stealth patterns.
@@ -1223,6 +1226,10 @@ pub fn parse_item_header<R: BitRead>(
     let mut has_checksum = false;
     let mut version = 0;
 
+    // 4. For Alpha v105 Summary Items (use w_axiom.is_summary_item):
+    // Use version 5 as a placeholder for code checking if header version not yet known
+    let is_v105_summary = alpha_mode && code_hint.map(|c| w_axiom.is_summary_item(5, c)).unwrap_or(false);
+
     // 2. For Alpha v105:
     if alpha_mode {
         let saved_pos = cursor.checkpoint();
@@ -1230,7 +1237,16 @@ pub fn parse_item_header<R: BitRead>(
         let version_res = cursor.read_bits::<u8>(3);
 
         if let (Ok(ck), Ok(v)) = (checksum_res, version_res) {
-            if ck == calculate_alpha_v105_checksum(flags, v) {
+            let mut matched = ck == calculate_alpha_v105_checksum(flags, v);
+            
+            // Forensic Override: Many Alpha v105 items have a checksum slot (8 bits)
+            // even if the formula doesn't match our current understanding.
+            // If it's a known summary item, we MUST consume those 8 bits to maintain rhythm.
+            if !matched && is_v105_summary {
+                matched = true;
+            }
+
+            if matched {
                 alpha_checksum = Some(ck);
                 has_checksum = true;
                 version = v;
@@ -1272,23 +1288,24 @@ pub fn parse_item_header<R: BitRead>(
     let mut alpha_header_gap_bits = Vec::new();
 
     // 4. For Alpha v105 Summary Items (use w_axiom.is_summary_item):
-    let is_v105_summary = alpha_mode && code_hint.map(|c| w_axiom.is_summary_item(version, c)).unwrap_or(false);
-
     if is_v105_summary {
         // Read Y (3 bits).
         y = cursor.read_bits::<u8>(3)?;
         // Read Gap (8 bits) and store in alpha_header_gap.
-        let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
-            Ok(AlphaHeaderGap::parse(c, 8)?)
-        })?;
-        alpha_header_gap_bits = gap_seg.bits;
-        let mut gap_val = 0u32;
-        for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
-            if i < 32 && bit {
-                gap_val |= 1u32 << i;
+        let gap_bits = w_axiom.summary_gap_bits(code_hint.unwrap_or(""));
+        if gap_bits > 0 {
+            let gap_seg = cursor.with_context("AlphaHeaderGap", |c| {
+                Ok(AlphaHeaderGap::parse(c, gap_bits as usize)?)
+            })?;
+            alpha_header_gap_bits = gap_seg.bits;
+            let mut gap_val = 0u32;
+            for (i, &bit) in alpha_header_gap_bits.iter().enumerate() {
+                if i < 32 && bit {
+                    gap_val |= 1u32 << i;
+                }
             }
+            alpha_header_gap = Some(gap_val);
         }
-        alpha_header_gap = Some(gap_val);
     } else {
         // 5. For others, read Y, Page, SocketHint as per geometry.
         let geometry = h_axiom.header_geometry(flags, code_hint);
@@ -1439,12 +1456,11 @@ pub fn parse_item_body<R: BitRead>(
 
         if alpha_mode && code.is_empty() {
             if let Some(hint) = code_hint {
-                if crate::domain::forensic::v105::axioms::is_v105_summary_code(hint) {
-                    code = hint.to_string();
+                let trimmed = hint.trim();
+                if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+                    code = trimmed.to_string();
                     // Capture the 16-bit ID/Stealth bits
-                    if let Ok(bits) = cursor.read_bits_as_vec(16) {
-                        alpha_code_bits = bits;
-                    }
+                    alpha_code_bits = cursor.read_bits_as_vec(16)?;
                 }
             }
         }
@@ -1548,8 +1564,9 @@ pub fn parse_item_body<R: BitRead>(
                     };
                     if consume_len > 0 {
                         let saved_pos = cursor.pos();
-                        if cursor.read_bits_as_vec(consume_len).is_ok() {
+                        if let Ok(bits) = cursor.read_bits_as_vec(consume_len) {
                             code = normalized_hint;
+                            alpha_code_bits = bits;
                         } else {
                             cursor.rollback(saved_pos);
                             if trusted_compact_hint {
@@ -1560,7 +1577,9 @@ pub fn parse_item_body<R: BitRead>(
                                 if trimmed_hint == "buc" {
                                     let tail_bits = cursor.remaining() as u32;
                                     if tail_bits > 0 && tail_bits < consume_len {
-                                        let _ = cursor.read_bits_as_vec(tail_bits);
+                                        if let Ok(bits) = cursor.read_bits_as_vec(tail_bits) {
+                                            alpha_code_bits = bits;
+                                        }
                                     }
                                 }
                             }
