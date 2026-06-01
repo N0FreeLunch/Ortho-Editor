@@ -29,6 +29,18 @@ fn main() -> anyhow::Result<()> {
             "Path to a baseline JSON report for regression checking",
         )
         .long("diff-baseline");
+    parser
+        .add_opt(
+            "section",
+            "Only verify specific section(s) (e.g., waypoint, item, header)",
+        )
+        .long("section");
+    parser
+        .add_opt(
+            "report-json",
+            "Shorthand for --json --output <PATH>",
+        )
+        .long("report-json");
     parser.add_arg("files", "Save files to verify").repeated();
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -40,13 +52,22 @@ fn main() -> anyhow::Result<()> {
         Err(ArgError::Error(e)) => anyhow::bail!("error: {}\n\n{}", e, parser.usage()),
     };
 
-    let files = parsed.get_vec("files").cloned().unwrap_or_default();
-    let fix_mode = parsed.is_set("fix");
-    let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &parsed);
-    let is_json = om.is_json();
-    let diff_baseline_path = parsed.get("diff-baseline");
+    // Handle --report-json shorthand
+    let mut final_parsed = parsed;
+    if let Some(report_path) = final_parsed.get("report-json").cloned() {
+        final_parsed.flags.insert("json".to_string(), true);
+        final_parsed.values.insert("output".to_string(), vec![report_path]);
+    }
 
-    if let Some(bits_args) = parsed.get_vec("dump-bits") {
+    let files = final_parsed.get_vec("files").cloned().unwrap_or_default();
+    let fix_mode = final_parsed.is_set("fix");
+    
+    let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &final_parsed);
+    let is_json = om.is_json();
+    let diff_baseline_path = final_parsed.get("diff-baseline");
+    let target_section = final_parsed.get("section");
+
+    if let Some(bits_args) = final_parsed.get_vec("dump-bits") {
         if files.is_empty() {
             anyhow::bail!("Error: No file provided for --dump-bits");
         }
@@ -56,7 +77,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if parsed.is_set("dump-residue-map") {
+    if final_parsed.is_set("dump-residue-map") {
         if files.is_empty() {
             anyhow::bail!("Error: No file provided for --dump-residue-map");
         }
@@ -98,7 +119,27 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-        let (report, failed) = verify_save_integrity(path, &bytes);
+        let (mut report, mut failed) = verify_save_integrity(path, &bytes);
+
+        if let Some(section) = target_section {
+            let section = section.to_lowercase();
+            report.issues.retain(|issue| {
+                match section.as_str() {
+                    "waypoint" => issue.kind.to_lowercase().contains("waypoint"),
+                    "header" => issue.kind.to_lowercase().contains("header") || issue.kind == "file_size" || issue.kind == "checksum",
+                    "item" => issue.kind.to_lowercase().contains("item") || issue.kind.to_lowercase().contains("jm_"),
+                    "progression" => issue.kind.to_lowercase().contains("progression") || issue.kind.to_lowercase().contains("waypoint") || issue.kind.to_lowercase().contains("quest"),
+                    _ => true,
+                }
+            });
+            // Update fail status based on filtered issues
+            failed = report.issues.iter().any(|i| {
+                i.kind == "header_parse" || i.kind == "file_size" || i.kind == "checksum" || 
+                i.kind == "item_parse" || i.kind == "jm_coherence" || i.kind == "progression_parse" ||
+                i.kind == "WaypointOrdinalOutOfRange"
+            });
+            report.status = if failed { d2r_core::verify::ReportStatus::Fail } else { d2r_core::verify::ReportStatus::Ok };
+        }
 
         if fix_mode && failed {
             let mut bytes_to_fix = bytes.clone();

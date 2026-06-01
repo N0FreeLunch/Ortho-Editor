@@ -158,8 +158,8 @@ pub struct ArgParser {
 
 #[derive(Debug)]
 pub struct ParsedArgs {
-    values: HashMap<String, Vec<String>>,
-    flags: HashMap<String, bool>,
+    pub values: HashMap<String, Vec<String>>,
+    pub flags: HashMap<String, bool>,
 }
 
 impl ArgParser {
