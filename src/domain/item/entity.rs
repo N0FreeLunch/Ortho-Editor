@@ -807,13 +807,23 @@ impl Item {
                             bits: if !self.body.alpha_header_gap_bits.is_empty() {
                                 self.body.alpha_header_gap_bits.clone()
                             } else {
-                                let mut b = Vec::new();
-                                let val = self.body.alpha_header_gap.unwrap_or(0);
-                                for i in 0..to_write {
-                                    let bit = i < 32 && (val & (1u32 << i)) != 0;
-                                    b.push(bit);
+                                let start_idx = current_bits as usize;
+                                let end_idx = start_idx + to_write as usize;
+                                if self.bits.len() >= end_idx {
+                                    // Prefer the preserved raw slice whenever it is available.
+                                    self.bits[start_idx..end_idx]
+                                        .iter()
+                                        .map(|rb| rb.bit)
+                                        .collect()
+                                } else {
+                                    let mut b = Vec::new();
+                                    let val = self.body.alpha_header_gap.unwrap_or(0);
+                                    for i in 0..to_write {
+                                        let bit = i < 32 && (val & (1u32 << i)) != 0;
+                                        b.push(bit);
+                                    }
+                                    b
                                 }
-                                b
                             },
                         };
                         gap_seg.emit(emitter)?;
@@ -955,7 +965,23 @@ impl Item {
             let is_item_alpha = s_axiom.is_alpha();
 
             if is_item_alpha && !s_axiom.is_compact {
-                let quality_to_write = self.alpha_quality_raw.unwrap_or(quality_val as u8);
+                let quality_to_write = if let Some(raw) = self.alpha_quality_raw {
+                    raw
+                } else {
+                    let current_bits = emitter.written_bits() - start_bit;
+                    let start_idx = current_bits as usize;
+                    if self.bits.len() >= start_idx + 3 {
+                        let mut raw = 0u8;
+                        for (i, rb) in self.bits[start_idx..start_idx + 3].iter().enumerate() {
+                            if rb.bit {
+                                raw |= 1 << i;
+                            }
+                        }
+                        raw
+                    } else {
+                        quality_val as u8
+                    }
+                };
                 emitter.write_bits(quality_to_write as u32, 3)?;
                 if (self.header.version == 1
                     || self.header.version == 5

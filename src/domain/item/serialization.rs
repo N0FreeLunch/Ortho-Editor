@@ -1359,7 +1359,7 @@ impl Item {
             } else {
                 peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
             };
-            let forced_compact_for_parse = if is_compact_final || marker_code_trimmed == "buc" {
+            let forced_compact_for_parse = if is_compact_final {
                 Some(true)
             } else {
                 None
