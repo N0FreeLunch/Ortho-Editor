@@ -315,6 +315,7 @@ where
             // recorder.base_pos holds the absolute bit offset of the section start.
             // child_marker_offsets are also section-local, so we subtract base_pos, not item_start_bit.
             let current_rel_pos = recorder.pos().saturating_sub(recorder.base_pos);
+            let lookahead_window = 128u64;
             let next_child_rel_off = if let Some(offsets) = child_marker_offsets {
                 offsets.iter().filter(|&&off| off >= current_rel_pos).min().cloned()
             } else {
@@ -327,45 +328,59 @@ where
                 None,
                 "main_loop_check",
             );
-            
-            // target_local_pos: section-local offset for peek_item_header_at (bytes = section_bytes)
-            let target_local_pos = next_child_rel_off.unwrap_or_else(|| recorder.pos().saturating_sub(recorder.base_pos));
-            
-            let is_close = if let Some(rel_off) = next_child_rel_off {
-                rel_off >= current_rel_pos && (rel_off - current_rel_pos) < 36
-            } else {
-                true 
-            };
-            
-            if is_close {
-                 // Use alpha=false for detection: rune markers at these offsets are
-                 // detectable via retail-style header peek even in alpha saves.
-                 if let Some(header_info) = crate::item::peek_item_header_at(_section_recovery.bytes, target_local_pos, huffman, false, 0) {
-                     let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
-                     let trimmed_peek = code_peek.trim();
-                     let normalized_peek = match trimmed_peek {
-                         "ww" => "r08",
-                         "gcw" => "r15",
-                         other => other,
-                     };
-                     if crate::item::is_plausible_item_header(mode, loc, normalized_peek.as_bytes(), flags, version_peek, false) {
-                         let is_socketable = (normalized_peek.starts_with('r') && normalized_peek.len() <= 3)
-                             || (normalized_peek.starts_with('g') && normalized_peek.len() == 3)
-                             || normalized_peek == "jew";
-                         if is_socketable {
-                             push_socket_trace_event(
-                                 "post_loop",
-                                 current_rel_pos,
-                                 next_child_rel_off,
-                                 Some(target_local_pos),
-                                 "main_loop_break_on_socketable_header",
-                             );
-                             saw_terminator = true;
-                             terminator_bit = false;
-                             break;
-                         }
-                     }
-                 }
+
+            let mut snap_target: Option<(u64, &'static str)> = None;
+            if let Some(rel_off) = next_child_rel_off {
+                if rel_off > current_rel_pos && (rel_off - current_rel_pos) <= lookahead_window {
+                    snap_target = Some((rel_off, "main_loop_break_on_child_marker"));
+                }
+            }
+
+            if snap_target.is_none() {
+                let mut probe = current_rel_pos.saturating_add(1);
+                let probe_limit = current_rel_pos.saturating_add(lookahead_window);
+                while probe <= probe_limit {
+                    // Use alpha=true for detection here: we are already in the Alpha-only
+                    // seam, and the boundary we want to snap to may only be visible in
+                    // Alpha header form at a non-byte-aligned bit offset.
+                    if let Some(header_info) =
+                        crate::item::peek_item_header_at(_section_recovery.bytes, probe, huffman, true, 0)
+                    {
+                        let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) =
+                            header_info;
+                        let trimmed_peek = code_peek.trim();
+                        let normalized_peek = match trimmed_peek {
+                            "ww" => "r08",
+                            "gcw" => "r15",
+                            other => other,
+                        };
+                        if crate::item::is_plausible_item_header(
+                            mode,
+                            loc,
+                            normalized_peek.as_bytes(),
+                            flags,
+                            version_peek,
+                            true,
+                        ) {
+                            snap_target = Some((probe, "main_loop_break_on_plausible_header"));
+                            break;
+                        }
+                    }
+                    probe = probe.saturating_add(1);
+                }
+            }
+
+            if let Some((target_local_pos, note)) = snap_target {
+                push_socket_trace_event(
+                    "post_loop",
+                    current_rel_pos,
+                    next_child_rel_off,
+                    Some(target_local_pos),
+                    note,
+                );
+                saw_terminator = true;
+                terminator_bit = false;
+                break;
             }
         }
 
