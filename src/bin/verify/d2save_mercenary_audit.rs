@@ -142,29 +142,8 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
     };
 
     let mercenary_json = merc.map(|merc| {
-        let class_name = match merc.class_id {
-            0 => {
-                if merc.hireling_id >= 8 {
-                    "Desert Warrior (Act 2)".to_string()
-                } else {
-                    "Rogue (Act 1)".to_string()
-                }
-            }
-            1 => "Iron Wolf (Act 3)".to_string(),
-            9 => "Barbarian (Act 5)".to_string(),
-            _ => format!("Unknown({})", merc.class_id),
-        };
-
-        let subtype_name = if merc.class_id == 1 {
-            match merc.subtype_id {
-                15 => "Fire".to_string(),
-                16 => "Cold".to_string(),
-                17 => "Lightning".to_string(),
-                _ => "Unknown Element".to_string(),
-            }
-        } else {
-            "N/A".to_string()
-        };
+        let class_name = merc.class_name();
+        let subtype_name = merc.subtype_name();
 
         if raw_w4_present {
             if let Some(w4) = w4_data {

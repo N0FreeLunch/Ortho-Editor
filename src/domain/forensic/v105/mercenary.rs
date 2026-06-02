@@ -96,9 +96,35 @@ impl MercenaryState {
     /// Returns the localized class name from the forensic registry.
     pub fn class_name(&self) -> String {
         let reg = crate::domain::forensic::registry::get_registry();
-        reg.mercenary_class_map.get(&self.class_id)
-            .cloned()
-            .unwrap_or_else(|| format!("Unknown({})", self.class_id))
+        
+        // Axiom 0381: If class_id is 0 or marked as None/Ambiguous, we use hireling_id (subtype_id) to disambiguate.
+        let name_opt = reg.mercenary_class_map.get(&self.class_id);
+        let is_ambiguous = name_opt.map(|n| n == "None" || n == "Ambiguous").unwrap_or(self.class_id == 0);
+
+        if is_ambiguous {
+            if self.hireling_id >= 8 {
+                "Desert Warrior (Act 2)".to_string()
+            } else {
+                "Rogue (Act 1)".to_string()
+            }
+        } else {
+            name_opt.cloned().unwrap_or_else(|| format!("Unknown({})", self.class_id))
+        }
+    }
+
+    /// Returns the subtype name (e.g. element for Act 3 Iron Wolves).
+    pub fn subtype_name(&self) -> String {
+        // Axiom 0366: Act 3 (Class 9) uses subtype_id for elements.
+        if self.class_id == 9 {
+            match self.subtype_id {
+                15 => "Fire".to_string(),
+                16 => "Cold".to_string(),
+                17 => "Lightning".to_string(),
+                _ => format!("Unknown Element({})", self.subtype_id),
+            }
+        } else {
+            "N/A".to_string()
+        }
     }
 
     /// Records forensic evidence about the mercenary state to the audit.
