@@ -421,5 +421,9 @@ path = "src/bin/verify/d2item_grep.rs"
 name = "d2save_taxonomy_harvester"
 path = "src/bin/verify/d2save_taxonomy_harvester.rs"
 
+[[bin]]
+name = "d2save_mercenary_audit"
+path = "src/bin/verify/d2save_mercenary_audit.rs"
+
 [dev-dependencies]
 trybuild = "1.0"
