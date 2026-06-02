@@ -1,7 +1,8 @@
-use d2r_core::domain::forensic::v105::MercenaryState;
+use d2r_core::domain::forensic::v105::{MercenaryState, MercenaryFooter, MercenaryEquipmentItem};
 use d2r_core::save::map_core_sections;
 use d2r_core::verify::args::{ArgError, ArgParser};
 use d2r_core::verify::OutputManager;
+use d2r_core::item::{HuffmanTree, Item};
 use serde::Serialize;
 use std::{env, fs, process};
 
@@ -21,14 +22,30 @@ struct ReportMetadata {
 
 #[derive(Serialize)]
 struct MercenaryJson {
+    hireling_id: u8,
     class_id: u8,
     class_name: String,
     subtype_id: u8,
     subtype_name: String,
-    hireling_id: u8,
     experience: u32,
     expected_level: u8,
     name_id: u16,
+    equipment: MercenaryEquipmentJson,
+}
+
+#[derive(Serialize)]
+struct MercenaryEquipmentJson {
+    count: usize,
+    items: Vec<MercenaryItemJson>,
+    footer_ok: bool,
+}
+
+#[derive(Serialize)]
+struct MercenaryItemJson {
+    code: String,
+    slot: String,
+    location: u8,
+    mode: u8,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -142,6 +159,86 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
         (Some(merc), false)
     };
 
+    // Equipment Audit (Slice 4)
+    let mut equipment_items = Vec::new();
+    let mut footer_ok = false;
+
+    if let Some(jf) = map.jf_pos {
+        // Find the JM section containing jf
+        let mut merc_jm_idx = None;
+        for (i, &pos) in map.jm_positions.iter().enumerate() {
+            if pos <= jf {
+                merc_jm_idx = Some(i);
+            }
+        }
+
+        if let Some(idx) = merc_jm_idx {
+            let jm_pos = map.jm_positions[idx];
+            let next_pos = map.jm_positions.get(idx + 1).copied().unwrap_or(bytes.len());
+            let item_count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
+
+            // Footer check
+            if let (Some(kf), Some(lf)) = (map.kf_pos, map.lf_pos) {
+                let footer = MercenaryFooter::from_bytes(&bytes[kf..]);
+                footer_ok = footer.is_standard();
+                if !footer_ok {
+                    issues.push("Non-standard mercenary footer detected".to_string());
+                }
+                
+                if lf + 4 < next_pos {
+                    // Items follow footer
+                    let huffman = HuffmanTree::new();
+                    let is_alpha = bytes.get(4..8).map(|b| u32::from_le_bytes(b.try_into().unwrap_or([0; 4])) == 105).unwrap_or(false);
+                    
+                    // In Alpha v105, items in the mercenary section follow the lf marker
+                    let items_start = lf + 4;
+                    let items_data = &bytes[items_start..next_pos];
+                    
+                    match Item::read_section(
+                        items_data,
+                        items_start as u64 * 8,
+                        item_count,
+                        &huffman,
+                        is_alpha,
+                        false,
+                    ) {
+                        Ok(items) => {
+                            for it in items {
+                                if it.is_residue() { continue; }
+                                
+                                let merc_it = MercenaryEquipmentItem {
+                                    code: it.code.trim().to_string(),
+                                    location: it.location,
+                                    mode: it.mode,
+                                    x: it.x,
+                                    y: it.y,
+                                };
+
+                                let slot = merc_it.slot_name();
+
+                                if it.mode != 1 || it.location != 1 {
+                                    issues.push(format!("Mercenary item {} in invalid mode/location (mode={}, loc={})", it.code.trim(), it.mode, it.location));
+                                }
+
+                                equipment_items.push(MercenaryItemJson {
+                                    code: merc_it.code,
+                                    slot,
+                                    location: merc_it.location,
+                                    mode: merc_it.mode,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            issues.push(format!("Failed to parse mercenary items: {}", e));
+                        }
+                    }
+                }
+            } else {
+                issues.push("Mercenary kf/lf markers missing".to_string());
+            }
+        }
+    }
+
     let mercenary_json = merc.map(|merc| {
         let class_name = merc.class_name();
         let subtype_name = merc.subtype_name();
@@ -161,18 +258,23 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
         }
 
         MercenaryJson {
+            hireling_id: merc.hireling_id,
             class_id: merc.class_id,
             class_name,
             subtype_id: merc.subtype_id,
             subtype_name,
-            hireling_id: merc.hireling_id,
             experience: merc.experience,
             expected_level: merc.expected_level(),
             name_id: merc.name_id,
+            equipment: MercenaryEquipmentJson {
+                count: equipment_items.len(),
+                items: equipment_items,
+                footer_ok,
+            },
         }
     });
 
-    let status = if issues.iter().any(|i| i.contains("error") || i.contains("Drift")) {
+    let status = if issues.iter().any(|i| i.contains("error") || i.contains("Drift") || i.contains("Failed") || i.contains("Non-standard") || i.contains("missing") || i.contains("invalid")) {
         "Fail".to_string()
     } else {
         "Ok".to_string()
@@ -195,16 +297,21 @@ fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryRepor
         om.println("Hybrid Decoded:");
         om.println(&format!("  Class:    {} ({})", merc.class_id, merc.class_name));
         om.println(&format!("  Subtype:  {} ({})", merc.subtype_id, merc.subtype_name));
-        om.println(&format!("  ID (H169):{}", merc.hireling_id));
+        om.println(&format!("  ID:        {}", merc.hireling_id));
         om.println(&format!(
             "  Experience: {} (0x{:08X}) -> Expected Level: {}",
             merc.experience, merc.experience, merc.expected_level
         ));
         om.println(&format!("  Name ID:   {}", merc.name_id));
+        
+        om.println(&format!("Equipment: {} items (Footer: {})", merc.equipment.count, if merc.equipment.footer_ok { "Standard" } else { "NON-STANDARD" }));
+        for it in &merc.equipment.items {
+            om.println(&format!("  - {} in slot {}", it.code, it.slot));
+        }
     }
     
     for issue in &report.issues {
-        if issue.contains("Drift") || issue.contains("NOT found") {
+        if issue.contains("Drift") || issue.contains("NOT found") || issue.contains("Failed") || issue.contains("Non-standard") || issue.contains("missing") || issue.contains("invalid") {
             om.println(&format!("  [WARN] {}", issue));
         } else {
             om.println(&format!("  [INFO] {}", issue));
@@ -216,3 +323,5 @@ fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryRepor
     }
     om.println("");
 }
+
+

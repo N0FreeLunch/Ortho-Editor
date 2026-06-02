@@ -1,10 +1,12 @@
+use serde::{Serialize, Deserialize};
+
 /// Alpha v105 Mercenary State (Hybrid priority decoding).
 ///
 /// Forensic evidence (Axiom 0328, 0366) shows that mercenary data is dual-localized:
 /// - Experience: Always at Header Offset 171 (4B LE).
 /// - Hireling ID: Priority to 'w4' NPC section (Offset 782+4), fallback to Header Offset 169.
 /// - Act 3 Divergence: w4[4] contains Class ID (9), Header[169] contains Subtype (15, 16, 17).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MercenaryState {
     /// Generic Hireling ID. 
     /// Legacy: Equal to subtype_id or w4_id.
@@ -27,6 +29,38 @@ pub struct MercenaryState {
 
     /// Raw w4 bytes for forensic preservation.
     pub raw_w4: Vec<u8>,
+
+    /// Mercenary equipped items (Slice 4).
+    pub equipment: MercenaryEquipment,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MercenaryEquipment {
+    pub items: Vec<MercenaryEquipmentItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MercenaryEquipmentItem {
+    pub code: String,
+    pub location: u8,
+    pub mode: u8,
+    pub x: u8,
+    pub y: u8,
+}
+
+impl MercenaryEquipmentItem {
+    pub fn slot_name(&self) -> String {
+        match self.location {
+            1 => match self.x {
+                1 => "Head",
+                3 => "Torso",
+                4 => "Right Hand",
+                5 => "Left Hand",
+                _ => "Equipped (Other)",
+            },
+            _ => "Unknown",
+        }.to_string()
+    }
 }
 
 impl MercenaryState {
@@ -90,6 +124,7 @@ impl MercenaryState {
             experience,
             name_id,
             raw_w4,
+            equipment: MercenaryEquipment::default(),
         }
     }
 
@@ -138,6 +173,21 @@ impl MercenaryState {
             Intentionality::Structural,
             format!("Alpha v105 Mercenary identified as {} (ClassID={}, HirelingID={}, ExpectedLevel={})", name, self.class_id, self.hireling_id, expected_lvl),
         ));
+
+        if !self.equipment.items.is_empty() {
+            audit.record(ForensicMetadata::new(
+                Confidence::VerifiedTruth,
+                Intentionality::Structural,
+                format!("Mercenary Equipment: {} items detected", self.equipment.items.len()),
+            ));
+            for it in &self.equipment.items {
+                audit.record(ForensicMetadata::new(
+                    Confidence::VerifiedTruth,
+                    Intentionality::Structural,
+                    format!("  - {} equipped in {}", it.code.trim(), it.slot_name()),
+                ));
+            }
+        }
     }
 
     /// Calculates the expected level based on experience using the verified Amazon XP table.
