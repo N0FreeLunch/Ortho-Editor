@@ -200,7 +200,7 @@ impl StatsAxiom {
         if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
             return true;
         }
-        if (flags & (1 << 26)) != 0 {
+        if (flags & (1 << 26)) != 0 || (flags & (1 << 31)) != 0 {
             return true;
         }
         if self.save_is_alpha {

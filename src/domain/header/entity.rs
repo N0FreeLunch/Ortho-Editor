@@ -147,9 +147,9 @@ impl HeaderAxiom {
             } else {
                 (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
             };
+
             if let Some(c) = code {
                 let trimmed = c.trim();
-                if trimmed.is_empty() { return true; }
 
                 let reg = crate::domain::forensic::registry::get_registry();
                 if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
@@ -158,6 +158,19 @@ impl HeaderAxiom {
                 if let Some(overrides) = &reg.item_overrides {
                     if let Some(map) = overrides.get(trimmed) {
                         if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+                    }
+                }
+                
+                // Default to true for empty strings if no override was found
+                if trimmed.is_empty() { 
+                    if let Some(overrides) = &reg.item_overrides {
+                        if overrides.contains_key(trimmed) {
+                            // Already handled by override above
+                        } else {
+                            return true;
+                        }
+                    } else {
+                        return true; 
                     }
                 }
             }
