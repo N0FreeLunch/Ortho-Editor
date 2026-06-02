@@ -481,9 +481,6 @@ impl StatsAxiom {
     pub fn stat_bit_width(&self, raw_id: u32, default_width: u32) -> u32 {
         if self.is_alpha() {
             let trimmed = self.code.trim();
-            if default_width == 9 && trimmed != "acww" {
-                return 9;
-            }
 
             let reg = get_registry();
             if let Some(overrides) = &reg.item_overrides {
@@ -492,6 +489,10 @@ impl StatsAxiom {
                         return width;
                     }
                 }
+            }
+
+            if default_width == 9 && trimmed != "acww" {
+                return 9;
             }
 
             if let Some(mapping) = self.lookup_alpha_map_by_raw(raw_id) {
