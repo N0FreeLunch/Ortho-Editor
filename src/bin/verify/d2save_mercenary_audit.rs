@@ -27,6 +27,7 @@ struct MercenaryJson {
     subtype_name: String,
     hireling_id: u8,
     experience: u32,
+    expected_level: u8,
     name_id: u16,
 }
 
@@ -166,6 +167,7 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
             subtype_name,
             hireling_id: merc.hireling_id,
             experience: merc.experience,
+            expected_level: merc.expected_level(),
             name_id: merc.name_id,
         }
     });
@@ -195,8 +197,8 @@ fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryRepor
         om.println(&format!("  Subtype:  {} ({})", merc.subtype_id, merc.subtype_name));
         om.println(&format!("  ID (H169):{}", merc.hireling_id));
         om.println(&format!(
-            "  Experience: {} (0x{:08X})",
-            merc.experience, merc.experience
+            "  Experience: {} (0x{:08X}) -> Expected Level: {}",
+            merc.experience, merc.experience, merc.expected_level
         ));
         om.println(&format!("  Name ID:   {}", merc.name_id));
     }
