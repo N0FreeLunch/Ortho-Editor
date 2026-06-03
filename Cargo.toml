@@ -196,6 +196,10 @@ name = "d2item_scanner_visualizer"
 path = "src/bin/verify/d2item_scanner_visualizer.rs"
 
 [[bin]]
+name = "d2item_scanner_trace"
+path = "src/bin/verify/d2item_scanner_trace.rs"
+
+[[bin]]
 name = "d2item_visualizer"
 path = "src/bin/verify/d2item_visualizer.rs"
 
