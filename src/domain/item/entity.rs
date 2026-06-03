@@ -699,6 +699,17 @@ impl Item {
                 }
             }
         }
+        let trimmed_code = self.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        let is_target_blank = alpha_mode && trimmed_code.is_empty();
+        if alpha_mode && (self.is_opaque() || self.is_semi_opaque() || is_target_blank) && !self.bits.is_empty() {
+            println!("DEBUG to_emitter: code='{}', total_bits={}, bits_len={}, is_opaque={}, is_semi_opaque={}, is_target_blank={}",
+                     self.code, self.total_bits, self.bits.len(), self.is_opaque(), self.is_semi_opaque(), is_target_blank);
+            let take = self.total_bits.min(self.bits.len() as u64) as usize;
+            if take > 0 {
+                emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
+                return Ok(());
+            }
+        }
         if alpha_mode && self.header.is_runeword && is_authority_overlap_code && !self.bits.is_empty() {
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
