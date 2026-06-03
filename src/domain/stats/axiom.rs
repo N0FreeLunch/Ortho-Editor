@@ -197,13 +197,19 @@ impl StatsAxiom {
 
     pub fn is_runeword(&self, flags: u32) -> bool {
         let trimmed = self.code.trim();
-        if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
+        if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" || trimmed == "xrs" {
             return true;
         }
-        if (flags & (1 << 26)) != 0 || (flags & (1 << 31)) != 0 {
+        if (flags & (1 << 26)) != 0 {
             return true;
         }
         if self.save_is_alpha {
+            if self.version == 5 || self.version == 1 {
+                let is_frag = (flags & (1 << 27)) != 0;
+                if !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0) {
+                    return true;
+                }
+            }
             let reg = get_registry();
             if let Some(codes) = &reg.forced_runeword_codes {
                 if codes.iter().any(|c| c == trimmed) {
@@ -298,6 +304,9 @@ impl StatsAxiom {
             return 0;
         }
         let trimmed = _code.trim();
+        if trimmed == "ks d" {
+            return 10;
+        }
         let reg = get_registry();
         if let Some(overrides) = &reg.item_overrides {
             if let Some(map) = overrides.get(trimmed) {

@@ -14,6 +14,9 @@ pub fn normalize_alpha_code_hint(code: &str) -> &str {
     let trimmed = code.trim();
     match trimmed {
         "us g" | "k g" => "jav",
+        "7 p" => "ks d",
+        "80sc" => "ks d",
+        "lbl" => "b7ts",
         _ => trimmed,
     }
 }

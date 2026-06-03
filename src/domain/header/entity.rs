@@ -73,7 +73,12 @@ use std::collections::HashSet;
 static VALID_CODES: LazyLock<HashSet<&'static [u8]>> = LazyLock::new(|| {
     let mut set = HashSet::new();
     for t in crate::data::item_codes::ITEM_TEMPLATES {
-        set.insert(t.code.as_bytes());
+        let bytes = t.code.as_bytes();
+        set.insert(bytes);
+        let trimmed = t.code.trim().as_bytes();
+        if trimmed != bytes {
+            set.insert(trimmed);
+        }
     }
     // Axiom 0365: Explicit Alpha/Legacy white-listed codes (Forensic markers & Quest items)
     set.insert(b"wuw8");
@@ -83,6 +88,10 @@ static VALID_CODES: LazyLock<HashSet<&'static [u8]>> = LazyLock::new(|| {
     set.insert(b"bwcw");  // Tome
     set.insert(b"isc");   // Identify Scroll
     set.insert(b"tsc");   // Town Portal Scroll
+    set.insert(b"us g");  // Javelin Alpha code
+    set.insert(b"k g");   // Javelin Alpha code (alternate)
+    set.insert(b"b7ts");  // Alpha v105 Battle Shield
+    set.insert(b"ks d");  // Alpha v105 forensic code
     set.insert(b"    "); // Blank code (Slice 6)
     set.insert(b"   ");  // Blank code (3-char variant)
     set.insert(b"");     // Allow empty trim (Slice 6)
