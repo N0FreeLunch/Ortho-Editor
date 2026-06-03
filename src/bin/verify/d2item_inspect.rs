@@ -359,14 +359,26 @@ fn main() {
                                     }
                                 }
                                 if ok {
+                                    let decoded_trimmed = decoded.trim().to_string();
                                     let gap_source = if gap_len > 0 {
-                                        "header_gap_lookup"
+                                        "header_gap_lookup".to_string()
                                     } else {
-                                        "downstream_normalization"
+                                        if item.is_opaque() || item.is_semi_opaque() {
+                                            "normalization:opaque_fallback".to_string()
+                                        } else if decoded_trimmed == item.code.trim() {
+                                            "normalization:match_target".to_string()
+                                        } else {
+                                            "normalization:drift_realigned".to_string()
+                                        }
                                     };
-                                    (decoded.trim().to_string(), gap_len as usize, gap_source.to_string())
+                                    (decoded_trimmed, gap_len as usize, gap_source)
                                 } else {
-                                    ("".to_string(), gap_len as usize, "downstream_normalization".to_string())
+                                    let gap_source = if item.is_opaque() || item.is_semi_opaque() {
+                                        "normalization:opaque_fallback".to_string()
+                                    } else {
+                                        "normalization:drift_realigned".to_string()
+                                    };
+                                    ("".to_string(), gap_len as usize, gap_source)
                                 }
                             }
                         } else {
