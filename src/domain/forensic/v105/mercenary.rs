@@ -1,5 +1,9 @@
 use serde::{Serialize, Deserialize};
 
+use crate::data::mercenary::{
+    mercenary_class_name, mercenary_identity_label, mercenary_subtype_name,
+};
+
 /// Alpha v105 Mercenary State (Hybrid priority decoding).
 ///
 /// Forensic evidence (Axiom 0328, 0366) shows that mercenary data is dual-localized:
@@ -103,15 +107,8 @@ impl MercenaryState {
             name_id = w4_bytes.get(n_id_off).copied().map(|v| v as u16).unwrap_or(0);
         }
 
-        // Axiom 0381: Hybrid Disambiguation Pattern
-        // In Alpha v105, class_id 0 is ambiguous (Act 1 Rogue or Act 2 Desert).
-        // Use Header[169] (subtype_id) as the tie-breaker.
-        let reg = crate::domain::forensic::registry::get_registry();
-        let is_ambiguous = reg.mercenary_class_map.get(&class_id)
-            .map(|name| name == "Ambiguous")
-            .unwrap_or(class_id == 0); // Fallback to 0 if registry is missing entry
-
-        let hireling_id = if is_ambiguous {
+        // Alpha v105 mercenary class 0 is the only ambiguous slot; use header subtype as the tie-breaker.
+        let hireling_id = if class_id == 0 {
             subtype_id // Return Header ID (1=Rogue, 8=Desert etc)
         } else {
             class_id // Return w4 Class ID (1=Iron Wolf, 9=Barbarian)
@@ -128,38 +125,14 @@ impl MercenaryState {
         }
     }
 
-    /// Returns the localized class name from the forensic registry.
+    /// Returns the localized class name from the mercenary bridge.
     pub fn class_name(&self) -> String {
-        let reg = crate::domain::forensic::registry::get_registry();
-        
-        // Axiom 0381: If class_id is 0 or marked as None/Ambiguous, we use hireling_id (subtype_id) to disambiguate.
-        let name_opt = reg.mercenary_class_map.get(&self.class_id);
-        let is_ambiguous = name_opt.map(|n| n == "None" || n == "Ambiguous").unwrap_or(self.class_id == 0);
-
-        if is_ambiguous {
-            if self.hireling_id >= 8 {
-                "Desert Warrior (Act 2)".to_string()
-            } else {
-                "Rogue (Act 1)".to_string()
-            }
-        } else {
-            name_opt.cloned().unwrap_or_else(|| format!("Unknown({})", self.class_id))
-        }
+        mercenary_class_name(self.class_id, self.hireling_id).to_string()
     }
 
     /// Returns the subtype name (e.g. element for Act 3 Iron Wolves).
     pub fn subtype_name(&self) -> String {
-        // Axiom 0366: Act 3 (Class 9) uses subtype_id for elements.
-        if self.class_id == 9 {
-            match self.subtype_id {
-                15 => "Fire".to_string(),
-                16 => "Cold".to_string(),
-                17 => "Lightning".to_string(),
-                _ => format!("Unknown Element({})", self.subtype_id),
-            }
-        } else {
-            "N/A".to_string()
-        }
+        mercenary_subtype_name(self.class_id, self.subtype_id)
     }
 
     /// Records forensic evidence about the mercenary state to the audit.
@@ -171,7 +144,11 @@ impl MercenaryState {
         audit.record(ForensicMetadata::new(
             Confidence::VerifiedTruth,
             Intentionality::Structural,
-            format!("Alpha v105 Mercenary identified as {} (ClassID={}, HirelingID={}, ExpectedLevel={})", name, self.class_id, self.hireling_id, expected_lvl),
+            format!(
+                "Alpha v105 Mercenary identified as {} ({})",
+                name,
+                mercenary_identity_label(self.class_id, self.hireling_id, expected_lvl)
+            ),
         ));
 
         if !self.equipment.items.is_empty() {
@@ -223,6 +200,45 @@ impl MercenaryState {
     pub fn from_w4(bytes: &[u8]) -> Self {
         let header = [0u8; 175]; // Dummy header for legacy compat if needed, but better use hybrid.
         Self::from_hybrid(&header, Some(bytes))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MercenaryState;
+
+    #[test]
+    fn mercenary_class_name_matches_alpha_v105_mapping() {
+        let rogue = MercenaryState {
+            class_id: 0,
+            hireling_id: 1,
+            ..Default::default()
+        };
+        assert_eq!(rogue.class_name(), "Rogue (Act 1)");
+
+        let desert = MercenaryState {
+            class_id: 0,
+            hireling_id: 8,
+            ..Default::default()
+        };
+        assert_eq!(desert.class_name(), "Desert Warrior (Act 2)");
+
+        let iron_wolf = MercenaryState {
+            class_id: 1,
+            hireling_id: 1,
+            subtype_id: 16,
+            ..Default::default()
+        };
+        assert_eq!(iron_wolf.class_name(), "Iron Wolf");
+        assert_eq!(iron_wolf.subtype_name(), "Cold");
+
+        let barbarian = MercenaryState {
+            class_id: 9,
+            hireling_id: 9,
+            ..Default::default()
+        };
+        assert_eq!(barbarian.class_name(), "Barbarian");
+        assert_eq!(barbarian.subtype_name(), "N/A");
     }
 }
 

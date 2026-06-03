@@ -4,6 +4,7 @@ pub mod generated;
 pub mod bit_cursor;
 pub mod repository;
 pub mod alignment_oracle;
+pub mod mercenary;
 
 #[cfg(test)]
 mod alignment_oracle_test;
