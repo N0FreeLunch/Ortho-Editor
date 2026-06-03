@@ -176,25 +176,32 @@ fn analyze_non_compact_item(bytes: &[u8], bit_start: usize, huffman: &HuffmanTre
     }
 }
 
-fn item_to_json(item: &Item) -> serde_json::Value {
-    json!({
-        "code": item.code.trim(),
-        "bit_length": item.range.end - item.range.start,
-        "stats": item.properties.iter().map(|p| {
-            json!({
-                "id": p.stat_id,
-                "name": p.name,
-                "is_unknown": p.name.starts_with("Unknown")
-            })
-        }).collect::<Vec<_>>(),
-        "residue_bits": item.modules.iter().find_map(|m| {
-            if let d2r_core::item::ItemModule::Residue(bits) = m {
-                Some(bits.iter().map(|&b| if b { '1' } else { '0' }).collect::<String>())
-            } else {
-                None
-            }
+fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    map.insert("code".to_string(), json!(item.code.trim()));
+    map.insert("bit_length".to_string(), json!(item.range.end - item.range.start));
+    map.insert("stats".to_string(), json!(item.properties.iter().map(|p| {
+        json!({
+            "id": p.stat_id,
+            "name": p.name,
+            "is_unknown": p.name.starts_with("Unknown")
         })
-    })
+    }).collect::<Vec<_>>()));
+    
+    let residue = item.modules.iter().find_map(|m| {
+        if let d2r_core::item::ItemModule::Residue(bits) = m {
+            Some(bits.iter().map(|&b| if b { '1' } else { '0' }).collect::<String>())
+        } else {
+            None
+        }
+    });
+    map.insert("residue_bits".to_string(), json!(residue));
+    
+    if let Some(prov) = provenance {
+        map.insert("provenance".to_string(), prov);
+    }
+    
+    serde_json::Value::Object(map)
 }
 
 fn main() {
@@ -212,6 +219,12 @@ fn main() {
         None,
         Some("bit-offset"),
         "Start parsing at specific bit offset",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "trace-provenance",
+        None,
+        Some("trace-provenance"),
+        "Trace item code provenance (scanner hint, normalized code, final code)",
     ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -231,6 +244,7 @@ fn main() {
     let bit_offset = parsed
         .get("bit-offset")
         .and_then(|s| s.parse::<usize>().ok());
+    let trace_provenance = parsed.is_set("trace-provenance");
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -262,16 +276,143 @@ fn main() {
             Ok(item) => {
                 let bit_end = reader.position_in_bits().unwrap_or(0) as usize;
 
+                let provenance = if trace_provenance && is_alpha {
+                    let scanner_hint = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                        &bytes,
+                        offset as u64,
+                        Some(offset as u64),
+                        &huffman,
+                        true,
+                        0,
+                    )
+                    .map(|p| p.3.trim().to_string())
+                    .unwrap_or_default();
+
+                    let (normalized_code, gap_len, gap_source) = {
+                        let mut reader2 = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+                        let _ = reader2.skip(offset as u32).unwrap_or(());
+                        let mut cursor = d2r_core::data::bit_cursor::BitCursor::new(&mut reader2);
+                        
+                        let gap_override = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                            &bytes,
+                            offset as u64,
+                            Some(offset as u64),
+                            &huffman,
+                            true,
+                            0,
+                        ).map(|p| {
+                            let mut gap = p.8 as usize;
+                            if p.5 == 7 && !p.6 {
+                                gap = gap.saturating_sub(45);
+                            }
+                            gap
+                        });
+                        
+                        let has_checksum_peek = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                            &bytes,
+                            offset as u64,
+                            Some(offset as u64),
+                            &huffman,
+                            true,
+                            0,
+                        ).map(|p| p.9);
+
+                        if let Ok((header, _, _)) = d2r_core::domain::item::entity::parse_item_header(
+                            &mut cursor,
+                            true,
+                            Some(scanner_hint.as_str()),
+                            gap_override,
+                            true,
+                            None,
+                            has_checksum_peek,
+                            Some(offset as u64),
+                        ) {
+                            if header.is_compact {
+                                cursor.base_pos = offset as u64;
+                            }
+                            let s_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
+                                header.version,
+                                header.quality.unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
+                                true,
+                            );
+                            let is_ho = s_axiom.is_header_only(header.flags, Some(scanner_hint.as_str()).unwrap_or(""));
+
+                            if is_ho {
+                                (scanner_hint.clone(), 0usize, "header_only".to_string())
+                            } else {
+                                let gap_len = if scanner_hint.trim() == "buc" || matches!(header.version, 1) {
+                                    0
+                                } else {
+                                    s_axiom.header_gap(&scanner_hint, header.flags)
+                                };
+                                if gap_len > 0 {
+                                    let _ = cursor.skip(gap_len as u64);
+                                }
+                                let mut decoded = String::new();
+                                let mut ok = true;
+                                for _ in 0..4 {
+                                    if let Ok(c) = huffman.decode(&mut reader2) {
+                                        decoded.push(c);
+                                    } else {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if ok {
+                                    let gap_source = if gap_len > 0 {
+                                        "header_gap_lookup"
+                                    } else {
+                                        "downstream_normalization"
+                                    };
+                                    (decoded.trim().to_string(), gap_len as usize, gap_source.to_string())
+                                } else {
+                                    ("".to_string(), gap_len as usize, "downstream_normalization".to_string())
+                                }
+                            }
+                        } else {
+                            ("".to_string(), 0usize, "unresolved".to_string())
+                        }
+                    };
+
+                    let final_code = item.code.trim().to_string();
+                    
+                    let emitter_bypass = {
+                        let trimmed_code = item.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+                        let is_target_blank = trimmed_code.is_empty() && item.code != "    ";
+                        item.is_opaque() || item.is_semi_opaque() || is_target_blank
+                    };
+
+                    Some(json!({
+                        "scanner_hint": scanner_hint,
+                        "normalized_code": normalized_code,
+                        "final_code": final_code,
+                        "gap_len": gap_len,
+                        "gap_source": gap_source,
+                        "emitter_bypass": emitter_bypass
+                    }))
+                } else {
+                    None
+                };
+
                 if is_json {
                     println!(
                         "{}",
-                        json!({ "item": item_to_json(&item), "errors": [], "range": {"start": offset, "end": bit_end} })
+                        json!({ "item": item_to_json(&item, provenance), "errors": [], "range": {"start": offset, "end": bit_end} })
                     );
                 } else {
                     println!(
                         "Parsed item at offset {}: '{}' bits {}-{} loc={} quality={:?}",
                         offset, item.code, offset, bit_end, item.location, item.header.quality
                     );
+                    if let Some(ref prov) = provenance {
+                        println!("  [PROVENANCE]");
+                        println!("    Scanner Hint   : {}", prov["scanner_hint"].as_str().unwrap_or(""));
+                        println!("    Normalized Code: {}", prov["normalized_code"].as_str().unwrap_or(""));
+                        println!("    Final Code     : {}", prov["final_code"].as_str().unwrap_or(""));
+                        println!("    Gap Len        : {}", prov["gap_len"].as_u64().unwrap_or(0));
+                        println!("    Gap Source     : {}", prov["gap_source"].as_str().unwrap_or(""));
+                        println!("    Emitter Bypass : {}", prov["emitter_bypass"].as_bool().unwrap_or(false));
+                    }
                     for prop in &item.properties {
                         println!(
                             "  Prop: id={} value={} param={} bits {}-{}",
@@ -302,7 +443,7 @@ fn main() {
     // 1. Try reading as player items (save file format)
     if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
         if is_json {
-            let item_objs: Vec<_> = items.iter().map(|it| item_to_json(it)).collect();
+            let item_objs: Vec<_> = items.iter().map(|it| item_to_json(it, None)).collect();
             println!("{}", json!({"items": item_objs, "errors": []}));
             return;
         }
@@ -407,7 +548,7 @@ fn main() {
     if is_json {
         let item_objs: Vec<_> = visible_items
             .iter()
-            .map(|(_, _, it)| item_to_json(it))
+            .map(|(_, _, it)| item_to_json(it, None))
             .collect();
         if item_objs.len() == 1 {
             println!("{}", json!({ "item": item_objs[0], "errors": errors }));
