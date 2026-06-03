@@ -93,14 +93,10 @@ fn main() -> anyhow::Result<()> {
         }
 
         {
-            // Slice 2: Prevent mutating Opaque items
-            if items[idx]
-                .modules
-                .iter()
-                .any(|m| matches!(m, d2r_core::item::ItemModule::Opaque(_)))
-            {
+            // Slice 1: Treat forensic isolation cases as read-only mutation targets.
+            if is_non_editable_forensic_item(&items[idx]) {
                 bail!(
-                    "Cannot mutate an Opaque (unparsable) item at index {}.",
+                    "Cannot mutate a non-editable forensic item (Opaque/SemiOpaque/Residue) at index {}.",
                     idx
                 );
             }
@@ -211,4 +207,50 @@ fn mutate_marker(
 
     println!("Note: Checksum was NOT recalculated.");
     Ok(())
+}
+
+fn is_non_editable_forensic_item(item: &Item) -> bool {
+    item.is_opaque() || item.is_semi_opaque() || item.is_residue()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn editable_item() -> Item {
+        let mut item = Item::default();
+        item.code = "cap".to_string();
+        item.body.code = "cap".to_string();
+        item
+    }
+
+    #[test]
+    fn opaque_item_is_non_editable() {
+        let mut item = editable_item();
+        item.modules
+            .push(d2r_core::item::ItemModule::Opaque(vec![true, false]));
+
+        assert!(is_non_editable_forensic_item(&item));
+    }
+
+    #[test]
+    fn semi_opaque_item_is_non_editable() {
+        let mut item = editable_item();
+        item.modules.push(d2r_core::item::ItemModule::SemiOpaque {
+            body_bits: vec![true, false, true],
+            reason: "forensic isolation".to_string(),
+        });
+
+        assert!(is_non_editable_forensic_item(&item));
+    }
+
+    #[test]
+    fn residue_item_is_non_editable() {
+        assert!(is_non_editable_forensic_item(&Item::default()));
+    }
+
+    #[test]
+    fn normal_item_remains_editable() {
+        assert!(!is_non_editable_forensic_item(&editable_item()));
+    }
 }
