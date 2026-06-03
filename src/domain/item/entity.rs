@@ -1671,8 +1671,16 @@ pub fn parse_item_body<R: BitRead>(
                     if consume_len > 0 {
                         let saved_pos = cursor.pos();
                         if let Ok(bits) = cursor.read_bits_as_vec(consume_len) {
-                            code = normalized_hint;
-                            alpha_code_bits = bits;
+                            if trimmed_hint == "buc" {
+                                // Buckler-style compact tails keep their consumed bits for
+                                // fidelity, but the raw Huffman decode is still authoritative
+                                // when it can recover a concrete code.
+                                alpha_code_bits = bits;
+                                cursor.rollback(saved_pos);
+                            } else {
+                                code = normalized_hint;
+                                alpha_code_bits = bits;
+                            }
                         } else {
                             cursor.rollback(saved_pos);
                             if trusted_compact_hint {
