@@ -1,5 +1,6 @@
 use super::{DomainReport, DomainVerifier};
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
+use crate::engine::validation::validate_item;
 use crate::item::{HuffmanTree, Item, ParsingError};
 use crate::save::find_jm_markers;
 use crate::verify::ReportIssue;
@@ -59,6 +60,17 @@ impl DomainVerifier for ItemVerifier {
             // if we already know they are in a forensic isolation state.
             if item.is_opaque() || item.is_semi_opaque() {
                 continue;
+            }
+
+            // Perform semantic legitimacy checks (detecting custom/invalid items)
+            if let Some(validation) = validate_item(item) {
+                for warning in validation.warnings {
+                    issues.push(ReportIssue {
+                        kind: "item_legitimacy".to_string(),
+                        message: format!("Item legitimacy warning ({}): {}", item.code.trim(), warning),
+                        bit_offset: Some(item.range.start),
+                    });
+                }
             }
 
             let item_bits_vec = match item.to_bits(idx, &huffman, alpha_mode) {

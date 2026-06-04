@@ -175,3 +175,84 @@ mod tests {
         assert_eq!(xrs.socketed_items[2].code.trim(), "r08");
     }
 }
+
+use std::sync::Once;
+
+static RAYON_INIT: Once = Once::new();
+
+#[cfg(windows)]
+mod os_priority {
+    // Zero-dependency win32 FFI to lower process priority class.
+    // This protects system responsiveness during heavy parallel agent runs.
+    use std::os::windows::raw::HANDLE;
+
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> HANDLE;
+        fn SetPriorityClass(h_process: HANDLE, dw_priority_class: u32) -> i32;
+    }
+
+    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
+
+    pub fn lower_priority() {
+        unsafe {
+            let handle = GetCurrentProcess();
+            let _ = SetPriorityClass(handle, BELOW_NORMAL_PRIORITY_CLASS);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod os_priority {
+    // Zero-dependency unix FFI to nice down the process priority.
+    unsafe extern "C" {
+        fn setpriority(which: i32, who: i32, value: i32) -> i32;
+    }
+
+    const PRIO_PROCESS: i32 = 0;
+
+    pub fn lower_priority() {
+        unsafe {
+            // set priority to nice=10 (yield cpu nicely to others)
+            let _ = setpriority(PRIO_PROCESS, 0, 10);
+        }
+    }
+}
+
+pub fn init_rayon_thread_pool() {
+    RAYON_INIT.call_once(|| {
+        // Lower OS process priority to avoid starving other processes or agents
+        os_priority::lower_priority();
+
+        let _ = dotenvy::dotenv();
+        
+        if std::env::var("RAYON_NUM_THREADS").is_ok() {
+            return;
+        }
+
+        let percent = std::env::var("D2R_THREAD_PERCENT")
+            .ok()
+            .and_then(|val| val.parse::<u32>().ok())
+            .unwrap_or(75);
+
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        
+        let mut threads = ((cpus as u64 * percent as u64) / 100) as usize;
+        
+        if percent > 0 && percent < 100 {
+            // 100% 미만이면 최소 한 개 스레드는 남김
+            threads = threads.min(cpus.saturating_sub(1));
+            // 0% 초과면 최소 한 개 스레드는 사용
+            threads = threads.max(1);
+        } else if percent >= 100 {
+            threads = cpus;
+        } else {
+            threads = 1;
+        }
+
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global();
+    });
+}

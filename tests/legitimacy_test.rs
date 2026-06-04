@@ -1,6 +1,7 @@
 use d2r_core::data::legitimacy::calc_alvl;
 use d2r_core::engine::validation::{
     check_alvl_legitimacy, check_socket_legitimacy, check_staffmod_legitimacy,
+    check_item_code_legitimacy,
 };
 use d2r_core::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
@@ -288,4 +289,27 @@ fn test_illegal_ethereal_bow() {
         "Warning missing 'cannot be ethereal': {}",
         warnings[0]
     );
+}
+
+#[test]
+fn test_item_code_legitimacy_violation() {
+    let mut item = Item::empty_for_tests();
+    item.code = "abc ".to_string(); // Non-existent custom code
+
+    let warnings = check_item_code_legitimacy(&item);
+    assert!(!warnings.is_empty(), "Should warn about invalid item code");
+    assert!(
+        warnings[0].contains("Invalid item code 'abc'"),
+        "Warning missing 'Invalid item code 'abc'': {}",
+        warnings[0]
+    );
+}
+
+#[test]
+fn test_item_code_legitimacy_valid() {
+    let mut item = Item::empty_for_tests();
+    item.code = "lsd ".to_string(); // Valid Long Sword code
+
+    let warnings = check_item_code_legitimacy(&item);
+    assert!(warnings.is_empty(), "Should NOT warn for valid item code: {:?}", warnings);
 }

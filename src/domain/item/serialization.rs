@@ -908,6 +908,7 @@ pub fn read_player_items(
     huffman: &HuffmanTree,
     alpha: bool,
 ) -> ParsingResult<Vec<Item>> {
+    crate::init_rayon_thread_pool();
     let mut all_items = Vec::new();
     let all_jm_positions = crate::save::find_jm_markers(bytes);
     let mut jm_positions = Vec::new();

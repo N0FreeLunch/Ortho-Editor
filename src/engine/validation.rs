@@ -219,8 +219,18 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
         res.warnings.extend(check_affix_group_legitimacy(item));
         res.warnings.extend(check_runeword_legitimacy(item));
         res.warnings.extend(check_base_stat_legitimacy(item));
+        res.warnings.extend(check_item_code_legitimacy(item));
     }
     result
+}
+
+pub fn check_item_code_legitimacy(item: &Item) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let trimmed = item.code.trim();
+    if ITEM_TEMPLATES.iter().find(|t| t.code == trimmed).is_none() {
+        warnings.push(format!("Invalid item code '{}': not found in game database", trimmed));
+    }
+    warnings
 }
 
 pub fn check_staffmod_legitimacy(item: &Item) -> Vec<String> {
