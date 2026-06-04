@@ -215,6 +215,23 @@ fn main() -> anyhow::Result<()> {
                         .unwrap_or_default()
                 ));
             }
+            for issue in &report.forensic_issues {
+                om.println(&format!(
+                    "  [FORENSIC] [{}] {}{}",
+                    issue.kind,
+                    issue.message,
+                    issue
+                        .bit_offset
+                        .map(|b| format!(" (bit {})", b))
+                        .unwrap_or_default()
+                ));
+                if let Some(dna) = &issue.dna_class {
+                    om.println(&format!("    DNA Class: {}", dna));
+                }
+                if let Some(pres) = &issue.prescription {
+                    om.println(&format!("    Prescription: {}", pres));
+                }
+            }
             for action in &report.suggested_actions {
                 om.println(&format!(
                     "  [ACTION] ({:.2}) {}: {}",

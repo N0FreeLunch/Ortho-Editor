@@ -1,6 +1,7 @@
 pub mod args;
 pub mod bit_diff;
 pub mod desync;
+pub mod forensics;
 pub mod mutation;
 pub mod sba;
 pub mod save_integrity;
@@ -141,6 +142,8 @@ pub struct Report<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scan_results: Option<T>,
     pub issues: Vec<ReportIssue>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub forensic_issues: Vec<forensics::ForensicIssue>,
     pub hints: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shadow_audit: Option<ShadowAuditResult>,
@@ -166,6 +169,7 @@ impl<T> Report<T> {
             status,
             scan_results: None,
             issues: Vec::new(),
+            forensic_issues: Vec::new(),
             hints: Vec::new(),
             shadow_audit: None,
             suggested_actions: Vec::new(),
@@ -184,6 +188,11 @@ impl<T> Report<T> {
 
     pub fn with_issues(mut self, issues: Vec<ReportIssue>) -> Self {
         self.issues = issues;
+        self
+    }
+
+    pub fn with_forensic_issues(mut self, issues: Vec<forensics::ForensicIssue>) -> Self {
+        self.forensic_issues = issues;
         self
     }
 

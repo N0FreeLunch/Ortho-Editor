@@ -7,7 +7,7 @@ use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save
 use crate::verify::v2::{
     header::HeaderVerifier, item::ItemVerifier, progression::ProgressionVerifier, DomainVerifier,
 };
-use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction};
+use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction, forensics};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +44,7 @@ pub struct D2SaveVerifyPayload {
 
 pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPayload>, bool) {
     let mut issues = Vec::new();
+    let mut forensic_issues = Vec::new();
     let mut fail = false;
 
     // Modular V2 Verifiers
@@ -109,20 +110,18 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
                 ("w4", map.w4_pos, V105_NPC_OFFSET),
             ] {
                 match found {
-                    Some(pos) if pos != expected => issues.push(ReportIssue {
-                        kind: "structural".into(),
-                        message: format!(
+                    Some(pos) if pos != expected => forensic_issues.push(forensics::ForensicIssue::new(
+                        "structural",
+                        &format!(
                             "Alpha v105: {} marker displaced (found at 0x{:03X}, expected 0x{:03X})",
                             name, pos, expected
                         ),
-                        bit_offset: Some(pos as u64 * 8),
-                    }),
+                    ).with_offset(pos as u64 * 8).with_prescription("Verify if this is a non-standard Alpha revision or if structural drift has occurred.")),
                     None => {
-                        issues.push(ReportIssue {
-                            kind: "structural".into(),
-                            message: format!("Alpha v105: {} marker missing", name),
-                            bit_offset: None,
-                        });
+                        forensic_issues.push(forensics::ForensicIssue::new(
+                            "structural",
+                            &format!("Alpha v105: {} marker missing", name),
+                        ));
                         fail = true;
                     }
                     _ => {}
@@ -168,7 +167,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
     let rhythmic_fidelity = item_report.rhythmic_fidelity;
     let hints = synthesize_hints(&issues);
     let actions = triage_actions(&issues);
-    let issue_count = issues.len();
+    let issue_count = issues.len() + forensic_issues.len();
     let status = if fail {
         ReportStatus::Fail
     } else {
@@ -184,6 +183,7 @@ pub fn verify_save_integrity(path: &str, bytes: &[u8]) -> (Report<D2SaveVerifyPa
         status,
     )
     .with_issues(issues)
+    .with_forensic_issues(forensic_issues)
     .with_hints(hints)
     .with_actions(actions)
     .with_results(D2SaveVerifyPayload {
@@ -254,8 +254,8 @@ fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
 
     for issue in issues {
         if issue.kind == "item_parity" {
-            if let Some(diagnosis) = extract_dna_diagnosis(&issue.message) {
-                actions.push(build_self_heal_action(issue, &diagnosis));
+            if let Some(diagnosis) = forensics::extract_dna_diagnosis(&issue.message) {
+                actions.push(forensics::build_self_heal_action(issue.bit_offset, &diagnosis));
             }
 
             if let Some(caps) = re_parity.captures(&issue.message) {
@@ -299,52 +299,6 @@ fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
     }
 
     actions
-}
-
-#[derive(Debug, Clone)]
-struct DnaDiagnosis {
-    rupture_field: String,
-    dna_class: String,
-    prescription: String,
-}
-
-fn extract_dna_diagnosis(message: &str) -> Option<DnaDiagnosis> {
-    let marker = " | DNA Diagnosis: Rupture Point: '";
-    let start = message.find(marker)? + marker.len();
-    let after_rupture = &message[start..];
-    let rupture_end = after_rupture.find("', DNA Class: '")?;
-    let rupture_field = after_rupture[..rupture_end].to_string();
-
-    let after_class = &after_rupture[rupture_end + "', DNA Class: '".len()..];
-    let class_end = after_class.find("', Prescription: ")?;
-    let dna_class = after_class[..class_end].to_string();
-    let prescription = after_class[class_end + "', Prescription: ".len()..]
-        .trim()
-        .to_string();
-
-    Some(DnaDiagnosis {
-        rupture_field,
-        dna_class,
-        prescription,
-    })
-}
-
-fn build_self_heal_action(issue: &ReportIssue, diagnosis: &DnaDiagnosis) -> SuggestedAction {
-    let bit_offset = issue.bit_offset.unwrap_or(0);
-    let command = match diagnosis.dna_class.as_str() {
-        "stat_alignment_drift" => format!("d2item_desync_detector --bit-offset {}", bit_offset),
-        "compact_geometry_shift" => format!("d2item_alignment_oracle --bit-offset {}", bit_offset),
-        _ => format!("d2save_verify --dump-bits {} 128", bit_offset),
-    };
-
-    SuggestedAction {
-        kind: format!("self_heal_{}", diagnosis.dna_class),
-        command: format!(
-            "{}  # {} | rupture_field={}",
-            command, diagnosis.prescription, diagnosis.rupture_field
-        ),
-        confidence: 0.95,
-    }
 }
 
 #[cfg(test)]
