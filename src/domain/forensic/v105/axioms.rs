@@ -776,7 +776,16 @@ impl V105PropertyWidthAxiom {
     pub fn x_bits(&self, _alpha_mode: bool) -> u32 { 4 }
 
     pub fn summary_gap_bits(&self, code: &str) -> u32 {
-        let trimmed = code.trim();
+        let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        let reg = crate::domain::forensic::registry::get_registry();
+        if let Some(overrides) = &reg.item_overrides {
+            if let Some(map) = overrides.get(trimmed) {
+                if let Some(&gap) = map.get("header_gap") {
+                    return gap;
+                }
+            }
+        }
+        
         if trimmed == "tsc" || trimmed == "isc" {
             0
         } else {

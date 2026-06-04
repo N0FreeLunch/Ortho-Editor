@@ -723,7 +723,9 @@ impl Item {
         let flags_to_write = self.header.flags;
         emitter.write_bits(flags_to_write, 32)?;
         let w_axiom = V105PropertyWidthAxiom::default();
-        if alpha_mode && self.header.has_checksum {
+        let is_v105_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
+        
+        if alpha_mode && self.header.has_checksum && !is_v105_summary {
             let checksum = self.header.alpha_checksum.unwrap_or_else(|| {
                 calculate_alpha_v105_checksum(flags_to_write, self.header.version)
             });
@@ -747,7 +749,6 @@ impl Item {
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
 
         // 2. Handle Alpha v105 summary items (Potions, Scrolls):
-        let is_v105_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
         if is_v105_summary {
             // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
             emitter.write_bits(self.header.y as u32, 3)?;
@@ -759,12 +760,9 @@ impl Item {
             }
 
             // Write 16-bit ID (Slice 2): Unified 16-bit ID field.
-            // Prefer original code bits to preserve bit-order/stealth patterns.
-            if !self.body.alpha_code_bits.is_empty() {
-                emitter.extend_bits(self.body.alpha_code_bits.iter().cloned())?;
-            } else {
-                emitter.write_bits(self.id.unwrap_or(0), 16)?;
-            }
+            // Alpha v105 summary items (wsp, potions, scrolls) MUST use 16-bit ID to maintain 73/80 bit slotted alignment.
+            // If they have 24-bit raw code bits, it will overflow the slotted boundary.
+            emitter.write_bits(self.id.unwrap_or(0), 16)?;
 
             // Align to target width (72 or 80 bits).
             let current_bits = emitter.written_bits() - start_bit;
