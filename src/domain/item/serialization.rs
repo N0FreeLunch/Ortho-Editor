@@ -1494,8 +1494,7 @@ impl Item {
                                     proximity_axiom.calculate_nudge(current_end, target)
                                 {
                                     // Axiom 0345: Proximity Snap. Consume the drift as alignment padding to recover boundary.
-                                    let preserve_padding =
-                                        !matches!(final_item.code.trim(), "hp1" | "mp1");
+                                    let preserve_padding = true;
                                     if preserve_padding {
                                         actual_consumed += drift;
                                         let padding_bits = read_alignment_padding_bits(
@@ -1808,8 +1807,7 @@ impl Item {
                                                 if let Some(drift) = proximity_axiom
                                                     .calculate_nudge(current_end, target)
                                                 {
-                                                    let preserve_padding =
-                                                        !matches!(final_item.code.trim(), "hp1" | "mp1");
+                                                    let preserve_padding = true;
                                                     if preserve_padding {
                                                         actual_consumed += drift;
                                                         let padding_bits =
@@ -2398,7 +2396,7 @@ impl Item {
         );
 
         let mut rhythm_recovery = false;
-        let (mut body, _alpha_code_bits, ear_class, ear_level, ear_player_name) = match body_res {
+        let (mut body, alpha_code_bits, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,
             Err(e)
                 if header.save_is_alpha
@@ -2539,7 +2537,23 @@ impl Item {
 
         let mut final_header = header;
         final_header.is_runeword = detected_runeword;
-        final_header.id = ext_data.id;
+
+        // Alpha v105 Summary Parity (Slice 30):
+        // Re-capture the 16-bit ID from alpha_code_bits for summary items to ensure
+        // it's preserved in final_header.id and correctly re-emitted.
+        let mut id_val = ext_data.id;
+        if alpha_mode && crate::domain::forensic::v105::axioms::is_v105_summary_code(&body.code) {
+            if !alpha_code_bits.is_empty() {
+                let mut val = 0u32;
+                for (i, &bit) in alpha_code_bits.iter().enumerate() {
+                    if i < 32 && bit {
+                        val |= 1u32 << i;
+                    }
+                }
+                id_val = Some(val);
+            }
+        }
+        final_header.id = id_val;
         final_header.level = ext_data.level;
         final_header.quality = ext_data.quality;
         final_header.alpha_quality_raw = ext_data.alpha_quality_raw;

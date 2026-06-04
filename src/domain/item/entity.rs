@@ -725,7 +725,7 @@ impl Item {
         let w_axiom = V105PropertyWidthAxiom::default();
         let is_v105_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
         
-        if alpha_mode && self.header.has_checksum && !is_v105_summary {
+        if alpha_mode && self.header.has_checksum {
             let checksum = self.header.alpha_checksum.unwrap_or_else(|| {
                 calculate_alpha_v105_checksum(flags_to_write, self.header.version)
             });
@@ -1357,8 +1357,12 @@ pub fn parse_item_header<R: BitRead>(
             // Forensic Override: Many Alpha v105 items have a checksum slot (8 bits)
             // even if the formula doesn't match our current understanding.
             // If it's a known summary item, we MUST consume those 8 bits to maintain rhythm.
+            // Exception: hp1/mp1/tsc/isc often skip the checksum entirely (Slice 30).
             if !matched && is_v105_summary {
-                matched = true;
+                let trimmed = code_hint.unwrap_or("").trim();
+                if !matches!(trimmed, "hp1" | "mp1" | "tsc" | "isc") {
+                    matched = true;
+                }
             }
 
             if matched {
