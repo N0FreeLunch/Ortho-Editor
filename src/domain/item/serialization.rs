@@ -2358,6 +2358,15 @@ impl Item {
             body.alpha_header_gap = alpha_header_gap;
             body.alpha_header_gap_bits = alpha_header_gap_bits;
 
+            if alpha_mode && peeked_code.trim().is_empty() {
+                let target_len = 74u64;
+                let current_len = cursor.pos() - start_bit;
+                if current_len < target_len {
+                    let to_skip = target_len - current_len;
+                    cursor.skip_and_record(to_skip as u32)?;
+                }
+            }
+
             let all_recorded = cursor.recorded_bits();
             let end_idx = (cursor.pos().saturating_sub(start_bit) as usize).min(all_recorded.len());
             let bits = all_recorded[..end_idx].to_vec();
