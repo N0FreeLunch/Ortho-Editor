@@ -3,6 +3,7 @@ use d2r_core::save::map_core_sections;
 use d2r_core::verify::args::{ArgError, ArgParser};
 use d2r_core::verify::OutputManager;
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::verify::forensics::ForensicIssue;
 use serde::Serialize;
 use std::{env, fs, process};
 
@@ -11,7 +12,7 @@ struct MercenaryReport {
     metadata: ReportMetadata,
     status: String,
     mercenary: Option<MercenaryJson>,
-    issues: Vec<String>,
+    issues: Vec<ForensicIssue>,
 }
 
 #[derive(Serialize)]
@@ -83,6 +84,7 @@ fn main() -> anyhow::Result<()> {
         let bytes = match fs::read(path) {
             Ok(b) => b,
             Err(e) => {
+                let msg = format!("Cannot read file: {}", e);
                 if is_json {
                     let report = MercenaryReport {
                         metadata: ReportMetadata {
@@ -91,11 +93,11 @@ fn main() -> anyhow::Result<()> {
                         },
                         status: "Fail".to_string(),
                         mercenary: None,
-                        issues: vec![format!("Cannot read file: {}", e)],
+                        issues: vec![ForensicIssue::new("IoError", &msg)],
                     };
                     om.json(&serde_json::to_string(&report)?);
                 } else {
-                    om.println(&format!("=== File: {} ===\n  [ERROR] Cannot read file: {}", path, e));
+                    om.println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg));
                 }
                 all_ok = false;
                 continue;
@@ -115,6 +117,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
+                let msg = format!("Audit failed: {}", e);
                 if is_json {
                     let report = MercenaryReport {
                         metadata: ReportMetadata {
@@ -123,11 +126,11 @@ fn main() -> anyhow::Result<()> {
                         },
                         status: "Fail".to_string(),
                         mercenary: None,
-                        issues: vec![format!("Audit failed: {}", e)],
+                        issues: vec![ForensicIssue::new("InternalError", &msg)],
                     };
                     om.json(&serde_json::to_string(&report)?);
                 } else {
-                    om.println(&format!("=== File: {} ===\n  [ERROR] Audit failed: {}", path, e));
+                    om.println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg));
                 }
                 all_ok = false;
             }
@@ -154,7 +157,7 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
         let merc = MercenaryState::from_hybrid(bytes, Some(w4));
         (Some(merc), true)
     } else {
-        issues.push("w4 section NOT found".to_string());
+        issues.push(ForensicIssue::new("SectionMissing", "w4 section NOT found"));
         let merc = MercenaryState::from_hybrid(bytes, None);
         (Some(merc), false)
     };
@@ -182,7 +185,10 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                 let footer = MercenaryFooter::from_bytes(&bytes[kf..]);
                 footer_ok = footer.is_standard();
                 if !footer_ok {
-                    issues.push("Non-standard mercenary footer detected".to_string());
+                    issues.push(
+                        ForensicIssue::new("LayoutAnomaly", "Non-standard mercenary footer detected")
+                            .with_offset(kf as u64 * 8)
+                    );
                 }
                 
                 if lf + 4 < next_pos {
@@ -217,7 +223,10 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                                 let slot = merc_it.slot_name();
 
                                 if it.mode != 1 || it.location != 1 {
-                                    issues.push(format!("Mercenary item {} in invalid mode/location (mode={}, loc={})", it.code.trim(), it.mode, it.location));
+                                    issues.push(
+                                        ForensicIssue::new("SemanticViolation", &format!("Mercenary item {} in invalid mode/location (mode={}, loc={})", it.code.trim(), it.mode, it.location))
+                                            .with_offset(it.range.start)
+                                    );
                                 }
 
                                 equipment_items.push(MercenaryItemJson {
@@ -229,12 +238,18 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                             }
                         }
                         Err(e) => {
-                            issues.push(format!("Failed to parse mercenary items: {}", e));
+                            issues.push(
+                                ForensicIssue::new("ParseFailure", &format!("Failed to parse mercenary items: {}", e))
+                                    .with_offset(items_start as u64 * 8)
+                            );
                         }
                     }
                 }
             } else {
-                issues.push("Mercenary kf/lf markers missing".to_string());
+                issues.push(
+                    ForensicIssue::new("SectionMissing", "Mercenary kf/lf markers missing")
+                        .with_offset(jm_pos as u64 * 8)
+                );
             }
         }
     }
@@ -249,10 +264,13 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                 let c_off = if has_marker { 6 } else { 4 };
                 let raw_class = w4.get(c_off).copied().unwrap_or(0);
                 if raw_class != merc.class_id {
-                    issues.push(format!(
-                        "Alignment Drift Detected! MercenaryState class ({}) != raw class ({})",
-                        merc.class_id, raw_class
-                    ));
+                    let w4_pos = map.w4_pos.unwrap_or(0);
+                    issues.push(
+                        ForensicIssue::new("AlignmentDrift", &format!(
+                            "Alignment Drift Detected! MercenaryState class ({}) != raw class ({})",
+                            merc.class_id, raw_class
+                        )).with_offset(w4_pos as u64 * 8)
+                    );
                 }
             }
         }
@@ -274,7 +292,18 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
         }
     });
 
-    let status = if issues.iter().any(|i| i.contains("error") || i.contains("Drift") || i.contains("Failed") || i.contains("Non-standard") || i.contains("missing") || i.contains("invalid")) {
+    let status = if issues.iter().any(|i| 
+        i.kind == "AlignmentDrift" || 
+        i.kind == "ParseFailure" || 
+        i.kind == "SemanticViolation" || 
+        i.kind == "IoError" || 
+        i.kind == "InternalError" ||
+        i.message.contains("error") || 
+        i.message.contains("Failed") || 
+        i.message.contains("Non-standard") || 
+        i.message.contains("missing") || 
+        i.message.contains("invalid")
+    ) {
         "Fail".to_string()
     } else {
         "Ok".to_string()
@@ -311,11 +340,13 @@ fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryRepor
     }
     
     for issue in &report.issues {
-        if issue.contains("Drift") || issue.contains("NOT found") || issue.contains("Failed") || issue.contains("Non-standard") || issue.contains("missing") || issue.contains("invalid") {
-            om.println(&format!("  [WARN] {}", issue));
-        } else {
-            om.println(&format!("  [INFO] {}", issue));
-        }
+        let label = match issue.kind.as_str() {
+            "AlignmentDrift" | "ParseFailure" | "SemanticViolation" | "IoError" | "InternalError" => "[ERROR]",
+            "SectionMissing" | "LayoutAnomaly" => "[WARN]",
+            _ => "[INFO]",
+        };
+        let offset_str = issue.bit_offset.map(|o| format!(" @ bit {}", o)).unwrap_or_default();
+        om.println(&format!("  {} {}{}", label, issue.message, offset_str));
     }
     
     if verbose {
