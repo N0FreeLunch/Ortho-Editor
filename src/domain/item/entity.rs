@@ -1184,19 +1184,34 @@ impl Item {
         if alpha_mode {
             let current_bits = emitter.written_bits() - start_bit;
             let start_idx = current_bits as usize;
-            let total_bits = self.total_bits.min(self.bits.len() as u64) as usize;
-            let fallback_padding = if total_bits > start_idx && total_bits <= self.bits.len() {
-                self.bits[start_idx..total_bits]
+            let recorded_total = self.bits.len();
+            let recorded_padding = if recorded_total > start_idx {
+                // Preserve any raw tail bits captured during parsing before falling back to
+                // synthesized alignment padding. This keeps compact-tail seams bit-exact.
+                self.bits[start_idx..recorded_total]
                     .iter()
                     .map(|rb| rb.bit)
                     .collect::<Vec<bool>>()
             } else {
                 Vec::new()
             };
-            let padding_bits = if !fallback_padding.is_empty() {
-                fallback_padding
+            let padding_bits = if !recorded_padding.is_empty() {
+                recorded_padding
             } else {
-                self.body.alpha_alignment_padding.clone()
+                let total_bits = self.total_bits.min(self.bits.len() as u64) as usize;
+                let fallback_padding = if total_bits > start_idx && total_bits <= self.bits.len() {
+                    self.bits[start_idx..total_bits]
+                        .iter()
+                        .map(|rb| rb.bit)
+                        .collect::<Vec<bool>>()
+                } else {
+                    Vec::new()
+                };
+                if !fallback_padding.is_empty() {
+                    fallback_padding
+                } else {
+                    self.body.alpha_alignment_padding.clone()
+                }
             };
 
             if !padding_bits.is_empty() {
