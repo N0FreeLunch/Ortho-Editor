@@ -204,6 +204,49 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     serde_json::Value::Object(map)
 }
 
+fn classify_trace_ownership(
+    item: &Item,
+    scanner_hint: &str,
+    normalized_code: &str,
+    final_code: &str,
+    gap_len: usize,
+    gap_source: &str,
+    emitter_bypass: bool,
+) -> (String, String) {
+    let padding_signals = emitter_bypass
+        || item.is_opaque()
+        || item.is_semi_opaque()
+        || gap_source == "normalization:opaque_fallback";
+    let replay_signals = gap_source == "header_gap_lookup"
+        || (!scanner_hint.is_empty()
+            && scanner_hint == normalized_code
+            && normalized_code == final_code
+            && gap_len > 0);
+
+    let ownership_hint = match (replay_signals, padding_signals) {
+        (true, false) => "capture_replay",
+        (false, true) => "emission_padding",
+        _ => "ambiguous",
+    };
+
+    let ownership_reason = match ownership_hint {
+        "capture_replay" => format!(
+            "Header-derived replay signals dominate here: scanner_hint='{}', normalized_code='{}', final_code='{}', gap_len={}, gap_source='{}'.",
+            scanner_hint, normalized_code, final_code, gap_len, gap_source
+        ),
+        "emission_padding" => format!(
+            "Padding-preserving emission signals dominate here: emitter_bypass={}, gap_source='{}', final_code='{}'.",
+            emitter_bypass, gap_source, final_code
+        ),
+        _ => format!(
+            "Signals remain split between replay and padding: scanner_hint='{}', normalized_code='{}', final_code='{}', gap_len={}, gap_source='{}', emitter_bypass={}.",
+            scanner_hint, normalized_code, final_code, gap_len, gap_source, emitter_bypass
+        ),
+    };
+
+    (ownership_hint.to_string(), ownership_reason)
+}
+
 fn main() {
     let mut parser = ArgParser::new("d2item_inspect")
         .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
@@ -394,13 +437,25 @@ fn main() {
                         item.is_opaque() || item.is_semi_opaque() || is_target_blank
                     };
 
+                    let (ownership_hint, ownership_reason) = classify_trace_ownership(
+                        &item,
+                        &scanner_hint,
+                        &normalized_code,
+                        &final_code,
+                        gap_len,
+                        &gap_source,
+                        emitter_bypass,
+                    );
+
                     Some(json!({
                         "scanner_hint": scanner_hint,
                         "normalized_code": normalized_code,
                         "final_code": final_code,
                         "gap_len": gap_len,
                         "gap_source": gap_source,
-                        "emitter_bypass": emitter_bypass
+                        "emitter_bypass": emitter_bypass,
+                        "ownership_hint": ownership_hint,
+                        "ownership_reason": ownership_reason
                     }))
                 } else {
                     None
@@ -424,6 +479,8 @@ fn main() {
                         println!("    Gap Len        : {}", prov["gap_len"].as_u64().unwrap_or(0));
                         println!("    Gap Source     : {}", prov["gap_source"].as_str().unwrap_or(""));
                         println!("    Emitter Bypass : {}", prov["emitter_bypass"].as_bool().unwrap_or(false));
+                        println!("    Ownership Hint : {}", prov["ownership_hint"].as_str().unwrap_or(""));
+                        println!("    Ownership Reason: {}", prov["ownership_reason"].as_str().unwrap_or(""));
                     }
                     for prop in &item.properties {
                         println!(
