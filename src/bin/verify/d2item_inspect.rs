@@ -217,7 +217,13 @@ fn classify_trace_ownership(
         || item.is_opaque()
         || item.is_semi_opaque()
         || gap_source == "normalization:opaque_fallback";
+        
+    let is_kk_seam_drift = (scanner_hint.starts_with("wc") || scanner_hint.contains("wc"))
+        && (final_code == "wwsl" || final_code == "wwu8")
+        && gap_source == "normalization:drift_realigned";
+
     let replay_signals = gap_source == "header_gap_lookup"
+        || is_kk_seam_drift
         || (!scanner_hint.is_empty()
             && scanner_hint == normalized_code
             && normalized_code == final_code
@@ -230,10 +236,19 @@ fn classify_trace_ownership(
     };
 
     let ownership_reason = match ownership_hint {
-        "capture_replay" => format!(
-            "Header-derived replay signals dominate here: scanner_hint='{}', normalized_code='{}', final_code='{}', gap_len={}, gap_source='{}'.",
-            scanner_hint, normalized_code, final_code, gap_len, gap_source
-        ),
+        "capture_replay" => {
+            if is_kk_seam_drift {
+                format!(
+                    "k  k seam drift identified: scanner_hint='{}' misaligned to final_code='{}' under drift_realigned. This is a capture_replay parsing geometry mismatch.",
+                    scanner_hint, final_code
+                )
+            } else {
+                format!(
+                    "Header-derived replay signals dominate here: scanner_hint='{}', normalized_code='{}', final_code='{}', gap_len={}, gap_source='{}'.",
+                    scanner_hint, normalized_code, final_code, gap_len, gap_source
+                )
+            }
+        }
         "emission_padding" => format!(
             "Padding-preserving emission signals dominate here: emitter_bypass={}, gap_source='{}', final_code='{}'.",
             emitter_bypass, gap_source, final_code
@@ -447,6 +462,27 @@ fn main() {
                         emitter_bypass,
                     );
 
+                    let clean_code = |s: &str| {
+                        s.split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+                            .to_string()
+                    };
+                    let clean_scanner = clean_code(&scanner_hint);
+                    let clean_final = clean_code(&final_code);
+
+                    // DIAGNOSTICS-CONTRACT: Exposes registry overrides to prevent AI reasoning desync.
+                    // Do not remove this block unless performing structural refactoring of the diagnostics channel.
+                    let reg = d2r_core::domain::forensic::registry::get_registry();
+                    let reg_override = reg.item_overrides.as_ref()
+                        .and_then(|overrides| {
+                            overrides.get(&clean_scanner)
+                                .or_else(|| overrides.get(&clean_final))
+                        })
+                        .map(|map| json!(map))
+                        .unwrap_or(serde_json::Value::Null);
+
                     Some(json!({
                         "scanner_hint": scanner_hint,
                         "normalized_code": normalized_code,
@@ -455,7 +491,8 @@ fn main() {
                         "gap_source": gap_source,
                         "emitter_bypass": emitter_bypass,
                         "ownership_hint": ownership_hint,
-                        "ownership_reason": ownership_reason
+                        "ownership_reason": ownership_reason,
+                        "registry_override": reg_override
                     }))
                 } else {
                     None
@@ -481,6 +518,9 @@ fn main() {
                         println!("    Emitter Bypass : {}", prov["emitter_bypass"].as_bool().unwrap_or(false));
                         println!("    Ownership Hint : {}", prov["ownership_hint"].as_str().unwrap_or(""));
                         println!("    Ownership Reason: {}", prov["ownership_reason"].as_str().unwrap_or(""));
+                        if !prov["registry_override"].is_null() {
+                            println!("    Registry Override: {:?}", prov["registry_override"]);
+                        }
                     }
                     for prop in &item.properties {
                         println!(
@@ -495,13 +535,54 @@ fn main() {
                 }
             }
             Err(e) => {
+                // DIAGNOSTICS-CONTRACT: Exposes registry overrides on parsing crash sites to triage geometry desync.
+                // Do not remove this block unless performing structural refactoring of the diagnostics channel.
+                let mut prescription = String::new();
+                if is_alpha {
+                    let peeked_code = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                        &bytes,
+                        offset as u64,
+                        Some(offset as u64),
+                        &huffman,
+                        true,
+                        0,
+                    ).map(|p| {
+                        p.3.split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+                            .to_string()
+                    });
+
+                    if let Some(ref code) = peeked_code {
+                        let reg = d2r_core::domain::forensic::registry::get_registry();
+                        if let Some(overrides) = &reg.item_overrides {
+                            if let Some(map) = overrides.get(code) {
+                                prescription = format!(
+                                    " [Prescription: Active Registry Override Detected for code '{}' at offset {}. Registry has overrides: {:?}. This might cause geometry parsing conflict/desync.]",
+                                    code, offset, map
+                                );
+                            }
+                        }
+                    }
+                }
+
                 if is_json {
+                    let err_msg = if prescription.is_empty() {
+                        format!("Error at offset {}: {}", offset, e)
+                    } else {
+                        format!("Error at offset {}: {}{}", offset, e, prescription)
+                    };
                     println!(
                         "{}",
-                        json!({ "errors": [format!("Error at offset {}: {}", offset, e)] })
+                        json!({ "errors": [err_msg] })
                     );
                 } else {
-                    eprintln!("Error at offset {}: {}", offset, e);
+                    if prescription.is_empty() {
+                        eprintln!("Error at offset {}: {}", offset, e);
+                    } else {
+                        eprintln!("Error at offset {}: {}{}", offset, e, prescription);
+                    }
                     analyze_non_compact_item(&bytes, offset, &huffman);
                 }
             }
