@@ -232,7 +232,7 @@ pub fn init_rayon_thread_pool() {
         let percent = std::env::var("D2R_THREAD_PERCENT")
             .ok()
             .and_then(|val| val.parse::<u32>().ok())
-            .unwrap_or(75);
+            .unwrap_or(50);
 
         let cpus = std::thread::available_parallelism()
             .map(|n| n.get())
