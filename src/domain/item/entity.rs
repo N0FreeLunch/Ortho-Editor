@@ -819,6 +819,11 @@ impl Item {
                 && is_v105_shadow_override;
 
             if !preserve_compact_summary_header {
+                if !geometry.skip_geometry {
+                    emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
+                    emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
+                    emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+                }
                 if geometry.target_width > 0 {
                     let current_bits = emitter.written_bits() - start_bit;
                     if current_bits < geometry.target_width as u64 {
