@@ -31,7 +31,7 @@ fn test_render_buckler_from_fixture() {
             .iter()
             .any(|s| s.contains("Defense"))
     );
-    // assert!(formatted_ko.base_attributes.iter().any(|s| s.contains("방어력")));
+    // `assert!(formatted_ko.base_attributes.iter().any(|s| s.contains("방어력")));`
 
     // Quality check
     assert_eq!(formatted_en.quality_name, "Some(Normal)");

@@ -378,7 +378,7 @@ pub fn strip_d2_color_codes(s: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '\u{00FF}' && i + 1 < chars.len() && chars[i + 1] == 'c' {
-            i += 3; // Skip ÿ, c, and the color code character
+            i += 3; // Skip `ÿ`, c, and the color code character
             continue;
         }
         out.push(chars[i]);
@@ -797,8 +797,8 @@ mod tests {
         };
         // 12 * 80 / 8 = 120
         let formatted = format_property(&prop, 80, "ko");
-        // ModStr1u in ko is "생명력" (Wait, I should check this)
-        // Let's assume it's "+120 생명력 (캐릭터 레벨에 비례해서)"
+        // `ModStr1u in ko is "생명력" (Wait, I should check this)`
+        // `Let's assume it's "+120 생명력 (캐릭터 레벨에 비례해서)"`
         assert_eq!(formatted, "+120 라이프 (캐릭터 레벨에 비례해서)");
     }
 
