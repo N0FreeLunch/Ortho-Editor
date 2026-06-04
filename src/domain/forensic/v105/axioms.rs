@@ -193,7 +193,7 @@ impl V105StealthCodeAxiom {
     pub fn resolve_stealth_code(&self, bits: &[bool]) -> Option<&'static str> {
         if bits.len() < 16 { return None; }
         
-        // Pattern: ÏO (0xCF 0x4F) for 'hp1 '
+        // Pattern: `ÏO` (0xCF 0x4F) for 'hp1 '
         // 0xCF = 1100 1111, 0x4F = 0100 1111
         // MSB-first bit dump observed: 11110011 11110010 (reversed)
         if bits.len() >= 24 {
@@ -709,7 +709,7 @@ impl V105PropertyWidthAxiom {
         // Forensic: Use raw u8 conversion to avoid UTF-8 mismatch for non-ASCII codes (Slice 24)
         let bytes: Vec<u8> = code.chars().map(|c| c as u32 as u8).collect();
 
-        // Pattern: ÏO (0xCF 0x4F)
+        // Pattern: `ÏO` (0xCF 0x4F)
         if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
             return true;
         }
@@ -735,7 +735,7 @@ impl V105PropertyWidthAxiom {
             return true;
         }
 
-        // Þ. Resolution: 0xDE 0x2E pattern for Alpha v105
+        // `Þ. Resolution: 0xDE 0x2E pattern for Alpha v105`
         if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
             return true;
         }
