@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 pub struct BitGenomicOracle {
-    pub valid_stat_ids: HashSet<u16>, // d2r-data/ItemStatCost 기반 유효 ID 집합
+    pub valid_stat_ids: HashSet<u16>, // Valid ID set based on d2r-data/ItemStatCost
 }
 
 impl BitGenomicOracle {
@@ -11,8 +11,8 @@ impl BitGenomicOracle {
         Self { valid_stat_ids }
     }
 
-    /// 9비트 Stat ID 코돈(Codon) 스코어링 및 넛지 도출
-    /// -3비트부터 +3비트까지 1비트 단위 슬라이딩 탐색
+    /// 9-bit Stat ID Codon scoring and nudge derivation
+    /// 1-bit unit sliding search from -3 bits to +3 bits
     pub fn codon_score_nudge(&self, stream: &[bool], start_offset: usize) -> isize {
         let mut best_nudge = 0;
         let mut max_score = 0;
@@ -34,8 +34,8 @@ impl BitGenomicOracle {
         best_nudge
     }
 
-    /// Multi-Codon 컨텍스트 정합성 평가 (Axiom 0340)
-    /// Codon + Value + Next Codon 구조의 리듬을 채점합니다.
+    /// Multi-Codon context consistency evaluation (Axiom 0340)
+    /// Scores the rhythm of the Codon + Value + Next Codon structure.
     fn evaluate_codon_context(&self, stream: &[bool], offset: usize) -> usize {
         if offset + 9 > stream.len() { return 0; }
         let current_id = self.bits_to_u16(&stream[offset..offset+9]);
@@ -66,7 +66,7 @@ impl BitGenomicOracle {
         score
     }
 
-    /// 코돈 시퀀스의 정렬 점수를 평가합니다. (Legacy Scaffold)
+    /// Evaluates the alignment score of the codon sequence. (Legacy Scaffold)
     fn evaluate_codon_sequence(&self, codon: &[bool]) -> usize {
         let val = self.bits_to_u16(codon);
         if self.valid_stat_ids.contains(&val) {
@@ -86,8 +86,8 @@ impl BitGenomicOracle {
 
     /// Alpha v105 Stat Value bit width (Axiom 0105/0340)
     fn get_stat_value_width(&self, _stat_id: u16) -> usize {
-        // FIXME: 버전별/스탯별 가변 폭 연동 필요.
-        // Slice 2: Alpha v105(v1/v2/v4/v6)의 9비트 고정 리듬을 우선 적용.
+        // FIXME: Needs linkage with variable widths per version/stat.
+        // Slice 2: Prioritizing the 9-bit fixed rhythm of Alpha v105 (v1/v2/v4/v6).
         9
     }
 }

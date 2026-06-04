@@ -290,8 +290,8 @@ impl QuestSection {
             2 => 196,
             _ => return,
         };
-        let travel_offset = base_offset + 24; // difficulty=1일 때 76 + 24 = 100 바이트!
-        let intro_offset = base_offset + 26;  // difficulty=1일 때 76 + 26 = 102 바이트!
+        let travel_offset = base_offset + 24; // 76 + 24 = 100 bytes when difficulty=1!
+        let intro_offset = base_offset + 26;  // 76 + 26 = 102 bytes when difficulty=1!
 
         if travel_offset < self.raw_bytes.len() {
             self.raw_bytes[travel_offset] |= 0x01;
@@ -322,8 +322,8 @@ impl QuestSection {
             2 => 196,
             _ => return,
         };
-        let travel_offset = base_offset + 36; // difficulty=1일 때 76 + 36 = 112 바이트!
-        let intro_offset = base_offset + 38;  // difficulty=1일 때 76 + 38 = 114 바이트!
+        let travel_offset = base_offset + 36; // 76 + 36 = 112 bytes when difficulty=1!
+        let intro_offset = base_offset + 38;  // 76 + 38 = 114 bytes when difficulty=1!
 
         if travel_offset < self.raw_bytes.len() {
             self.raw_bytes[travel_offset] |= 0x01;
@@ -354,8 +354,8 @@ impl QuestSection {
             2 => 196,
             _ => return,
         };
-        let travel_offset = base_offset + 48; // difficulty=1일 때 76 + 48 = 124 바이트!
-        let intro_offset = base_offset + 50;  // difficulty=1일 때 76 + 50 = 126 바이트!
+        let travel_offset = base_offset + 48; // 76 + 48 = 124 bytes when difficulty=1!
+        let intro_offset = base_offset + 50;  // 76 + 50 = 126 bytes when difficulty=1!
 
         if travel_offset < self.raw_bytes.len() {
             self.raw_bytes[travel_offset] |= 0x01;

@@ -241,9 +241,9 @@ pub fn init_rayon_thread_pool() {
         let mut threads = ((cpus as u64 * percent as u64) / 100) as usize;
         
         if percent > 0 && percent < 100 {
-            // 100% 미만이면 최소 한 개 스레드는 남김
+            // Leave at least one thread if under 100%
             threads = threads.min(cpus.saturating_sub(1));
-            // 0% 초과면 최소 한 개 스레드는 사용
+            // Use at least one thread if over 0%
             threads = threads.max(1);
         } else if percent >= 100 {
             threads = cpus;
