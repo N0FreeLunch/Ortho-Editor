@@ -1348,17 +1348,6 @@ pub fn parse_item_header<R: BitRead>(
 ) -> ParsingResult<(ItemHeader, Option<u32>, Vec<bool>)> {
     let mut code_hint = code_hint.map(crate::item::normalize_alpha_code_hint);
 
-    // Slice 35: k k seam drift correction.
-    // If scanner identifies a 'wc 7' (scepter) family hint but we are at a 65-bit club seam,
-    // force k k summary geometry to prevent 1-bit rhythm rupture.
-    if alpha_mode {
-        if let Some(hint) = code_hint {
-            if hint == "wc 7" {
-                code_hint = Some("k  k");
-            }
-        }
-    }
-
     let w_axiom = V105PropertyWidthAxiom::default();
     let start_bit = cursor.pos();
     cursor.begin_segment(ItemSegmentType::Header);
