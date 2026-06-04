@@ -503,6 +503,7 @@ fn write_ascii_nul_padded(
 
 impl Save {
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
+        crate::init_rayon_thread_pool();
         if bytes.len() < MIN_HEADER_LEN {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

@@ -207,6 +207,7 @@ impl ArgParser {
     }
 
     pub fn parse(&self, args: Vec<OsString>) -> Result<ParsedArgs, ArgError> {
+        crate::init_rayon_thread_pool();
         if self.auto_load_dotenv {
             let _ = dotenvy::dotenv();
         }

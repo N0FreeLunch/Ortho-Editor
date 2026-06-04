@@ -69,6 +69,7 @@ pub fn calculate_symmetry_diff(
     bytes_b: Option<&[u8]>,
     options: SymmetryOptions,
 ) -> anyhow::Result<DiffReport> {
+    crate::init_rayon_thread_pool();
     let huffman = HuffmanTree::new();
     let is_alpha_a = is_alpha(bytes_a);
     let mut report = DiffReport {
