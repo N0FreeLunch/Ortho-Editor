@@ -129,7 +129,7 @@ impl V105HeaderGapAxiom {
         gap
     }
 
-    fn resolve_gap_internal(&self, version: u8, code: Option<&str>, flags: u32, _is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
+    fn resolve_gap_internal(&self, version: u8, code: Option<&str>, flags: u32, is_first_item: bool, is_compact: bool, has_checksum: bool) -> usize {
         let reg = crate::domain::forensic::registry::get_registry();
         let mut base_gap = 0;
 
@@ -155,13 +155,15 @@ impl V105HeaderGapAxiom {
                 base_gap = 0;
             } else {
                 // Standard equipment
-                base_gap = if has_checksum { 0 } else { 8 };
+                // Alpha v105 Forensic: Items in sequences (not first) usually have 0 gap (Slice 27).
+                base_gap = if has_checksum { 0 } else if is_first_item { 8 } else { 0 };
             }
         }
 
         // Alpha v105 Forensic: Add version-specific residue nudge to the gap (Axiom 0340)
         // Axiom 0718: Compact items (potions, scrolls, etc.) do NOT use residue nudges.
-        let residue = if is_compact { 0 } else {
+        // Slice 27: Sequence items (not first) do NOT use residue nudges if base_gap is 0.
+        let residue = if is_compact || (base_gap == 0 && !is_first_item) { 0 } else {
             match version {
                 5 => 5,
                 0 | 1 | 2 => 3,
