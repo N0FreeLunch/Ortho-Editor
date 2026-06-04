@@ -1365,6 +1365,7 @@ pub fn parse_item_header<R: BitRead>(
 
     // 1. Read Flags (32 bits).
     let flags = cursor.read_bits::<u32>(32)?;
+    let raw_flags = flags;
     let is_nested = cursor.context_stack().iter().any(|s| s == "nested")
         || crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get());
 
@@ -1545,7 +1546,7 @@ pub fn parse_item_header<R: BitRead>(
     cursor.end_segment();
     Ok((
         ItemHeader {
-            flags,
+            flags: if alpha_mode { raw_flags } else { flags },
             version,
             mode,
             location,
