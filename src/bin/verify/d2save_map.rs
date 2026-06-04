@@ -53,9 +53,38 @@ fn main() -> anyhow::Result<()> {
     if items_only && json_items {
         anyhow::bail!("--items-only and --json-items cannot be used together");
     }
-    let bytes = fs::read(path).map_err(|e| anyhow::anyhow!("Cannot read '{}': {}", path, e))?;
-    let save = Save::from_bytes(&bytes)
-        .map_err(|err| anyhow::anyhow!("Cannot parse D2R header: {}", err))?;
+
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            let err_msg = format!("Cannot read '{}': {}", path, e);
+            if json_items {
+                let payload = json!({
+                    "save_file": path,
+                    "error": err_msg,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+                std::process::exit(1);
+            }
+            anyhow::bail!(err_msg);
+        }
+    };
+
+    let save = match Save::from_bytes(&bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            let err_msg = format!("Cannot parse D2R header: {}", e);
+            if json_items {
+                let payload = json!({
+                    "save_file": path,
+                    "error": err_msg,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+                std::process::exit(1);
+            }
+            anyhow::bail!(err_msg);
+        }
+    };
 
     if items_only || json_items {
         let (inventory, errors, total_jm_sections) =
