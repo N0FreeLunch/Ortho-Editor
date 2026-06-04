@@ -762,7 +762,18 @@ impl Item {
             // Write 16-bit ID (Slice 2): Unified 16-bit ID field.
             // Alpha v105 summary items (wsp, potions, scrolls) MUST use 16-bit ID to maintain 73/80 bit slotted alignment.
             // If they have 24-bit raw code bits, it will overflow the slotted boundary.
-            emitter.write_bits(self.id.unwrap_or(0), 16)?;
+            let id_val = if !self.body.alpha_code_bits.is_empty() {
+                let mut val = 0u32;
+                for (i, &bit) in self.body.alpha_code_bits.iter().enumerate() {
+                    if i < 32 && bit {
+                        val |= 1 << i;
+                    }
+                }
+                val
+            } else {
+                self.id.unwrap_or(0)
+            };
+            emitter.write_bits(id_val, 16)?;
 
             // Align to target width (72 or 80 bits).
             let current_bits = emitter.written_bits() - start_bit;

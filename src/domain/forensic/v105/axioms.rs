@@ -673,6 +673,7 @@ impl V105PropertyWidthAxiom {
             || trimmed == "isc"
             || trimmed == "jav"
             || trimmed == "ks d"
+            || trimmed == "k  k"
         {
             // Alpha v105 potion family are textual summaries even when the raw
             // stealth pattern has already been normalized to a readable code.
