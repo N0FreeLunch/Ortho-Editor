@@ -7,6 +7,7 @@ use d2r_core::save::{
     ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET, CHAR_NAME_OFFSET,
     LAST_PLAYED_OFFSET, Save, class_name, find_jm_markers,
 };
+use d2r_core::verify::forensics::ForensicIssue;
 
 fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_map")
@@ -74,7 +75,11 @@ fn main() -> anyhow::Result<()> {
             if !errors.is_empty() {
                 println!("errors:");
                 for error in errors {
-                    println!("  - {}", error);
+                    let offset_str = error
+                        .bit_offset
+                        .map(|o| format!(" @ bit {}", o))
+                        .unwrap_or_default();
+                    println!("  - [{}] {}{}", error.kind, error.message, offset_str);
                 }
             }
             for entry in inventory {
@@ -308,7 +313,7 @@ fn collect_item_inventory(
     bytes: &[u8],
     is_alpha: bool,
     verbose_markers: bool,
-) -> (Vec<serde_json::Value>, Vec<String>, usize) {
+) -> (Vec<serde_json::Value>, Vec<ForensicIssue>, usize) {
     use d2r_core::item::{HuffmanTree, Item, ItemModule};
 
     let jm_positions = find_jm_markers(bytes);
@@ -382,10 +387,11 @@ fn collect_item_inventory(
                 }
             }
             Err(err) => {
-                errors.push(format!(
-                    "section_index={} section_label=\"{}\" parse_error={}",
-                    section_index, section_label, err
-                ));
+                errors.push(
+                    ForensicIssue::new("ItemParseError", &err.to_string())
+                        .with_offset(pos as u64 * 8)
+                        .with_context(section_label),
+                );
             }
         }
     }
