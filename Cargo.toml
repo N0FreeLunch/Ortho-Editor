@@ -286,6 +286,10 @@ name = "d2save_progression_audit"
 path = "src/bin/verify/d2save_progression_audit.rs"
 
 [[bin]]
+name = "d2save_progression_offset_map"
+path = "src/bin/verify/d2save_progression_offset_map.rs"
+
+[[bin]]
 name = "d2save_mutate"
 path = "src/bin/verify/d2save_mutate.rs"
 [[bin]]

@@ -651,6 +651,16 @@ impl V105PropertyWidthAxiom {
         let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         let reg = crate::domain::forensic::registry::get_registry();
 
+        if let Some(overrides) = &reg.item_overrides {
+            if let Some(map) = overrides.get(trimmed) {
+                if let Some(&is_shadow) = map.get("is_shadow") {
+                    if is_shadow != 0 {
+                        return false;
+                    }
+                }
+            }
+        }
+
         if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
             return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
