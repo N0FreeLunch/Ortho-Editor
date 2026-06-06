@@ -1,4 +1,5 @@
 use crate::domain::item::axiom_meta::{Confidence, ForensicAxiom, ForensicMetadata, Intentionality};
+use crate::domain::header::HeaderAxiom;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -296,11 +297,15 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_item(version, code);
     
-    let is_compact_flag = (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0;
+    // Axiom 0718: Enforce registry-aware compactness check.
+    // This ensures items like Leather Gloves `lgl` are correctly identified as compact when overridden in registry.
+    let h_axiom = HeaderAxiom::new(version, true);
+    let is_compact = h_axiom.is_compact(flags, Some(code));
+
     let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
     let is_personalized = (flags & (1 << 24)) != 0;
 
-    if is_summary || is_compact_flag {
+    if is_summary || is_compact {
         if is_summary {
             if w_axiom.is_summary_rhythm_forced(version, code) {
                 return w_axiom.summary_item_fixed_width(); // Enforce strict 80-bit slotted boundary
@@ -837,6 +842,22 @@ impl V105PropertyWidthAxiom {
     }
     
     pub fn stat_bits(&self, stat_id: u32) -> u32 {
+        let reg = crate::domain::forensic::registry::get_registry();
+        
+        // Axiom 0812: Use registry truth for Alpha v105 stat widths (e.g. durability=14, defense=10).
+        // 1. Try explicit stats section
+        if let Some(info) = reg.stats.get(&stat_id.to_string()) {
+            return info.width;
+        }
+
+        // 2. Try mappings section for save_bits
+        if let Some(map) = crate::domain::stats::lookup_alpha_map_by_effective(stat_id) {
+            if let Some(bits) = map.save_bits {
+                return bits as u32;
+            }
+        }
+
+        // 3. Fallback to retail defaults
         match stat_id {
             31 => crate::domain::stats::stat_save_bits(31).unwrap_or(11), // Defense
             73 => crate::domain::stats::stat_save_bits(73).unwrap_or(8),  // Max Durability
@@ -875,5 +896,13 @@ mod tests {
         assert_eq!(get_v105_target_width(5, "hp1", 0, None), 80);
         assert_eq!(get_v105_target_width(5, "mp1", 0, None), 80);
         assert!(!is_v105_summary_code("xrs"));
+    }
+
+    #[test]
+    fn test_v105_lgl_is_compact_via_registry() {
+        // Leather Gloves (lgl) should be compact if registry override is respected.
+        // Based on Slice 2 spec, lgl is expected to be compact in Alpha v105.
+        let width = get_v105_target_width(5, "lgl", 0, None);
+        assert_eq!(width, 72, "lgl should have 72-bit compact width via registry override");
     }
 }

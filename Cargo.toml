@@ -437,5 +437,9 @@ path = "src/bin/verify/d2save_taxonomy_harvester.rs"
 name = "d2save_mercenary_audit"
 path = "src/bin/verify/d2save_mercenary_audit.rs"
 
+[[bin]]
+name = "d2save_json_dump"
+path = "src/bin/verify/d2save_json_dump.rs"
+
 [dev-dependencies]
 trybuild = "1.0"
