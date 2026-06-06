@@ -315,7 +315,7 @@ where
             // recorder.base_pos holds the absolute bit offset of the section start.
             // child_marker_offsets are also section-local, so we subtract base_pos, not item_start_bit.
             let current_rel_pos = recorder.pos().saturating_sub(recorder.base_pos);
-            let lookahead_window = 128u64;
+            let lookahead_window = 64u64;
             let next_child_rel_off = if let Some(offsets) = child_marker_offsets {
                 offsets.iter().filter(|&&off| off >= current_rel_pos).min().cloned()
             } else {
