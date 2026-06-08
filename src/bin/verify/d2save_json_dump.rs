@@ -2,6 +2,8 @@ use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
 use d2r_core::domain::progression::Progression;
 use d2r_core::domain::progression::waypoint::WaypointSet;
+use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter};
+use d2r_core::item::{HuffmanTree, Item};
 use std::env;
 use std::fs;
 use serde_json::json;
@@ -152,14 +154,112 @@ fn main() {
         None
     };
     let merc_state = d2r_core::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
+    let huffman = HuffmanTree::new();
+    let merc_equipped_items = parse_mercenary_equipped_items(&bytes, &map, &huffman, is_alpha);
 
     let merc_json = json!({
         "class_name": merc_state.class_name(),
         "hireling_id": merc_state.hireling_id,
         "subtype_id": merc_state.subtype_id,
         "experience": merc_state.experience,
-        "equipped_items": []
+        "equipped_items": merc_equipped_items
     });
+
+    // Parse player items to build equipment, inventory, belt, stash, and cube lists
+    let mut equipment_json = Vec::new();
+    let mut inventory_json = Vec::new();
+    let mut belt_json = Vec::new();
+    let mut stash_json = Vec::new();
+    let mut cube_json = Vec::new();
+
+    if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
+        for (i, item) in items.iter().enumerate() {
+            // Filter out residue and structural summary items (like ks d, b7ts)
+            let trimmed_code = item.code.trim();
+            if item.is_residue() || trimmed_code.is_empty() || trimmed_code == "ks d" || trimmed_code == "b7ts" {
+                continue;
+            }
+
+            let (name_en, name_ko) = get_item_localization(&item.code);
+            let (width, height) = d2r_core::inventory::get_item_size(&item.code);
+            let q_str = if item.header.is_runeword {
+                "Runeword"
+            } else {
+                quality_to_str(item.header.quality)
+            };
+
+            let mut socket_json = Vec::new();
+            for (si, s_item) in item.socketed_items.iter().enumerate() {
+                let (s_name_en, s_name_ko) = get_item_localization(&s_item.code);
+                socket_json.push(json!({
+                    "index": si,
+                    "code": s_item.code.trim(),
+                    "name_en": s_name_en,
+                    "name_ko": s_name_ko,
+                    "quality": quality_to_str(s_item.header.quality),
+                }));
+            }
+
+            let item_data = json!({
+                "index": i,
+                "code": item.code.trim(),
+                "name_en": name_en,
+                "name_ko": name_ko,
+                "type": d2r_core::inventory::get_item_category(&item.code),
+                "quality": q_str,
+                "x": item.x,
+                "y": item.y,
+                "width": width,
+                "height": height,
+                "is_equipped": item.mode == 1,
+                "location": item.location,
+                "socketed_items": socket_json
+            });
+
+            let is_potion = is_potion_code(&item.code);
+
+            if item.mode == 1 {
+                if is_potion {
+                    // In Alpha v105, potions in the first belt row often show mode 1
+                    belt_json.push(item_data);
+                } else {
+                    let mut eq_data = item_data.clone();
+                    // Alpha v105 heuristic: 0=Armor, 1=Weapon1 observed in fixtures
+                    let slot_name = if is_alpha {
+                        match item.x {
+                            0 => "Armor",
+                            1 => "Weapon1",
+                            2 => "Weapon2",
+                            3 => "Head",
+                            _ => body_position_to_slot(item.x),
+                        }
+                    } else {
+                        body_position_to_slot(item.x)
+                    };
+                    eq_data["slot_en"] = json!(slot_name);
+                    equipment_json.push(eq_data);
+                }
+            } else if item.mode == 2 {
+                // Mode 2 is always Belt
+                belt_json.push(item_data);
+            } else {
+                match item.location {
+                    0 => {
+                        // Heuristic: If it's a potion at (0,0) in inventory, it's likely a belt item with shifted parse
+                        if is_potion && item.x == 0 && item.y == 0 {
+                            belt_json.push(item_data);
+                        } else {
+                            inventory_json.push(item_data);
+                        }
+                    },
+                    2 => belt_json.push(item_data),
+                    4 => stash_json.push(item_data),
+                    7 => cube_json.push(item_data),
+                    _ => inventory_json.push(item_data), // Default to inventory
+                }
+            }
+        }
+    }
 
     // Map entire payload to match index.html expected format
     let payload = json!({
@@ -191,13 +291,199 @@ fn main() {
         "skills": skills_json,
         "waypoints": waypoints_json,
         "quests": quests_json,
-        "equipment": [],
-        "inventory": [],
-        "stash": [],
+        "equipment": equipment_json,
+        "inventory": inventory_json,
+        "belt": belt_json,
+        "stash": stash_json,
+        "cube": cube_json,
         "mercenary": merc_json
     });
 
     let out_str = serde_json::to_string_pretty(&payload).expect("Failed to serialize JSON");
     fs::write(&args[2], out_str).expect("Failed to write output JSON");
     println!("Successfully dumped save game JSON to {}", args[2]);
+}
+
+fn parse_mercenary_equipped_items(
+    bytes: &[u8],
+    map: &d2r_core::save::SaveSectionMap,
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+) -> Vec<serde_json::Value> {
+    let Some(jf) = map.jf_pos.or_else(|| find_marker(bytes, b"jf")) else {
+        return Vec::new();
+    };
+
+    let jm_positions = d2r_core::save::find_jm_markers(bytes);
+    let Some(merc_jm_idx) = jm_positions
+        .iter()
+        .enumerate()
+        .find_map(|(idx, pos)| (*pos > jf).then_some(idx))
+    else {
+        return Vec::new();
+    };
+
+    let jm_pos = jm_positions[merc_jm_idx];
+    if jm_pos + 4 > bytes.len() {
+        return Vec::new();
+    }
+
+    let item_count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
+    let (Some(kf), Some(lf)) = (
+        map.kf_pos.or_else(|| find_marker(bytes, b"kf")),
+        map.lf_pos.or_else(|| find_marker(bytes, b"lf")),
+    ) else {
+        return Vec::new();
+    };
+
+    let next_pos = jm_positions.get(merc_jm_idx + 1).copied().unwrap_or(bytes.len());
+    let items_start = jm_pos;
+    let items_end = kf.min(next_pos);
+    if !MercenaryFooter::from_bytes(&bytes[kf..]).is_standard()
+        || lf < kf
+        || items_start >= items_end
+    {
+        return Vec::new();
+    }
+
+    let items_data = &bytes[items_start..items_end];
+    let Ok(items) = Item::read_section(
+        items_data,
+        items_start as u64 * 8,
+        item_count,
+        huffman,
+        is_alpha,
+        false,
+    ) else {
+        return Vec::new();
+    };
+
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, item)| {
+            let trimmed_code = item.code.trim();
+            if !is_alpha && trimmed_code.is_empty() {
+                return None;
+            }
+
+            let code_display = if trimmed_code.is_empty() {
+                "unk" // Unknown code placeholder
+            } else {
+                trimmed_code
+            };
+
+            let merc_item = MercenaryEquipmentItem {
+                code: code_display.to_string(),
+                location: item.location,
+                mode: item.mode,
+                x: item.x,
+                y: item.y,
+            };
+            let (name_en, name_ko) = get_item_localization(code_display);
+            let (width, height) = d2r_core::inventory::get_item_size(code_display);
+            let quality = if item.header.is_runeword {
+                "Runeword"
+            } else {
+                quality_to_str(item.header.quality)
+            };
+
+            // Alpha v105 mercenary slot heuristic
+            let slot_en = if is_alpha {
+                match (item.location, item.mode, item.x) {
+                    (3, 1, _) => "Armor".to_string(),
+                    (4, 1, _) => "Right Hand".to_string(), // Bow for Rogue
+                    (1, 1, 1) => "Head".to_string(),
+                    (1, 1, 3) => "Armor".to_string(),
+                    (1, 1, 4) => "Right Hand".to_string(),
+                    (1, 1, 5) => "Left Hand".to_string(),
+                    (4, 5, _) => "Weapon1".to_string(), // Barb Sword 1
+                    (1, 4, _) => "Weapon2".to_string(), // Barb Sword 2
+                    (4, 0, _) => "Head".to_string(),    // Barb Helm
+                    _ => merc_item.slot_name(),
+                }
+            } else {
+                merc_item.slot_name()
+            };
+
+            Some(json!({
+                "index": i,
+                "code": code_display,
+                "name_en": name_en,
+                "name_ko": name_ko,
+                "type": d2r_core::inventory::get_item_category(code_display),
+                "quality": quality,
+                "x": item.x,
+                "y": item.y,
+                "width": width,
+                "height": height,
+                "is_equipped": item.mode == 1 || (is_alpha && item.mode != 0),
+                "location": item.location,
+                "mode": item.mode,
+                "slot_en": slot_en,
+            }))
+        })
+        .collect()
+}
+
+fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
+    bytes.windows(2).position(|window| window == marker)
+}
+
+// Helper: check if item is a potion (summary items in Alpha v105)
+fn is_potion_code(code: &str) -> bool {
+    let trimmed = code.trim().to_lowercase();
+    trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed.starts_with("rv") || trimmed == "tsc" || trimmed == "isc"
+}
+
+// Helper: map body slot index to EN slot name string
+fn body_position_to_slot(pos: u8) -> &'static str {
+    match pos {
+        1 => "Head",
+        2 => "Amulet",
+        3 => "Armor",
+        4 => "Weapon1",
+        5 => "Weapon2",
+        6 => "Ring1",
+        7 => "Ring2",
+        8 => "Belt",
+        9 => "Boots",
+        10 => "Gloves",
+        _ => "None",
+    }
+}
+
+// Helper: get standard quality string representation
+fn quality_to_str(q: Option<d2r_core::domain::item::quality::ItemQuality>) -> &'static str {
+    use d2r_core::domain::item::quality::ItemQuality;
+    match q {
+        Some(ItemQuality::Low) => "Low",
+        Some(ItemQuality::Normal) => "Normal",
+        Some(ItemQuality::High) => "High",
+        Some(ItemQuality::Magic) => "Magic",
+        Some(ItemQuality::Set) => "Set",
+        Some(ItemQuality::Rare) => "Rare",
+        Some(ItemQuality::Unique) => "Unique",
+        Some(ItemQuality::Crafted) => "Crafted",
+        None => "None",
+    }
+}
+
+// Helper: search localization dictionary for item name translation
+fn get_item_localization(code: &str) -> (String, String) {
+    let trimmed = code.trim().to_lowercase();
+    let entry = d2r_core::data::localization::LOCALIZATIONS
+        .iter()
+        .find(|loc| loc.key.to_lowercase() == trimmed);
+    
+    if let Some(e) = entry {
+        (e.en.to_string(), e.ko.to_string())
+    } else {
+        let name_en = d2r_core::data::item_codes::ITEM_TEMPLATES
+            .iter()
+            .find(|t| t.code == trimmed)
+            .map(|t| t.name)
+            .unwrap_or(code);
+        (name_en.to_string(), name_en.to_string())
+    }
 }
