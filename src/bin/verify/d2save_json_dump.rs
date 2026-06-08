@@ -444,25 +444,28 @@ fn alpha_mercenary_slot_semantics(
         (4, 5, _) => Some("Weapon1"),
         (1, 4, _) => Some("Weapon2"),
         (4, 0, _) => Some("Helm"),
-        (0, 3, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate
-        (0, 5, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate
+        (0, 3, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate (observed mode 3)
+        (0, 5, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate (observed mode 5)
         _ => None,
     };
 
-    if let Some(slot) = slot {
-        let kind = if item.code == "unk" || is_residue {
-            "unknown_code_localization_gap"
-        } else {
-            "equipped_slot_candidate"
-        };
-        return (slot.to_string(), "alpha_v105_signature", kind);
+    match slot {
+        Some(s) => {
+            let kind = if is_residue {
+                "parser_residue_in_valid_slot"
+            } else if item.code == "unk" {
+                "unknown_code_localization_gap"
+            } else {
+                "equipped_slot_candidate"
+            };
+            (s.to_string(), "alpha_v105_signature", kind)
+        }
+        None => (
+            "Unknown".to_string(),
+            "unclassified_alpha_v105_candidate",
+            "parser_residue",
+        ),
     }
-
-    (
-        "Unknown".to_string(),
-        "unclassified_alpha_v105_candidate",
-        "parser_residue",
-    )
 }
 
 fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
