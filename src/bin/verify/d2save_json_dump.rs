@@ -1,12 +1,12 @@
 use d2r_core::domain::character::skills::parse_skill_section;
-use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
-use d2r_core::domain::progression::Progression;
-use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter};
+use d2r_core::domain::progression::waypoint::WaypointSet;
+use d2r_core::domain::progression::Progression;
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
+use serde_json::json;
 use std::env;
 use std::fs;
-use serde_json::json;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -25,9 +25,7 @@ fn main() {
     let attrs = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)
         .expect("Failed to parse attributes");
 
-    let get_stat = |id: u32| -> i32 {
-        attrs.actual_value(id, is_alpha).unwrap_or(0)
-    };
+    let get_stat = |id: u32| -> i32 { attrs.actual_value(id, is_alpha).unwrap_or(0) };
 
     // Extract basic character stats (scale life/mana/stamina by 256)
     let strength = get_stat(0);
@@ -55,7 +53,9 @@ fn main() {
             .find(|s| s.id == entry.stat_id)
             .map(|s| s.name.as_ref())
             .unwrap_or("Unknown");
-        let act_val = attrs.actual_value(entry.stat_id, is_alpha).unwrap_or(entry.raw_value as i32);
+        let act_val = attrs
+            .actual_value(entry.stat_id, is_alpha)
+            .unwrap_or(entry.raw_value as i32);
         all_attributes_json.push(json!({
             "stat_id": entry.stat_id,
             "name": name,
@@ -95,7 +95,7 @@ fn main() {
     };
 
     // progression waypoints (difficulty: 0=normal, 1=nightmare, 2=hell)
-    let wp_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE 
+    let wp_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE
         + d2r_core::domain::progression::axiom::V105WaypointAxiom::start_offset();
     let wp_bytes = if bytes.len() > d2r_core::domain::progression::axiom::V105_WAYPOINT_OFFSET {
         &bytes[d2r_core::domain::progression::axiom::V105_WAYPOINT_OFFSET..]
@@ -108,7 +108,8 @@ fn main() {
     let hell_wps = WaypointSet::from_bytes(wp_bytes, 2, wp_anchor, is_expansion);
 
     let get_active_wp_ids = |wp_set: &WaypointSet| -> Vec<u8> {
-        wp_set.waypoints()
+        wp_set
+            .waypoints()
             .iter()
             .filter(|w| w.is_active())
             .map(|w| w.ws_bit())
@@ -147,13 +148,15 @@ fn main() {
     });
 
     // Parse mercenary details
-    let header = &bytes[0..d2r_core::domain::progression::axiom::V105_WAYPOINT_OFFSET.min(bytes.len())];
+    let header =
+        &bytes[0..d2r_core::domain::progression::axiom::V105_WAYPOINT_OFFSET.min(bytes.len())];
     let w4_bytes = if bytes.len() > d2r_core::domain::progression::axiom::V105_NPC_OFFSET {
         Some(&bytes[d2r_core::domain::progression::axiom::V105_NPC_OFFSET..])
     } else {
         None
     };
-    let merc_state = d2r_core::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
+    let merc_state =
+        d2r_core::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
     let huffman = HuffmanTree::new();
     let merc_equipped_items = parse_mercenary_equipped_items(&bytes, &map, &huffman, is_alpha);
 
@@ -176,7 +179,11 @@ fn main() {
         for (i, item) in items.iter().enumerate() {
             // Filter out residue and structural summary items (like ks d, b7ts)
             let trimmed_code = item.code.trim();
-            if item.is_residue() || trimmed_code.is_empty() || trimmed_code == "ks d" || trimmed_code == "b7ts" {
+            if item.is_residue()
+                || trimmed_code.is_empty()
+                || trimmed_code == "ks d"
+                || trimmed_code == "b7ts"
+            {
                 continue;
             }
 
@@ -251,7 +258,7 @@ fn main() {
                         } else {
                             inventory_json.push(item_data);
                         }
-                    },
+                    }
                     2 => belt_json.push(item_data),
                     4 => stash_json.push(item_data),
                     7 => cube_json.push(item_data),
@@ -336,7 +343,10 @@ fn parse_mercenary_equipped_items(
         return Vec::new();
     };
 
-    let next_pos = jm_positions.get(merc_jm_idx + 1).copied().unwrap_or(bytes.len());
+    let next_pos = jm_positions
+        .get(merc_jm_idx + 1)
+        .copied()
+        .unwrap_or(bytes.len());
     let items_start = jm_pos;
     let items_end = kf.min(next_pos);
     if !MercenaryFooter::from_bytes(&bytes[kf..]).is_standard()
@@ -388,22 +398,14 @@ fn parse_mercenary_equipped_items(
                 quality_to_str(item.header.quality)
             };
 
-            // Alpha v105 mercenary slot heuristic
-            let slot_en = if is_alpha {
-                match (item.location, item.mode, item.x) {
-                    (3, 1, _) => "Armor".to_string(),
-                    (4, 1, _) => "Right Hand".to_string(), // Bow for Rogue
-                    (1, 1, 1) => "Head".to_string(),
-                    (1, 1, 3) => "Armor".to_string(),
-                    (1, 1, 4) => "Right Hand".to_string(),
-                    (1, 1, 5) => "Left Hand".to_string(),
-                    (4, 5, _) => "Weapon1".to_string(), // Barb Sword 1
-                    (1, 4, _) => "Weapon2".to_string(), // Barb Sword 2
-                    (4, 0, _) => "Head".to_string(),    // Barb Helm
-                    _ => merc_item.slot_name(),
-                }
+            let (slot_en, slot_source, candidate_kind) = if is_alpha {
+                alpha_mercenary_slot_semantics(&merc_item, item.is_residue())
             } else {
-                merc_item.slot_name()
+                (
+                    merc_item.slot_name(),
+                    "shared_mercenary_slot_name",
+                    "legacy_candidate",
+                )
             };
 
             Some(json!({
@@ -421,9 +423,46 @@ fn parse_mercenary_equipped_items(
                 "location": item.location,
                 "mode": item.mode,
                 "slot_en": slot_en,
+                "slot_source": slot_source,
+                "candidate_kind": candidate_kind,
             }))
         })
         .collect()
+}
+
+fn alpha_mercenary_slot_semantics(
+    item: &MercenaryEquipmentItem,
+    is_residue: bool,
+) -> (String, &'static str, &'static str) {
+    let slot = match (item.location, item.mode, item.x) {
+        (3, 1, _) => Some("Armor"),
+        (4, 1, _) => Some("Weapon1"),
+        (1, 1, 1) => Some("Helm"),
+        (1, 1, 3) => Some("Armor"),
+        (1, 1, 4) => Some("Weapon1"),
+        (1, 1, 5) => Some("Weapon2"),
+        (4, 5, _) => Some("Weapon1"),
+        (1, 4, _) => Some("Weapon2"),
+        (4, 0, _) => Some("Helm"),
+        (0, 3, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate
+        (0, 5, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate
+        _ => None,
+    };
+
+    if let Some(slot) = slot {
+        let kind = if item.code == "unk" || is_residue {
+            "unknown_code_localization_gap"
+        } else {
+            "equipped_slot_candidate"
+        };
+        return (slot.to_string(), "alpha_v105_signature", kind);
+    }
+
+    (
+        "Unknown".to_string(),
+        "unclassified_alpha_v105_candidate",
+        "parser_residue",
+    )
 }
 
 fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
@@ -433,7 +472,11 @@ fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
 // Helper: check if item is a potion (summary items in Alpha v105)
 fn is_potion_code(code: &str) -> bool {
     let trimmed = code.trim().to_lowercase();
-    trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed.starts_with("rv") || trimmed == "tsc" || trimmed == "isc"
+    trimmed.starts_with("hp")
+        || trimmed.starts_with("mp")
+        || trimmed.starts_with("rv")
+        || trimmed == "tsc"
+        || trimmed == "isc"
 }
 
 // Helper: map body slot index to EN slot name string
@@ -475,7 +518,7 @@ fn get_item_localization(code: &str) -> (String, String) {
     let entry = d2r_core::data::localization::LOCALIZATIONS
         .iter()
         .find(|loc| loc.key.to_lowercase() == trimmed);
-    
+
     if let Some(e) = entry {
         (e.en.to_string(), e.ko.to_string())
     } else {
