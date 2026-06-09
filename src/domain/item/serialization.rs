@@ -1421,7 +1421,9 @@ impl Item {
                             && !final_item.header.is_compact
                             && final_item.header.version == 7
                             && consumed_bits < 96)
-                            || (final_item.header.version == 1 && consumed_bits < 320))
+                            || (final_item.header.version == 1
+                                && consumed_bits < 320
+                                && (non_residue_count + 1 >= top_level_count as usize)))
                     {
                         if let Ok((retry_item, retry_consumed)) = parse_item_at_with_limit(
                             section_bytes,
@@ -1483,7 +1485,11 @@ impl Item {
                         // Greedy Slice 8 Resolution: For buc/jav tail padding, swallow trailing noise markers.
                         if matches!(marker.code.trim(), "buc" | "jav") {
                             let total_rem = section_bits - start;
-                            if consumed_bits < total_rem && total_rem < 512 && total_rem % 8 == 0 {
+                            if consumed_bits < total_rem
+                                && total_rem < 512
+                                && total_rem % 8 == 0
+                                && (non_residue_count + 1 >= top_level_count as usize)
+                            {
                                 consumed_bits = total_rem;
                             }
                         }
