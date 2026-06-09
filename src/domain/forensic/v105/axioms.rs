@@ -687,6 +687,7 @@ impl V105PropertyWidthAxiom {
             || trimmed == "tsc"
             || trimmed == "isc"
             || trimmed == "jav"
+            || trimmed == "buc"
             || trimmed == "ks d"
             || trimmed == "k  k"
         {
