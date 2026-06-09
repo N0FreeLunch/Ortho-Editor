@@ -1399,12 +1399,29 @@ impl Item {
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
+                    #[cfg(debug_assertions)]
+                    if alpha_mode {
+                        println!(
+                            "DEBUG_PARSE_BEFORE: index={} code={} marker_code={} start={} consumed_bits={} is_compact={} version={} quality={:?} flags=0x{:08X}",
+                            item_count,
+                            final_item.code,
+                            marker.code,
+                            start,
+                            consumed_bits,
+                            final_item.header.is_compact,
+                            final_item.header.version,
+                            final_item.header.quality,
+                            final_item.header.flags
+                        );
+                    }
+
                     if alpha_mode
-                        && target_width_override == 0
-                        && !final_item.header.is_compact
-                        && final_item.header.version == 7
                         && matches!(marker.code.trim(), "buc" | "jav")
-                        && consumed_bits < 96
+                        && ((target_width_override == 0
+                            && !final_item.header.is_compact
+                            && final_item.header.version == 7
+                            && consumed_bits < 96)
+                            || (final_item.header.version == 1 && consumed_bits < 320))
                     {
                         if let Ok((retry_item, retry_consumed)) = parse_item_at_with_limit(
                             section_bytes,
@@ -1461,6 +1478,14 @@ impl Item {
 
                         if target_width > 0 {
                             consumed_bits = target_width;
+                        }
+
+                        // Greedy Slice 8 Resolution: For buc/jav tail padding, swallow trailing noise markers.
+                        if matches!(marker.code.trim(), "buc" | "jav") {
+                            let total_rem = section_bits - start;
+                            if consumed_bits < total_rem && total_rem < 512 && total_rem % 8 == 0 {
+                                consumed_bits = total_rem;
+                            }
                         }
                     }
 
@@ -1535,6 +1560,18 @@ impl Item {
                         }
                     }
 
+                    #[cfg(debug_assertions)]
+                    if alpha_mode {
+                        println!(
+                            "DEBUG_PARSE_AFTER: index={} code={} start={} actual_consumed={} next_start={}",
+                            item_count,
+                            final_item.code,
+                            start,
+                            actual_consumed,
+                            start + actual_consumed
+                        );
+                    }
+
                     items.push(final_item);
                     consecutive_opaque = 0;
                     if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
@@ -1544,6 +1581,16 @@ impl Item {
                     next_expected_start = start + actual_consumed;
                 }
                 Err(e) => {
+                    #[cfg(debug_assertions)]
+                    if alpha_mode {
+                        println!(
+                            "DEBUG_PARSE_ERR: index={} marker_code={} start={} err={:?}",
+                            item_count,
+                            marker.code,
+                            start,
+                            e
+                        );
+                    }
                     if alpha_mode {
                         consecutive_opaque += 1;
                         let signature = (start % 8, format!("{:?}", e));
@@ -2334,6 +2381,15 @@ impl Item {
                 abs_start_bit,
             )?;
 
+        #[cfg(debug_assertions)]
+        if alpha_mode {
+            println!(
+                "TRACE_PARSE: code={:?} after_header={}",
+                code_peek,
+                cursor.pos() - start_bit
+            );
+        }
+
         if header.is_compact {
             cursor.base_pos = start_bit;
         }
@@ -2350,6 +2406,13 @@ impl Item {
         .with_code(code_peek.unwrap_or(""));
 
         let is_ho = s_axiom.is_header_only(header.flags, code_peek.unwrap_or(""));
+        #[cfg(debug_assertions)]
+        if alpha_mode {
+            println!(
+                "DEBUG_FROM_READER: code={:?} version={} is_compact={} flags=0x{:08X} is_ho={}",
+                code_peek, header.version, header.is_compact, header.flags, is_ho
+            );
+        }
         if is_ho {
             let mut body = crate::domain::item::entity::ItemBody::default();
             let peeked_code = code_peek.unwrap_or("").to_string();
@@ -2414,6 +2477,13 @@ impl Item {
                 (b, Vec::new(), None, None, None)
             }
             Err(e) => {
+                #[cfg(debug_assertions)]
+                if header.save_is_alpha {
+                    println!(
+                        "DEBUG_FROM_READER_BODY_ERR: code={:?} err={:?}",
+                        code_peek, e
+                    );
+                }
                 if header.save_is_alpha {
                     // Slice 4: Forensic isolation. Capture header and preserve body as SemiOpaque.
                     cursor.rollback(body_start_bit);
@@ -2461,6 +2531,14 @@ impl Item {
                 return Err(e);
             }
         };
+        #[cfg(debug_assertions)]
+        if alpha_mode {
+            println!(
+                "TRACE_PARSE: code={:?} after_body={}",
+                code_peek,
+                cursor.pos() - start_bit
+            );
+        }
         if header.save_is_alpha {
             let reg = crate::domain::forensic::registry::get_registry();
             if body.code.trim().is_empty() {
@@ -2534,6 +2612,15 @@ impl Item {
         } else {
             crate::domain::item::entity::ExtendedStatsData::default()
         };
+
+        #[cfg(debug_assertions)]
+        if alpha_mode {
+            println!(
+                "TRACE_PARSE: code={:?} after_ext={}",
+                code_peek,
+                cursor.pos() - start_bit
+            );
+        }
 
         let mut final_header = header;
         final_header.is_runeword = detected_runeword;
@@ -2721,6 +2808,15 @@ impl Item {
             item.socketed_items = nested_items;
         }
 
+        #[cfg(debug_assertions)]
+        if alpha_mode {
+            println!(
+                "TRACE_PARSE: code={:?} after_props={}",
+                code_peek,
+                cursor.pos() - start_bit
+            );
+        }
+
         let axiom = StatsAxiom::new(
             item.header.version,
             item.header.quality.unwrap_or(ItemQuality::Normal),
@@ -2739,6 +2835,16 @@ impl Item {
             &axiom,
         )?;
         item.body.alpha_alignment_padding.extend(padding);
+
+        #[cfg(debug_assertions)]
+        if alpha_mode {
+            println!(
+                "TRACE_PARSE: code={:?} after_padding={}",
+                code_peek,
+                cursor.pos() - start_bit
+            );
+        }
+
         item.range.end = cursor.pos();
         item.total_bits = item.range.end - item.range.start;
 
