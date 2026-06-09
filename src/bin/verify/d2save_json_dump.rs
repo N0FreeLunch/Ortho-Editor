@@ -223,10 +223,10 @@ fn main() {
                 "socketed_items": socket_json
             });
 
-            let is_potion = is_potion_code(&item.code);
+            let is_true_pot = is_true_potion(&item.code);
 
             if item.mode == 1 {
-                if is_potion {
+                if is_true_pot {
                     // In Alpha v105, potions in the first belt row often show mode 1
                     belt_json.push(item_data);
                 } else {
@@ -247,13 +247,23 @@ fn main() {
                     equipment_json.push(eq_data);
                 }
             } else if item.mode == 2 {
-                // Mode 2 is always Belt
-                belt_json.push(item_data);
+                // In Alpha v105, mode 2 often signals Belt (location 2), but sometimes weapons/scrolls/armor
+                // incorrectly show mode 2 while in inventory (location 0).
+                if is_alpha && !is_true_pot && item.location != 2 {
+                    // Fall back to location-based routing
+                    match item.location {
+                        4 => stash_json.push(item_data),
+                        7 => cube_json.push(item_data),
+                        _ => inventory_json.push(item_data),
+                    }
+                } else {
+                    belt_json.push(item_data);
+                }
             } else {
                 match item.location {
                     0 => {
-                        // Heuristic: If it's a potion at (0,0) in inventory, it's likely a belt item with shifted parse
-                        if is_potion && item.x == 0 && item.y == 0 {
+                        // Heuristic: If it's a true potion at (0,0) in inventory, it's likely a belt item with shifted parse
+                        if is_true_pot && item.x == 0 && item.y == 0 {
                             belt_json.push(item_data);
                         } else {
                             inventory_json.push(item_data);
@@ -472,14 +482,10 @@ fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
     bytes.windows(2).position(|window| window == marker)
 }
 
-// Helper: check if item is a potion (summary items in Alpha v105)
-fn is_potion_code(code: &str) -> bool {
+// Helper: check if item is a true potion (hp, mp, rv)
+fn is_true_potion(code: &str) -> bool {
     let trimmed = code.trim().to_lowercase();
-    trimmed.starts_with("hp")
-        || trimmed.starts_with("mp")
-        || trimmed.starts_with("rv")
-        || trimmed == "tsc"
-        || trimmed == "isc"
+    trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed.starts_with("rv")
 }
 
 // Helper: map body slot index to EN slot name string
