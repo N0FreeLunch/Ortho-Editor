@@ -1332,6 +1332,14 @@ impl Item {
                 if target_width_override > 0 {
                     dynamic_limit = target_width_override as u64;
                 }
+
+                // Slice 4: Authority Overlap Boundary Repair.
+                // Authority containers (`xrs`, `c8xr`, `rhd`) in Alpha v105 swallow their peer children
+                // (r15, r13, r08) during parsing. We must ensure the dynamic limit accommodates this 
+                // "swallowing" behavior even if the next physical marker is only 128 bits away.
+                if matches!(parse_code_hint.trim(), "xrs" | "c8xr" | "rhd") {
+                    dynamic_limit = dynamic_limit.max(512);
+                }
             }
 
             // Alpha v105 forensic: Socketed items add 8-bit alignment padding
