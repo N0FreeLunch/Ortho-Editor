@@ -421,8 +421,11 @@ impl ItemHeader {
             (cursor.read_bits::<u8>(3)? as u8, false)
         };
         let mode = cursor.read_bits::<u8>(3)? as u8;
-        let location = cursor.read_bits::<u8>(3)? as u8;
-        let x = cursor.read_bits::<u8>(4)? as u8;
+        let (location, x) = if alpha_mode && version >= 5 {
+            (cursor.read_bits::<u8>(4)? as u8, cursor.read_bits::<u8>(3)? as u8)
+        } else {
+            (cursor.read_bits::<u8>(3)? as u8, cursor.read_bits::<u8>(4)? as u8)
+        };
         
         let axiom = HeaderAxiom::new(version, alpha_mode);
         let mut s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);

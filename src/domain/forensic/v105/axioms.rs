@@ -788,8 +788,12 @@ impl V105PropertyWidthAxiom {
     pub fn checksum_bits(&self) -> u32 { 8 }
     pub fn version_bits(&self, _alpha_mode: bool) -> u32 { 3 }
     pub fn mode_bits(&self, _alpha_mode: bool) -> u32 { 3 }
-    pub fn location_bits(&self, _alpha_mode: bool) -> u32 { 3 }
-    pub fn x_bits(&self, _alpha_mode: bool) -> u32 { 4 }
+    pub fn location_bits(&self, alpha_mode: bool, version: u8) -> u32 {
+        if alpha_mode && version >= 5 { 4 } else { 3 }
+    }
+    pub fn x_bits(&self, alpha_mode: bool, version: u8) -> u32 {
+        if alpha_mode && version >= 5 { 3 } else { 4 }
+    }
 
     pub fn summary_gap_bits(&self, code: &str) -> u32 {
         let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
