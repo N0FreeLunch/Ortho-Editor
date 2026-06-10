@@ -110,7 +110,7 @@ impl HeaderAxiom {
     }
 
     pub fn is_alpha(&self) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
+        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 3 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
     }
 
     pub fn is_plausible(&self, mode: u8, location: u8, code: &[u8], _flags: u32) -> bool {
@@ -131,6 +131,13 @@ impl HeaderAxiom {
             };
 
             if !VALID_CODES.contains(trimmed) {
+                // Slice 5: Support Alpha v105 stealth codes (potions/scrolls/etc.)
+                if self.alpha_mode {
+                    let s_str = String::from_utf8_lossy(trimmed);
+                    if crate::domain::forensic::v105::axioms::is_v105_summary_code(&s_str) {
+                        return mode <= 6 && location <= 5;
+                    }
+                }
                 return false;
             }
         }
@@ -410,7 +417,7 @@ impl ItemHeader {
             let v = cursor.read_bits::<u8>(3)? as u8;
             let expected = calculate_alpha_v105_checksum(flags, v);
             
-            if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4) {
+            if checksum == expected && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4 || v == 3) {
                 alpha_checksum = Some(checksum);
                 (v, true)
             } else {
@@ -524,14 +531,18 @@ pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
     for i in 0..32 {
         if (flags & (1u32 << i)) != 0 { bits_set += 1; }
     }
-    
+
     match version {
         1 | 2 => {
             // Version 1/2 rule: (sum * 24 + 106) % 256
             bits_set.wrapping_mul(24).wrapping_add(106)
         },
+        3 => {
+            // Version 3 rule: (sum * 16 + 181) % 256 (Observed in authority fixture)
+            bits_set.wrapping_mul(16).wrapping_add(181)
+        },
         _ => {
-            // Version 0/5 rule: (sum * 16 + 213) % 256
+            // Version 0/4/5 rule: (sum * 16 + 213) % 256
             bits_set.wrapping_mul(16).wrapping_add(213)
         }
     }

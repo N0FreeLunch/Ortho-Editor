@@ -38,12 +38,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         return Vec::new();
     }
 
-    // Tier 1: Parallel Structural Indexing using Rayon
-    // We split the byte stream into chunks and scan each chunk in parallel.
-    // To avoid missing markers straddling chunk boundaries, we overlap chunks slightly.
     let limit_bits = (bytes.len() * 8) as u64;
     
-    // Slice 8: Parse D2R_FORCE_LENGTH to ensure true markers are not dropped
     let mut force_length_map = std::collections::HashMap::new();
     if let Ok(env_val) = std::env::var("D2R_FORCE_LENGTH") {
         for pair in env_val.split(',') {
@@ -64,14 +60,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             let end_byte = ((chunk_idx + 1) * SCAN_CHUNK_SIZE).min(bytes.len());
             
             let start_bit = (start_byte * 8) as u64;
-            // Overlap by 256 bits (sufficient for any item header + some buffer)
             let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
             
             let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
             let section_header_bits = if alpha && chunk_idx == 0 {
                 let mut p = 32;
                 if let Some((version, _, _, _, _, _, _, _, _, _)) = peek_item_header_at(bytes, 32, huffman, alpha, 0) {
-
                     p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default().header_bits(version) as u64;
                 }
                 p
@@ -131,9 +125,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     }
 
                     if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = header_candidate {   
-
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
-
                             let trimmed_code = code.trim();
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
                                 || crate::domain::item::serialization::item_template(&code).is_some();
@@ -144,13 +136,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 .map(|&val| val == 0)
                                 .unwrap_or(false);
                             
-                            // Slice S3: Stricter parity. Alpha v105 version 5 items must have a valid checksum unless they are known summary/templated items.
                             if alpha && version == 5 && !has_checksum && !is_known { continue; }
-                            
-                            // Alpha v105: We start at section_header_bits, so any marker found must be at or after it.
                             if alpha && chunk_idx == 0 && scan_pos < section_header_bits { continue; }
                             
-                            // Slice 8: Targeted Oracle. If forced, skip lookahead.
                             let mut is_forced = false;
                             let absolute_offset = section_bit_offset + scan_pos;
                             if force_length_map.contains_key(&absolute_offset) {
@@ -159,13 +147,11 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
                             let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code);
                             
-                            // Axiom 0344: Forced 80-bit slot check for Alpha v105 summary items (potions, etc.)
                             let mut forced_80 = false;
                             if alpha && !is_compact && !is_forced {
                                 if is_v105_summary {
                                     if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha, 0) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
-
                                         if is_plausible_item_header(n_mode, n_loc, n_code.as_bytes(), n_flags, n_ver, alpha) {
                                             forced_80 = true;
                                         }
@@ -199,22 +185,17 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 confidence += 100;
                             }
                             
-                            // Rhythmic Bonus: Favor candidates that align with the Bit 5 Rhythm rule
                             if alpha {
+                                let rem = scan_pos % 8;
                                 let body_start = scan_pos + _header_len;
                                 if body_start % 8 == 5 {
                                     confidence += 500;
                                 }
                                 
-                                // Pattern Bonus: Authority Potion Oscillation (0, 1, 0, 1)
-                                // and Runeword Shift (2, 2).
-                                let rem = scan_pos % 8;
-                                
                                 if trimmed_code == "hp1" || trimmed_code == "mp1" {
                                     if has_checksum {
                                         confidence += 1000;
                                     } else {
-                                        // Require checksum for summary items in Alpha
                                         continue;
                                     }
                                 }
@@ -227,8 +208,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                      }
                                 }
                             }
-                            
-                            if confidence > max_confidence {
+
+                            if confidence > max_confidence 
+                                || (alpha && confidence == max_confidence && (scan_pos % 8 == 2))
+                            {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
                                 best_code = code.clone();
@@ -240,21 +223,17 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 if max_confidence > 0 {
                     local_markers.push((best_offset, max_confidence, best_code.clone()));
 
-                    // Slice S3: Safe rhythmic jump.
                     let jump = if alpha {
-                        // Re-peek best to get version/flags for target width
                         if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
                              let mut j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
                              if best_code.trim() == "xrs" && j == 0 {
-                                 // Slice 30: Don't use a massive jump that might swallow valid items.
-                                 // Instead, use a safe minimum width (128) and let phantom suppression handle shadow items.
                                  j = 128; 
                              }
-                             if j > 0 { j } else { 72 } // Ensure forward progress
+                             if j > 0 { j } else { 72 }
                         } else { 72 }
 
                     } else {
-                        72 // Retail minimum width
+                        72 
                     };
                     probe = best_offset + jump;
                 } else {
@@ -265,15 +244,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         })
         .collect();
 
-
-
-    // Consolidate markers: sort and remove duplicates caused by overlapping scan
     let mut final_markers = markers;
     final_markers.sort_unstable_by_key(|m| m.0);
     
-    // Slice 14.1: Slot-Aligned Competitive Advancement.
-    // We use a lookahead window to pick the highest confidence marker,
-    // prioritizing those that align with the previous item's slot boundary.
     let mut all_markers: Vec<ItemMarker> = Vec::new();
     let mut filtered_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
     
@@ -285,8 +258,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     
     while i < final_markers.len() {
         let (offset, confidence, code_str) = &final_markers[i];
-        
-        // Find the best candidate in a lookahead window
         let mut best_idx = i;
         let mut max_score = *confidence as i32;
 
@@ -300,24 +271,14 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 max_score += 100;
             }
 
-            // Slice 30: Boundary-sensitive shadow suppression.
             if let Some(xrs_off) = since_last_xrs {
                 let dist = offset - xrs_off;
                 if dist < 512 && is_alpha_v105_shadow_marker(code_str) {
                     max_score -= 1500;
                 }
             }
-
-            if let Some(expected) = expected_count {
-                if accepted_count >= expected as usize {
-                    if !is_v105_aligned(diff) {
-                        max_score -= 500;
-                    }
-                }
-            }
         }
         
-        // Look ahead to see if there's a better (e.g. aligned) marker nearby
         let lookahead_limit = if alpha { offset + 64 } else { offset + 120 };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
@@ -340,7 +301,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 }
                 score += alignment_bonus;
 
-                // Slice 30: Boundary-sensitive shadow suppression.
                 if let Some(xrs_off) = since_last_xrs {
                     let dist = o_offset - xrs_off;
                     if dist < 512 && is_alpha_v105_shadow_marker(o_code) {
@@ -348,16 +308,18 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     }
                 }
 
-                // Recursive Alignment Check (Slice 7): 
-                // Check if THIS lookahead candidate itself has an aligned successor.
-                if alignment_bonus > 0 {
-                    let next_window = o_offset + 96;
+                if alpha {
+                    let next_window = o_offset + 128;
                     let mut k = j + 1;
                     while k < final_markers.len() && final_markers[k].0 < next_window {
                         let k_offset = final_markers[k].0;
                         let k_diff = k_offset - o_offset;
                         if is_v105_aligned(k_diff) {
-                            score += 100; // Multi-hop alignment bonus
+                            if k_diff == 80 || k_diff == 72 {
+                                score += 300; 
+                            } else {
+                                score += 100;
+                            }
                             break;
                         }
                         k += 1;
@@ -365,17 +327,13 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 }
             }
             
-            // Phantom Suppression (Slice 7): 
-            // If we have an expected_count and we are over it, be more aggressive 
-            // in suppressing low-confidence non-aligned markers.
             if let Some(expected) = expected_count {
                 if accepted_count >= expected as usize {
                     let is_aligned = if accepted_count == 0 { false } else { is_v105_aligned(o_offset - last_offset) };
                     if !is_aligned {
-                        // Slice 30: Boundary-sensitive unaligned penalty.
                         let following_xrs = since_last_xrs.map(|off| o_offset - off < 512).unwrap_or(false);
                         if !following_xrs {
-                            score -= 500; // Even higher penalty for extra unaligned markers
+                            score -= 500;
                         } else {
                             score -= 100;
                         }
@@ -390,27 +348,22 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             j += 1;
         }
 
-            let (best_offset, best_confidence, best_code_str) = &final_markers[best_idx];
-            let mut status = MarkerStatus::Accepted;
+        let (best_offset, best_confidence, best_code_str) = &final_markers[best_idx];
+        let mut status = MarkerStatus::Accepted;
 
-            // Competitive Stopgate: if even the best score is too low or inconsistent, 
-            // stop and defer to isolation.
-            if alpha && max_score < 150 {
-             if let Some(expected) = expected_count {
-                 // Slice 30: Shadow markers following an xrs should ALWAYS be suppressed if low score,
-                 // regardless of expected count.
-                 let following_xrs = since_last_xrs.map(|off| best_offset - off < 512).unwrap_or(false);
-                 if following_xrs && is_alpha_v105_shadow_marker(best_code_str) {
-                     status = MarkerStatus::Phantom;
-                 } else if accepted_count < expected as usize {
-                     // Still keep it if we really need items, but with fragile confidence
-                 } else {
-                     status = MarkerStatus::Phantom;
-                 }
-             } else {
-                 status = MarkerStatus::Phantom;
-             }
+        if alpha && max_score < 150 {
+            if let Some(expected) = expected_count {
+                let following_xrs = since_last_xrs.map(|off| best_offset - off < 512).unwrap_or(false);
+                if following_xrs && is_alpha_v105_shadow_marker(best_code_str) {
+                    status = MarkerStatus::Phantom;
+                } else if accepted_count < expected as usize {
+                } else {
+                    status = MarkerStatus::Phantom;
+                }
+            } else {
+                status = MarkerStatus::Phantom;
             }
+        }
 
         if status == MarkerStatus::Accepted || status == MarkerStatus::Phantom {
             if status == MarkerStatus::Accepted {
@@ -426,7 +379,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 last_offset = *best_offset;
                 last_code = best_code_str.clone();
                 
-                // Slice 30: Track last xrs for shadow suppression
                 if last_code.trim() == "xrs" {
                     since_last_xrs = Some(last_offset);
                 } else if let Some(off) = since_last_xrs {
@@ -453,7 +405,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             });
         }
         
-        // Advance i to after the lookahead window and skip the rest of this item's space
         let skip_until = best_offset + 72;
         i = best_idx + 1;
         while i < final_markers.len() && final_markers[i].0 < skip_until {
@@ -463,7 +414,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     offset: *o_offset,
                     confidence: *o_conf,
                     code: o_code.clone(),
-                    score: *o_conf as i32, // Raw score for skipped
+                    score: *o_conf as i32,
                     status: MarkerStatus::Rejected,
                 });
             }
@@ -481,8 +432,6 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
 fn is_alpha_v105_slot_item(code: &str) -> bool {
     let trimmed = code.trim();
-    // Potions, Scrolls, and other common inventory slot items in Alpha v105.
-    // Also include 'w' prefixed versions common in Alpha.
     if matches!(trimmed, 
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
         "whp1"|"whp2"|"whp3"|"whp4"|"whp5"|"wmp1"|"wmp2"|"wmp3"|"wmp4"|"wmp5"|
@@ -490,13 +439,12 @@ fn is_alpha_v105_slot_item(code: &str) -> bool {
         "6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|"mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|
         "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"|"swsp"
     ) { return true; }
-    
-    // Check if it's a summary code from axioms
     crate::domain::forensic::v105::axioms::is_v105_summary_code(code)
 }
 
 fn is_v105_aligned(diff: u64) -> bool {
     // Standard Alpha v105 slot sizes are 72, 73, 80, 88.
     // We also allow sums of these for empty slots.
-    matches!(diff, 72 | 73 | 80 | 88 | 144 | 145 | 152 | 153 | 160 | 161 | 168 | 176 | 216 | 224 | 232 | 240)
+    // Slice 5: Add 2-bit residual shift awareness (74, 82, 90) and common sums.
+    matches!(diff, 72 | 73 | 74 | 80 | 81 | 82 | 88 | 89 | 90 | 144 | 145 | 146 | 152 | 153 | 154 | 160 | 161 | 162 | 168 | 176 | 216 | 224 | 232 | 240)
 }

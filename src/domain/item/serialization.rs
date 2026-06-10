@@ -370,7 +370,7 @@ pub fn peek_item_header_at_with_base(
 
     let mut alpha_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     let _ = alpha_reader.skip(start_bit as u32 + 32);
-    let checksum = alpha_reader.read::<8, u8>().unwrap_or(0);
+    let _checksum = alpha_reader.read::<8, u8>().unwrap_or(0);
     let v = alpha_reader.read::<3, u8>().unwrap_or(0);
     let _calculated = calculate_alpha_v105_checksum(flags, v);
 
@@ -387,11 +387,16 @@ pub fn peek_item_header_at_with_base(
 
     let mut trial_configs = Vec::new();
     if alpha_mode && (v <= 7) {
-        let m = alpha_reader.read::<3, u8>().ok();
-        let l = alpha_reader.read::<3, u8>().ok();
-        let x = alpha_reader.read::<4, u8>().ok();
-        if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
-            trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 3 + 4, true));
+        let _calculated = calculate_alpha_v105_checksum(flags, v);
+        let matched = _checksum == _calculated && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4 || v == 3);
+        
+        if matched {
+            let m = alpha_reader.read::<3, u8>().ok();
+            let l = alpha_reader.read::<3, u8>().ok();
+            let x = alpha_reader.read::<4, u8>().ok();
+            if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
+                trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 3 + 4, true));
+            }
         }
     }
 
@@ -424,7 +429,8 @@ pub fn peek_item_header_at_with_base(
                 Some(absolute_start_bit.unwrap_or(start_bit)),
             );
             trial_possible_gaps.push(rhythm_gap);
-            for &g in &[0, 3, 6, 8, 16, 24, 32, 40, 48, 50, 56] {
+            // Slice 5: Expand gap search range for Alpha v105 to handle residual shifts
+            for &g in &[0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56] {
                 if !trial_possible_gaps.contains(&g) {
                     trial_possible_gaps.push(g);
                 }
@@ -433,7 +439,7 @@ pub fn peek_item_header_at_with_base(
             let geom_bits = if !alpha_mode { 4 } else { 0 };
 
             for gap in trial_possible_gaps {
-                let mut trial_total_skip = base_header_len as u32 + geom_bits + gap as u32;
+                let trial_total_skip = base_header_len as u32 + geom_bits + gap as u32;
                 let mut t_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
                 if t_reader.skip(start_bit as u32 + trial_total_skip).is_err() {
                     continue;
@@ -482,11 +488,13 @@ pub fn peek_item_header_at_with_base(
                     }
                 }
 
-                let trimmed = crate::item::normalize_alpha_code_hint(t_code.trim());
+                let trimmed_norm = crate::item::normalize_alpha_code_hint(t_code.trim());
+                let trimmed = trimmed_norm.trim();
                 if trimmed.len() >= 2 {
                     let mut confidence: i32 = 100;
-                    let reg = crate::domain::forensic::registry::get_registry();
-                    let is_known = reg
+                    if h_axiom.is_plausible(mode, loc, trimmed.as_bytes(), flags) {
+                        let reg = crate::domain::forensic::registry::get_registry();
+                        let is_known = reg
                         .forced_compact_codes
                         .as_ref()
                         .map(|codes| codes.iter().any(|c| c == trimmed))
@@ -526,8 +534,16 @@ pub fn peek_item_header_at_with_base(
                             confidence += 1000;
                         }
                     }
+                    }
+
                     if has_checksum {
-                        confidence += 100;
+                        // Slice 5: Increase checksum bonus to favor Alpha-path trials over Retail-path trials
+                        confidence += 400;
+                    }
+
+                    // Slice 5: Tip the balance for authority shifts
+                    if alpha_mode && start_bit % 8 == 2 {
+                        confidence += 10;
                     }
 
                     // Rhythmic Bonus: Favor gaps that align body start with Bit 5 boundary (Slice 7)
@@ -537,7 +553,7 @@ pub fn peek_item_header_at_with_base(
 
                     let is_compact_trial = is_compact;
                     if confidence > max_confidence
-                        || (confidence == max_confidence && is_compact_trial)
+                        || (confidence == max_confidence && (is_compact_trial || has_checksum))
                     {
                         max_confidence = confidence;
                         best_res = Some((
@@ -829,10 +845,6 @@ pub fn parse_item_at_with_limit(
     cursor.set_pos(absolute_bit);
     cursor.base_pos = base_bit_offset;
     if let Some(l) = limit {
-        #[cfg(debug_assertions)]
-        if alpha && code_hint.map(|c| c.trim() == "jav" || c.trim() == "buc").unwrap_or(false) {
-            println!("DEBUG: parse_item_at_with_limit for {:?}: limit={}", code_hint, l);
-        }
         cursor.set_limit(absolute_bit + l);
     }
     let item = Item::from_reader_with_context(
@@ -1407,22 +1419,6 @@ impl Item {
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
-                    #[cfg(debug_assertions)]
-                    if alpha_mode {
-                        println!(
-                            "DEBUG_PARSE_BEFORE: index={} code={} marker_code={} start={} consumed_bits={} is_compact={} version={} quality={:?} flags=0x{:08X}",
-                            item_count,
-                            final_item.code,
-                            marker.code,
-                            start,
-                            consumed_bits,
-                            final_item.header.is_compact,
-                            final_item.header.version,
-                            final_item.header.quality,
-                            final_item.header.flags
-                        );
-                    }
-
                     if alpha_mode
                         && matches!(marker.code.trim(), "buc" | "jav")
                         && ((target_width_override == 0
@@ -1574,18 +1570,6 @@ impl Item {
                         }
                     }
 
-                    #[cfg(debug_assertions)]
-                    if alpha_mode {
-                        println!(
-                            "DEBUG_PARSE_AFTER: index={} code={} start={} actual_consumed={} next_start={}",
-                            item_count,
-                            final_item.code,
-                            start,
-                            actual_consumed,
-                            start + actual_consumed
-                        );
-                    }
-
                     items.push(final_item);
                     consecutive_opaque = 0;
                     if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
@@ -1595,16 +1579,6 @@ impl Item {
                     next_expected_start = start + actual_consumed;
                 }
                 Err(e) => {
-                    #[cfg(debug_assertions)]
-                    if alpha_mode {
-                        println!(
-                            "DEBUG_PARSE_ERR: index={} marker_code={} start={} err={:?}",
-                            item_count,
-                            marker.code,
-                            start,
-                            e
-                        );
-                    }
                     if alpha_mode {
                         consecutive_opaque += 1;
                         let signature = (start % 8, format!("{:?}", e));
@@ -2395,15 +2369,6 @@ impl Item {
                 abs_start_bit,
             )?;
 
-        #[cfg(debug_assertions)]
-        if alpha_mode {
-            println!(
-                "TRACE_PARSE: code={:?} after_header={}",
-                code_peek,
-                cursor.pos() - start_bit
-            );
-        }
-
         if header.is_compact {
             cursor.base_pos = start_bit;
         }
@@ -2420,13 +2385,6 @@ impl Item {
         .with_code(code_peek.unwrap_or(""));
 
         let is_ho = s_axiom.is_header_only(header.flags, code_peek.unwrap_or(""));
-        #[cfg(debug_assertions)]
-        if alpha_mode {
-            println!(
-                "DEBUG_FROM_READER: code={:?} version={} is_compact={} flags=0x{:08X} is_ho={}",
-                code_peek, header.version, header.is_compact, header.flags, is_ho
-            );
-        }
         if is_ho {
             let mut body = crate::domain::item::entity::ItemBody::default();
             let peeked_code = code_peek.unwrap_or("").to_string();
@@ -2491,13 +2449,6 @@ impl Item {
                 (b, Vec::new(), None, None, None)
             }
             Err(e) => {
-                #[cfg(debug_assertions)]
-                if header.save_is_alpha {
-                    println!(
-                        "DEBUG_FROM_READER_BODY_ERR: code={:?} err={:?}",
-                        code_peek, e
-                    );
-                }
                 if header.save_is_alpha {
                     // Slice 4: Forensic isolation. Capture header and preserve body as SemiOpaque.
                     cursor.rollback(body_start_bit);
@@ -2545,14 +2496,6 @@ impl Item {
                 return Err(e);
             }
         };
-        #[cfg(debug_assertions)]
-        if alpha_mode {
-            println!(
-                "TRACE_PARSE: code={:?} after_body={}",
-                code_peek,
-                cursor.pos() - start_bit
-            );
-        }
         if header.save_is_alpha {
             let reg = crate::domain::forensic::registry::get_registry();
             if body.code.trim().is_empty() {
@@ -2626,15 +2569,6 @@ impl Item {
         } else {
             crate::domain::item::entity::ExtendedStatsData::default()
         };
-
-        #[cfg(debug_assertions)]
-        if alpha_mode {
-            println!(
-                "TRACE_PARSE: code={:?} after_ext={}",
-                code_peek,
-                cursor.pos() - start_bit
-            );
-        }
 
         let mut final_header = header;
         final_header.is_runeword = detected_runeword;
@@ -2822,15 +2756,6 @@ impl Item {
             item.socketed_items = nested_items;
         }
 
-        #[cfg(debug_assertions)]
-        if alpha_mode {
-            println!(
-                "TRACE_PARSE: code={:?} after_props={}",
-                code_peek,
-                cursor.pos() - start_bit
-            );
-        }
-
         let axiom = StatsAxiom::new(
             item.header.version,
             item.header.quality.unwrap_or(ItemQuality::Normal),
@@ -2849,15 +2774,6 @@ impl Item {
             &axiom,
         )?;
         item.body.alpha_alignment_padding.extend(padding);
-
-        #[cfg(debug_assertions)]
-        if alpha_mode {
-            println!(
-                "TRACE_PARSE: code={:?} after_padding={}",
-                code_peek,
-                cursor.pos() - start_bit
-            );
-        }
 
         item.range.end = cursor.pos();
         item.total_bits = item.range.end - item.range.start;

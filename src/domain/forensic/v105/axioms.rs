@@ -99,6 +99,7 @@ impl V105PropertyNudgeAxiom {
         match version {
             5 => 5, // Version 5 requires a 5-bit residue nudge (Slice 23)
             4 => 1, // Version 4 requires a 1-bit residue nudge (Slice 5)
+            3 => 1, // Version 3 requires a 1-bit residue nudge (Observed in authority fixture)
             2 | 0 => 3, // Version 2 and 0 require a 3-bit residue nudge
             1 => 0, // Version 1 (xrs runeword base) does not use this nudge
             _ => 0,
@@ -113,7 +114,7 @@ impl V105HeaderGapAxiom {
         // Axiom 0344: Alpha v105 Bit 5 Rhythm Snap.
         // For Alpha v105 items, the body start bit B must satisfy B % 8 == 5
         // relative to a byte-aligned marker boundary.
-        if start_bit_offset.is_some() && (version == 5 || version == 2 || version == 1 || version == 0 || version == 6 || version == 4) {
+        if start_bit_offset.is_some() && (version == 5 || version == 2 || version == 1 || version == 0 || version == 6 || version == 4 || version == 3) {
             let abs_start = start_bit_offset.unwrap();
             let header_len = if has_checksum { 53 } else { 45 }; 
             
@@ -168,7 +169,7 @@ impl V105HeaderGapAxiom {
             match version {
                 5 => 5,
                 0 | 1 | 2 => 3,
-                4 => 1, // Observed 1-bit drift in version 4 (Item 13)
+                3 | 4 => 1, // Observed 1-bit drift in version 3/4
                 _ => 0,
             }
         };
