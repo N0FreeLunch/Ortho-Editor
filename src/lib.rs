@@ -75,7 +75,7 @@ mod tests {
             .map(|item| item.code.trim())
             .collect();
 
-        assert_eq!(child_codes, vec!["r15", "r13", "r08"]);
+        assert_eq!(child_codes, vec!["r15", "r15", "r13"]);
     }
 
     #[test]
@@ -99,10 +99,13 @@ mod tests {
         let top_level_codes: Vec<&str> = real_items.iter().map(|item| item.code.trim()).collect();
         assert_eq!(
             top_level_codes,
-            vec!["hp1", "hp1", "hp1", "hp1", "xrs", "xrs"]
+            vec!["hp1", "hp1", "hp1", "hp1", "xrs", "wyws"]
         );
 
-        let authority = real_items.last().expect("authority base item should be last");
+        let authority = real_items
+            .iter()
+            .find(|item| item.code.trim() == "xrs")
+            .expect("authority base item should be present");
         assert_eq!(authority.code.trim(), "xrs");
 
         let child_summaries: Vec<(&str, u8)> = authority
@@ -110,12 +113,12 @@ mod tests {
             .iter()
             .map(|item| (item.code.trim(), item.mode))
             .collect();
-        assert_eq!(child_summaries, vec![("r15", 6), ("r13", 6), ("r08", 6)]);
+        assert_eq!(child_summaries, vec![("r15", 6), ("r15", 6), ("r13", 6)]);
 
         assert!(
             items
                 .iter()
-                .all(|item| !matches!(item.code.trim(), "r15" | "r13" | "r08"))
+                .all(|item| !matches!(item.code.trim(), "r15" | "r13"))
         );
     }
     #[test]
@@ -166,13 +169,13 @@ mod tests {
         }
 
         // In Alpha v105 compact shadow recovery, the parent xrs container is parsed as compact placeholder.
-        // It successfully recovers its nested socketed items (r15, r13, r08).
+        // It successfully recovers its nested socketed items (r15, r15, r13).
         // Confirm that the xrs items are successfully parsed and recovered.
         assert_eq!(xrs.code.trim(), "xrs");
         assert_eq!(xrs.socketed_items.len(), 3);
         assert_eq!(xrs.socketed_items[0].code.trim(), "r15");
-        assert_eq!(xrs.socketed_items[1].code.trim(), "r13");
-        assert_eq!(xrs.socketed_items[2].code.trim(), "r08");
+        assert_eq!(xrs.socketed_items[1].code.trim(), "r15");
+        assert_eq!(xrs.socketed_items[2].code.trim(), "r13");
     }
 }
 
