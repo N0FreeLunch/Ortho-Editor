@@ -1,5 +1,6 @@
 use d2r_core::item::{HuffmanTree, peek_item_header_at};
 use d2r_core::verify::OutputManager;
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use d2r_core::verify::desync::dump_bits_at;
 use serde::Serialize;
@@ -135,7 +136,20 @@ fn main() {
         Ok(b) => b,
         Err(e) => {
             if out.is_json() {
-                out.json(&format!("{{\"error\": \"Failed to read fixture: {}\"}}", e));
+                let report: Report<()> = Report::new(
+                    ReportMetadata::new(
+                        "d2item_boundary_oracle",
+                        &fixture_str,
+                        env!("CARGO_PKG_VERSION"),
+                    ),
+                    ReportStatus::Fail,
+                )
+                .with_issues(vec![ReportIssue {
+                    kind: "io_error".to_string(),
+                    message: format!("Failed to read fixture: {}", e),
+                    bit_offset: None,
+                }]);
+                out.json(&serde_json::to_string_pretty(&report).unwrap());
             } else {
                 out.println(&format!(
                     "Error: Failed to read fixture '{}': {}",
@@ -307,8 +321,16 @@ fn main() {
     };
 
     if out.is_json() {
-        let json = serde_json::to_string_pretty(&report).unwrap();
-        out.json(&json);
+        let final_report = Report::new(
+            ReportMetadata::new(
+                "d2item_boundary_oracle",
+                &fixture_str,
+                env!("CARGO_PKG_VERSION"),
+            ),
+            ReportStatus::Ok,
+        )
+        .with_results(report);
+        out.json(&serde_json::to_string_pretty(&final_report).unwrap());
     } else {
         out.println(&format!(
             "Boundary Oracle Report for domain: {}",
