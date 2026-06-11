@@ -279,6 +279,20 @@ impl OutputManager {
             println!("{}", text);
         }
     }
+
+    pub fn print(&mut self, text: &str) {
+        if !self.is_json {
+            if let Some(w) = &mut self.writer {
+                let _ = write!(w, "{}", text);
+            }
+        }
+
+        if self.is_json {
+            eprint!("{}", text);
+        } else if !self.is_token_efficient {
+            print!("{}", text);
+        }
+    }
     
     pub fn json(&mut self, text: &str) {
         if let Some(w) = &mut self.writer {
