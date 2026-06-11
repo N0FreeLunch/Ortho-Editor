@@ -446,7 +446,7 @@ impl ItemHeader {
             (cursor.read_bits::<u8>(3)? as u8, false)
         };
         let mode = cursor.read_bits::<u8>(3)? as u8;
-        let (location, x) = if alpha_mode && version >= 5 {
+        let (location, x) = if alpha_mode {
             (cursor.read_bits::<u8>(4)? as u8, cursor.read_bits::<u8>(3)? as u8)
         } else {
             (cursor.read_bits::<u8>(3)? as u8, cursor.read_bits::<u8>(4)? as u8)

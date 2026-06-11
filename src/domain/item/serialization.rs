@@ -392,10 +392,10 @@ pub fn peek_item_header_at_with_base(
         
         if matched {
             let m = alpha_reader.read::<3, u8>().ok();
-            let l = alpha_reader.read::<3, u8>().ok();
-            let x = alpha_reader.read::<4, u8>().ok();
+            let l = alpha_reader.read::<4, u8>().ok();
+            let x = alpha_reader.read::<3, u8>().ok();
             if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
-                trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 3 + 4, true));
+                trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 4 + 3, true));
             }
         }
     }
@@ -604,9 +604,9 @@ pub fn peek_item_header_at_specific_gap(
         && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
     {
         let m = alpha_reader.read::<3, u8>().ok()?;
-        let l = alpha_reader.read::<3, u8>().ok()?;
-        let x = alpha_reader.read::<4, u8>().ok()?;
-        (v, m, l, x, 32 + 8 + 3 + 3 + 3 + 4, true)
+        let l = alpha_reader.read::<4, u8>().ok()?;
+        let x = alpha_reader.read::<3, u8>().ok()?;
+        (v, m, l, x, 32 + 8 + 3 + 3 + 4 + 3, true)
     } else {
         let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
         retail_reader.skip(start_bit as u32 + 32).ok()?;

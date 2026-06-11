@@ -790,11 +790,11 @@ impl V105PropertyWidthAxiom {
     pub fn checksum_bits(&self) -> u32 { 8 }
     pub fn version_bits(&self, _alpha_mode: bool) -> u32 { 3 }
     pub fn mode_bits(&self, _alpha_mode: bool) -> u32 { 3 }
-    pub fn location_bits(&self, alpha_mode: bool, version: u8) -> u32 {
-        if alpha_mode && version >= 5 { 4 } else { 3 }
+    pub fn location_bits(&self, alpha_mode: bool, _version: u8) -> u32 {
+        if alpha_mode { 4 } else { 3 }
     }
-    pub fn x_bits(&self, alpha_mode: bool, version: u8) -> u32 {
-        if alpha_mode && version >= 5 { 3 } else { 4 }
+    pub fn x_bits(&self, alpha_mode: bool, _version: u8) -> u32 {
+        if alpha_mode { 3 } else { 4 }
     }
 
     pub fn summary_gap_bits(&self, code: &str) -> u32 {
