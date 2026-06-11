@@ -4,21 +4,13 @@ use d2r_core::save::map_core_sections;
 use d2r_core::verify::OutputManager;
 use d2r_core::verify::args::{ArgError, ArgParser};
 use d2r_core::verify::forensics::ForensicIssue;
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
 use serde::Serialize;
 use std::{env, fs, process};
 
 #[derive(Serialize)]
-struct MercenaryReport {
-    metadata: ReportMetadata,
-    status: String,
+struct MercenaryPayload {
     mercenary: Option<MercenaryJson>,
-    issues: Vec<ForensicIssue>,
-}
-
-#[derive(Serialize)]
-struct ReportMetadata {
-    tool: String,
-    file: String,
 }
 
 #[derive(Serialize)]
@@ -86,15 +78,17 @@ fn main() -> anyhow::Result<()> {
             Err(e) => {
                 let msg = format!("Cannot read file: {}", e);
                 if is_json {
-                    let report = MercenaryReport {
-                        metadata: ReportMetadata {
-                            tool: "d2save_mercenary_audit".to_string(),
-                            file: path.clone(),
-                        },
-                        status: "Fail".to_string(),
+                    let metadata = ReportMetadata::new("d2save_mercenary_audit", path, env!("CARGO_PKG_VERSION"));
+                    let payload = MercenaryPayload {
                         mercenary: None,
-                        issues: vec![ForensicIssue::new("IoError", &msg)],
                     };
+                    let report = Report::new(metadata, ReportStatus::Fail)
+                        .with_results(payload)
+                        .with_issues(vec![ReportIssue {
+                            kind: "IoError".to_string(),
+                            message: msg.clone(),
+                            bit_offset: None,
+                        }]);
                     om.json(&serde_json::to_string(&report)?);
                 } else {
                     om.println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg));
@@ -106,28 +100,42 @@ fn main() -> anyhow::Result<()> {
 
         let audit_result = audit_mercenary(path, &bytes, verbose);
         match audit_result {
-            Ok(report) => {
+            Ok((payload, issues, status)) => {
                 if is_json {
+                    let metadata = ReportMetadata::new("d2save_mercenary_audit", path, env!("CARGO_PKG_VERSION"));
+                    let report_status = if status == "Fail" { ReportStatus::Fail } else { ReportStatus::Ok };
+                    
+                    let report_issues = issues.iter().map(|i| ReportIssue {
+                        kind: i.kind.clone(),
+                        message: i.message.clone(),
+                        bit_offset: i.bit_offset,
+                    }).collect();
+
+                    let report = Report::new(metadata, report_status)
+                        .with_results(payload)
+                        .with_issues(report_issues);
                     om.json(&serde_json::to_string(&report)?);
                 } else {
-                    print_report_text(&mut om, path, &report, verbose);
+                    print_report_text(&mut om, path, &payload, &issues, verbose);
                 }
-                if report.status == "Fail" {
+                if status == "Fail" {
                     all_ok = false;
                 }
             }
             Err(e) => {
                 let msg = format!("Audit failed: {}", e);
                 if is_json {
-                    let report = MercenaryReport {
-                        metadata: ReportMetadata {
-                            tool: "d2save_mercenary_audit".to_string(),
-                            file: path.clone(),
-                        },
-                        status: "Fail".to_string(),
+                    let metadata = ReportMetadata::new("d2save_mercenary_audit", path, env!("CARGO_PKG_VERSION"));
+                    let payload = MercenaryPayload {
                         mercenary: None,
-                        issues: vec![ForensicIssue::new("InternalError", &msg)],
                     };
+                    let report = Report::new(metadata, ReportStatus::Fail)
+                        .with_results(payload)
+                        .with_issues(vec![ReportIssue {
+                            kind: "InternalError".to_string(),
+                            message: msg.clone(),
+                            bit_offset: None,
+                        }]);
                     om.json(&serde_json::to_string(&report)?);
                 } else {
                     om.println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg));
@@ -144,12 +152,13 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<MercenaryReport> {
+fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<(MercenaryPayload, Vec<ForensicIssue>, String)> {
     let map = map_core_sections(bytes).map_err(|e| anyhow::anyhow!("Map error: {}", e))?;
     let w4_data = map.w4_pos.map(|pos| {
         let w4_end = map.jf_pos.unwrap_or(bytes.len());
         &bytes[pos..w4_end]
     });
+
 
     let mut issues = Vec::new();
 
@@ -324,20 +333,18 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
         "Ok".to_string()
     };
 
-    Ok(MercenaryReport {
-        metadata: ReportMetadata {
-            tool: "d2save_mercenary_audit".to_string(),
-            file: path.to_string(),
+    Ok((
+        MercenaryPayload {
+            mercenary: mercenary_json,
         },
-        status,
-        mercenary: mercenary_json,
         issues,
-    })
+        status,
+    ))
 }
 
-fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryReport, verbose: bool) {
+fn print_report_text(om: &mut OutputManager, path: &str, payload: &MercenaryPayload, issues: &[ForensicIssue], verbose: bool) {
     om.println(&format!("=== File: {} ===", path));
-    if let Some(merc) = &report.mercenary {
+    if let Some(merc) = &payload.mercenary {
         om.println("Hybrid Decoded:");
         om.println(&format!(
             "  Class:    {} ({})",
@@ -368,7 +375,7 @@ fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryRepor
         }
     }
 
-    for issue in &report.issues {
+    for issue in issues {
         let label = match issue.kind.as_str() {
             "AlignmentDrift" | "ParseFailure" | "SemanticViolation" | "IoError"
             | "InternalError" => "[ERROR]",
