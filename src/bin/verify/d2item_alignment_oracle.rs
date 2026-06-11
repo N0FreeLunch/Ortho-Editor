@@ -1,11 +1,10 @@
-use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::{HuffmanTree, is_plausible_item_header, peek_item_header_at};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::Cursor;
 
 #[derive(Serialize)]
 struct AlignmentReport {
@@ -56,7 +55,7 @@ fn main() {
         .get("offset")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
-    let use_json = parsed.is_set("json");
+    let use_json = parsed.is_json();
     let do_detect_desync = parsed.is_set("detect-desync");
 
     let bytes = match fs::read(path) {
@@ -160,13 +159,18 @@ fn main() {
         .map(|(&val, _)| val);
 
     if use_json {
-        let report = AlignmentReport {
+        let payload = AlignmentReport {
             total_markers: found_count,
             intervals,
             distribution,
             contextual_mapping,
             inferred_alignment,
         };
+        let report = Report::new(
+            ReportMetadata::new("d2item_alignment_oracle", path, env!("CARGO_PKG_VERSION")),
+            ReportStatus::Ok,
+        )
+        .with_results(payload);
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     } else {
         println!("{:-<75}", "");
