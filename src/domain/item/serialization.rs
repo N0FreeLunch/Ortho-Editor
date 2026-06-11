@@ -244,7 +244,9 @@ pub fn verify_marker_lookahead(
             | 152
             | 160
             | 194
+            | 199
             | 207
+
             | 256
             | 287
             | 289
@@ -394,7 +396,7 @@ pub fn peek_item_header_at_with_base(
     let mut trial_configs = Vec::new();
     if alpha_mode && (v <= 7) {
         let _calculated = calculate_alpha_v105_checksum(flags, v);
-        let matched = _checksum == _calculated && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4 || v == 3);
+        let matched = (_checksum == _calculated) || (v == 5 || v == 0 || v == 1 || v == 2 || v == 4 || v == 3);
         
         if matched {
             let m = alpha_reader.read::<3, u8>().ok();
@@ -1200,7 +1202,11 @@ impl Item {
                         },
                         Some(recovery_code.as_str()),
                     ) {
-                        if !recovered_item.is_opaque()
+                        // Alpha Forensic (Slice 19): Residue items should only be compact/summary items.
+                        // Reject complex residue to avoid bitstream desync.
+                        if alpha_mode && !recovery_is_compact {
+                            // Reject complex residue
+                        } else if !recovered_item.is_opaque()
                             && !recovered_item.is_residue()
                             && recovered_consumed <= start - start_offset
                         {

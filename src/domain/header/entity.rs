@@ -152,7 +152,7 @@ impl HeaderAxiom {
         }
     }
     pub fn is_compact(&self, flags: u32, code: Option<&str>) -> bool {
-        if self.is_runeword(flags, code) {
+        if self.is_runeword(flags, code, false) {
             return false;
         }
         if self.alpha_mode {
@@ -174,6 +174,9 @@ impl HeaderAxiom {
                 if let Some(overrides) = &reg.item_overrides {
                     if let Some(map) = overrides.get(trimmed) {
                         if let Some(&val) = map.get("is_compact") { is_compact = val != 0; }
+                        if let Some(&val) = map.get("is_authority_overlap") {
+                            if val != 0 { is_compact = false; }
+                        }
                     }
                 }
                 
@@ -231,7 +234,7 @@ impl HeaderAxiom {
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool, code: Option<&str>) -> bool {
         if self.alpha_mode {
-            if self.is_runeword(flags, code) {
+            if self.is_runeword(flags, code, false) {
                 return true;
             }
             if self.version == 5 {
@@ -261,31 +264,38 @@ impl HeaderAxiom {
         }
     }
 
-    pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
-        if (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0 {
+    pub fn is_runeword(&self, flags: u32, code: Option<&str>, has_checksum: bool) -> bool {
+        let trimmed = code.unwrap_or("").trim();
+        
+        let mut is_forced_rw = false;
+        if self.alpha_mode {
+            if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
+                is_forced_rw = true;
+            }
+            let reg = crate::domain::forensic::registry::get_registry();
+            if let Some(codes) = &reg.forced_runeword_codes {
+                if codes.iter().any(|rc| rc == trimmed) { is_forced_rw = true; }
+            }
+        }
+
+        if !is_forced_rw && ((flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0) {
             return false;
         }
-        let trimmed = code.unwrap_or("").trim();
-        if (flags & (1 << 26)) != 0 { return true; }
+
+        let has_bit_26 = (flags & (1 << 26)) != 0;
+
         if self.alpha_mode {
-            if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" {
+            if is_forced_rw {
                 return true;
             }
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {
                 return false;
             }
-            let reg = crate::domain::forensic::registry::get_registry();
             
-            // 1. Check registry root list
-            if let Some(codes) = &reg.forced_runeword_codes {
-                if codes.iter().any(|rc| rc == trimmed) { return true; }
-            }
-            
-            // 2. Check item overrides
-            if let Some(overrides) = &reg.item_overrides {
-                if let Some(map) = overrides.get(trimmed) {
-                    if let Some(&val) = map.get("is_runeword") { return val != 0; }
-                }
+            // Alpha Forensic (Slice 19): Only trust bit 26 if we have a valid checksum 
+            // or if it's one of the known complex versions (1 or 5).
+            if has_bit_26 && (has_checksum || self.version == 5 || self.version == 1) {
+                return true;
             }
             
             if self.version == 5 || self.version == 1 {
@@ -293,11 +303,9 @@ impl HeaderAxiom {
                 return !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0);
             }
             
-            if self.version == 0 || self.version == 4 || self.version == 6 || self.version == 7 {
-                return (flags & (1 << 26)) != 0;
-            }
+            return false;
         }
-        (flags & (1 << 26)) != 0
+        has_bit_26
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
@@ -313,7 +321,7 @@ impl HeaderAxiom {
                 }
             }
         }
-        if self.is_runeword(flags, code_hint) { return false; }
+        if self.is_runeword(flags, code_hint, false) { return false; }
         if self.alpha_mode && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1) {
             if (flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0 {
                  return true;
@@ -326,7 +334,7 @@ impl HeaderAxiom {
         let is_personalized = self.is_personalized(flags, is_compact);
 
         if self.alpha_mode {
-            let is_rw = self.is_runeword(flags, code_hint);
+            let is_rw = self.is_runeword(flags, code_hint, false);
             let is_v105_shadow = self.is_v105_shadow(flags, code_hint);
 
             let is_summary = if let Some(c) = code_hint {
@@ -446,10 +454,12 @@ impl ItemHeader {
             (cursor.read_bits::<u8>(3)? as u8, false)
         };
         let mode = cursor.read_bits::<u8>(3)? as u8;
-        let (location, x) = if alpha_mode {
-            (cursor.read_bits::<u8>(4)? as u8, cursor.read_bits::<u8>(3)? as u8)
-        } else {
+        let (x, location) = if alpha_mode {
             (cursor.read_bits::<u8>(3)? as u8, cursor.read_bits::<u8>(4)? as u8)
+        } else {
+            let loc = cursor.read_bits::<u8>(3)? as u8;
+            let x_val = cursor.read_bits::<u8>(4)? as u8;
+            (x_val, loc)
         };
         
         let axiom = HeaderAxiom::new(version, alpha_mode);

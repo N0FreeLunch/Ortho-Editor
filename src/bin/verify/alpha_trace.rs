@@ -68,12 +68,15 @@ fn main() -> anyhow::Result<()> {
             om.println(&format!("Parsed {} items (showing {}).", items.len(), matched_items.len()));
             for (i, item) in matched_items.iter().enumerate() {
                 let trimmed = d2r_core::item::normalize_alpha_code_hint(item.code.trim());
+                let h_axiom = d2r_core::domain::header::entity::HeaderAxiom::new(item.header.version, is_alpha);
+                let is_rw = h_axiom.is_runeword(item.header.flags, Some(&item.code), item.header.has_checksum);
                 om.println(&format!(
-                    "Item {}: code={}, start={}, bin_len={} bits",
+                    "Item {}: code={}, start={}, bin_len={} bits, is_rw={}",
                     i,
                     trimmed,
                     item.range.start,
-                    item.bits.len()
+                    item.bits.len(),
+                    is_rw
                 ));
                 om.println(&format!(
                     "  Header: flags=0x{:08X}, v={}, m={}, l={}, x={}, has_checksum={}",

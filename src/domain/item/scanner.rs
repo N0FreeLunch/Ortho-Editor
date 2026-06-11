@@ -161,21 +161,21 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
                             let mut confidence = if is_known { 500 } else { 50 };
                             let header_axiom = crate::domain::header::entity::HeaderAxiom::new(version, alpha);
-                            let is_alpha_runeword_candidate = alpha && header_axiom.is_runeword(flags, Some(&code));
+                            let is_alpha_runeword_candidate = alpha && header_axiom.is_runeword(flags, Some(&code), has_checksum);
                             if override_noncompact {
                                 confidence += 300;
                             }
 
-                            if alpha && !is_compact && !is_forced && !forced_80 && !is_alpha_runeword_candidate && !is_v105_summary && !override_noncompact {
+                            if alpha && !is_compact && !is_forced && !forced_80 && !(is_alpha_runeword_candidate && has_checksum) && !is_v105_summary && !override_noncompact {
                                 if !verify_marker_lookahead(bytes, scan_pos + _header_len, huffman, alpha) {
                                     continue;
                                 }
                             }
 
-                            if alpha && (trimmed_code == "hp1" || trimmed_code == "xrs") {
+                            if alpha && (trimmed_code == "hp1" || trimmed_code == "xrs" || trimmed_code == "wa2") {
                                 confidence += 200;
                             }
-                            if alpha && header_axiom.is_runeword(flags, Some(&code)) && trimmed_code == "xrs" {
+                            if alpha && is_alpha_runeword_candidate && (trimmed_code == "xrs" || trimmed_code == "wa2") {
                                 confidence += 300;
                             }
                             if alpha && version == 5 {
@@ -200,8 +200,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                     }
                                 }
                                 
-                                if trimmed_code == "xrs" || trimmed_code == "c8xr" || trimmed_code == "rhd" {
+                                if trimmed_code == "xrs" || trimmed_code == "c8xr" || trimmed_code == "rhd" || trimmed_code == "wa2" {
                                      if rem == 2 {
+                                         confidence += 1000;
+                                     } else if (trimmed_code == "wa2" || trimmed_code == "rhd") && rem == 6 {
                                          confidence += 1000;
                                      } else {
                                          continue;
@@ -226,8 +228,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     let jump = if alpha {
                         if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
                              let mut j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
-                             if best_code.trim() == "xrs" && j == 0 {
-                                 j = 128; 
+                             if (best_code.trim() == "xrs" || best_code.trim() == "wa2") && j == 0 {
+                                 j = 150; 
                              }
                              if j > 0 { j } else { 72 }
                         } else { 72 }
@@ -279,7 +281,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             }
         }
         
-        let lookahead_limit = if alpha { offset + 64 } else { offset + 120 };
+        let lookahead_limit = if alpha { offset + 128 } else { offset + 120 };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
             let (o_offset, o_conf, o_code) = &final_markers[j];
@@ -443,8 +445,5 @@ fn is_alpha_v105_slot_item(code: &str) -> bool {
 }
 
 fn is_v105_aligned(diff: u64) -> bool {
-    // Standard Alpha v105 slot sizes are 72, 73, 80, 88.
-    // We also allow sums of these for empty slots.
-    // Slice 5: Add 2-bit residual shift awareness (74, 82, 90) and common sums.
     matches!(diff, 72 | 73 | 74 | 80 | 81 | 82 | 88 | 89 | 90 | 144 | 145 | 146 | 152 | 153 | 154 | 160 | 161 | 162 | 168 | 176 | 216 | 224 | 232 | 240)
 }
