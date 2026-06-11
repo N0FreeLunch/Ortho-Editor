@@ -1,8 +1,11 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::{HuffmanTree, is_plausible_item_header, peek_item_header_at};
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
+use std::env;
 use std::fs;
-use std::io::{self, Cursor};
+use std::io::{Cursor};
 
 #[derive(Serialize, Clone)]
 struct PropertyEntry {
@@ -47,7 +50,7 @@ struct SimulationPath {
 }
 
 #[derive(Serialize)]
-struct FuzzerReport {
+struct FuzzerPayload {
     file: String,
     start_bit: u64,
     best_width: u32,
@@ -59,94 +62,45 @@ struct FuzzerReport {
 
 /// Bitstream Structural Fuzzer & Analyzer for D2R Alpha v105
 /// Rank bit-width candidates based on terminator alignment.
-fn main() -> io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        println!("Usage: d2item_structural_fuzzer <save_path> [options]");
-        println!("Options:");
-        println!("  --start-bit <n>      Start bit offset (default: 0)");
-        println!("  --brute              Brute-force scan for best start-bit within 1000 bits");
-        println!("  --width-range <n..m> Bit width range to sweep (default: 10..25)");
-        println!("  --max-props <n>      Maximum properties to read per width (default: 64)");
-        println!("  --json               Output result as JSON");
-        println!("  --heatmap            Show candidate heatmap and overlap diagnostics");
-        println!("  --simulate           Run sequence-aware path simulation");
-        println!("  --auto               [Planned] Automated best-path selection");
-        return Ok(());
-    }
+fn main() -> anyhow::Result<()> {
+    let mut parser = ArgParser::new("d2item_structural_fuzzer")
+        .description("Bitstream Structural Fuzzer & Analyzer for D2R Alpha v105\nRank bit-width candidates based on terminator alignment.");
 
-    let path = &args[1];
-    let mut start_bit: u64 = 0;
-    let mut brute_mode = false;
-    let mut show_json = false;
-    let mut show_heatmap = false;
-    let mut show_simulate = false;
-    let mut width_range_start = 10;
-    let mut width_range_end = 25;
-    let mut max_props = 64;
+    parser.add_arg("save_path", "Path to save file");
+    parser.add_spec(ArgSpec::option("start-bit", None, Some("start-bit"), "Start bit offset").with_default("0"));
+    parser.add_spec(ArgSpec::flag("brute", None, Some("brute"), "Brute-force scan for best start-bit within 1000 bits"));
+    parser.add_spec(ArgSpec::flag("heatmap", None, Some("heatmap"), "Show candidate heatmap and overlap diagnostics"));
+    parser.add_spec(ArgSpec::flag("simulate", None, Some("simulate"), "Run sequence-aware path simulation"));
+    parser.add_spec(ArgSpec::option("width-range", None, Some("width-range"), "Bit width range to sweep (n..m)").with_default("10..25"));
+    parser.add_spec(ArgSpec::option("max-props", None, Some("max-props"), "Maximum properties to read per width").with_default("64"));
 
-    let mut i = 2;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--start-bit" => {
-                if i + 1 < args.len() {
-                    start_bit = args[i + 1].parse().expect("Invalid start-bit");
-                    i += 2;
-                } else {
-                    panic!("Missing value for --start-bit");
-                }
-            }
-            "--brute" => {
-                brute_mode = true;
-                i += 1;
-            }
-            "--json" => {
-                show_json = true;
-                i += 1;
-            }
-            "--heatmap" => {
-                show_heatmap = true;
-                i += 1;
-            }
-            "--simulate" => {
-                show_simulate = true;
-                i += 1;
-            }
-            "--width-range" => {
-                if i + 1 < args.len() {
-                    let range: Vec<&str> = args[i + 1].split("..").collect();
-                    if range.len() == 2 {
-                        width_range_start = range[0].parse().expect("Invalid range start");
-                        width_range_end = range[1].parse().expect("Invalid range end");
-                    } else {
-                        panic!("Invalid range format (expected n..m)");
-                    }
-                    i += 2;
-                } else {
-                    panic!("Missing value for --width-range");
-                }
-            }
-            "--max-props" => {
-                if i + 1 < args.len() {
-                    max_props = args[i + 1].parse().expect("Invalid max-props");
-                    i += 2;
-                } else {
-                    panic!("Missing value for --max-props");
-                }
-            }
-            "--auto" => {
-                println!(
-                    "Note: {} is planned for future slices and not yet implemented.",
-                    args[i]
-                );
-                i += 1;
-            }
-            _ => {
-                println!("Warning: Unknown option: {}", args[i]);
-                i += 1;
-            }
+    let parsed = match parser.parse(env::args_os().skip(1).collect()) {
+        Ok(p) => p,
+        Err(ArgError::Help(h)) => {
+            println!("{}", h);
+            return Ok(());
         }
-    }
+        Err(ArgError::Error(e)) => {
+            anyhow::bail!("{}\n\n{}", e, parser.usage());
+        }
+    };
+
+    let path = parsed.get("save_path").unwrap();
+    let start_bit: u64 = parsed.get("start-bit").unwrap().parse()?;
+    let brute_mode = parsed.is_set("brute");
+    let show_json = parsed.is_json();
+    let show_heatmap = parsed.is_set("heatmap");
+    let show_simulate = parsed.is_set("simulate");
+    
+    let range_str = parsed.get("width-range").unwrap();
+    let range_parts: Vec<&str> = range_str.split("..").collect();
+    let (width_range_start, width_range_end) = if range_parts.len() == 2 {
+        (range_parts[0].parse::<u32>()?, range_parts[1].parse::<u32>()?)
+    } else {
+        anyhow::bail!("Invalid range format (expected n..m)");
+    };
+
+    let max_props: usize = parsed.get("max-props").unwrap().parse()?;
 
     let bytes = fs::read(path)?;
     let huffman = HuffmanTree::new();
@@ -444,7 +398,7 @@ fn main() -> io::Result<()> {
             });
         }
 
-        let report = FuzzerReport {
+        let payload = FuzzerPayload {
             file: path.clone(),
             start_bit: best_overall_start,
             best_width: best_overall_width,
@@ -453,6 +407,8 @@ fn main() -> io::Result<()> {
             simulation: simulation_paths,
             best_properties: best_props,
         };
+        let metadata = ReportMetadata::new("d2item_structural_fuzzer", path, env!("CARGO_PKG_VERSION"));
+        let report = Report::new(metadata, ReportStatus::Ok).with_results(payload);
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     } else {
         if show_heatmap && !brute_mode {

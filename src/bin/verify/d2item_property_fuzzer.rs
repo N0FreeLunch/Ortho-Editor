@@ -2,12 +2,13 @@ use d2r_core::domain::header::entity::calculate_alpha_v105_checksum;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::symmetry::{SymmetryOptions, calculate_symmetry_diff};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct FuzzResult {
     bit_offset: usize,
     fidelity: f32,
@@ -52,7 +53,7 @@ fn get_all_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> Vec
     all_markers
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2item_property_fuzzer");
     parser.add_spec(ArgSpec::positional("fixture", "Path to save file"));
     parser.add_spec(ArgSpec::option(
@@ -87,7 +88,7 @@ fn main() {
     ));
     parser.add_spec(ArgSpec::option(
         "output-json",
-        Some('o'),
+        None,
         Some("output-json"),
         "Export results to JSON file",
     ));
@@ -96,12 +97,10 @@ fn main() {
         Ok(p) => p,
         Err(ArgError::Help(h)) => {
             println!("{}", h);
-            std::process::exit(0);
+            return Ok(());
         }
         Err(ArgError::Error(e)) => {
-            eprintln!("error: {}", e);
-            eprintln!("\n{}", parser.usage());
-            std::process::exit(1);
+            anyhow::bail!("{}\n\n{}", e, parser.usage());
         }
     };
 
@@ -118,17 +117,12 @@ fn main() {
         .unwrap_or("0..1");
     let parse_verify = parsed.is_set("parse-verify");
     let detect_drift = parsed.is_set("detect-drift");
+    let is_json = parsed.is_json();
     let output_json = parsed.get("output-json").cloned();
 
     let (bit_start, bit_end) = parse_range(bit_range_str).unwrap_or((0, 1));
 
-    let original_bytes = match fs::read(file_path) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("[ERROR] Failed to read file {}: {}", file_path, e);
-            std::process::exit(1);
-        }
-    };
+    let original_bytes = fs::read(file_path)?;
 
     let huffman = HuffmanTree::new();
     let is_alpha_mode = is_alpha(&original_bytes);
@@ -136,26 +130,27 @@ fn main() {
         Item::read_player_items(&original_bytes, &huffman, is_alpha_mode).unwrap_or_default();
 
     if target_idx >= original_items.len() {
-        eprintln!(
-            "[ERROR] Target item index {} out of range (found {} items).",
+        anyhow::bail!(
+            "Target item index {} out of range (found {} items).",
             target_idx,
             original_items.len()
         );
-        std::process::exit(1);
     }
 
     let target_item = &original_items[target_idx];
     let item_bit_offset = target_item.range.start as usize;
 
-    println!("--- Alpha v105 Item Property Poke-Test Fuzzer ---");
-    println!("Fixture: {}", file_path);
-    println!(
-        "Target Item: #{} ({} at bit {})",
-        target_idx,
-        target_item.code.trim(),
-        item_bit_offset
-    );
-    println!("Fuzzing Bit Range: {}..{}", bit_start, bit_end);
+    if !is_json {
+        println!("--- Alpha v105 Item Property Poke-Test Fuzzer ---");
+        println!("Fixture: {}", file_path);
+        println!(
+            "Target Item: #{} ({} at bit {})",
+            target_idx,
+            target_item.code.trim(),
+            item_bit_offset
+        );
+        println!("Fuzzing Bit Range: {}..{}", bit_start, bit_end);
+    }
 
     let out_dir = Path::new("tmp/fuzz_outputs");
     if !out_dir.exists() {
@@ -244,10 +239,12 @@ fn main() {
             "MUTATED"
         };
 
-        println!(
-            "  Bit {:>4}: FIDELITY={:>5.1}% [{}] {}{}",
-            bit_offset, fidelity, status, mismatch_info, drift_info
-        );
+        if !is_json {
+            println!(
+                "  Bit {:>4}: FIDELITY={:>5.1}% [{}] {}{}",
+                bit_offset, fidelity, status, mismatch_info, drift_info
+            );
+        }
 
         results.push(FuzzResult {
             bit_offset,
@@ -265,6 +262,12 @@ fn main() {
         }
     }
 
+    if is_json {
+        let metadata = ReportMetadata::new("d2item_property_fuzzer", file_path, env!("CARGO_PKG_VERSION"));
+        let report = Report::new(metadata, ReportStatus::Ok).with_results(results.clone());
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    }
+
     if let Some(json_path) = output_json {
         let json_path = resolve_output_json_path(&json_path);
         let json_str = serde_json::to_string_pretty(&results).unwrap();
@@ -272,10 +275,16 @@ fn main() {
             let _ = fs::create_dir_all(parent);
         }
         fs::write(&json_path, json_str).unwrap();
-        println!("Results exported to {}", json_path.display());
+        if !is_json {
+            println!("Results exported to {}", json_path.display());
+        }
     }
 
-    println!("Fuzzing complete. Results in tmp/fuzz_outputs/");
+    if !is_json {
+        println!("Fuzzing complete. Results in tmp/fuzz_outputs/");
+    }
+    
+    Ok(())
 }
 
 fn is_alpha(bytes: &[u8]) -> bool {

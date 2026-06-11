@@ -4,6 +4,7 @@ use d2r_core::domain::stats::parser::{
 };
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -55,7 +56,7 @@ struct ProbeTraceEvent {
 }
 
 #[derive(Serialize, Debug)]
-struct SocketFuzzerReport {
+struct SocketFuzzerPayload {
     fixture: PathBuf,
     anchor_bit: u64,
     jm_byte_pos: usize,
@@ -112,12 +113,6 @@ fn main() -> anyhow::Result<()> {
         Some("seam-bit"),
         "Override the discovered seam bit offset",
     ));
-    parser.add_spec(ArgSpec::flag(
-        "json",
-        None,
-        Some("json"),
-        "Output results in JSON format",
-    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -164,7 +159,7 @@ fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(48);
     let seam_override = parsed.get("seam-bit").and_then(|s| s.parse::<u64>().ok());
-    let use_json = parsed.is_set("json");
+    let use_json = parsed.is_json();
 
     let bytes = fs::read(&fixture_path)
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", fixture_path.display(), e))?;
@@ -301,7 +296,7 @@ fn main() -> anyhow::Result<()> {
     }
     set_socket_recovery_trace_enabled(false);
 
-    let report = SocketFuzzerReport {
+    let payload = SocketFuzzerPayload {
         fixture: fixture_path,
         anchor_bit: anchor,
         jm_byte_pos,
@@ -314,18 +309,20 @@ fn main() -> anyhow::Result<()> {
     };
 
     if use_json {
+        let metadata = ReportMetadata::new("d2item_socket_fuzzer", &payload.fixture.to_string_lossy(), env!("CARGO_PKG_VERSION"));
+        let report = Report::new(metadata, ReportStatus::Ok).with_results(payload);
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
 
-    println!("Fixture: {}", report.fixture.display());
+    println!("Fixture: {}", payload.fixture.display());
     println!(
         "Anchor (JM): {} (byte {}), Seam: {} (source: {})",
-        report.anchor_bit, report.jm_byte_pos, report.seam.bit_offset, report.seam.source
+        payload.anchor_bit, payload.jm_byte_pos, payload.seam.bit_offset, payload.seam.source
     );
     println!(
         "Parent code: '{}' expected_children: {} shifts: {}..={}",
-        report.parent_code, report.expected_children, report.shift_start, report.shift_end
+        payload.parent_code, payload.expected_children, payload.shift_start, payload.shift_end
     );
     println!(
         "{:>5} | {:>14} | {:>10} | {:>24} | {:>6}",
@@ -333,7 +330,7 @@ fn main() -> anyhow::Result<()> {
     );
     println!("{:-<76}", "");
 
-    for probe in &report.probes {
+    for probe in &payload.probes {
         let codes = if probe.child_codes.is_empty() {
             "-".to_string()
         } else {
@@ -357,8 +354,8 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    if let Some(best) = report.probes.iter().find(|p| {
-        matches!(p.status, ProbeStatus::Ok) && p.parsed_children == report.expected_children
+    if let Some(best) = payload.probes.iter().find(|p| {
+        matches!(p.status, ProbeStatus::Ok) && p.parsed_children == payload.expected_children
     }) {
         println!(
             "\nFirst exact match: shift={} children={}/{} codes={}",

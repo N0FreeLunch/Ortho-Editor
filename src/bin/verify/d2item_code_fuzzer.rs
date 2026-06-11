@@ -1,5 +1,6 @@
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -172,7 +173,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     if is_json {
-        println!("{}", serde_json::to_string_pretty(&all_results)?);
+        let metadata = ReportMetadata::new("d2item_code_fuzzer", path, env!("CARGO_PKG_VERSION"));
+        let report = Report::new(metadata, ReportStatus::Ok).with_results(all_results);
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         for res in all_results {
             println!("[JM #{}] at bit {}", res.jm_index, res.jm_bit_pos);
