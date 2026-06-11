@@ -1449,10 +1449,15 @@ impl Item {
                     // ensure the parser uses it (prevents Huffman collisions).
                     // Restore code BEFORE alignment calculation to ensure correct target width.
                     if alpha_mode && !marker.code.trim().is_empty() {
-                        let _reg = crate::domain::forensic::registry::get_registry();
-                        if crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code)
-                        {
+                        let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code);
+                        let is_authority = matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd");
+
+                        if is_summary || is_authority {
                             final_item.code = marker.code.clone();
+                            if is_authority {
+                                final_item.body.code = marker.code.clone();
+                                final_item.header.is_runeword = true;
+                            }
                         }
                     }
 

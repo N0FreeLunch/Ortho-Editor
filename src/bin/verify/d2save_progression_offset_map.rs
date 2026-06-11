@@ -2,7 +2,7 @@
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
 use d2r_core::domain::progression::axiom::{
-    PROG_START_FILE, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET, V105_NPC_OFFSET,
+    PROG_START_FILE, V105_NPC_OFFSET, V105_QUEST_OFFSET, V105_WAYPOINT_OFFSET,
 };
 use d2r_core::save::map_core_sections;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -45,7 +45,10 @@ struct Matches {
 
 fn main() {
     let mut parser = ArgParser::new("d2save_progression_offset_map");
-    parser.add_spec(ArgSpec::positional("fixture", "Path to Alpha v105 save file"));
+    parser.add_spec(ArgSpec::positional(
+        "fixture",
+        "Path to Alpha v105 save file",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -128,22 +131,42 @@ fn main() {
     println!("");
 
     println!("Axiom Constants (Truth):");
-    println!("  PROG_START_FILE    : 0x{:04X} ({})", PROG_START_FILE, PROG_START_FILE);
-    println!("  V105_QUEST_OFFSET  : 0x{:04X} ({})", V105_QUEST_OFFSET, V105_QUEST_OFFSET);
-    println!("  V105_WAYPOINT_OFFSET: 0x{:04X} ({})", V105_WAYPOINT_OFFSET, V105_WAYPOINT_OFFSET);
-    println!("  V105_NPC_OFFSET    : 0x{:04X} ({})", V105_NPC_OFFSET, V105_NPC_OFFSET);
+    println!(
+        "  PROG_START_FILE    : 0x{:04X} ({})",
+        PROG_START_FILE, PROG_START_FILE
+    );
+    println!(
+        "  V105_QUEST_OFFSET  : 0x{:04X} ({})",
+        V105_QUEST_OFFSET, V105_QUEST_OFFSET
+    );
+    println!(
+        "  V105_WAYPOINT_OFFSET: 0x{:04X} ({})",
+        V105_WAYPOINT_OFFSET, V105_WAYPOINT_OFFSET
+    );
+    println!(
+        "  V105_NPC_OFFSET    : 0x{:04X} ({})",
+        V105_NPC_OFFSET, V105_NPC_OFFSET
+    );
     println!("");
 
     let mut failures = 0;
 
     println!("Actual Marker Positions & Progression-Relative Offsets:");
-    
+
     // Woo! (Quest)
     match map.woo_pos {
         Some(pos) => {
             let rel = pos as isize - PROG_START_FILE as isize;
-            let match_str = if woo_match { "PASS" } else { failures += 1; "FAIL" };
-            println!("  'Woo!' (Quest)     : 0x{:04X} (rel {}) -> [{}]", pos, rel, match_str);
+            let match_str = if woo_match {
+                "PASS"
+            } else {
+                failures += 1;
+                "FAIL"
+            };
+            println!(
+                "  'Woo!' (Quest)     : 0x{:04X} (rel {}) -> [{}]",
+                pos, rel, match_str
+            );
             if !woo_match {
                 println!("    Mismatch: Expected 0x{:04X}", V105_QUEST_OFFSET);
             }
@@ -158,8 +181,16 @@ fn main() {
     match map.ws_pos {
         Some(pos) => {
             let rel = pos as isize - PROG_START_FILE as isize;
-            let match_str = if ws_match { "PASS" } else { failures += 1; "FAIL" };
-            println!("  'WS'   (Waypoint)  : 0x{:04X} (rel {}) -> [{}]", pos, rel, match_str);
+            let match_str = if ws_match {
+                "PASS"
+            } else {
+                failures += 1;
+                "FAIL"
+            };
+            println!(
+                "  'WS'   (Waypoint)  : 0x{:04X} (rel {}) -> [{}]",
+                pos, rel, match_str
+            );
             if !ws_match {
                 println!("    Mismatch: Expected 0x{:04X}", V105_WAYPOINT_OFFSET);
             }
@@ -174,8 +205,16 @@ fn main() {
     match map.w4_pos {
         Some(pos) => {
             let rel = pos as isize - PROG_START_FILE as isize;
-            let match_str = if w4_match { "PASS" } else { failures += 1; "FAIL" };
-            println!("  'w4'   (NPC/Exp)   : 0x{:04X} (rel {}) -> [{}]", pos, rel, match_str);
+            let match_str = if w4_match {
+                "PASS"
+            } else {
+                failures += 1;
+                "FAIL"
+            };
+            println!(
+                "  'w4'   (NPC/Exp)   : 0x{:04X} (rel {}) -> [{}]",
+                pos, rel, match_str
+            );
             if !w4_match {
                 println!("    Mismatch: Expected 0x{:04X}", V105_NPC_OFFSET);
             }
@@ -188,7 +227,10 @@ fn main() {
 
     // gf (Stats) - Informative
     let gf_rel = map.gf_pos as isize - PROG_START_FILE as isize;
-    println!("  'gf'   (Stats)     : 0x{:04X} (rel {}) -> [INFO]", map.gf_pos, gf_rel);
+    println!(
+        "  'gf'   (Stats)     : 0x{:04X} (rel {}) -> [INFO]",
+        map.gf_pos, gf_rel
+    );
 
     println!("");
     if failures > 0 {

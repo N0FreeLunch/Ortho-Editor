@@ -112,11 +112,22 @@ fn run_report_mode(args: Vec<std::ffi::OsString>) -> Result<()> {
         "Hardened Alpha v105 bit-width probe that emits a machine-readable width-source report.",
     );
     parser.add_spec(
-        ArgSpec::option("file", Some('f'), Some("file"), "Path to the .d2s save file").required(),
+        ArgSpec::option(
+            "file",
+            Some('f'),
+            Some("file"),
+            "Path to the .d2s save file",
+        )
+        .required(),
     );
     parser.add_spec(
-        ArgSpec::option("base_bit", None, Some("base-bit"), "Absolute bit offset of the frontier")
-            .required(),
+        ArgSpec::option(
+            "base_bit",
+            None,
+            Some("base-bit"),
+            "Absolute bit offset of the frontier",
+        )
+        .required(),
     );
     parser.add_spec(
         ArgSpec::option("window_bits", None, Some("window"), "Window size in bits")
@@ -170,10 +181,9 @@ fn run_report_mode(args: Vec<std::ffi::OsString>) -> Result<()> {
         .context("max-depth must be numeric")?;
     let json = parsed.is_json();
     let user_supplied_output = parsed.get("output").is_some();
-    let output_path = parsed
-        .get("output")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("agent_artifacts/2026-06-02-2853-width-source-probe.json"));
+    let output_path = parsed.get("output").map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from("agent_artifacts/2026-06-02-2853-width-source-probe.json")
+    });
 
     let report = build_width_source_report(&file, base_bit, window_bits, max_depth, &output_path)?;
     write_report_artifacts(&report, &output_path, json, user_supplied_output)?;
@@ -261,7 +271,8 @@ fn build_width_source_report(
     max_depth: usize,
     output_path: &Path,
 ) -> Result<WidthProbeSummary> {
-    let bytes = fs::read(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
+    let bytes =
+        fs::read(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
     let huffman = HuffmanTree::new();
     let is_alpha = bytes.get(4..8) == Some(&[0x69, 0, 0, 0]);
     let items = Item::read_player_items(&bytes, &huffman, is_alpha)
@@ -409,11 +420,7 @@ fn compute_default_width(raw_id: u32) -> u32 {
         .unwrap_or(9)
 }
 
-fn resolve_width_source(
-    axiom: &StatsAxiom,
-    raw_id: u32,
-    default_width: u32,
-) -> WidthResolution {
+fn resolve_width_source(axiom: &StatsAxiom, raw_id: u32, default_width: u32) -> WidthResolution {
     let reg = get_registry();
     let trimmed = axiom.code.trim();
 
@@ -422,7 +429,9 @@ fn resolve_width_source(
         .as_ref()
         .and_then(|overrides| overrides.get(trimmed))
         .and_then(|item_map| item_map.get(&raw_id.to_string()).copied());
-    let mapping_width = axiom.lookup_alpha_map_by_raw(raw_id).and_then(|m| m.save_bits);
+    let mapping_width = axiom
+        .lookup_alpha_map_by_raw(raw_id)
+        .and_then(|m| m.save_bits);
     let stats_width = reg.stats.get(&raw_id.to_string()).map(|s| s.width);
 
     if let Some(width) = override_width {

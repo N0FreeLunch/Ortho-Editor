@@ -1,8 +1,8 @@
-use d2r_core::domain::forensic::v105::{MercenaryState, MercenaryFooter, MercenaryEquipmentItem};
-use d2r_core::save::map_core_sections;
-use d2r_core::verify::args::{ArgError, ArgParser};
-use d2r_core::verify::OutputManager;
+use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter, MercenaryState};
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::save::map_core_sections;
+use d2r_core::verify::OutputManager;
+use d2r_core::verify::args::{ArgError, ArgParser};
 use d2r_core::verify::forensics::ForensicIssue;
 use serde::Serialize;
 use std::{env, fs, process};
@@ -177,7 +177,11 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
 
         if let Some(idx) = merc_jm_idx {
             let jm_pos = map.jm_positions[idx];
-            let next_pos = map.jm_positions.get(idx + 1).copied().unwrap_or(bytes.len());
+            let next_pos = map
+                .jm_positions
+                .get(idx + 1)
+                .copied()
+                .unwrap_or(bytes.len());
             let item_count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
 
             // Footer check
@@ -186,20 +190,26 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                 footer_ok = footer.is_standard();
                 if !footer_ok {
                     issues.push(
-                        ForensicIssue::new("LayoutAnomaly", "Non-standard mercenary footer detected")
-                            .with_offset(kf as u64 * 8)
+                        ForensicIssue::new(
+                            "LayoutAnomaly",
+                            "Non-standard mercenary footer detected",
+                        )
+                        .with_offset(kf as u64 * 8),
                     );
                 }
-                
+
                 if lf + 4 < next_pos {
                     // Items follow footer
                     let huffman = HuffmanTree::new();
-                    let is_alpha = bytes.get(4..8).map(|b| u32::from_le_bytes(b.try_into().unwrap_or([0; 4])) == 105).unwrap_or(false);
-                    
+                    let is_alpha = bytes
+                        .get(4..8)
+                        .map(|b| u32::from_le_bytes(b.try_into().unwrap_or([0; 4])) == 105)
+                        .unwrap_or(false);
+
                     // In Alpha v105, items in the mercenary section follow the lf marker
                     let items_start = lf + 4;
                     let items_data = &bytes[items_start..next_pos];
-                    
+
                     match Item::read_section(
                         items_data,
                         items_start as u64 * 8,
@@ -210,8 +220,10 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                     ) {
                         Ok(items) => {
                             for it in items {
-                                if it.is_residue() { continue; }
-                                
+                                if it.is_residue() {
+                                    continue;
+                                }
+
                                 let merc_it = MercenaryEquipmentItem {
                                     code: it.code.trim().to_string(),
                                     location: it.location,
@@ -239,8 +251,11 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
                         }
                         Err(e) => {
                             issues.push(
-                                ForensicIssue::new("ParseFailure", &format!("Failed to parse mercenary items: {}", e))
-                                    .with_offset(items_start as u64 * 8)
+                                ForensicIssue::new(
+                                    "ParseFailure",
+                                    &format!("Failed to parse mercenary items: {}", e),
+                                )
+                                .with_offset(items_start as u64 * 8),
                             );
                         }
                     }
@@ -248,7 +263,7 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
             } else {
                 issues.push(
                     ForensicIssue::new("SectionMissing", "Mercenary kf/lf markers missing")
-                        .with_offset(jm_pos as u64 * 8)
+                        .with_offset(jm_pos as u64 * 8),
                 );
             }
         }
@@ -292,18 +307,18 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<M
         }
     });
 
-    let status = if issues.iter().any(|i| 
-        i.kind == "AlignmentDrift" || 
-        i.kind == "ParseFailure" || 
-        i.kind == "SemanticViolation" || 
-        i.kind == "IoError" || 
-        i.kind == "InternalError" ||
-        i.message.contains("error") || 
-        i.message.contains("Failed") || 
-        i.message.contains("Non-standard") || 
-        i.message.contains("missing") || 
-        i.message.contains("invalid")
-    ) {
+    let status = if issues.iter().any(|i| {
+        i.kind == "AlignmentDrift"
+            || i.kind == "ParseFailure"
+            || i.kind == "SemanticViolation"
+            || i.kind == "IoError"
+            || i.kind == "InternalError"
+            || i.message.contains("error")
+            || i.message.contains("Failed")
+            || i.message.contains("Non-standard")
+            || i.message.contains("missing")
+            || i.message.contains("invalid")
+    }) {
         "Fail".to_string()
     } else {
         "Ok".to_string()
@@ -324,35 +339,51 @@ fn print_report_text(om: &mut OutputManager, path: &str, report: &MercenaryRepor
     om.println(&format!("=== File: {} ===", path));
     if let Some(merc) = &report.mercenary {
         om.println("Hybrid Decoded:");
-        om.println(&format!("  Class:    {} ({})", merc.class_id, merc.class_name));
-        om.println(&format!("  Subtype:  {} ({})", merc.subtype_id, merc.subtype_name));
+        om.println(&format!(
+            "  Class:    {} ({})",
+            merc.class_id, merc.class_name
+        ));
+        om.println(&format!(
+            "  Subtype:  {} ({})",
+            merc.subtype_id, merc.subtype_name
+        ));
         om.println(&format!("  ID:        {}", merc.hireling_id));
         om.println(&format!(
             "  Experience: {} (0x{:08X}) -> Expected Level: {}",
             merc.experience, merc.experience, merc.expected_level
         ));
         om.println(&format!("  Name ID:   {}", merc.name_id));
-        
-        om.println(&format!("Equipment: {} items (Footer: {})", merc.equipment.count, if merc.equipment.footer_ok { "Standard" } else { "NON-STANDARD" }));
+
+        om.println(&format!(
+            "Equipment: {} items (Footer: {})",
+            merc.equipment.count,
+            if merc.equipment.footer_ok {
+                "Standard"
+            } else {
+                "NON-STANDARD"
+            }
+        ));
         for it in &merc.equipment.items {
             om.println(&format!("  - {} in slot {}", it.code, it.slot));
         }
     }
-    
+
     for issue in &report.issues {
         let label = match issue.kind.as_str() {
-            "AlignmentDrift" | "ParseFailure" | "SemanticViolation" | "IoError" | "InternalError" => "[ERROR]",
+            "AlignmentDrift" | "ParseFailure" | "SemanticViolation" | "IoError"
+            | "InternalError" => "[ERROR]",
             "SectionMissing" | "LayoutAnomaly" => "[WARN]",
             _ => "[INFO]",
         };
-        let offset_str = issue.bit_offset.map(|o| format!(" @ bit {}", o)).unwrap_or_default();
+        let offset_str = issue
+            .bit_offset
+            .map(|o| format!(" @ bit {}", o))
+            .unwrap_or_default();
         om.println(&format!("  {} {}{}", label, issue.message, offset_str));
     }
-    
+
     if verbose {
         // Output extra debug bytes if needed
     }
     om.println("");
 }
-
-

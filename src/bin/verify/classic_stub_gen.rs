@@ -38,7 +38,10 @@ fn main() -> anyhow::Result<()> {
     // 1. Clear expansion flag (offset 271, bit 0x20)
     if bytes.len() > EXPANSION_FLAG_OFFSET {
         let old_byte = bytes[EXPANSION_FLAG_OFFSET];
-        println!("[ClassicStub] Offset {}: 0x{:02X} (binary: {:08b})", EXPANSION_FLAG_OFFSET, old_byte, old_byte);
+        println!(
+            "[ClassicStub] Offset {}: 0x{:02X} (binary: {:08b})",
+            EXPANSION_FLAG_OFFSET, old_byte, old_byte
+        );
         if (old_byte & 0x20) != 0 {
             println!("[ClassicStub] Clearing expansion flag (0x20)...");
             bytes[EXPANSION_FLAG_OFFSET] &= !0x20;
@@ -46,7 +49,10 @@ fn main() -> anyhow::Result<()> {
             println!("[ClassicStub] Expansion flag (0x20) is already clear.");
         }
     } else {
-        anyhow::bail!("Input file is too small to contain expansion flag offset ({})", EXPANSION_FLAG_OFFSET);
+        anyhow::bail!(
+            "Input file is too small to contain expansion flag offset ({})",
+            EXPANSION_FLAG_OFFSET
+        );
     }
 
     // 2. Recompute Checksum
@@ -55,7 +61,11 @@ fn main() -> anyhow::Result<()> {
 
     // 3. Same-budget check
     if bytes.len() != original_len {
-        anyhow::bail!("Same-budget contract violated: output length ({}) != input length ({})", bytes.len(), original_len);
+        anyhow::bail!(
+            "Same-budget contract violated: output length ({}) != input length ({})",
+            bytes.len(),
+            original_len
+        );
     }
 
     // Ensure parent directory exists for output
@@ -66,7 +76,10 @@ fn main() -> anyhow::Result<()> {
     fs::write(output_path, &bytes)
         .with_context(|| format!("Failed to write output file: {}", output_path))?;
 
-    println!("[ClassicStub] Successfully generated classic mock: {}", output_path);
+    println!(
+        "[ClassicStub] Successfully generated classic mock: {}",
+        output_path
+    );
 
     Ok(())
 }

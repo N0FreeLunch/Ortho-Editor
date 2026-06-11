@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use d2r_core::domain::item::scanner::{scan_item_markers, ItemMarker, MarkerStatus};
+use d2r_core::domain::item::scanner::{ItemMarker, MarkerStatus, scan_item_markers};
 use d2r_core::item::{BitSegment, HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -95,8 +95,9 @@ fn main() {
 }
 
 fn run() -> Result<i32> {
-    let mut parser = ArgParser::new("d2item_visualizer")
-        .description("Failure-first read-only item segment visualizer with JSON and semantic navigation.");
+    let mut parser = ArgParser::new("d2item_visualizer").description(
+        "Failure-first read-only item segment visualizer with JSON and semantic navigation.",
+    );
 
     parser.add_spec(
         ArgSpec::positional("input", "Path to the save file (.d2s) to inspect").optional(),
@@ -120,12 +121,22 @@ fn run() -> Result<i32> {
         .with_default("items"),
     );
     parser.add_spec(
-        ArgSpec::option("offset", Some('O'), Some("offset"), "Absolute bit offset to focus on")
-            .optional(),
+        ArgSpec::option(
+            "offset",
+            Some('O'),
+            Some("offset"),
+            "Absolute bit offset to focus on",
+        )
+        .optional(),
     );
     parser.add_spec(
-        ArgSpec::option("range", Some('R'), Some("range"), "Bit range to inspect from offset")
-            .optional(),
+        ArgSpec::option(
+            "range",
+            Some('R'),
+            Some("range"),
+            "Bit range to inspect from offset",
+        )
+        .optional(),
     );
     parser.add_spec(ArgSpec::flag(
         "verbose",
@@ -207,7 +218,9 @@ fn run() -> Result<i32> {
                 },
                 scanner_marker_sample: Vec::new(),
                 sections: Vec::new(),
-                hint: Some("Check the file path or point the visualizer at a .d2s fixture.".to_string()),
+                hint: Some(
+                    "Check the file path or point the visualizer at a .d2s fixture.".to_string(),
+                ),
                 issues: vec![format!("Failed to read file: {err}")],
                 status: "fail".to_string(),
             };
@@ -412,8 +425,11 @@ fn print_human_report(report: &VisualizerReport) {
             if omitted > 0 {
                 println!(
                     "{}",
-                    format!("... {} more item(s) hidden; use --full-dump to expand.", omitted)
-                        .yellow()
+                    format!(
+                        "... {} more item(s) hidden; use --full-dump to expand.",
+                        omitted
+                    )
+                    .yellow()
                 );
             }
             break;
@@ -444,7 +460,14 @@ fn print_human_report(report: &VisualizerReport) {
                 println!("      semantic@offset: {}", semantic.blue());
             }
 
-            print_segment_tree(item, report.offset, report.range, report.selection.detailed, report.selection.focus.as_str(), printed == 0);
+            print_segment_tree(
+                item,
+                report.offset,
+                report.range,
+                report.selection.detailed,
+                report.selection.focus.as_str(),
+                printed == 0,
+            );
 
             if !item.markers.is_empty() {
                 println!("      markers:");
@@ -558,7 +581,9 @@ fn build_item_reports(
         .map(|(index, item)| {
             let item_markers = markers
                 .iter()
-                .filter(|marker| marker.offset >= item.range.start && marker.offset < item.range.end)
+                .filter(|marker| {
+                    marker.offset >= item.range.start && marker.offset < item.range.end
+                })
                 .cloned()
                 .take(DEFAULT_MARKER_SAMPLE_LIMIT)
                 .collect::<Vec<_>>();
@@ -586,7 +611,9 @@ fn build_item_reports(
                 segment_count: item.segments.len(),
                 marker_count: markers
                     .iter()
-                    .filter(|marker| marker.offset >= item.range.start && marker.offset < item.range.end)
+                    .filter(|marker| {
+                        marker.offset >= item.range.start && marker.offset < item.range.end
+                    })
                     .count(),
                 is_residue: item.is_residue(),
                 is_opaque: item.is_opaque(),
@@ -782,7 +809,8 @@ fn build_hint(
     empty_selection: bool,
 ) -> String {
     if empty_selection {
-        return "Try --section items --verbose or narrow with --offset <bit> --range <bits>.".to_string();
+        return "Try --section items --verbose or narrow with --offset <bit> --range <bits>."
+            .to_string();
     }
 
     if matches!(focus, SectionFocus::Summary) {
@@ -797,7 +825,8 @@ fn build_hint(
         return "If the window is too wide, reduce --range or use --full-dump for an explicit expansion.".to_string();
     }
 
-    "Use --json for machine-readable inspection or --full-dump for exhaustive segment trees.".to_string()
+    "Use --json for machine-readable inspection or --full-dump for exhaustive segment trees."
+        .to_string()
 }
 
 fn parse_section_focus(raw: &str) -> SectionFocus {

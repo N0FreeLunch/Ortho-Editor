@@ -36,10 +36,7 @@ fn main() -> anyhow::Result<()> {
         )
         .long("section");
     parser
-        .add_opt(
-            "report-json",
-            "Shorthand for --json --output <PATH>",
-        )
+        .add_opt("report-json", "Shorthand for --json --output <PATH>")
         .long("report-json");
     parser.add_arg("files", "Save files to verify").repeated();
 
@@ -56,12 +53,14 @@ fn main() -> anyhow::Result<()> {
     let mut final_parsed = parsed;
     if let Some(report_path) = final_parsed.get("report-json").cloned() {
         final_parsed.flags.insert("json".to_string(), true);
-        final_parsed.values.insert("output".to_string(), vec![report_path]);
+        final_parsed
+            .values
+            .insert("output".to_string(), vec![report_path]);
     }
 
     let files = final_parsed.get_vec("files").cloned().unwrap_or_default();
     let fix_mode = final_parsed.is_set("fix");
-    
+
     let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &final_parsed);
     let is_json = om.is_json();
     let diff_baseline_path = final_parsed.get("diff-baseline");
@@ -123,22 +122,39 @@ fn main() -> anyhow::Result<()> {
 
         if let Some(section) = target_section {
             let section = section.to_lowercase();
-            report.issues.retain(|issue| {
-                match section.as_str() {
-                    "waypoint" => issue.kind.to_lowercase().contains("waypoint"),
-                    "header" => issue.kind.to_lowercase().contains("header") || issue.kind == "file_size" || issue.kind == "checksum",
-                    "item" => issue.kind.to_lowercase().contains("item") || issue.kind.to_lowercase().contains("jm_"),
-                    "progression" => issue.kind.to_lowercase().contains("progression") || issue.kind.to_lowercase().contains("waypoint") || issue.kind.to_lowercase().contains("quest"),
-                    _ => true,
+            report.issues.retain(|issue| match section.as_str() {
+                "waypoint" => issue.kind.to_lowercase().contains("waypoint"),
+                "header" => {
+                    issue.kind.to_lowercase().contains("header")
+                        || issue.kind == "file_size"
+                        || issue.kind == "checksum"
                 }
+                "item" => {
+                    issue.kind.to_lowercase().contains("item")
+                        || issue.kind.to_lowercase().contains("jm_")
+                }
+                "progression" => {
+                    issue.kind.to_lowercase().contains("progression")
+                        || issue.kind.to_lowercase().contains("waypoint")
+                        || issue.kind.to_lowercase().contains("quest")
+                }
+                _ => true,
             });
             // Update fail status based on filtered issues
             failed = report.issues.iter().any(|i| {
-                i.kind == "header_parse" || i.kind == "file_size" || i.kind == "checksum" || 
-                i.kind == "item_parse" || i.kind == "jm_coherence" || i.kind == "progression_parse" ||
-                i.kind == "WaypointOrdinalOutOfRange"
+                i.kind == "header_parse"
+                    || i.kind == "file_size"
+                    || i.kind == "checksum"
+                    || i.kind == "item_parse"
+                    || i.kind == "jm_coherence"
+                    || i.kind == "progression_parse"
+                    || i.kind == "WaypointOrdinalOutOfRange"
             });
-            report.status = if failed { d2r_core::verify::ReportStatus::Fail } else { d2r_core::verify::ReportStatus::Ok };
+            report.status = if failed {
+                d2r_core::verify::ReportStatus::Fail
+            } else {
+                d2r_core::verify::ReportStatus::Ok
+            };
         }
 
         if fix_mode && failed {

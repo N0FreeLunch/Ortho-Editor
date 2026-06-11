@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::domain::forensic::v105::axioms::V105SectionMarkerAxiom;
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -20,15 +20,26 @@ struct ScanResult {
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("flag_paradox_scanner");
     parser.add_spec(
-        ArgSpec::option("fixtures", None, Some("fixtures"), "Path to fixtures directory")
-            .required(),
+        ArgSpec::option(
+            "fixtures",
+            None,
+            Some("fixtures"),
+            "Path to fixtures directory",
+        )
+        .required(),
     );
-    parser.add_spec(
-        ArgSpec::option("output-json", None, Some("output-json"), "Path to output JSON file"),
-    );
-    parser.add_spec(
-        ArgSpec::option("output-md", None, Some("output-md"), "Path to output Markdown file"),
-    );
+    parser.add_spec(ArgSpec::option(
+        "output-json",
+        None,
+        Some("output-json"),
+        "Path to output JSON file",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "output-md",
+        None,
+        Some("output-md"),
+        "Path to output Markdown file",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -51,12 +62,15 @@ fn main() -> Result<()> {
 
     if let Some(json_path) = parsed.get("output-json") {
         let json = serde_json::to_string_pretty(&results)?;
-        fs::write(json_path, json).with_context(|| format!("Failed to write JSON to {}", json_path))?;
+        fs::write(json_path, json)
+            .with_context(|| format!("Failed to write JSON to {}", json_path))?;
     }
 
     if let Some(md_path) = parsed.get("output-md") {
         let mut md = String::from("# Flag Paradox Scan Results\n\n");
-        md.push_str("| File | Version | Offset 271 | Is Expansion | Has Woo! | Has WS | Has w4 |\n");
+        md.push_str(
+            "| File | Version | Offset 271 | Is Expansion | Has Woo! | Has WS | Has w4 |\n",
+        );
         md.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
         for res in &results {
             md.push_str(&format!(
@@ -93,7 +107,7 @@ fn main() -> Result<()> {
 
 fn scan_dir(dir: &Path, results: &mut Vec<ScanResult>) -> Result<()> {
     let axiom = V105SectionMarkerAxiom::default();
-    
+
     // Check if it's a file directly (for single file scan)
     if dir.is_file() {
         if dir.extension().and_then(|s| s.to_str()) == Some("d2s") {
@@ -114,7 +128,11 @@ fn scan_dir(dir: &Path, results: &mut Vec<ScanResult>) -> Result<()> {
     Ok(())
 }
 
-fn scan_file(path: &Path, axiom: &V105SectionMarkerAxiom, results: &mut Vec<ScanResult>) -> Result<()> {
+fn scan_file(
+    path: &Path,
+    axiom: &V105SectionMarkerAxiom,
+    results: &mut Vec<ScanResult>,
+) -> Result<()> {
     let bytes = fs::read(path)?;
     if bytes.len() < 300 {
         return Ok(());

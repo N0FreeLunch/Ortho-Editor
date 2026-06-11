@@ -147,7 +147,10 @@ fn build_legacy_report(
         }
     }
 
-    let plausible_count = candidates.iter().filter(|candidate| candidate.plausibility).count();
+    let plausible_count = candidates
+        .iter()
+        .filter(|candidate| candidate.plausibility)
+        .count();
     let verdict = if plausible_count > 0 {
         "plausible_candidates_found"
     } else {
@@ -192,7 +195,8 @@ fn build_sweep_report(
                 header_bits,
                 nudge_val,
                 has_checksum,
-            )) = peek_item_header_at_specific_gap(bytes, candidate_offset, huffman, alpha_mode, gap)
+            )) =
+                peek_item_header_at_specific_gap(bytes, candidate_offset, huffman, alpha_mode, gap)
             {
                 let plausibility = is_plausible_item_header(
                     mode,
@@ -223,7 +227,10 @@ fn build_sweep_report(
         }
     }
 
-    let plausible_count = candidates.iter().filter(|candidate| candidate.plausibility).count();
+    let plausible_count = candidates
+        .iter()
+        .filter(|candidate| candidate.plausibility)
+        .count();
     let verdict = if plausible_count > 0 {
         "plausible_candidates_found"
     } else {
@@ -251,7 +258,11 @@ fn print_legacy_report(report: &MarkerProbeReport) {
     println!("{:-<40}", "");
 
     let mut found = false;
-    for candidate in report.candidates.iter().filter(|candidate| candidate.plausibility) {
+    for candidate in report
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.plausibility)
+    {
         println!(
             "Candidate at bit {} (Gap {}):",
             candidate.candidate_offset_bits, candidate.gap_bits

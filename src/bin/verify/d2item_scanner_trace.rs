@@ -269,8 +269,14 @@ fn build_sections(
             0
         };
 
-        let markers =
-            scan_item_markers(section_bytes, huffman, alpha_mode, section_bit_offset, Some(expected_count), true);
+        let markers = scan_item_markers(
+            section_bytes,
+            huffman,
+            alpha_mode,
+            section_bit_offset,
+            Some(expected_count),
+            true,
+        );
 
         let accepted_count = markers
             .iter()
@@ -318,7 +324,9 @@ fn build_sections(
         let candidates = emitted_markers
             .iter()
             .enumerate()
-            .map(|(idx, marker)| build_candidate_trace(idx + 1, marker, winner_score, section_bit_offset))
+            .map(|(idx, marker)| {
+                build_candidate_trace(idx + 1, marker, winner_score, section_bit_offset)
+            })
             .collect::<Vec<_>>();
 
         let decision_path = build_decision_path(
@@ -484,10 +492,9 @@ fn build_verdict(sections: &[SectionTrace], jm_positions: &[usize]) -> String {
     if sections.is_empty() {
         return "no_sections_in_focus".to_string();
     }
-    if sections
-        .iter()
-        .any(|section| section.winner.as_ref().map(|winner| winner.status.as_str()) == Some("accepted"))
-    {
+    if sections.iter().any(|section| {
+        section.winner.as_ref().map(|winner| winner.status.as_str()) == Some("accepted")
+    }) {
         "accepted_winner_found".to_string()
     } else {
         "trace_available_but_no_accepted_winner_found".to_string()
