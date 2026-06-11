@@ -248,6 +248,9 @@ impl StatsAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
+        if self.is_compact {
+            return false;
+        }
         self.header_axiom().is_v105_shadow(flags, code_hint)
     }
 

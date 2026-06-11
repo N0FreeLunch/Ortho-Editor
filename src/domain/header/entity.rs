@@ -250,6 +250,9 @@ impl HeaderAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32, code: Option<&str>) -> bool {
+        if (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0 {
+            return false;
+        }
         let trimmed = code.unwrap_or("").trim();
         if (flags & (1 << 26)) != 0 { return true; }
         if self.alpha_mode {
@@ -286,6 +289,9 @@ impl HeaderAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
+        if self.is_compact(flags, code_hint) {
+            return false;
+        }
         let trimmed = code_hint.unwrap_or("").trim();
         if self.alpha_mode {
             let reg = crate::domain::forensic::registry::get_registry();
