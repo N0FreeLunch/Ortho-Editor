@@ -2176,7 +2176,9 @@ impl Item {
             }
         }
 
-        let should_capture_trailing = true;
+        // Do not synthesize a residue item for an already-satisfied empty section.
+        // This keeps zero-count sections from fabricating a trailing Opaque tail.
+        let should_capture_trailing = !(items.is_empty() && top_level_count == 0);
 
         if should_capture_trailing && last_end < section_bits {
             let missing = if items.len() < top_level_count as usize {

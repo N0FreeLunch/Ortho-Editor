@@ -10,8 +10,8 @@ mod tests {
             .expect("JM header not found");
         let count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
         let huffman = HuffmanTree::new();
-        let items =
-            Item::read_player_items(&bytes[jm_pos..], &huffman, true).expect("Parsing failed");
+        // Parse the full file so absolute-offset heuristics stay intact.
+        let items = Item::read_player_items(&bytes, &huffman, true).expect("Parsing failed");
         (items, count)
     }
 
