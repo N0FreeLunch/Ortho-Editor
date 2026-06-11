@@ -2161,15 +2161,7 @@ impl Item {
             }
         }
 
-        let should_capture_trailing = if alpha_mode {
-            // Slice19 follow-up:
-            // In Alpha v105, trailing slack after full top-level recovery is often
-            // section-alignment noise. Avoid synthesizing an extra Opaque item once
-            // the declared top-level item count is already satisfied.
-            non_residue_count < top_level_count as usize
-        } else {
-            true
-        };
+        let should_capture_trailing = true;
 
         if should_capture_trailing && last_end < section_bits {
             let missing = if items.len() < top_level_count as usize {
@@ -2406,7 +2398,7 @@ impl Item {
             let bits = all_recorded[..end_idx].to_vec();
 
             cursor.end_segment(); // Root segment
-            return Ok(Item {
+            let mut item = Item {
                 header,
                 body,
                 code: peeked_code,
@@ -2417,7 +2409,32 @@ impl Item {
                 },
                 total_bits: cursor.pos() - start_bit,
                 ..Default::default()
-            });
+            };
+
+            // Slice 7: Shadow items must also perform residue capture to preserve full intervals.
+            if let Some(l) = cursor.limit() {
+                if cursor.pos() < l {
+                    let start_residue = cursor.pos();
+                    let residue_len = l - cursor.pos();
+                    let mut residue_bits = Vec::new();
+                    for _ in 0..residue_len {
+                        if let Ok(b) = cursor.read_bit() {
+                            residue_bits.push(b);
+                        }
+                    }
+                    for (idx, &b) in residue_bits.iter().enumerate() {
+                        item.bits.push(crate::domain::item::RecordedBit {
+                            bit: b,
+                            offset: start_residue + idx as u64,
+                        });
+                    }
+                    item.range.end = cursor.pos();
+                    item.total_bits = item.range.end - item.range.start;
+                    item.modules
+                        .push(crate::domain::item::ItemModule::Opaque(residue_bits));
+                }
+            }
+            return Ok(item);
         }
 
         let body_start_bit = cursor.pos();
@@ -2799,6 +2816,7 @@ impl Item {
 
         if let Some(l) = cursor.limit() {
             if cursor.pos() < l {
+                let start_residue = cursor.pos();
                 let residue_len = l - cursor.pos();
                 let mut residue_bits = Vec::new();
                 for _ in 0..residue_len {
@@ -2806,6 +2824,18 @@ impl Item {
                         residue_bits.push(b);
                     }
                 }
+                
+                // Slice 7: Dynamic Interval Capture. Ensure residue bits are recorded in item.bits
+                // for bit-perfect reserialization.
+                for (idx, &b) in residue_bits.iter().enumerate() {
+                    item.bits.push(crate::domain::item::RecordedBit {
+                        bit: b,
+                        offset: start_residue + idx as u64,
+                    });
+                }
+                item.range.end = cursor.pos();
+                item.total_bits = item.range.end - item.range.start;
+
                 if alpha_mode {
                     item.modules
                         .push(crate::domain::item::ItemModule::Opaque(residue_bits));
