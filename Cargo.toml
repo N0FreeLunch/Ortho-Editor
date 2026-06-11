@@ -382,6 +382,10 @@ name = "d2item_stat_fuzzer_v105"
 path = "src/bin/verify/d2item_stat_fuzzer_v105.rs"
 
 [[bin]]
+name = "d2item_stat_width_fuzzer"
+path = "src/bin/verify/d2item_stat_width_fuzzer.rs"
+
+[[bin]]
 name = "d2item_registry_sync"
 path = "src/bin/verify/d2item_registry_sync.rs"
 
