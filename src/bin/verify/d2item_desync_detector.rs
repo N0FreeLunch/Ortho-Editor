@@ -1,8 +1,17 @@
 use d2r_core::item::HuffmanTree;
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use d2r_core::verify::desync::detect_desync;
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use serde::Serialize;
 use std::env;
 use std::fs;
+
+#[derive(Serialize)]
+struct DesyncPayload {
+    items: Vec<d2r_core::verify::desync::DesyncReport>,
+    total: usize,
+    desync_count: usize,
+}
 
 fn main() {
     let mut parser = ArgParser::new("d2item_desync_detector");
@@ -29,7 +38,7 @@ fn main() {
     };
 
     let path = parsed.get("save_file").unwrap();
-    let use_json = parsed.is_set("json");
+    let use_json = parsed.is_json();
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -45,7 +54,25 @@ fn main() {
     match detect_desync(&bytes, &huffman, is_alpha) {
         Ok(reports) => {
             if use_json {
-                println!("{}", serde_json::to_string_pretty(&reports).unwrap());
+                let desync_count = reports.iter().filter(|r| !r.is_match).count();
+                let total = reports.len();
+                let payload = DesyncPayload {
+                    items: reports,
+                    total,
+                    desync_count,
+                };
+                let status = if desync_count == 0 {
+                    ReportStatus::Ok
+                } else {
+                    ReportStatus::Fail
+                };
+                let report = Report::new(
+                    ReportMetadata::new("d2item_desync_detector", path, env!("CARGO_PKG_VERSION")),
+                    status,
+                )
+                .with_results(payload);
+                println!("{}", serde_json::to_string_pretty(&report).unwrap());
+                return;
             } else {
                 println!("Cascading Desync Report for: {}", path);
                 println!("Mode: {}", if is_alpha { "Alpha v105" } else { "Retail" });
