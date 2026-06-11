@@ -192,7 +192,19 @@ impl HeaderAxiom {
             }
             if self.version == 5 {
                 let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-                is_compact && !is_fragment
+                let mut fragment_override = false;
+                if let Some(c) = code {
+                    let trimmed = c.trim();
+                    let reg = crate::domain::forensic::registry::get_registry();
+                    if let Some(overrides) = &reg.item_overrides {
+                        if let Some(map) = overrides.get(trimmed) {
+                            if let Some(&val) = map.get("is_shadow") {
+                                if val == 0 { fragment_override = true; }
+                            }
+                        }
+                    }
+                }
+                is_compact && (!is_fragment || fragment_override)
             } else {
                 is_compact
             }
