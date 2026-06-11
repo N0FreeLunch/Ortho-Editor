@@ -32,6 +32,9 @@ fn main() -> anyhow::Result<()> {
     parser
         .add_flag("json-items", "print item inventory only (JSON)")
         .long("json-items");
+    parser
+        .add_flag("json", "print full machine-readable report (JSON)")
+        .long("json");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -50,20 +53,32 @@ fn main() -> anyhow::Result<()> {
     let verbose_markers = parsed.is_set("verbose-markers");
     let items_only = parsed.is_set("items-only");
     let json_items = parsed.is_set("json-items");
-    if items_only && json_items {
-        anyhow::bail!("--items-only and --json-items cannot be used together");
+    let is_json = parsed.is_json();
+
+    if items_only && (json_items || is_json) {
+        anyhow::bail!("--items-only and JSON flags cannot be used together");
     }
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) => {
             let err_msg = format!("Cannot read '{}': {}", path, e);
-            if json_items {
-                let payload = json!({
-                    "save_file": path,
-                    "error": err_msg,
-                });
-                println!("{}", serde_json::to_string_pretty(&payload)?);
+            if json_items || is_json {
+                if is_json {
+                    use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+                    let report: Report<()> = Report::new(
+                        ReportMetadata::new("d2save_map", path, env!("CARGO_PKG_VERSION")),
+                        ReportStatus::Fail,
+                    )
+                    .with_forensic_issues(vec![ForensicIssue::new("IOError", &err_msg)]);
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    let payload = json!({
+                        "save_file": path,
+                        "error": err_msg,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&payload)?);
+                }
                 std::process::exit(1);
             }
             anyhow::bail!(err_msg);
@@ -74,22 +89,47 @@ fn main() -> anyhow::Result<()> {
         Ok(s) => s,
         Err(e) => {
             let err_msg = format!("Cannot parse D2R header: {}", e);
-            if json_items {
-                let payload = json!({
-                    "save_file": path,
-                    "error": err_msg,
-                });
-                println!("{}", serde_json::to_string_pretty(&payload)?);
+            if json_items || is_json {
+                if is_json {
+                    use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+                    let report: Report<()> = Report::new(
+                        ReportMetadata::new("d2save_map", path, env!("CARGO_PKG_VERSION")),
+                        ReportStatus::Fail,
+                    )
+                    .with_forensic_issues(vec![ForensicIssue::new("HeaderParseError", &err_msg)]);
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    let payload = json!({
+                        "save_file": path,
+                        "error": err_msg,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&payload)?);
+                }
                 std::process::exit(1);
             }
             anyhow::bail!(err_msg);
         }
     };
 
-    if items_only || json_items {
+    if items_only || json_items || is_json {
         let (inventory, errors, total_jm_sections) =
             collect_item_inventory(&bytes, save.header.version == 105, verbose_markers);
-        if json_items {
+        
+        if is_json {
+            use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+            let status = if errors.is_empty() { ReportStatus::Ok } else { ReportStatus::Warn };
+            let results = json!({
+                "total_jm_sections": total_jm_sections,
+                "items": inventory,
+            });
+            let report = Report::new(
+                ReportMetadata::new("d2save_map", path, env!("CARGO_PKG_VERSION")),
+                status,
+            )
+            .with_results(results)
+            .with_forensic_issues(errors);
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else if json_items {
             let payload = json!({
                 "save_file": path,
                 "total_jm_sections": total_jm_sections,
