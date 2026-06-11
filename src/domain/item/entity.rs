@@ -1178,7 +1178,7 @@ impl Item {
                 if !is_v105_summary
                     && (self.header.version != 5
                         || is_shadow
-                        || self.header.is_runeword
+                        || (self.header.is_runeword && is_authority_overlap_code)
                         || (alpha_mode && s_axiom.is_compact)
                         || !self.properties.is_empty())
                 {

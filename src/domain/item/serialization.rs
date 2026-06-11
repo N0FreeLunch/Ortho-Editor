@@ -1559,6 +1559,21 @@ impl Item {
                         final_item.range.end = computed_end;
                     }
                     final_item.total_bits = actual_consumed;
+
+                    // Slice 9: Sync captured bits with final consumed length to ensure bit-exact parity
+                    // for items with greedy swallowing or proximity nudges.
+                    if alpha_mode && final_item.bits.len() < actual_consumed as usize {
+                        let diff = actual_consumed as usize - final_item.bits.len();
+                        let start_cap = start + (actual_consumed - diff as u64);
+                        let extra_bits = read_alignment_padding_bits(section_bytes, start_cap, diff as u64);
+                        for (idx, b) in extra_bits.iter().enumerate() {
+                            final_item.bits.push(crate::domain::item::RecordedBit {
+                                bit: *b,
+                                offset: section_bit_offset + start_cap + idx as u64,
+                            });
+                        }
+                    }
+
                     final_item.logical_width = Some(actual_consumed);
                     // Slice 7: Mark subsumed markers (Competitive Marker Resolution)
                     let end_bit = start + actual_consumed;
