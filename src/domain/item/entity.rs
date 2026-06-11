@@ -688,11 +688,18 @@ impl Item {
             .modules
             .iter()
             .any(|m| matches!(m, ItemModule::Opaque(_) | ItemModule::Residue(_)));
+
         if is_placeholder_opaque {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                        let len = bits.len() as u64;
                         emitter.extend_bits(bits.iter().cloned())?;
+                        // Slice 7: Dynamic Interval Capture. Honor total_bits even for placeholder items.
+                        if self.total_bits > len {
+                            let padding = (self.total_bits - len) as u32;
+                            emitter.extend_bits(std::iter::repeat(false).take(padding as usize))?;
+                        }
                         return Ok(());
                     }
                     _ => {}
@@ -702,11 +709,17 @@ impl Item {
         let trimmed_code = self.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         let is_target_blank = alpha_mode && trimmed_code.is_empty();
         if alpha_mode && (self.is_opaque() || self.is_semi_opaque() || is_target_blank) && !self.bits.is_empty() {
-            println!("DEBUG to_emitter: code='{}', total_bits={}, bits_len={}, is_opaque={}, is_semi_opaque={}, is_target_blank={}",
-                     self.code, self.total_bits, self.bits.len(), self.is_opaque(), self.is_semi_opaque(), is_target_blank);
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
                 emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
+            }
+            // Slice 7: Dynamic Interval Capture. Honor total_bits even for Opaque/SemiOpaque/Blank items
+            // to ensure bit-perfect preservation of drifted boundaries.
+            if self.total_bits > take as u64 {
+                let padding_needed = (self.total_bits - take as u64) as u32;
+                emitter.extend_bits(std::iter::repeat(false).take(padding_needed as usize))?;
+            }
+            if take > 0 || self.total_bits > 0 {
                 return Ok(());
             }
         }
@@ -714,6 +727,14 @@ impl Item {
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
                 emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
+            }
+            // Slice 7: Dynamic Interval Capture. Honor total_bits for authority containers (xrs, wa2, etc)
+            // to preserve the full 512-bit (or larger) block.
+            if self.total_bits > take as u64 {
+                let padding_needed = (self.total_bits - take as u64) as u32;
+                emitter.extend_bits(std::iter::repeat(false).take(padding_needed as usize))?;
+            }
+            if take > 0 || self.total_bits > 0 {
                 return Ok(());
             }
         }
@@ -783,13 +804,22 @@ impl Item {
                 self.header.flags,
                 Some(idx),
             );
-            if target as u64 > current_bits {
-                let padding_needed = (target as u64 - current_bits) as u32;
+            
+            let mut final_target = target as u64;
+            if self.total_bits > final_target {
+                final_target = self.total_bits;
+            }
+
+            if final_target > current_bits {
+                let padding_needed = (final_target - current_bits) as u32;
                 let padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
                     let mut bits = self.body.alpha_alignment_padding.clone();
-                    bits.truncate(padding_needed as usize);
+                    // Slice 7: Honor total_bits even for summary items to preserve bit-exact boundaries
+                    // when they have been expanded by proximity snaps or dynamic interval capture.
                     if bits.len() < padding_needed as usize {
                         bits.resize(padding_needed as usize, false);
+                    } else {
+                        bits.truncate(padding_needed as usize);
                     }
                     bits
                 } else {
