@@ -667,7 +667,7 @@ impl V105PropertyWidthAxiom {
             }
         }
 
-        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
+        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" {
             return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
         if trimmed.is_empty() && code.chars().any(|c| c.is_whitespace()) {

@@ -1375,7 +1375,8 @@ impl Item {
                     .as_ref()
                 .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
                 .unwrap_or(false);
-            let parse_code_hint = if marker_is_forced_summary {
+            let is_authority_marker = alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd");
+            let parse_code_hint = if marker_is_forced_summary || is_authority_marker {
                 marker.code.as_str()
             } else {
                 peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
@@ -1452,12 +1453,12 @@ impl Item {
                         let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code);
                         let is_authority = matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd");
 
-                        if is_summary || is_authority {
+                        if is_authority {
+                            final_item.code = "xrs ".to_string();
+                            final_item.body.code = "xrs ".to_string();
+                            final_item.header.is_runeword = true;
+                        } else if is_summary {
                             final_item.code = marker.code.clone();
-                            if is_authority {
-                                final_item.body.code = marker.code.clone();
-                                final_item.header.is_runeword = true;
-                            }
                         }
                     }
 
