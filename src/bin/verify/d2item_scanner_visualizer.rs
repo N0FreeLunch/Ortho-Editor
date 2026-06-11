@@ -70,6 +70,12 @@ enum TimelineEvent {
         registry_tags: Vec<String>,
         stat_tags: Vec<String>,
         stat_validation_ok: bool,
+        x: u8,
+        y: u8,
+        location: u8,
+        mode: u8,
+        page: u8,
+        owner_seam: String,
     },
     ItemEnd {
         code: String,
@@ -258,6 +264,18 @@ fn build_timeline(
         parsed_ranges.push((item.range.start, item.range.end));
         let registry_tags = build_registry_tags(&item.code, registry);
         let (stat_tags, stat_validation_ok) = build_stat_validation_tags(item);
+        
+        let mut owner_seam = "entity.rs".to_string();
+        if item.is_residue() {
+            owner_seam = "serialization.rs (Residue)".to_string();
+        } else if let Some(m) = context.markers.iter().find(|m| (context.section_bit_offset + m.offset) == item.range.start) {
+            if item.code.trim() == m.code.trim() {
+                owner_seam = "scanner.rs (Matched)".to_string();
+            } else if m.status == MarkerStatus::Accepted {
+                owner_seam = "serialization.rs (Override)".to_string();
+            }
+        }
+
         timeline.push(TimelineEntry {
             offset: item.range.start,
             event: TimelineEvent::ItemStart {
@@ -268,6 +286,12 @@ fn build_timeline(
                 registry_tags: registry_tags.clone(),
                 stat_tags: stat_tags.clone(),
                 stat_validation_ok,
+                x: item.body.x,
+                y: item.body.y,
+                location: item.body.location,
+                mode: item.body.mode,
+                page: item.body.page,
+                owner_seam,
             },
         });
         timeline.push(TimelineEntry {
@@ -683,6 +707,7 @@ fn render_text_entry(
             registry_tags,
             stat_tags,
             stat_validation_ok,
+            ..
         } => {
             type_str = if *is_residue {
                 "RESIDUE:START".to_string()
