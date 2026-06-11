@@ -1,10 +1,23 @@
 use d2r_core::item::HuffmanTree;
 use d2r_core::verify::args::{ArgParser, ArgSpec, ArgError};
-use bitstream_io::{BitRead, BitReader, LittleEndian};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::io::Cursor;
 use std::process;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WidthFuzzerResult {
+    width: u32,
+    next_jm: Option<u64>,
+    alignment_error: u64,
+    is_candidate: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WidthFuzzerPayload {
+    results: Vec<WidthFuzzerResult>,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2item_stat_width_fuzzer")
@@ -66,20 +79,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let alignment = found_jm.map(|pos| pos % 8).unwrap_or(99);
         let status = if alignment == 0 { "CANDIDATE" } else { "" };
         
+        let result = WidthFuzzerResult {
+            width,
+            next_jm: found_jm,
+            alignment_error: alignment,
+            is_candidate: alignment == 0,
+        };
+
         if use_json {
-            results.push(serde_json::json!({
-                "width": width,
-                "next_jm": found_jm,
-                "alignment_error": alignment,
-                "is_candidate": alignment == 0
-            }));
+            results.push(result);
         } else if alignment == 0 || width == 12 { // Always show 12 for runeword debugging
-             println!("{:>5} | {:>15?} | {:>10} | {}", width, found_jm, alignment, status);
+             println!("{:>5} | {:>15?} | {:>10} | {}", result.width, result.next_jm, result.alignment_error, status);
         }
     }
 
     if use_json {
-        println!("{}", serde_json::to_string_pretty(&results)?);
+        let metadata = ReportMetadata::new("d2item_stat_width_fuzzer", file_path, env!("CARGO_PKG_VERSION"));
+        let report = Report {
+            metadata,
+            forensic_context: None,
+            status: ReportStatus::Ok,
+            scan_results: Some(WidthFuzzerPayload { results }),
+            issues: Vec::new(),
+            forensic_issues: Vec::new(),
+            hints: Vec::new(),
+            shadow_audit: None,
+            suggested_actions: Vec::new(),
+        };
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("{:-<60}", "");
     }

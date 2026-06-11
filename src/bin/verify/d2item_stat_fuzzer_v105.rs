@@ -1,4 +1,5 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
@@ -48,6 +49,7 @@ fn main() -> anyhow::Result<()> {
         Some("item-index"),
         "Target specific item index",
     ));
+    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -67,6 +69,7 @@ fn main() -> anyhow::Result<()> {
     let stat_id: u32 = stat_id_str.parse().expect("Invalid stat ID");
     let range_str = parsed.get("range").map(|s| s.as_str()).unwrap_or("8..32");
     let item_index = parsed.get("item-index");
+    let use_json = parsed.is_set("json");
 
     let range: Vec<u32> = if let Some((start_str, end_str)) = range_str.split_once("..") {
         let start: u32 = start_str.parse().expect("Invalid range start");
@@ -76,10 +79,12 @@ fn main() -> anyhow::Result<()> {
         vec![range_str.parse().expect("Invalid range value")]
     };
 
-    println!(
-        "Fuzzing stat {} over range {:?} using fixture {}",
-        stat_id, range, fixture_path
-    );
+    if !use_json {
+        println!(
+            "Fuzzing stat {} over range {:?} using fixture {}",
+            stat_id, range, fixture_path
+        );
+    }
 
     let mut results = FuzzResult {
         stat_id,
@@ -96,8 +101,10 @@ fn main() -> anyhow::Result<()> {
     let registry_json: Value = serde_json::from_str(&original_content)?;
 
     for &width in &range {
-        print!("Trying width {}... ", width);
-        std::io::Write::flush(&mut std::io::stdout())?;
+        if !use_json {
+            print!("Trying width {}... ", width);
+            std::io::Write::flush(&mut std::io::stdout())?;
+        }
 
         // Patch registry
         let mut temp_registry = registry_json.clone();
@@ -151,7 +158,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        println!("Match: {}, Fidelity: {}", is_match, fidelity);
+        if !use_json {
+            println!("Match: {}, Fidelity: {}", is_match, fidelity);
+        }
 
         results.candidates.push(Candidate {
             bits: width,
@@ -169,7 +178,23 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    println!("{}", serde_json::to_string_pretty(&results)?);
+    if use_json {
+        let metadata = ReportMetadata::new("d2item_stat_fuzzer_v105", fixture_path, env!("CARGO_PKG_VERSION"));
+        let report = Report {
+            metadata,
+            forensic_context: None,
+            status: if results.winner.is_some() { ReportStatus::Ok } else { ReportStatus::Fail },
+            scan_results: Some(results),
+            issues: Vec::new(),
+            forensic_issues: Vec::new(),
+            hints: Vec::new(),
+            shadow_audit: None,
+            suggested_actions: Vec::new(),
+        };
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+    }
 
     Ok(())
 }
