@@ -1,6 +1,6 @@
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser};
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -55,9 +55,10 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    let mut om = OutputManager::new("d2item_code_fuzzer", &parsed);
+
     let path = parsed.get("save_file").unwrap();
     let scan_range: u64 = parsed.get("range").unwrap().parse()?;
-    let is_json = parsed.is_json();
     let strict = parsed.is_set("strict");
 
     let bytes = fs::read(path)?;
@@ -172,20 +173,20 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    if is_json {
+    if om.is_json() {
         let metadata = ReportMetadata::new("d2item_code_fuzzer", path, env!("CARGO_PKG_VERSION"));
         let report = Report::new(metadata, ReportStatus::Ok).with_results(all_results);
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        om.json(&serde_json::to_string_pretty(&report)?);
     } else {
         for res in all_results {
-            println!("[JM #{}] at bit {}", res.jm_index, res.jm_bit_pos);
+            om.println(&format!("[JM #{}] at bit {}", res.jm_index, res.jm_bit_pos));
             for cand in res.candidates {
-                println!(
+                om.println(&format!(
                     "  Offset {} | Shift {} | Candidate '{}' | Hex {}",
                     cand.bit_offset, cand.bit_shift, cand.code, cand.hex
-                );
+                ));
             }
-            println!("{:-<60}", "");
+            om.println(&format!("{:-<60}", ""));
         }
     }
 
