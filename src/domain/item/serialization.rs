@@ -1,6 +1,7 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::forensic::v105::{
-    V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105ShadowAxiom,
+    V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
+    V105ShadowAxiom,
 };
 use crate::domain::header::entity::{calculate_alpha_v105_checksum, HeaderAxiom, ItemSegmentType};
 use crate::domain::item::axiom_meta::{
@@ -373,6 +374,11 @@ pub fn peek_item_header_at_with_base(
     let _checksum = alpha_reader.read::<8, u8>().unwrap_or(0);
     let v = alpha_reader.read::<3, u8>().unwrap_or(0);
     let _calculated = calculate_alpha_v105_checksum(flags, v);
+    let w_axiom = V105PropertyWidthAxiom::default();
+    let version_bits = w_axiom.version_bits(alpha_mode);
+    let mode_bits = w_axiom.mode_bits(alpha_mode);
+    let location_bits = w_axiom.location_bits(alpha_mode, v);
+    let x_bits = w_axiom.x_bits(alpha_mode, v);
 
     let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     let mut v_retail = 0;
@@ -392,10 +398,16 @@ pub fn peek_item_header_at_with_base(
         
         if matched {
             let m = alpha_reader.read::<3, u8>().ok();
-            let l = alpha_reader.read::<4, u8>().ok();
-            let x = alpha_reader.read::<3, u8>().ok();
+            let l = match location_bits {
+                4 => alpha_reader.read::<4, u8>().ok(),
+                _ => alpha_reader.read::<3, u8>().ok(),
+            };
+            let x = match x_bits {
+                3 => alpha_reader.read::<3, u8>().ok(),
+                _ => alpha_reader.read::<4, u8>().ok(),
+            };
             if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
-                trial_configs.push((v, mode, loc, x_val, 32 + 8 + 3 + 3 + 4 + 3, true));
+                trial_configs.push((v, mode, loc, x_val, 32 + version_bits + 8 + mode_bits + location_bits + x_bits, true));
             }
         }
     }
@@ -596,6 +608,11 @@ pub fn peek_item_header_at_specific_gap(
     let checksum = alpha_reader.read::<8, u8>().ok()?;
     let v = alpha_reader.read::<3, u8>().ok()?;
     let calculated = calculate_alpha_v105_checksum(flags, v);
+    let w_axiom = V105PropertyWidthAxiom::default();
+    let version_bits = w_axiom.version_bits(alpha_mode);
+    let mode_bits = w_axiom.mode_bits(alpha_mode);
+    let location_bits = w_axiom.location_bits(alpha_mode, v);
+    let x_bits = w_axiom.x_bits(alpha_mode, v);
 
     let is_compact_flag = (flags & 0x00200000) != 0;
 
@@ -604,9 +621,15 @@ pub fn peek_item_header_at_specific_gap(
         && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
     {
         let m = alpha_reader.read::<3, u8>().ok()?;
-        let l = alpha_reader.read::<4, u8>().ok()?;
-        let x = alpha_reader.read::<3, u8>().ok()?;
-        (v, m, l, x, 32 + 8 + 3 + 3 + 4 + 3, true)
+        let l = match location_bits {
+            4 => alpha_reader.read::<4, u8>().ok()?,
+            _ => alpha_reader.read::<3, u8>().ok()?,
+        };
+        let x = match x_bits {
+            3 => alpha_reader.read::<3, u8>().ok()?,
+            _ => alpha_reader.read::<4, u8>().ok()?,
+        };
+        (v, m, l, x, 32 + version_bits + 8 + mode_bits + location_bits + x_bits, true)
     } else {
         let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
         retail_reader.skip(start_bit as u32 + 32).ok()?;

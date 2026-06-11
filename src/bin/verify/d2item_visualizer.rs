@@ -22,9 +22,10 @@ enum SectionFocus {
     Filter(String),
 }
 
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+
 #[derive(Debug, Clone, Serialize)]
-struct VisualizerReport {
-    file: String,
+struct VisualizerPayload {
     alpha_mode: bool,
     section: String,
     offset: Option<u64>,
@@ -33,9 +34,6 @@ struct VisualizerReport {
     summary: SummaryReport,
     scanner_marker_sample: Vec<ItemMarker>,
     sections: Vec<ItemReport>,
-    hint: Option<String>,
-    issues: Vec<String>,
-    status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -186,8 +184,8 @@ fn run() -> Result<i32> {
     let bytes = match fs::read(&file) {
         Ok(bytes) => bytes,
         Err(err) => {
-            let report = VisualizerReport {
-                file,
+            let metadata = ReportMetadata::new("d2item_visualizer", &file, env!("CARGO_PKG_VERSION"));
+            let payload = VisualizerPayload {
                 alpha_mode: false,
                 section: section_raw,
                 offset,
@@ -218,12 +216,16 @@ fn run() -> Result<i32> {
                 },
                 scanner_marker_sample: Vec::new(),
                 sections: Vec::new(),
-                hint: Some(
-                    "Check the file path or point the visualizer at a .d2s fixture.".to_string(),
-                ),
-                issues: vec![format!("Failed to read file: {err}")],
-                status: "fail".to_string(),
             };
+            let report = Report::new(metadata, ReportStatus::Fail)
+                .with_results(payload)
+                .with_issues(vec![ReportIssue {
+                    kind: "io".to_string(),
+                    message: format!("Failed to read file: {err}"),
+                    bit_offset: None,
+                }])
+                .with_hints(vec!["Check the file path or point the visualizer at a .d2s fixture.".to_string()]);
+
             emit_report(&report, json_mode)?;
             return Ok(1);
         }
@@ -302,12 +304,20 @@ fn run() -> Result<i32> {
         }
     }
 
-    let hint = issues
-        .first()
-        .map(|_| build_hint(&section_focus, offset, range, item_reports.is_empty()));
+    let hint = if !issues.is_empty() {
+        Some(build_hint(&section_focus, offset, range, item_reports.is_empty()))
+    } else {
+        None
+    };
 
-    let report = VisualizerReport {
-        file,
+    let metadata = ReportMetadata::new("d2item_visualizer", &file, env!("CARGO_PKG_VERSION"));
+    let status = if !parse_error_present && !summary_has_failure {
+        ReportStatus::Ok
+    } else {
+        ReportStatus::Fail
+    };
+
+    let payload = VisualizerPayload {
         alpha_mode,
         section: section_raw,
         offset,
@@ -323,20 +333,25 @@ fn run() -> Result<i32> {
         summary,
         scanner_marker_sample,
         sections: item_reports,
-        hint,
-        issues,
-        status: if !parse_error_present && !summary_has_failure {
-            "ok".to_string()
-        } else {
-            "fail".to_string()
-        },
     };
 
+    let mut report = Report::new(metadata, status)
+        .with_results(payload)
+        .with_issues(issues.into_iter().map(|msg| ReportIssue {
+            kind: "general".to_string(),
+            message: msg,
+            bit_offset: None,
+        }).collect());
+
+    if let Some(h) = hint {
+        report = report.with_hints(vec![h]);
+    }
+
     emit_report(&report, json_mode)?;
-    Ok(if report.status == "ok" { 0 } else { 1 })
+    Ok(if report.status == ReportStatus::Ok { 0 } else { 1 })
 }
 
-fn emit_report(report: &VisualizerReport, json_mode: bool) -> Result<()> {
+fn emit_report(report: &Report<VisualizerPayload>, json_mode: bool) -> Result<()> {
     if json_mode {
         println!("{}", serde_json::to_string_pretty(report)?);
         return Ok(());
@@ -346,12 +361,13 @@ fn emit_report(report: &VisualizerReport, json_mode: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_human_report(report: &VisualizerReport) {
+fn print_human_report(report: &Report<VisualizerPayload>) {
+    let payload = report.scan_results.as_ref().unwrap();
     println!(
         "{}",
         format!(
-            "d2item_visualizer | file={} | section={} | alpha={} | status={}",
-            report.file, report.section, report.alpha_mode, report.status
+            "d2item_visualizer | file={} | section={} | alpha={} | status={:?}",
+            report.metadata.file, payload.section, payload.alpha_mode, report.status
         )
         .cyan()
         .bold()
@@ -359,17 +375,17 @@ fn print_human_report(report: &VisualizerReport) {
 
     println!(
         "Summary: items={} visible={} segments={} markers={} (accepted={} rejected={} phantom={})",
-        report.summary.parsed_items,
-        report.summary.visible_items,
-        report.summary.segment_total,
-        report.summary.scanner_markers,
-        report.summary.accepted_markers,
-        report.summary.rejected_markers,
-        report.summary.phantom_markers
+        payload.summary.parsed_items,
+        payload.summary.visible_items,
+        payload.summary.segment_total,
+        payload.summary.scanner_markers,
+        payload.summary.accepted_markers,
+        payload.summary.rejected_markers,
+        payload.summary.phantom_markers
     );
 
-    if let Some(offset) = report.offset {
-        match report.range {
+    if let Some(offset) = payload.offset {
+        match payload.range {
             Some(range) => println!("Focus window: offset={} range={}", offset, range),
             None => println!("Focus offset: {}", offset),
         }
@@ -378,13 +394,13 @@ fn print_human_report(report: &VisualizerReport) {
     if !report.issues.is_empty() {
         println!("{}", "Issues:".yellow().bold());
         for issue in &report.issues {
-            println!("  - {}", issue.red());
+            println!("  - {}", issue.message.red());
         }
     }
 
-    if report.sections.is_empty() && !report.scanner_marker_sample.is_empty() {
+    if payload.sections.is_empty() && !payload.scanner_marker_sample.is_empty() {
         println!("{}", "Scanner markers:".cyan().bold());
-        for marker in &report.scanner_marker_sample {
+        for marker in &payload.scanner_marker_sample {
             println!(
                 "  {:>8} {:<9} score={:<4} conf={:<4} code={}",
                 marker.offset,
@@ -394,34 +410,34 @@ fn print_human_report(report: &VisualizerReport) {
                 marker.code.trim()
             );
         }
-        if report.summary.scanner_markers > report.scanner_marker_sample.len() {
+        if payload.summary.scanner_markers > payload.scanner_marker_sample.len() {
             println!(
                 "{}",
                 format!(
                     "  ... {} more scanner marker(s) hidden; use --full-dump to expand.",
-                    report.summary.scanner_markers - report.scanner_marker_sample.len()
+                    payload.summary.scanner_markers - payload.scanner_marker_sample.len()
                 )
                 .yellow()
             );
         }
     }
 
-    if matches!(report.selection.focus.as_str(), "summary") {
+    if matches!(payload.selection.focus.as_str(), "summary") {
         return;
     }
 
-    let item_limit = if report.selection.full_dump {
+    let item_limit = if payload.selection.full_dump {
         usize::MAX
-    } else if report.selection.detailed {
+    } else if payload.selection.detailed {
         DEFAULT_DETAIL_ITEM_LIMIT
     } else {
         DEFAULT_ITEM_LIMIT
     };
 
     let mut printed = 0usize;
-    for item in &report.sections {
+    for item in &payload.sections {
         if printed >= item_limit {
-            let omitted = report.sections.len().saturating_sub(printed);
+            let omitted = payload.sections.len().saturating_sub(printed);
             if omitted > 0 {
                 println!(
                     "{}",
@@ -455,17 +471,17 @@ fn print_human_report(report: &VisualizerReport) {
             status
         );
 
-        if report.selection.detailed {
+        if payload.selection.detailed {
             if let Some(semantic) = &item.semantic_at_offset {
                 println!("      semantic@offset: {}", semantic.blue());
             }
 
             print_segment_tree(
                 item,
-                report.offset,
-                report.range,
-                report.selection.detailed,
-                report.selection.focus.as_str(),
+                payload.offset,
+                payload.range,
+                payload.selection.detailed,
+                payload.selection.focus.as_str(),
                 printed == 0,
             );
 
@@ -497,6 +513,7 @@ fn print_human_report(report: &VisualizerReport) {
         printed += 1;
     }
 }
+
 
 fn print_segment_tree(
     item: &ItemReport,

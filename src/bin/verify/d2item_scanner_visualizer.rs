@@ -11,9 +11,10 @@ use std::{env, fs};
 
 const VISUAL_WIDTH: usize = 72;
 
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+
 #[derive(Debug, Clone, Serialize)]
-struct VisualizerReport {
-    save_file: String,
+struct ScannerPayload {
     alpha_mode: bool,
     sections: Vec<SectionReport>,
 }
@@ -122,7 +123,13 @@ fn main() -> Result<()> {
         "json-timeline",
         None,
         Some("json-timeline"),
-        "Emit the scanner/parser timeline as JSON",
+        "Emit the scanner/parser timeline as JSON (legacy alias)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Emit the scanner/parser timeline as normalized JSON report",
     ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
@@ -139,28 +146,47 @@ fn main() -> Result<()> {
     };
 
     let file_path = parsed.get("file").unwrap();
-    let alpha_mode = parsed.is_set("alpha");
     let visual_gap = parsed.is_set("visual-gap");
-    let json_timeline = parsed.is_set("json-timeline");
+    let json_mode = parsed.is_json() || parsed.is_set("json-timeline");
 
-    if visual_gap && json_timeline {
-        bail!("--visual-gap and --json-timeline cannot be used together");
+    if visual_gap && json_mode {
+        bail!("--visual-gap and JSON mode cannot be used together");
     }
 
     let bytes =
         fs::read(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
 
+    let alpha_mode = parsed.is_set("alpha") || is_alpha_v105(&bytes);
     let huffman = HuffmanTree::new();
     let registry = get_registry();
     let jm_positions = find_jm_markers(&bytes);
     let section_reports = build_sections(&bytes, &huffman, registry, alpha_mode, &jm_positions);
 
-    if json_timeline {
-        let report = VisualizerReport {
-            save_file: file_path.to_string(),
+    if json_mode {
+        let metadata = ReportMetadata::new("d2item_scanner_visualizer", file_path, env!("CARGO_PKG_VERSION"));
+        let payload = ScannerPayload {
             alpha_mode,
             sections: section_reports,
         };
+        
+        let has_parse_error = payload.sections.iter().any(|s| s.parse_error.is_some());
+        let status = if has_parse_error { ReportStatus::Fail } else { ReportStatus::Ok };
+        
+        let mut issues = Vec::new();
+        for (i, section) in payload.sections.iter().enumerate() {
+            if let Some(err) = &section.parse_error {
+                issues.push(ReportIssue {
+                    kind: "parser".to_string(),
+                    message: format!("Section {i} parse error: {err}"),
+                    bit_offset: Some(section.section_bit_offset),
+                });
+            }
+        }
+
+        let report = Report::new(metadata, status)
+            .with_results(payload)
+            .with_issues(issues);
+
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
@@ -930,6 +956,10 @@ fn fill_range(bar: &mut String, start: usize, end: usize) {
         }
     }
     *bar = chars.into_iter().collect();
+}
+
+fn is_alpha_v105(bytes: &[u8]) -> bool {
+    bytes.get(4..8) == Some(&[0x69, 0, 0, 0])
 }
 
 fn section_label(index: usize) -> &'static str {
