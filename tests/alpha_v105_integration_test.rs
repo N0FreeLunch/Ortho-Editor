@@ -104,12 +104,6 @@ mod tests {
             
             // 1. Recover all items
             let items = Item::read_player_items(&bytes, &huffman, true).expect("Parsing failed");
-            if fixture_path.contains("amazon_authority_runeword") || fixture_path.contains("amazon_10_scrolls") {
-                for (idx, item) in items.iter().enumerate() {
-                    println!("[TEST-DEBUG] Recovered item idx={}, code='{}', range={:?}, total_bits={}, is_compact={}, is_residue={}",
-                             idx, item.code.trim(), item.range, item.total_bits, item.header.is_compact, item.is_residue());
-                }
-            }
             
             // 2. Reserialize section
             let reserialized_items = Item::serialize_section(&items, &huffman, true).expect("Serialization failed");
