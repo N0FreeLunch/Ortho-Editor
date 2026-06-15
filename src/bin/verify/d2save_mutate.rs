@@ -76,9 +76,13 @@ fn main() -> anyhow::Result<()> {
         let name = &shift_args[0];
         let offset: isize = shift_args[1].parse().context("Invalid shift offset")?;
         mutate_marker(&mut bytes, &map, name, Some(offset))?;
+        d2r_core::save::finalize_save_bytes(&mut bytes, force_fix)
+            .context("Failed to finalize save bytes")?;
     } else if let Some(delete_args) = parsed.get_vec("delete-marker") {
         let name = &delete_args[0];
         mutate_marker(&mut bytes, &map, name, None)?;
+        d2r_core::save::finalize_save_bytes(&mut bytes, force_fix)
+            .context("Failed to finalize save bytes")?;
     } else if let Some(item_idx_str) = parsed.get("item-index") {
         let idx: usize = item_idx_str.parse().context("Invalid item index")?;
         let mut items =
@@ -205,7 +209,6 @@ fn mutate_marker(
         println!("Deleted marker {} (zero-filled)", name);
     }
 
-    println!("Note: Checksum was NOT recalculated.");
     Ok(())
 }
 
