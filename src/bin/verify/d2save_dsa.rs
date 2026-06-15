@@ -1,4 +1,6 @@
+use anyhow::{Result, anyhow, Context};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus, ReportIssue};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -13,7 +15,7 @@ struct DsaReport {
     violations: Vec<BitViolation>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct BitViolation {
     abs_bit: usize,
     byte_offset: usize,
@@ -22,7 +24,7 @@ struct BitViolation {
     val_b: u8,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let mut parser = ArgParser::new("d2save_dsa")
         .description("Domain Symmetry Auditor: Validates bit-level symmetry between two save files with allowed drift rules.");
 
@@ -54,10 +56,10 @@ fn main() {
         }
     };
 
+    let mut om = OutputManager::new("d2save_dsa", &parsed);
     let path_a = parsed.get("file_a").unwrap();
     let path_b = parsed.get("file_b").unwrap();
     let allowed_bits_str = parsed.get("allowed-bits").map(|s| s.as_str()).unwrap_or("");
-    let is_json = parsed.is_json();
 
     let mut allowed_bits: Vec<usize> = Vec::new();
     if !allowed_bits_str.is_empty() {
@@ -66,41 +68,19 @@ fn main() {
             if part.contains('-') {
                 let bounds: Vec<&str> = part.split('-').collect();
                 if bounds.len() != 2 {
-                    eprintln!(
-                        "[ERROR] Invalid range format: '{}'. Expected 'start-end'.",
-                        part
-                    );
-                    process::exit(1);
+                    return Err(anyhow!("Invalid range format: '{}'. Expected 'start-end'.", part));
                 }
                 let start_str = bounds[0].trim();
                 let end_str = bounds[1].trim();
                 let start = start_str
                     .parse::<usize>()
-                    .map_err(|_| {
-                        eprintln!(
-                            "[ERROR] Invalid bit offset: '{}' in range '{}'.",
-                            start_str, part
-                        );
-                        process::exit(1);
-                    })
-                    .unwrap();
+                    .map_err(|_| anyhow!("Invalid bit offset: '{}' in range '{}'.", start_str, part))?;
                 let end = end_str
                     .parse::<usize>()
-                    .map_err(|_| {
-                        eprintln!(
-                            "[ERROR] Invalid bit offset: '{}' in range '{}'.",
-                            end_str, part
-                        );
-                        process::exit(1);
-                    })
-                    .unwrap();
+                    .map_err(|_| anyhow!("Invalid bit offset: '{}' in range '{}'.", end_str, part))?;
 
                 if start > end {
-                    eprintln!(
-                        "[ERROR] Reverse range is not allowed: '{}' ({} > {}).",
-                        part, start, end
-                    );
-                    process::exit(1);
+                    return Err(anyhow!("Reverse range is not allowed: '{}' ({} > {}).", part, start, end));
                 }
                 for bit in start..=end {
                     allowed_bits.push(bit);
@@ -108,11 +88,7 @@ fn main() {
             } else {
                 let bit = part
                     .parse::<usize>()
-                    .map_err(|_| {
-                        eprintln!("[ERROR] Invalid bit offset: '{}'.", part);
-                        process::exit(1);
-                    })
-                    .unwrap();
+                    .map_err(|_| anyhow!("Invalid bit offset: '{}'.", part))?;
                 allowed_bits.push(bit);
             }
         }
@@ -120,54 +96,27 @@ fn main() {
         allowed_bits.dedup();
     }
 
-    let bytes_a = match fs::read(path_a) {
-        Ok(b) => b,
-        Err(e) => {
-            if is_json {
-                println!(
-                    "{}",
-                    serde_json::json!({"error": format!("Cannot read '{}': {}", path_a, e)})
-                );
-            } else {
-                eprintln!("[ERROR] Cannot read '{}': {}", path_a, e);
-            }
-            process::exit(1);
-        }
-    };
-    let bytes_b = match fs::read(path_b) {
-        Ok(b) => b,
-        Err(e) => {
-            if is_json {
-                println!(
-                    "{}",
-                    serde_json::json!({"error": format!("Cannot read '{}': {}", path_b, e)})
-                );
-            } else {
-                eprintln!("[ERROR] Cannot read '{}': {}", path_b, e);
-            }
-            process::exit(1);
-        }
-    };
+    let bytes_a = fs::read(path_a).with_context(|| format!("Cannot read '{}'", path_a))?;
+    let bytes_b = fs::read(path_b).with_context(|| format!("Cannot read '{}'", path_b))?;
 
     if bytes_a.len() != bytes_b.len() {
-        if is_json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "error": "Length mismatch",
-                    "len_a": bytes_a.len(),
-                    "len_b": bytes_b.len()
-                }))
-                .unwrap()
-            );
+        let msg = format!("Length mismatch: A={} bytes, B={} bytes", bytes_a.len(), bytes_b.len());
+        if om.is_json() {
+            let report = Report::<()>::new(
+                ReportMetadata::new("d2save_dsa", path_a, env!("CARGO_PKG_VERSION")),
+                ReportStatus::Fail,
+            )
+            .with_issues(vec![ReportIssue {
+                kind: "LengthMismatch".to_string(),
+                message: msg,
+                bit_offset: None,
+            }])
+            .with_forensic_context();
+            om.json(&serde_json::to_string_pretty(&report)?);
+            process::exit(1);
         } else {
-            eprintln!(
-                "[ERROR] Length mismatch: A={} bytes, B={} bytes",
-                bytes_a.len(),
-                bytes_b.len()
-            );
+            return Err(anyhow!("{}", msg));
         }
-        process::exit(1);
     }
 
     let mut violations = Vec::new();
@@ -191,38 +140,56 @@ fn main() {
         }
     }
 
-    if is_json {
-        let report = DsaReport {
+    if om.is_json() {
+        let status = if violations.is_empty() { ReportStatus::Ok } else { ReportStatus::Fail };
+        let mut report = Report::new(
+            ReportMetadata::new("d2save_dsa", path_a, env!("CARGO_PKG_VERSION")),
+            status,
+        )
+        .with_results(DsaReport {
             file_a: path_a.clone(),
             file_b: path_b.clone(),
             allowed_bits,
             identical: violations.is_empty(),
-            violations,
-        };
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            violations: violations.clone(),
+        })
+        .with_forensic_context();
+        
+        if !violations.is_empty() {
+            report = report.with_issues(vec![ReportIssue {
+                kind: "BitViolation".to_string(),
+                message: format!("{} unauthorized bit violations found.", violations.len()),
+                bit_offset: Some(violations[0].abs_bit as u64),
+            }]);
+        }
+        
+        om.json(&serde_json::to_string_pretty(&report)?);
     } else {
-        println!("=== Domain Symmetry Auditor (DSA) ===");
-        println!("  A: {}", path_a);
-        println!("  B: {}", path_b);
-        println!("  Allowed bits: {:?}", allowed_bits);
+        om.println("=== Domain Symmetry Auditor (DSA) ===");
+        om.println(&format!("  A: {}", path_a));
+        om.println(&format!("  B: {}", path_b));
+        om.println(&format!("  Allowed bits: {:?}", allowed_bits));
 
         if violations.is_empty() {
-            println!("\n[SUCCESS] Bitwise symmetry verified.");
+            om.summary("Bitwise symmetry verified.");
         } else {
-            println!(
+            om.println(&format!(
                 "\n[FAILURE] {} unauthorized bit violations found:",
                 violations.len()
-            );
+            ));
             for v in violations.iter().take(20) {
-                println!(
+                om.println(&format!(
                     "  Bit {:>6} (Byte {:>5}, Bit {}): A={} B={}",
                     v.abs_bit, v.byte_offset, v.bit_in_byte, v.val_a, v.val_b
-                );
+                ));
             }
             if violations.len() > 20 {
-                println!("  ... and {} more violations", violations.len() - 20);
+                om.println(&format!("  ... and {} more violations", violations.len() - 20));
             }
+            om.summary(&format!("{} violations found.", violations.len()));
             process::exit(1);
         }
     }
+    
+    Ok(())
 }

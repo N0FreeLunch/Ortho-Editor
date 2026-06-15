@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -53,9 +54,9 @@ fn main() -> Result<()> {
         }
     };
 
+    let mut om = OutputManager::new("d2save_ssa", &parsed);
     let file1_path = parsed.get("file1").unwrap();
     let file2_path = parsed.get("file2").unwrap();
-    let use_json = parsed.is_json();
 
     let mut diff_stats = parsed.is_set("stats");
     let diff_items = parsed.is_set("items");
@@ -197,36 +198,42 @@ fn main() -> Result<()> {
         }
     }
 
-    if use_json {
-        println!("{}", serde_json::to_string_pretty(&results)?);
+    if om.is_json() {
+        let report = Report::new(
+            ReportMetadata::new("d2save_ssa", file1_path, env!("CARGO_PKG_VERSION")),
+            ReportStatus::Ok,
+        )
+        .with_results(results)
+        .with_forensic_context();
+        om.json(&serde_json::to_string_pretty(&report)?);
     } else {
-        println!("SSA - Semantic Save-Game Auditor");
-        println!("File A: {}", file1_path);
-        println!("File B: {}", file2_path);
-        println!();
+        om.println("SSA - Semantic Save-Game Auditor");
+        om.println(&format!("File A: {}", file1_path));
+        om.println(&format!("File B: {}", file2_path));
+        om.println("");
 
         if results.is_empty() {
-            println!("No semantic differences found.");
+            om.summary("No semantic differences found.");
         } else {
-            println!(
+            om.println(
                 "+------------+----------------------+----------------------+----------------------+"
             );
-            println!(
-                "| {:<10} | {:<20} | {:<20} | {:<20} |",
-                "Section", "Field", "Value A", "Value B"
+            om.println(
+                "| Section    | Field                | Value A              | Value B              |"
             );
-            println!(
+            om.println(
                 "+------------+----------------------+----------------------+----------------------+"
             );
-            for res in results {
-                println!(
+            for res in &results {
+                om.println(&format!(
                     "| {:<10} | {:<20} | {:<20} | {:<20} |",
                     res.section, res.field, res.old_value, res.new_value
-                );
+                ));
             }
-            println!(
+            om.println(
                 "+------------+----------------------+----------------------+----------------------+"
             );
+            om.summary(&format!("{} semantic differences found.", results.len()));
         }
     }
 
