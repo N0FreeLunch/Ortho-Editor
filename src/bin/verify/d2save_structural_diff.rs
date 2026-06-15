@@ -3,7 +3,7 @@ use d2r_core::domain::progression::axiom::{
 };
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::fs;
 use std::process;
@@ -86,9 +86,10 @@ fn main() {
         }
     };
 
+    let mut out = OutputManager::new("d2save_structural_diff", &parsed);
     let path_a = parsed.get("file_a").unwrap();
     let path_b = parsed.get("file_b").unwrap();
-    let is_json = parsed.is_set("json");
+    let is_json = out.is_json();
     let show_all = parsed.is_set("all");
     let show_details = parsed.is_set("details");
 
@@ -159,62 +160,62 @@ fn main() {
         )
         .with_results(payload);
 
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        out.json(&serde_json::to_string_pretty(&report).unwrap());
     } else {
-        println!("=== d2save_structural_diff ===");
-        println!("  A: {} ({} bytes)", path_a, bytes_a.len());
-        println!("  B: {} ({} bytes)", path_b, bytes_b.len());
-        println!();
+        out.println("=== d2save_structural_diff ===");
+        out.println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()));
+        out.println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()));
+        out.println("");
 
         if section_counts.is_empty() && length_delta == 0 {
-            println!("  [IDENTICAL] No differences found.");
+            out.println("  [IDENTICAL] No differences found.");
         } else {
-            println!("[SECTION SUMMARY]");
+            out.println("[SECTION SUMMARY]");
             let mut keys: Vec<_> = section_counts.keys().collect();
             keys.sort();
             for label in keys {
                 let count = section_counts[label];
                 let mask_note = if label == "Checksum" { " (MASKED)" } else { "" };
-                println!("  {:<15}: {:>4} bytes{}", label, count, mask_note);
+                out.println(&format!("  {:<15}: {:>4} bytes{}", label, count, mask_note));
             }
             if length_delta != 0 {
-                println!("  {:<15}: {:>4} bytes", "Length Delta", length_delta);
+                out.println(&format!("  {:<15}: {:>4} bytes", "Length Delta", length_delta));
             }
-            println!();
+            out.println("");
 
             if show_details || show_all {
-                println!("[DETAILED DIFFS]");
-                println!(
+                out.println("[DETAILED DIFFS]");
+                out.println(&format!(
                     "  {:>8}  {:<12}  {:>8}  {:>8}",
                     "Offset", "Section", "A", "B"
-                );
-                println!("  {:->8}  {:->12}  {:->8}  {:->8}", "", "", "", "");
+                ));
+                out.println(&format!("  {:->8}  {:->12}  {:->8}  {:->8}", "", "", "", ""));
 
                 for d in &details {
                     if !show_all && d.is_masked {
                         continue;
                     }
-                    println!(
+                    out.println(&format!(
                         "  {:>8}  {:<12}  {:>8}  {:>8}",
                         d.offset, d.label, d.a_hex, d.b_hex
-                    );
+                    ));
                 }
 
                 if !show_all && details.len() > unmasked_count {
-                    println!(
+                    out.println(&format!(
                         "  ... ({} masked bytes hidden, use --all to see)",
                         details.len() - unmasked_count
-                    );
+                    ));
                 }
             } else if unmasked_count == 0 && !details.is_empty() {
-                println!(
+                out.println(
                     "  [INFO] Only masked sections (Checksum) differ. Use --all to see details."
                 );
             } else if unmasked_count > 0 {
-                println!(
+                out.println(&format!(
                     "  [INFO] {} unmasked differences found. Use --details to see offset list.",
                     unmasked_count
-                );
+                ));
             }
         }
     }
