@@ -1,5 +1,6 @@
 pub mod quality;
 pub mod entity;
+pub mod builder;
 pub mod serialization;
 pub mod axiom_meta;
 pub mod scanner;
@@ -12,6 +13,7 @@ pub use entity::{
     ItemBody, Item, ItemModule, CharmBagData, CursedItemData,
     RecordedBit, ItemBitRange, BitSegment
 };
+pub use builder::ItemBuilder;
 // Removed redundant re-exports: ItemProperty, ItemStats moved to domain::stats
 pub use serialization::{BitEmitter, HuffmanTree, verify_marker_lookahead, peek_item_header_at};
 pub use scanner::scan_item_markers;
