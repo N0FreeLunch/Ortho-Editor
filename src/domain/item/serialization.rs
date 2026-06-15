@@ -1480,11 +1480,12 @@ impl Item {
                     // Restore code BEFORE alignment calculation to ensure correct target width.
                     if alpha_mode && !marker.code.trim().is_empty() {
                         let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code);
-                        let is_authority = matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd");
+                        let is_authority = matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
 
                         if is_authority {
-                            final_item.code = "xrs ".to_string();
-                            final_item.body.code = "xrs ".to_string();
+                            let forced_code = if marker.code.trim() == "wa2" { "wa2 " } else { "xrs " };
+                            final_item.code = forced_code.to_string();
+                            final_item.body.code = forced_code.to_string();
                             final_item.header.is_runeword = true;
                         } else if is_summary {
                             final_item.code = marker.code.clone();
@@ -1746,7 +1747,7 @@ impl Item {
                         )
                     };
                     let authority_runeword_hint =
-                        alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd");
+                        alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
 
                     if alpha_mode
                         && !peek_code.trim().is_empty()
@@ -1754,7 +1755,7 @@ impl Item {
                     {
                         let max_retry_limit = section_bits.saturating_sub(start);
                         let recovery_hint = if authority_runeword_hint {
-                            "c8xr"
+                            if marker.code.trim() == "wa2" { "wa2" } else { "c8xr" }
                         } else {
                             peek_code.as_str()
                         };
@@ -1821,8 +1822,9 @@ impl Item {
                                     // Restore code BEFORE alignment calculation.
                                     if alpha_mode {
                                         if authority_runeword_hint {
-                                            final_item.code = "xrs ".to_string();
-                                            final_item.body.code = "xrs ".to_string();
+                                            let forced_code = if marker.code.trim() == "wa2" { "wa2 " } else { "xrs " };
+                                            final_item.code = forced_code.to_string();
+                                            final_item.body.code = forced_code.to_string();
                                             final_item.header.is_runeword = true;
                                         } else if !marker.code.trim().is_empty()
                                             && crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code)

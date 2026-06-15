@@ -139,14 +139,14 @@ pub fn read_item_stats<R: BitRead>(
         let markers = crate::domain::item::scanner::scan_item_markers(
             bytes,
             huffman,
-            false,
+            axiom.is_alpha(),
             section_recovery.item_start_bit,
             None,
             false,
         );
         for m in markers.iter() {
             let t = m.code.trim();
-            if matches!(t, "xrs" | "c8xr" | "rhd") {
+            if matches!(t, "xrs" | "c8xr" | "rhd" | "wa2") {
                 authority_offsets.push(m.offset);
             }
             if (t.starts_with('r') && t.len() <= 3) || (t.starts_with('g') && t.len() == 3) || t == "jew" {
@@ -156,7 +156,7 @@ pub fn read_item_stats<R: BitRead>(
         }
     }
 
-    if is_alpha && is_compact {
+    if is_alpha && (is_compact || trimmed_code == "wa2") {
         if trimmed_code == "7mgw" {
             let mut payload = Vec::new();
             for _ in 0..28 {
@@ -166,7 +166,7 @@ pub fn read_item_stats<R: BitRead>(
         }
 
         let is_pure_fragment = matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "" | "wa2");
-        if allow_compact_recovery && is_pure_fragment {
+        if (allow_compact_recovery || trimmed_code == "wa2") && is_pure_fragment {
             let mut nested_items = Vec::new();
             for off in child_offsets
                 .iter()
@@ -534,8 +534,8 @@ where
                      v.set(true);
                      p
                  });
-                 // Use alpha=false: empirically reliable for parsing runes in alpha saves at scanner-found offsets
-                 let res = recovery_fn(_section_recovery.bytes, target_local_pos, huffman, child_idx, false);
+                 // Use axiom.is_alpha(): ensure nested items use the correct mode
+                 let res = recovery_fn(_section_recovery.bytes, target_local_pos, huffman, child_idx, axiom.is_alpha());
                  crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(prev_nested));
                  recorder.pop_context();
                  d.set(prev);
@@ -676,6 +676,7 @@ where
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
 
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
+    crate::item_trace!("[TEST-DEBUG] stat_id: {}, rhythm: {:?}", stat_id, rhythm);
     
     let id_bits = rhythm.id_bits;
     let terminator = (1u32 << id_bits) - 1;
@@ -744,6 +745,7 @@ where
     }
 
     let effective_width = axiom.stat_bit_width(stat_id, default_width);
+    crate::item_trace!("[TEST-DEBUG] stat_id: {}, effective_width: {}", stat_id, effective_width);
 
     let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
     let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;

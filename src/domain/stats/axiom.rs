@@ -402,14 +402,12 @@ impl StatsAxiom {
             {
                 return PropertyRhythm {
                     id_bits: 9,
-                    // Alpha v105 legacy alpha stat rows are generally 9-bit,
-                    // but version 0 and 1 rows are handled by the narrower guard above
-                    // to preserve the observed 17-bit property rhythm.
                     value_bits: Some(9),
                     has_terminal_bit: false,
                     has_extra_terminal_bit: false,
                 };
             }
+
             return PropertyRhythm {
                 id_bits: 9,
                 value_bits: None,
