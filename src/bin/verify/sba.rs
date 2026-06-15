@@ -7,7 +7,7 @@ use d2r_core::save::Save;
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 
 use d2r_core::verify::sba::{SbaBaseline, SbaJsonPayload, flatten_item, verify_baseline};
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
+use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus};
 
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("sba");
@@ -57,11 +57,12 @@ fn main() -> Result<()> {
         }
     };
 
+    let mut out = OutputManager::new("sba", &parsed);
     let fixture_path = parsed.get("fixture").cloned().unwrap();
     let baseline_path = parsed.get("baseline").cloned().unwrap();
     let is_generate = parsed.is_set("generate");
     let is_verify = parsed.is_set("verify");
-    let is_json = parsed.is_set("json");
+    let is_json = out.is_json();
 
     if !is_generate && !is_verify {
         anyhow::bail!("Must specify either --generate or --verify");
@@ -100,13 +101,11 @@ fn main() -> Result<()> {
         let json = serde_json::to_string_pretty(&current_baseline)?;
         fs::write(&baseline_path, json)
             .with_context(|| format!("Failed to write baseline: {}", baseline_path))?;
-        if !is_json {
-            println!(
-                "Generated baseline for {} items to {}",
-                current_baseline.items.len(),
-                baseline_path
-            );
-        }
+        out.summary(&format!(
+            "Generated baseline for {} items to {}",
+            current_baseline.items.len(),
+            baseline_path
+        ));
     } else if is_verify {
         let baseline_json = fs::read_to_string(&baseline_path)
             .with_context(|| format!("Failed to read baseline: {}", baseline_path))?;
@@ -118,11 +117,17 @@ fn main() -> Result<()> {
             }
         }
 
-        if !is_json {
-            println!(
+        if issues.is_empty() {
+            out.summary(&format!(
                 "Verification successful: 0 segment mismatches across {} items.",
                 current_baseline.items.len()
-            );
+            ));
+        } else {
+            out.summary(&format!(
+                "Verification failed: {} segment mismatches across {} items.",
+                issues.len(),
+                current_baseline.items.len()
+            ));
         }
     }
 
@@ -153,7 +158,7 @@ fn main() -> Result<()> {
             .with_results(payload)
             .with_issues(issues);
 
-        println!("{}", serde_json::to_string(&report)?);
+        out.json(&serde_json::to_string(&report)?);
     }
 
     Ok(())
