@@ -94,6 +94,7 @@ mod tests {
             "tests/fixtures/savegames/original/amazon_v105_act2_start.d2s",
             "tests/fixtures/savegames/original/amazon_v105_andariel_killed_no_talk.d2s",
             "tests/fixtures/savegames/original/amazon_v105_re_probe_zigzag_all_diff.d2s",
+            "tests/fixtures/savegames/original/amazon_v105_slice2_equipment.d2s",
         ];
         
         let huffman = HuffmanTree::new();

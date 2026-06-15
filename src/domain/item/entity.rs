@@ -1585,7 +1585,7 @@ pub fn parse_item_header<R: BitRead>(
             is_identified: s_axiom.is_identified(flags),
             is_socketed: s_axiom.is_socketed(flags, is_compact, code_hint),
             is_personalized,
-            is_runeword: h_axiom.is_runeword(flags, code_hint),
+            is_runeword: h_axiom.is_runeword(flags, code_hint, has_checksum),
             is_ethereal: s_axiom.is_ethereal(flags),
             is_ear: !alpha_mode && (flags & (1 << 24)) != 0,
             has_checksum,
