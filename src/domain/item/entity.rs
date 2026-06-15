@@ -1421,6 +1421,19 @@ pub fn parse_item_header<R: BitRead>(
             // even if the formula doesn't match our current understanding.
             // If it's a known summary item, we MUST consume those 8 bits to maintain rhythm.
             // Exception: hp1/mp1/tsc/isc often skip the checksum entirely (Slice 30).
+            let is_known_summary = if let Some(code) = code_hint {
+                matches!(code.trim(), "hp1" | "mp1" | "tsc" | "isc")
+            } else {
+                false
+            };
+
+            if matched && is_known_summary {
+                // Checksum match for hp1/mp1/tsc/isc is often a false positive against 
+                // version (3 bits) + mode (3 bits) + location (2 bits) bits.
+                // Trust the raw bits instead.
+                matched = false;
+            }
+
             if !matched && is_v105_summary {
                 let trimmed = code_hint.unwrap_or("").trim();
                 if !matches!(trimmed, "hp1" | "mp1" | "tsc" | "isc") {
