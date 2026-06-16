@@ -660,7 +660,8 @@ impl V105PropertyWidthAxiom {
         if let Some(overrides) = &reg.item_overrides {
             if let Some(map) = overrides.get(trimmed) {
                 if let Some(&is_shadow) = map.get("is_shadow") {
-                    if is_shadow != 0 {
+                    let is_compact_override = map.get("is_compact").map(|&v| v != 0).unwrap_or(false);
+                    if is_shadow != 0 && !is_compact_override {
                         return false;
                     }
                 }
