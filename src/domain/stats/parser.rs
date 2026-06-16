@@ -241,9 +241,29 @@ pub fn read_item_stats<R: BitRead>(
     let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery.clone(), huffman, is_runeword, is_v105_shadow_final || is_shadow_container, &axiom, Some(&child_offsets), Some(&child_offset_codes), |bytes, pos, huff, idx, alpha| {
         // Use scanner-verified code as hint to ensure correct item identification
         let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
-        let peek_code = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0).map(|p| p.3);
-        let code_hint = scanner_code.or(peek_code.as_deref());
-        crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, section_base_abs, huff, idx, alpha, None, None, code_hint)
+        let peek_res = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0);
+        let peek_code = peek_res.as_ref().map(|p| p.3.as_str());
+        let code_hint = scanner_code.or(peek_code);
+
+        let mut limit = None;
+        let mut forced_compact = None;
+        if alpha {
+            if let Some((_, _, _, code, flags, version, is_compact, _, _, _)) = &peek_res {
+                let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(*version, code, *flags, Some(idx));
+                if target_width > 0 {
+                    limit = Some(target_width as u64);
+                }
+                if *is_compact {
+                    forced_compact = Some(true);
+                }
+            }
+        }
+
+        let (item, mut consumed) = crate::domain::item::serialization::parse_item_at_with_limit(bytes, pos, section_base_abs, huff, idx, alpha, limit, forced_compact, code_hint)?;
+        if let Some(l) = limit {
+            consumed = consumed.max(l);
+        }
+        Ok((item, consumed))
     })?;
     if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) && !is_shadow_container {
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
@@ -676,7 +696,6 @@ where
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
 
     let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
-    crate::item_trace!("[TEST-DEBUG] stat_id: {}, rhythm: {:?}", stat_id, rhythm);
     
     let id_bits = rhythm.id_bits;
     let terminator = (1u32 << id_bits) - 1;
@@ -745,7 +764,6 @@ where
     }
 
     let effective_width = axiom.stat_bit_width(stat_id, default_width);
-    crate::item_trace!("[TEST-DEBUG] stat_id: {}, effective_width: {}", stat_id, effective_width);
 
     let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
     let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;

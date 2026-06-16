@@ -2947,7 +2947,23 @@ pub fn scan_socket_children(
         {
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
                 if mode == 6 || location == 6 {
+                    let mut limit = None;
+                    let mut forced_compact = None;
+                    let mut code_hint = None;
+                    if alpha {
+                        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(version, &code, flags, None);
+                        if target_width > 0 {
+                            limit = Some(target_width as u64);
+                        }
+                        if _is_compact {
+                            forced_compact = Some(true);
+                        }
+                        code_hint = Some(code.clone());
+                    }
+
                     let remaining = section_bits.saturating_sub(current_pos);
+                    let final_limit = if let Some(l) = limit { Some(l.min(remaining)) } else { Some(remaining) };
+                    
                     if let Ok((item, consumed)) = parse_item_at_with_limit(
                         bytes,
                         current_pos,
@@ -2955,12 +2971,14 @@ pub fn scan_socket_children(
                         huffman,
                         0,
                         alpha,
-                        Some(remaining),
-                        None,
-                        None,
+                        final_limit,
+                        forced_compact,
+                        code_hint.as_deref(),
                     ) {
                         let mut item_end = current_pos + consumed;
-                        if alpha {
+                        if let Some(l) = limit {
+                            item_end = current_pos + consumed.max(l);
+                        } else if alpha {
                             if let Some(next_start) =
                                 find_next_item_match(bytes, current_pos + 64, huffman, alpha)
                             {
