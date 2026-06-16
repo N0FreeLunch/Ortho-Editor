@@ -293,4 +293,23 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn marker_delete_is_already_finalized() -> anyhow::Result<()> {
+        let mut bytes = fixture_bytes("amazon_v105_act2_start.d2s");
+        let map = map_core_sections(&bytes).context("Failed to map core sections")?;
+        let woo_pos = map.woo_pos.context("Woo! marker not found")?;
+
+        mutate_marker_and_finalize(&mut bytes, &map, "Woo!", None, false)?;
+
+        assert_eq!(&bytes[woo_pos..woo_pos + "Woo!".len()], &[0; 4]);
+
+        let save = Save::from_bytes(&bytes).context("Failed to parse finalized bytes")?;
+        assert_eq!(save.header.file_size as usize, bytes.len());
+
+        let recalculated = recalculate_checksum(&bytes)?;
+        assert_eq!(save.header.checksum, recalculated);
+
+        Ok(())
+    }
 }
