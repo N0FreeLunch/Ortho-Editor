@@ -1,7 +1,7 @@
 use anyhow::{Context, bail};
 use d2r_core::item::{HuffmanTree, Item, ItemEditorExt};
 use d2r_core::save::{map_core_sections, rebuild_status_and_player_items};
-use d2r_core::verify::args::{ArgParser, ArgSpec};
+use d2r_core::verify::args::ArgParser;
 use std::fs;
 
 fn main() -> anyhow::Result<()> {
@@ -75,14 +75,10 @@ fn main() -> anyhow::Result<()> {
     if let Some(shift_args) = parsed.get_vec("shift-marker") {
         let name = &shift_args[0];
         let offset: isize = shift_args[1].parse().context("Invalid shift offset")?;
-        mutate_marker(&mut bytes, &map, name, Some(offset))?;
-        d2r_core::save::finalize_save_bytes(&mut bytes, force_fix)
-            .context("Failed to finalize save bytes")?;
+        mutate_marker_and_finalize(&mut bytes, &map, name, Some(offset), force_fix)?;
     } else if let Some(delete_args) = parsed.get_vec("delete-marker") {
         let name = &delete_args[0];
-        mutate_marker(&mut bytes, &map, name, None)?;
-        d2r_core::save::finalize_save_bytes(&mut bytes, force_fix)
-            .context("Failed to finalize save bytes")?;
+        mutate_marker_and_finalize(&mut bytes, &map, name, None, force_fix)?;
     } else if let Some(item_idx_str) = parsed.get("item-index") {
         let idx: usize = item_idx_str.parse().context("Invalid item index")?;
         let mut items =
@@ -212,6 +208,18 @@ fn mutate_marker(
     Ok(())
 }
 
+fn mutate_marker_and_finalize(
+    bytes: &mut Vec<u8>,
+    map: &d2r_core::save::SaveSectionMap,
+    name: &str,
+    shift: Option<isize>,
+    force_fix: bool,
+) -> anyhow::Result<()> {
+    mutate_marker(bytes, map, name, shift)?;
+    d2r_core::save::finalize_save_bytes(bytes, force_fix).context("Failed to finalize save bytes")?;
+    Ok(())
+}
+
 fn is_non_editable_forensic_item(item: &Item) -> bool {
     item.is_opaque() || item.is_semi_opaque() || item.is_residue()
 }
@@ -219,12 +227,25 @@ fn is_non_editable_forensic_item(item: &Item) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use d2r_core::save::{recalculate_checksum, Save};
+    use std::path::PathBuf;
 
     fn editable_item() -> Item {
         let mut item = Item::default();
         item.code = "cap".to_string();
         item.body.code = "cap".to_string();
         item
+    }
+
+    fn fixture_bytes(name: &str) -> Vec<u8> {
+        let repo_root = env!("CARGO_MANIFEST_DIR");
+        let path = PathBuf::from(repo_root)
+            .join("tests")
+            .join("fixtures")
+            .join("savegames")
+            .join("original")
+            .join(name);
+        fs::read(path).expect("fixture should exist")
     }
 
     #[test]
@@ -255,5 +276,21 @@ mod tests {
     #[test]
     fn normal_item_remains_editable() {
         assert!(!is_non_editable_forensic_item(&editable_item()));
+    }
+
+    #[test]
+    fn marker_shift_is_already_finalized() -> anyhow::Result<()> {
+        let mut bytes = fixture_bytes("amazon_v105_act2_start.d2s");
+        let map = map_core_sections(&bytes).context("Failed to map core sections")?;
+
+        mutate_marker_and_finalize(&mut bytes, &map, "Woo!", Some(1), false)?;
+
+        let save = Save::from_bytes(&bytes).context("Failed to parse finalized bytes")?;
+        assert_eq!(save.header.file_size as usize, bytes.len());
+
+        let recalculated = recalculate_checksum(&bytes)?;
+        assert_eq!(save.header.checksum, recalculated);
+
+        Ok(())
     }
 }
