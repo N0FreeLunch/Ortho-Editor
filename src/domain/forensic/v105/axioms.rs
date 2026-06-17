@@ -312,13 +312,9 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
                 return w_axiom.summary_item_fixed_width(); // Enforce strict 80-bit slotted boundary
             }
 
-            // Alpha v105 forensic: Potions and scrolls usually follow an 80-bit slotted rhythm.
-            // Scrolls (tsc/isc) are often 72-bit (Slice 27).
-            let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
-            if trimmed == "tsc" || trimmed == "isc" {
-                return 72;
-            }
-            return 80;
+            // Alpha v105 forensic: Potions and scrolls usually follow a 72-bit slotted rhythm (Slice 27).
+            // Some summary items still use 80-bit rhythm via force_summary_rhythm_codes override.
+            return 72;
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
@@ -900,8 +896,8 @@ mod tests {
     fn test_v105_summary_aliases_keep_hp1_and_mp1_compact() {
         assert!(is_v105_summary_code("hp1"));
         assert!(is_v105_summary_code("mp1"));
-        assert_eq!(get_v105_target_width(5, "hp1", 0, None), 80);
-        assert_eq!(get_v105_target_width(5, "mp1", 0, None), 80);
+        assert_eq!(get_v105_target_width(5, "hp1", 0, None), 72);
+        assert_eq!(get_v105_target_width(5, "mp1", 0, None), 72);
         assert!(!is_v105_summary_code("xrs"));
     }
 
