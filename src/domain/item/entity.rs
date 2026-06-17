@@ -771,6 +771,7 @@ impl Item {
 
         // 2. Handle Alpha v105 summary items (Potions, Scrolls):
         if is_v105_summary {
+            let s_start = emitter.written_bits();
             // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
             emitter.write_bits(self.header.y as u32, 3)?;
             // Write Gap.
@@ -781,8 +782,6 @@ impl Item {
             }
 
             // Write 16-bit ID (Slice 2): Unified 16-bit ID field.
-            // Alpha v105 summary items (wsp, potions, scrolls) MUST use 16-bit ID to maintain 73/80 bit slotted alignment.
-            // If they have 24-bit raw code bits, it will overflow the slotted boundary.
             let id_val = if !self.body.alpha_code_bits.is_empty() {
                 let mut val = 0u32;
                 for (i, &bit) in self.body.alpha_code_bits.iter().enumerate() {
@@ -806,7 +805,9 @@ impl Item {
             );
             
             let mut final_target = target as u64;
-            if self.total_bits > final_target {
+            // Slice 3040: Summary items should strictly follow their slotted rhythm (72/80 bits)
+            // and avoid greedy expansion from proximity nudges or residue capture.
+            if !is_v105_summary && self.total_bits > final_target {
                 final_target = self.total_bits;
             }
 
@@ -814,8 +815,6 @@ impl Item {
                 let padding_needed = (final_target - current_bits) as u32;
                 let padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
                     let mut bits = self.body.alpha_alignment_padding.clone();
-                    // Slice 7: Honor total_bits even for summary items to preserve bit-exact boundaries
-                    // when they have been expanded by proximity snaps or dynamic interval capture.
                     if bits.len() < padding_needed as usize {
                         bits.resize(padding_needed as usize, false);
                     } else {

@@ -672,25 +672,14 @@ impl V105PropertyWidthAxiom {
             // in Alpha v105 to preserve the 80-bit rhythm and item count parity.
             return true;
         }
-        if trimmed.starts_with('h')
-            || trimmed.starts_with('m')
-            || (trimmed.starts_with('r') && trimmed.len() <= 3)
-            || trimmed == "vps"
-            || trimmed == "yps"
-            || trimmed == "wms"
-            || trimmed.starts_with('o')
-            || trimmed.starts_with('g')
-            || trimmed == "ice"
-            || trimmed == "xyz"
-            || trimmed == "tsc"
-            || trimmed == "isc"
-            || trimmed == "jav"
-            || trimmed == "buc"
-            || trimmed == "ks d"
-            || trimmed == "k  k"
-        {
-            // Alpha v105 potion family are textual summaries even when the raw
-            // stealth pattern has already been normalized to a readable code.
+        
+        // Alpha v105 Summary Items: Potions, Scrolls, and small consumables (Slice 3040).
+        // These items follow strict 72/80 bit slotted boundaries and use 16-bit IDs.
+        let is_potion = trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed == "rvs" || trimmed == "rvl";
+        let is_scroll = trimmed == "tsc" || trimmed == "isc";
+        let is_misc_summary = trimmed == "vps" || trimmed == "yps" || trimmed == "wms" || trimmed == "wuw8";
+        
+        if is_potion || is_scroll || is_misc_summary {
             return true;
         }
 
@@ -704,6 +693,10 @@ impl V105PropertyWidthAxiom {
             if codes.iter().any(|c| c == trimmed) {
                 // Alpha v105 Forensic: ww/gcw in version 0/2 are often full equipment (Slice 48)
                 if (version == 0 || version == 2) && (trimmed == "ww" || trimmed == "gcw") {
+                    return false;
+                }
+                // Exclude known non-summary equipment-like shadows even if in forced_compact
+                if trimmed == "jav" || trimmed == "buc" || trimmed == "ks d" {
                     return false;
                 }
                 return true;
@@ -805,7 +798,11 @@ impl V105PropertyWidthAxiom {
             }
         }
         
-        if trimmed == "tsc" || trimmed == "isc" {
+        // Alpha v105 potions and scrolls use 0-bit gaps.
+        if trimmed == "tsc" || trimmed == "isc" 
+            || trimmed.starts_with('h') || trimmed.starts_with('m')
+            || trimmed == "rvs" || trimmed == "rvl"
+        {
             0
         } else {
             8

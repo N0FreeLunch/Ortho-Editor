@@ -1176,18 +1176,72 @@ impl Item {
             }
 
             // Slice 2: Capture residue between items
-            if alpha_mode && start > start_offset {
-                if let Some((_, _, _, recovery_code, _, _, recovery_is_compact, _, _, _)) =
-                    peek_item_header_at_with_base(
-                        section_bytes,
-                        start_offset,
-                        Some(section_bit_offset + start_offset),
-                        huffman,
-                        alpha_mode,
-                        item_count,
-                    )
-                {
-                    if let Ok((mut recovered_item, recovered_consumed)) = parse_item_at_with_limit(
+            while alpha_mode && start > start_offset {
+                let mut found_item = None;
+                let max_search = start.saturating_sub(start_offset).min(128);
+                
+                for search_offset in 0..=max_search {
+                    if let Some((_, _, _, recovery_code, _, _, recovery_is_compact, _, _, _)) =
+                        peek_item_header_at_with_base(
+                            section_bytes,
+                            start_offset + search_offset,
+                            Some(section_bit_offset + start_offset + search_offset),
+                            huffman,
+                            alpha_mode,
+                            item_count,
+                        )
+                    {
+                        if !recovery_code.trim().is_empty()
+                            && (crate::domain::forensic::v105::axioms::is_v105_summary_code(
+                                &recovery_code,
+                            ) || matches!(recovery_code.trim(), "jav" | "buc" | "us g"))
+                        {
+                            found_item = Some((search_offset, recovery_code, recovery_is_compact));
+                            break;
+                        }
+                    }
+                }
+
+                if let Some((skip, recovery_code, recovery_is_compact)) = found_item {
+                    if skip > 0 {
+                        let bits = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                        let mut cursor = BitCursor::new(bits);
+                        let _ = cursor.skip(section_bit_offset + start_offset);
+                        let bits_vec = cursor.read_bits_as_vec(skip as u32).unwrap_or_default();
+                        
+                        if let Some(prev_item) = items.last_mut() {
+                            prev_item.body.alpha_alignment_padding.extend(bits_vec.clone());
+                            for (idx, b) in bits_vec.iter().enumerate() {
+                                prev_item.bits.push(crate::domain::item::RecordedBit {
+                                    bit: *b,
+                                    offset: section_bit_offset + start_offset + idx as u64,
+                                });
+                            }
+                            prev_item.range.end += skip;
+                            prev_item.total_bits += skip;
+                            if let Some(w) = prev_item.logical_width {
+                                prev_item.logical_width = Some(w + skip);
+                            }
+                        } else {
+                            let mut residue = Item::default();
+                            residue.expected_start_bit = start_offset;
+                            residue.code = "    ".to_string();
+                            residue.modules.push(crate::domain::item::ItemModule::Opaque(bits_vec.clone()));
+                            for (idx, b) in bits_vec.iter().enumerate() {
+                                residue.bits.push(crate::domain::item::RecordedBit {
+                                    bit: *b,
+                                    offset: section_bit_offset + start_offset + idx as u64,
+                                });
+                            }
+                            residue.range.start = section_bit_offset + start_offset;
+                            residue.range.end = section_bit_offset + start_offset + skip;
+                            residue.total_bits = skip;
+                            items.push(residue);
+                        }
+                        start_offset += skip;
+                    }
+
+                    let res = parse_item_at_with_limit(
                         section_bytes,
                         start_offset,
                         section_bit_offset,
@@ -1201,41 +1255,42 @@ impl Item {
                             None
                         },
                         Some(recovery_code.as_str()),
-                    ) {
-                        // Alpha Forensic (Slice 19): Residue items should only be compact/summary items.
-                        // Reject complex residue to avoid bitstream desync.
-                        if alpha_mode && !recovery_is_compact {
-                            // Reject complex residue
-                        } else if !recovered_item.is_opaque()
-                            && !recovered_item.is_residue()
-                            && recovered_consumed <= start - start_offset
-                        {
-                            if !recovery_code.trim().is_empty()
-                                && crate::domain::forensic::v105::axioms::is_v105_summary_code(
-                                    &recovery_code,
-                                )
-                            {
-                                recovered_item.code = recovery_code.clone();
-                            }
-                            recovered_item.expected_start_bit = start_offset;
-                            recovered_item.range.start = section_bit_offset + start_offset;
-                            recovered_item.range.end =
-                                section_bit_offset + start_offset + recovered_consumed;
-                            recovered_item.total_bits = recovered_consumed;
-                            recovered_item.logical_width = Some(recovered_consumed);
-                            items.push(recovered_item);
-                            if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get())
-                            {
-                                item_count += 1;
-                            }
-                            start_offset += recovered_consumed;
-                        }
+                    );
+                    if let Err(e) = &res {
+                        println!("DEBUG: recovery parse FAILED for {}: {:?}", recovery_code, e);
                     }
+                    if let Ok((mut recovered_item, recovered_consumed)) = res {
+                        recovered_item.code = recovery_code.clone();
+                        recovered_item.expected_start_bit = start_offset;
+                        recovered_item.range.start = section_bit_offset + start_offset;
+                        
+                        let remaining_gap = start.saturating_sub(start_offset.saturating_add(recovered_consumed));
+                        let consumed = if remaining_gap < 8 && remaining_gap > 0 {
+                            recovered_consumed.saturating_add(remaining_gap)
+                        } else {
+                            recovered_consumed
+                        };
+                        
+                        recovered_item.range.end = section_bit_offset + start_offset + consumed;
+                        recovered_item.total_bits = consumed;
+                        recovered_item.logical_width = Some(consumed);
+                        items.push(recovered_item);
+                        
+                        if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get())
+                        {
+                            item_count += 1;
+                        }
+                        start_offset += consumed;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
                 }
             }
 
             if start > start_offset {
-                let residue_len = start - start_offset;
+                let residue_len = start.saturating_sub(start_offset);
                 let mut bits = Vec::new();
                 let mut fallback_reader =
                     BitReader::endian(Cursor::new(section_bytes), LittleEndian);
@@ -1269,20 +1324,41 @@ impl Item {
                 residue.range.start = section_bit_offset + start_offset;
                 residue.range.end = section_bit_offset + start;
                 residue.total_bits = residue_len;
+
                 if alpha_mode {
-                    residue.forensic_audit.record(ForensicMetadata::new(
-                        Confidence::Speculative,
-                        Intentionality::Artifactual,
-                        "Alpha v105 item preservation",
-                    ));
+                    if let Some(prev_item) = items.last_mut() {
+                        prev_item.body.alpha_alignment_padding.extend(bits.clone());
+                        for (idx, b) in bits.iter().enumerate() {
+                            prev_item.bits.push(crate::domain::item::RecordedBit {
+                                bit: *b,
+                                offset: section_bit_offset + start_offset + idx as u64,
+                            });
+                        }
+                        prev_item.range.end = section_bit_offset + start;
+                        prev_item.total_bits += residue_len;
+                        if let Some(w) = prev_item.logical_width {
+                            prev_item.logical_width = Some(w + residue_len);
+                        }
+                    } else {
+                        residue.forensic_audit.record(ForensicMetadata::new(
+                            Confidence::Speculative,
+                            Intentionality::Artifactual,
+                            "Alpha v105 item preservation",
+                        ));
+                        items.push(residue);
+                    }
                 } else {
                     residue.forensic_audit.record(ForensicMetadata::new(
                         Confidence::Fragile,
                         Intentionality::Artifactual,
                         "Residue preservation",
                     ));
+                    items.push(residue);
+                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                        item_count += 1;
+                    }
                 }
-                items.push(residue);
+                start_offset = start;
             }
 
             // Slice 5: Acceptance Gate
