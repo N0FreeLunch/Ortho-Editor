@@ -448,7 +448,7 @@ fn main() {
                     
                     let emitter_bypass = {
                         let trimmed_code = item.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
-                        let is_target_blank = trimmed_code.is_empty() && item.code != "    ";
+                        let is_target_blank = is_alpha && trimmed_code.is_empty();
                         item.is_opaque() || item.is_semi_opaque() || is_target_blank
                     };
 
