@@ -754,8 +754,8 @@ impl Item {
         }
         emitter.write_bits(self.header.version as u32, w_axiom.version_bits(alpha_mode) as u32)?;
         emitter.write_bits(self.header.mode as u32, w_axiom.mode_bits(alpha_mode) as u32)?;
-        emitter.write_bits(self.header.location as u32, w_axiom.location_bits(alpha_mode, self.header.version) as u32)?;
         emitter.write_bits(self.header.x as u32, w_axiom.x_bits(alpha_mode, self.header.version) as u32)?;
+        emitter.write_bits(self.header.location as u32, w_axiom.location_bits(alpha_mode, self.header.version) as u32)?;
 
         let s_axiom = StatsAxiom::new(
             self.header.version,
@@ -1466,10 +1466,10 @@ pub fn parse_item_header<R: BitRead>(
         }
     }
 
-    // 3. Read Mode, Location, X with correct widths.
+    // 3. Read Mode, X, Location with correct widths.
     let mode = cursor.read_bits::<u8>(w_axiom.mode_bits(alpha_mode) as u32).unwrap_or(0);
-    let location = cursor.read_bits::<u8>(w_axiom.location_bits(alpha_mode, version) as u32).unwrap_or(0);
     let x = cursor.read_bits::<u8>(w_axiom.x_bits(alpha_mode, version) as u32).unwrap_or(0);
+    let location = cursor.read_bits::<u8>(w_axiom.location_bits(alpha_mode, version) as u32).unwrap_or(0);
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);

@@ -623,13 +623,13 @@ pub fn peek_item_header_at_specific_gap(
         && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
     {
         let m = alpha_reader.read::<3, u8>().ok()?;
-        let l = match location_bits {
-            4 => alpha_reader.read::<4, u8>().ok()?,
-            _ => alpha_reader.read::<3, u8>().ok()?,
-        };
         let x = match x_bits {
             3 => alpha_reader.read::<3, u8>().ok()?,
             _ => alpha_reader.read::<4, u8>().ok()?,
+        };
+        let l = match location_bits {
+            4 => alpha_reader.read::<4, u8>().ok()?,
+            _ => alpha_reader.read::<3, u8>().ok()?,
         };
         (v, m, l, x, 32 + version_bits + 8 + mode_bits + location_bits + x_bits, true)
     } else {
