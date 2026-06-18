@@ -30,7 +30,7 @@ impl GapCombinator for AlphaHeaderGap {
     }
 
     fn parse<R: BitRead>(cursor: &mut BitCursor<R>, len: usize) -> io::Result<Self> {
-        let bits = cursor.read_bits_as_vec(len as u32).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let bits = cursor.read_bits_as_vec_up_to(len as u32);
         Ok(Self { bits })
     }
 }
