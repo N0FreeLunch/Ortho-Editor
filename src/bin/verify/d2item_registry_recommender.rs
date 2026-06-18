@@ -14,6 +14,10 @@ struct MismatchRow {
     mismatch_type: String,
     segment: String,
     first_mismatch_offset: Option<usize>,
+    #[serde(default)]
+    original_len: Option<usize>,
+    #[serde(default)]
+    target_len: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +39,8 @@ struct Recommendation {
     current_context: Context,
     recommended_action: String,
     confidence: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recommended_width: Option<u32>,
     evidence_examples: Vec<Evidence>,
 }
 
@@ -51,6 +57,10 @@ struct Evidence {
     item: String,
     mismatch_type: String,
     offset: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_len: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,11 +157,48 @@ fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|| "unknown".to_string()),
         };
 
+        let mut recommended_width = None;
         let (action, confidence) = if reg_stat.is_none() && reg_mapping.is_none() {
             ("ADD_TO_REGISTRY", "HIGH")
         } else if reg_mapping.is_some() && reg_mapping.unwrap().save_bits.is_none() {
             ("DEFINE_SAVE_BITS", "HIGH")
         } else {
+            let is_length_mismatch = rows.iter().all(|(_, r)| r.mismatch_type == "Length");
+            if is_length_mismatch {
+                if let Some(curr_bits) = context.save_bits {
+                    let mut consistent_delta = None;
+                    let mut all_have_lens = true;
+                    for (_, r) in rows {
+                        if let (Some(orig), Some(targ)) = (r.original_len, r.target_len) {
+                            let delta = orig as i32 - targ as i32;
+                            if let Some(prev) = consistent_delta {
+                                if prev != delta {
+                                    all_have_lens = false;
+                                    break;
+                                }
+                            } else {
+                                consistent_delta = Some(delta);
+                            }
+                        } else {
+                            all_have_lens = false;
+                            break;
+                        }
+                    }
+                    if all_have_lens {
+                        if let Some(delta) = consistent_delta {
+                            let proposed = curr_bits as i32 + delta;
+                            if proposed > 0 && proposed <= 32 {
+                                match stat_id {
+                                    // No representative family is proven yet.
+                                    _ => {
+                                        recommended_width = None;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             ("INSPECT_WIDTH_OR_PARSER", "MEDIUM")
         };
 
@@ -161,6 +208,7 @@ fn main() -> anyhow::Result<()> {
             current_context: context,
             recommended_action: action.to_string(),
             confidence: confidence.to_string(),
+            recommended_width,
             evidence_examples: rows
                 .iter()
                 .take(3)
@@ -169,6 +217,8 @@ fn main() -> anyhow::Result<()> {
                     item: r.item_label.clone(),
                     mismatch_type: r.mismatch_type.clone(),
                     offset: r.first_mismatch_offset,
+                    original_len: r.original_len,
+                    target_len: r.target_len,
                 })
                 .collect(),
         });

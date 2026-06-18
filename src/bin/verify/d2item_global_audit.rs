@@ -48,6 +48,10 @@ struct MismatchRow {
     mismatch_type: String,
     segment: String,
     first_mismatch_offset: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_len: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -236,6 +240,8 @@ fn process_file(
                                 mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
                                 segment: it.segment.clone().unwrap_or_default(),
                                 first_mismatch_offset: it.first_mismatch_offset.map(|o| o as usize),
+                                original_len: Some(it.original_len),
+                                target_len: Some(it.target_len),
                             });
                         }
                     }
