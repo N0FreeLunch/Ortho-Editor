@@ -623,13 +623,13 @@ pub fn peek_item_header_at_specific_gap(
         && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
     {
         let m = alpha_reader.read::<3, u8>().ok()?;
-        let x = match x_bits {
-            3 => alpha_reader.read::<3, u8>().ok()?,
-            _ => alpha_reader.read::<4, u8>().ok()?,
-        };
         let l = match location_bits {
             4 => alpha_reader.read::<4, u8>().ok()?,
             _ => alpha_reader.read::<3, u8>().ok()?,
+        };
+        let x = match x_bits {
+            3 => alpha_reader.read::<3, u8>().ok()?,
+            _ => alpha_reader.read::<4, u8>().ok()?,
         };
         (v, m, l, x, 32 + version_bits + 8 + mode_bits + location_bits + x_bits, true)
     } else {
@@ -1156,16 +1156,16 @@ impl Item {
             }
         }
         let mut start_offset = section_header_bits;
-        let mut subsumed_indices = std::collections::HashSet::new();
-        let mut next_expected_start = section_header_bits;
+        let mut subsumed_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut _next_expected_start = section_header_bits;
         let mut item_count = 0;
-        let mut consecutive_opaque = 0;
-        let mut drift_signatures = std::collections::HashSet::new();
+        let mut _consecutive_opaque = 0;
+        let mut _drift_signatures: std::collections::HashSet<String> = std::collections::HashSet::new();
         'marker_loop: for (i, marker) in markers.iter().enumerate() {
             if subsumed_indices.contains(&i) {
                 continue;
             }
-            let mut start = marker.offset; // marker.offset is relative to section_bytes
+            let start = marker.offset; // marker.offset is relative to section_bytes
 
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
             if non_residue_count >= top_level_count as usize {
@@ -1175,12 +1175,21 @@ impl Item {
                 continue;
             }
 
-            // Slice 2: Capture residue between items
+            // Slice 2: Capture residue between items (Resilient Recovery)
             while alpha_mode && start > start_offset {
                 let mut found_item = None;
-                let max_search = start.saturating_sub(start_offset).min(128);
+                let max_search = start.saturating_sub(start_offset).min(64);
                 
                 for search_offset in 0..=max_search {
+                    // Skip noise: 16 bits of all ones or zeros is never a valid Alpha summary/equipment header
+                    let bits = BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
+                    let mut cursor = BitCursor::new(bits);
+                    if cursor.skip(section_bit_offset + start_offset + search_offset).is_ok() {
+                        if let Ok(val) = cursor.read_bits::<u16>(16) {
+                            if val == 0 || val == 0xFFFF { continue; }
+                        }
+                    }
+
                     if let Some((_, _, _, recovery_code, _, _, recovery_is_compact, _, _, _)) =
                         peek_item_header_at_with_base(
                             section_bytes,
@@ -1191,10 +1200,12 @@ impl Item {
                             item_count,
                         )
                     {
-                        if !recovery_code.trim().is_empty()
+                        let trimmed = recovery_code.trim();
+                        if !trimmed.is_empty()
                             && (crate::domain::forensic::v105::axioms::is_v105_summary_code(
                                 &recovery_code,
-                            ) || matches!(recovery_code.trim(), "jav" | "buc" | "us g"))
+                            ) || matches!(trimmed, "jav" | "buc" | "us g"))
+                            && trimmed != "7pw"
                         {
                             found_item = Some((search_offset, recovery_code, recovery_is_compact));
                             break;
@@ -1204,7 +1215,7 @@ impl Item {
 
                 if let Some((skip, recovery_code, recovery_is_compact)) = found_item {
                     if skip > 0 {
-                        let bits = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                        let bits = BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
                         let mut cursor = BitCursor::new(bits);
                         let _ = cursor.skip(section_bit_offset + start_offset);
                         let bits_vec = cursor.read_bits_as_vec(skip as u32).unwrap_or_default();
@@ -1241,7 +1252,7 @@ impl Item {
                         start_offset += skip;
                     }
 
-                    let res = parse_item_at_with_limit(
+                    if let Ok((mut recovered_item, recovered_consumed)) = parse_item_at_with_limit(
                         section_bytes,
                         start_offset,
                         section_bit_offset,
@@ -1249,24 +1260,16 @@ impl Item {
                         item_count,
                         alpha_mode,
                         None,
-                        if recovery_is_compact {
-                            Some(true)
-                        } else {
-                            None
-                        },
+                        if recovery_is_compact { Some(true) } else { None },
                         Some(recovery_code.as_str()),
-                    );
-                    if let Err(e) = &res {
-                        println!("DEBUG: recovery parse FAILED for {}: {:?}", recovery_code, e);
-                    }
-                    if let Ok((mut recovered_item, recovered_consumed)) = res {
+                    ) {
                         recovered_item.code = recovery_code.clone();
                         recovered_item.expected_start_bit = start_offset;
                         recovered_item.range.start = section_bit_offset + start_offset;
                         
                         let remaining_gap = start.saturating_sub(start_offset.saturating_add(recovered_consumed));
                         let consumed = if remaining_gap < 8 && remaining_gap > 0 {
-                            recovered_consumed.saturating_add(remaining_gap)
+                            recovered_consumed + remaining_gap
                         } else {
                             recovered_consumed
                         };
@@ -1290,10 +1293,10 @@ impl Item {
             }
 
             if start > start_offset {
-                let residue_len = start.saturating_sub(start_offset);
+                let residue_len = start - start_offset;
                 let mut bits = Vec::new();
                 let mut fallback_reader =
-                    BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                    BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
                 if fallback_reader.skip(start_offset as u32).is_ok() {
                     for _ in 0..residue_len {
                         if let Ok(b) = fallback_reader.read_bit() {
@@ -1303,58 +1306,54 @@ impl Item {
                         }
                     }
                 }
-                let mut residue = Item::default();
-                residue.expected_start_bit = start_offset;
-                residue.code = "    ".to_string();
-                if alpha_mode {
-                    residue
-                        .modules
-                        .push(crate::domain::item::ItemModule::Opaque(bits.clone()));
+                
+                if let Some(prev_item) = items.last_mut() {
+                    prev_item.body.alpha_alignment_padding.extend(bits.clone());
+                    for (idx, b) in bits.iter().enumerate() {
+                        prev_item.bits.push(crate::domain::item::RecordedBit {
+                            bit: *b,
+                            offset: section_bit_offset + start_offset + idx as u64,
+                        });
+                    }
+                    prev_item.range.end = section_bit_offset + start;
+                    prev_item.total_bits += residue_len;
+                    if let Some(w) = prev_item.logical_width {
+                        prev_item.logical_width = Some(w + residue_len);
+                    }
                 } else {
-                    residue
-                        .modules
-                        .push(crate::domain::item::ItemModule::Residue(bits.clone()));
-                }
-                for (idx, b) in bits.iter().enumerate() {
-                    residue.bits.push(crate::domain::item::RecordedBit {
-                        bit: *b,
-                        offset: section_bit_offset + start_offset + idx as u64,
-                    });
-                }
-                residue.range.start = section_bit_offset + start_offset;
-                residue.range.end = section_bit_offset + start;
-                residue.total_bits = residue_len;
-
-                if alpha_mode {
-                    if let Some(prev_item) = items.last_mut() {
-                        prev_item.body.alpha_alignment_padding.extend(bits.clone());
-                        for (idx, b) in bits.iter().enumerate() {
-                            prev_item.bits.push(crate::domain::item::RecordedBit {
-                                bit: *b,
-                                offset: section_bit_offset + start_offset + idx as u64,
-                            });
-                        }
-                        prev_item.range.end = section_bit_offset + start;
-                        prev_item.total_bits += residue_len;
-                        if let Some(w) = prev_item.logical_width {
-                            prev_item.logical_width = Some(w + residue_len);
-                        }
-                    } else {
+                    let mut residue = Item::default();
+                    residue.expected_start_bit = start_offset;
+                    residue.code = "    ".to_string();
+                    if alpha_mode {
+                        residue
+                            .modules
+                            .push(crate::domain::item::ItemModule::Opaque(bits.clone()));
                         residue.forensic_audit.record(ForensicMetadata::new(
                             Confidence::Speculative,
                             Intentionality::Artifactual,
                             "Alpha v105 item preservation",
                         ));
-                        items.push(residue);
+                    } else {
+                        residue
+                            .modules
+                            .push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                        residue.forensic_audit.record(ForensicMetadata::new(
+                            Confidence::Fragile,
+                            Intentionality::Artifactual,
+                            "Residue preservation",
+                        ));
                     }
-                } else {
-                    residue.forensic_audit.record(ForensicMetadata::new(
-                        Confidence::Fragile,
-                        Intentionality::Artifactual,
-                        "Residue preservation",
-                    ));
+                    for (idx, b) in bits.iter().enumerate() {
+                        residue.bits.push(crate::domain::item::RecordedBit {
+                            bit: *b,
+                            offset: section_bit_offset + start_offset + idx as u64,
+                        });
+                    }
+                    residue.range.start = section_bit_offset + start_offset;
+                    residue.range.end = section_bit_offset + start;
+                    residue.total_bits = residue_len;
                     items.push(residue);
-                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                    if !alpha_mode && !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
                         item_count += 1;
                     }
                 }
@@ -1406,7 +1405,6 @@ impl Item {
                 is_compact_final = is_compact;
                 version_peek = version;
                 flags_peek = flags;
-                let _trimmed_code = code.trim();
                 // Slice 6/9: Axiom 0344 inference for blank items and summary codes missing the compact flag
                 if alpha_mode
                     && !is_compact
@@ -1439,10 +1437,10 @@ impl Item {
 
             let mut target_width_override = 0u32;
             if alpha_mode {
-                let parse_code_hint = peek_code_hint.as_deref().unwrap_or(marker.code.as_str());
+                let parse_code_hint_tmp = peek_code_hint.as_deref().unwrap_or(marker.code.as_str());
                 target_width_override = crate::domain::forensic::v105::axioms::get_v105_target_width(
                     version_peek,
-                    parse_code_hint,
+                    parse_code_hint_tmp,
                     flags_peek,
                     Some(item_count),
                 );
@@ -1451,10 +1449,7 @@ impl Item {
                 }
 
                 // Slice 4: Authority Overlap Boundary Repair.
-                // Authority containers (`xrs`, `c8xr`, `rhd`) in Alpha v105 swallow their peer children
-                // (r15, r13, r08) during parsing. We must ensure the dynamic limit accommodates this 
-                // "swallowing" behavior even if the next physical marker is only 128 bits away.
-                if matches!(parse_code_hint.trim(), "xrs" | "c8xr" | "rhd") {
+                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd") {
                     dynamic_limit = dynamic_limit.max(512);
                 }
             }
@@ -1553,7 +1548,6 @@ impl Item {
 
                     // Axiom 0344: In Alpha v105, if the scanner found a valid code,
                     // ensure the parser uses it (prevents Huffman collisions).
-                    // Restore code BEFORE alignment calculation to ensure correct target width.
                     if alpha_mode && !marker.code.trim().is_empty() {
                         let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code);
                         let is_authority = matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
@@ -1584,12 +1578,12 @@ impl Item {
                         );
 
                         // Slice 3 Resolution: Trust the physical marker found by the scanner as the absolute boundary.
-                        if let Some(limit) = parse_limit {
+                        if let Some(limit_val) = parse_limit {
                             if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code)
                                 && !crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_rhythm_forced(final_item.header.version, &final_item.code)
                             {
-                                if limit >= 72 && limit <= 128 && (limit % 8 == 0 || limit % 8 == 5) {
-                                    target_width = limit;
+                                if limit_val >= 72 && limit_val <= 128 && (limit_val % 8 == 0 || limit_val % 8 == 5) {
+                                    target_width = limit_val;
                                 }
                             }
                         }
@@ -1620,419 +1614,28 @@ impl Item {
                         final_item.code = "Opaque".to_string();
                     }
 
-                    let mut actual_consumed = consumed_bits;
-                    let current_end = start + consumed_bits;
-
-                    if alpha_mode {
-                        // Look ahead to find the next high-confidence marker that hasn't been subsumed
-                        let mut next_target = None;
-                        for next_m in markers.iter().skip(i + 1) {
-                            if next_m.confidence >= 500 {
-                                // High confidence threshold
-                                next_target = Some(next_m.offset);
-                                break;
-                            }
-                        }
-
-                        if let Some(target) = next_target {
-                            if current_end < target {
-                                let proximity_axiom = crate::domain::forensic::v105::axioms::V105MarkerProximityAxiom::default();
-                                if let Some(drift) =
-                                    proximity_axiom.calculate_nudge(current_end, target)
-                                {
-                                    // Axiom 0345: Proximity Snap. Consume the drift as alignment padding to recover boundary.
-                                    let preserve_padding = true;
-                                    if preserve_padding {
-                                        actual_consumed += drift;
-                                        let padding_bits = read_alignment_padding_bits(
-                                            section_bytes,
-                                            current_end,
-                                            drift,
-                                        );
-                                        final_item
-                                            .body
-                                            .alpha_alignment_padding
-                                            .extend(padding_bits);
-                                    }
-                                    final_item.forensic_audit.record(proximity_axiom.metadata());
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(flen) = forced_length {
-                        actual_consumed = flen;
-                    }
-
-                    final_item.expected_start_bit = start;
+                    let actual_consumed = consumed_bits;
                     final_item.range.start = section_bit_offset + start;
-                    let computed_end = section_bit_offset + start + actual_consumed;
-                    if final_item.range.end < computed_end {
-                        final_item.range.end = computed_end;
-                    }
+                    final_item.range.end = section_bit_offset + start + actual_consumed;
                     final_item.total_bits = actual_consumed;
-
-                    // Slice 9: Sync captured bits with final consumed length to ensure bit-exact parity
-                    // for items with greedy swallowing or proximity nudges.
-                    if alpha_mode && final_item.bits.len() < actual_consumed as usize {
-                        let diff = actual_consumed as usize - final_item.bits.len();
-                        let start_cap = start + (actual_consumed - diff as u64);
-                        let extra_bits = read_alignment_padding_bits(section_bytes, start_cap, diff as u64);
-                        for (idx, b) in extra_bits.iter().enumerate() {
-                            final_item.bits.push(crate::domain::item::RecordedBit {
-                                bit: *b,
-                                offset: section_bit_offset + start_cap + idx as u64,
-                            });
-                        }
-                    }
-
                     final_item.logical_width = Some(actual_consumed);
-                    // Slice 7: Mark subsumed markers (Competitive Marker Resolution)
-                    let end_bit = start + actual_consumed;
-                    for (next_idx, next_marker) in markers.iter().enumerate().skip(i + 1) {
-                        if next_marker.offset < end_bit {
-                            subsumed_indices.insert(next_idx);
-                        } else {
-                            break;
-                        }
-                    }
-
                     items.push(final_item);
-                    consecutive_opaque = 0;
-                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
-                        item_count += 1;
-                    }
+
+                    item_count += 1;
                     start_offset = start + actual_consumed;
-                    next_expected_start = start + actual_consumed;
+                    _next_expected_start = start + actual_consumed;
+                    _consecutive_opaque = 0;
                 }
-                Err(e) => {
-                    if alpha_mode {
-                        consecutive_opaque += 1;
-                        let signature = (start % 8, format!("{:?}", e));
-                        if drift_signatures.contains(&signature) {
-                            return Err(e).map_err(|e| {
-                                e.with_hint("Terminating section: Repeating drift signature detected.")
-                            });
-                        }
-                        drift_signatures.insert(signature);
-
-                        if consecutive_opaque >= 3 {
-                            return Err(e).map_err(|e| {
-                                e.with_hint("Terminating section: 3 consecutive Opaque items detected.")
-                            });
-                        }
-                    }
-
-                    // Marker was plausible but parsing failed or was rejected. Capture raw bits as Opaque item.
-                    // Slice 7: Dynamic Interval Capture. Scan for next JM to bound the Opaque block.
-                    let mut actual_limit = limit;
-                    let mut found_next = false;
-
-                    let mut probe_pos = start + (if alpha_mode { 72 } else { 80 }); // Minimum interval for Alpha v105
-                    while probe_pos + 32 <= section_bits {
-                        let mut probe_reader = bitstream_io::BitReader::endian(
-                            Cursor::new(section_bytes),
-                            LittleEndian,
-                        );
-                        if probe_reader.skip(probe_pos as u32).is_ok() {
-                            if let Ok(p_flags) = probe_reader.read::<32, u32>() {
-                                let mut is_next = (p_flags & 0xFFFF) == 0x4D4A;
-                                if !is_next && alpha_mode {
-                                    let mut check_reader =
-                                        BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                                    if check_reader.skip(probe_pos as u32 + 32).is_ok() {
-                                        if let (Ok(ck), Ok(v)) = (
-                                            check_reader.read::<8, u8>(),
-                                            check_reader.read::<3, u8>(),
-                                        ) {
-                                            if ck == calculate_alpha_v105_checksum(p_flags, v) {
-                                                is_next = true;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if is_next {
-                                    if alpha_mode {
-                                        if let Some((mode, loc, _, code, flags, version, _, _, _, _)) =
-                                            peek_item_header_at(
-                                                section_bytes,
-                                                probe_pos,
-                                                huffman,
-                                                alpha_mode,
-                                                0,
-                                            )
-                                        {
-                                            if !is_plausible_item_header(
-                                                mode,
-                                                loc,
-                                                code.as_bytes(),
-                                                flags,
-                                                version,
-                                                alpha_mode,
-                                            ) {
-                                                is_next = false;
-                                            }
-                                        } else {
-                                            is_next = false;
-                                        }
-                                    }
-
-                                    if is_next {
-                                        actual_limit = probe_pos - start;
-                                        found_next = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        probe_pos += 8;
-                    }
-
-                    let (peek_code, peek_limit, peek_is_compact) = if let Some(flen) = forced_length
-                    {
-                        ("Opaque".to_string(), flen, false)
-                    } else if let Some((_version, _, _, code, flags, _, is_compact, _, _, _)) =
-                        peek_item_header_at_with_base(
-                            section_bytes,
-                            start,
-                            Some(section_bit_offset + start),
-                            huffman,
-                            alpha_mode,
-                            0,
-                        )
-                    {
-                        let axiom = StatsAxiom::new(_version, ItemQuality::Normal, alpha_mode)
-                            .with_compact(is_compact)
-                            .with_code(&code);
-                        let l = if alpha_mode && axiom.is_compact {
-                            // For Opaque compact items, we use the alignment axiom with a minimal 32-bit guess if unknown,
-                            // but usually peek_item_header_at consumed ~64-80 bits already.
-                            axiom.calculate_alignment(64, &code, flags)
-                        } else if found_next {
-                            actual_limit
-                        } else {
-                            limit
-                        };
-                        (code, l, is_compact)
-                    } else {
-                        (
-                            "Opaque".to_string(),
-                            if found_next { actual_limit } else { limit },
-                            false,
-                        )
-                    };
-                    let authority_runeword_hint =
-                        alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
-
-                    if alpha_mode
-                        && !peek_code.trim().is_empty()
-                        && (peek_is_compact || authority_runeword_hint)
-                    {
-                        let max_retry_limit = section_bits.saturating_sub(start);
-                        let recovery_hint = if authority_runeword_hint {
-                            if marker.code.trim() == "wa2" { "wa2" } else { "c8xr" }
-                        } else {
-                            peek_code.as_str()
-                        };
-                        let mut retry_limits = if authority_runeword_hint {
-                            vec![None, Some(peek_limit)]
-                        } else {
-                            vec![None, Some(peek_limit)]
-                        };
-
-                        if !authority_runeword_hint {
-                            for extra in [8u64, 16, 24, 32] {
-                                let candidate = std::cmp::min(limit + extra, max_retry_limit);
-                                if candidate > limit && !retry_limits.contains(&Some(candidate)) {
-                                    retry_limits.push(Some(candidate));
-                                }
-                            }
-                        }
-
-                        for retry_limit in retry_limits {
-                            if let Some(limit_bits) = retry_limit {
-                                if limit_bits <= limit {
-                                    continue;
-                                }
-                            }
-
-                            match parse_item_at_with_limit(
-                                section_bytes,
-                                start,
-                                section_bit_offset,
-                                huffman,
-                                item_count,
-                                alpha_mode,
-                                retry_limit,
-                                if peek_is_compact { Some(true) } else { None },
-                                Some(recovery_hint),
-                            ) {
-                                Ok((item, mut consumed_bits)) => {
-                                    let mut final_item = item.clone();
-
-                                    if authority_runeword_hint && final_item.properties.len() < 9 {
-                                        if let Ok((retry_item, retry_consumed)) =
-                                            parse_item_at_with_limit(
-                                                section_bytes,
-                                                start,
-                                                section_bit_offset,
-                                                huffman,
-                                                item_count,
-                                                alpha_mode,
-                                                Some(max_retry_limit),
-                                                if peek_is_compact { Some(true) } else { None },
-                                                Some(recovery_hint),
-                                            )
-                                        {
-                                            if retry_item.properties.len()
-                                                > final_item.properties.len()
-                                                || retry_consumed > consumed_bits
-                                            {
-                                                final_item = retry_item;
-                                                consumed_bits = retry_consumed;
-                                            }
-                                        }
-                                    }
-
-                                    // Restore code BEFORE alignment calculation.
-                                    if alpha_mode {
-                                        if authority_runeword_hint {
-                                            let forced_code = if marker.code.trim() == "wa2" { "wa2 " } else { "xrs " };
-                                            final_item.code = forced_code.to_string();
-                                            final_item.body.code = forced_code.to_string();
-                                            final_item.header.is_runeword = true;
-                                        } else if !marker.code.trim().is_empty()
-                                            && crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code)
-                                        {
-                                            final_item.code = marker.code.clone();
-                                        }
-                                    }
-
-                                    if alpha_mode {
-                                        let alignment_axiom = StatsAxiom::new(
-                                            final_item.header.version,
-                                            final_item
-                                                .header
-                                                .quality
-                                                .unwrap_or(ItemQuality::Normal),
-                                            alpha_mode,
-                                        )
-                                        .with_index(i)
-                                        .with_compact(final_item.header.is_compact)
-                                        .with_code(&final_item.code);
-
-                                        let mut target_width = alignment_axiom.calculate_alignment(
-                                            consumed_bits,
-                                            &final_item.code,
-                                            final_item.header.flags,
-                                        );
-
-                                        if let Some(limit_hint) = retry_limit {
-                                            if crate::domain::forensic::v105::axioms::is_v105_summary_code(&final_item.code)
-                                                && !crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_rhythm_forced(final_item.header.version, &final_item.code)
-                                            {
-                                                if limit_hint >= 72 && limit_hint <= 128 && (limit_hint % 8 == 0 || limit_hint % 8 == 5) {
-                                                    target_width = limit_hint;
-                                                }
-                                            }
-                                        }
-
-                                        if target_width > 0 {
-                                            consumed_bits = target_width;
-                                        }
-                                    }
-
-                                    if final_item.code.trim().is_empty()
-                                        && final_item.modules.iter().any(|m| {
-                                            matches!(m, crate::domain::item::ItemModule::Opaque(_))
-                                        })
-                                    {
-                                        final_item.code = "Opaque".to_string();
-                                    }
-
-                                    let mut actual_consumed = consumed_bits;
-                                    let current_end = start + consumed_bits;
-
-                                    if alpha_mode {
-                                        let mut next_target = None;
-                                        for next_m in markers.iter().skip(i + 1) {
-                                            if next_m.confidence >= 500 {
-                                                next_target = Some(next_m.offset);
-                                                break;
-                                            }
-                                        }
-
-                                        if let Some(target) = next_target {
-                                            if current_end < target {
-                                                let proximity_axiom =
-                                                    crate::domain::forensic::v105::axioms::V105MarkerProximityAxiom::default();
-                                                if let Some(drift) = proximity_axiom
-                                                    .calculate_nudge(current_end, target)
-                                                {
-                                                    let preserve_padding = true;
-                                                    if preserve_padding {
-                                                        actual_consumed += drift;
-                                                        let padding_bits =
-                                                            read_alignment_padding_bits(
-                                                                section_bytes,
-                                                                current_end,
-                                                                drift,
-                                                            );
-                                                        final_item
-                                                            .body
-                                                            .alpha_alignment_padding
-                                                            .extend(padding_bits);
-                                                    }
-                                                    final_item
-                                                        .forensic_audit
-                                                        .record(proximity_axiom.metadata());
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if let Some(flen) = forced_length {
-                                        actual_consumed = flen;
-                                    }
-
-                                    final_item.expected_start_bit = start;
-                                    final_item.range.start = section_bit_offset + start;
-                                    final_item.range.end =
-                                        section_bit_offset + start + actual_consumed;
-                                    final_item.total_bits = actual_consumed;
-                                    final_item.logical_width = Some(actual_consumed);
-                                    let end_bit = start + actual_consumed;
-                                    for (next_idx, next_marker) in
-                                        markers.iter().enumerate().skip(i + 1)
-                                    {
-                                        if next_marker.offset < end_bit {
-                                            subsumed_indices.insert(next_idx);
-                                        } else {
-                                            break;
-                                        }
-                                    }
-
-                                    items.push(final_item);
-                                    if !crate::domain::header::entity::IN_NESTED_RECOVERY
-                                        .with(|v| v.get())
-                                    {
-                                        item_count += 1;
-                                    }
-                                    start_offset = start + actual_consumed;
-                                    next_expected_start = start + actual_consumed;
-                                    continue 'marker_loop;
-                                }
-                                Err(_err) => {}
-                            }
-                        }
-                    }
-
+                Err(_e) => {
+                    // Fail-safe: isolate as Opaque
+                    let mut opaque = Item::default();
+                    opaque.expected_start_bit = start;
+                    opaque.code = "Opaque".to_string();
                     let mut bits = Vec::new();
                     let mut fallback_reader =
-                        bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+                        BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
                     if fallback_reader.skip(start as u32).is_ok() {
-                        for _ in 0..peek_limit {
+                        for _ in 0..limit {
                             if let Ok(b) = fallback_reader.read_bit() {
                                 bits.push(b);
                             } else {
@@ -2040,388 +1643,95 @@ impl Item {
                             }
                         }
                     }
-
-                    let mut opaque_item = Item::default();
-                    opaque_item.expected_start_bit = start;
-                    opaque_item.code = "Opaque".to_string();
-                    opaque_item
+                    opaque
                         .modules
                         .push(crate::domain::item::ItemModule::Opaque(bits.clone()));
-                    if alpha_mode && opaque_item.code.trim().is_empty() {
-                        opaque_item.code = "Opaque".to_string();
-                    }
                     for (idx, b) in bits.iter().enumerate() {
-                        opaque_item.bits.push(crate::domain::item::RecordedBit {
+                        opaque.bits.push(crate::domain::item::RecordedBit {
                             bit: *b,
                             offset: section_bit_offset + start + idx as u64,
                         });
                     }
-                    opaque_item.range.start = section_bit_offset + start;
-                    opaque_item.range.end = section_bit_offset + start + peek_limit;
-                    opaque_item.total_bits = peek_limit;
-                    opaque_item.forensic_audit.record(ForensicMetadata::new(
-                        Confidence::Fragile,
-                        Intentionality::Undetermined,
-                        format!("Opaque isolation: {}", e),
-                    ));
-                    items.push(opaque_item);
-                    if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
-                        item_count += 1;
-                    }
-                    start_offset = start + peek_limit;
+                    opaque.range.start = section_bit_offset + start;
+                    opaque.range.end = section_bit_offset + start + limit;
+                    opaque.total_bits = limit;
+                    opaque.logical_width = Some(limit);
+                    items.push(opaque);
+
+                    item_count += 1;
+                    start_offset = start + limit;
+                    _next_expected_start = start + limit;
+                    _consecutive_opaque += 1;
                 }
             }
         }
 
-        // Slice 2: Residue capture to ensure item count parity and bit preservation.
-        // If the marker scan under-counted, attempt one more header recovery pass across
-        // the trailing region before we collapse the remainder into placeholder Opaque items.
-        if alpha_mode && items.len() < top_level_count as usize {
-            let mut recovery_start = start_offset;
-            let mut recovery_guard = 0usize;
-
-            while items.len() < top_level_count as usize
-                && recovery_start + 72 <= section_bits
-                && recovery_guard < top_level_count as usize * 2
-            {
-                recovery_guard += 1;
-
-                let Some(next_start) =
-                    find_next_item_match(section_bytes, recovery_start, huffman, alpha_mode)
-                else {
-                    break;
-                };
-
-                let recovery_limit = next_start.saturating_sub(recovery_start);
-                if recovery_limit > 0 {
-                    if let Some((_, _, _, peek_code, _, _, peek_is_compact, _, _, _)) =
-                        peek_item_header_at_with_base(
-                            section_bytes,
-                            recovery_start,
-                            Some(section_bit_offset + recovery_start),
-                            huffman,
-                            alpha_mode,
-                            items.len(),
-                        )
-                    {
-                        let recovered_parse = parse_item_at_with_limit(
-                            section_bytes,
-                            recovery_start,
-                            section_bit_offset,
-                            huffman,
-                            items.len(),
-                            alpha_mode,
-                            None,
-                            if peek_is_compact { Some(true) } else { None },
-                            Some(&peek_code),
-                        )
-                        .or_else(|_| {
-                            parse_item_at_with_limit(
-                                section_bytes,
-                                recovery_start,
-                                section_bit_offset,
-                                huffman,
-                                items.len(),
-                                alpha_mode,
-                                Some(recovery_limit),
-                                if peek_is_compact { Some(true) } else { None },
-                                Some(&peek_code),
-                            )
-                        });
-
-                        if let Ok((mut recovered_item, recovered_consumed)) = recovered_parse {
-                            if !recovered_item.is_opaque() && !recovered_item.is_residue() {
-                                let recovered_consumed =
-                                    recovered_consumed.max(recovered_item.total_bits);
-                                recovered_item.expected_start_bit = recovery_start;
-                                recovered_item.range.start = section_bit_offset + recovery_start;
-                                let computed_end =
-                                    section_bit_offset + recovery_start + recovered_consumed;
-                                if recovered_item.range.end < computed_end {
-                                    recovered_item.range.end = computed_end;
-                                }
-                                recovered_item.total_bits = recovered_consumed;
-                                recovered_item.logical_width = Some(recovered_consumed);
-                                items.push(recovered_item);
-                                start_offset = recovery_start + recovered_consumed;
-                                recovery_start = start_offset;
-                                continue;
-                            }
-                        }
+        // Final Trailing Residue
+        if section_bits > start_offset {
+            let residue_len = section_bits - start_offset;
+            let mut bits = Vec::new();
+            let mut fallback_reader =
+                BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
+            if fallback_reader.skip(start_offset as u32).is_ok() {
+                for _ in 0..residue_len {
+                    if let Ok(b) = fallback_reader.read_bit() {
+                        bits.push(b);
+                    } else {
+                        break;
                     }
                 }
-
-                if next_start > recovery_start {
-                    let residue_len = next_start - recovery_start;
-                    let mut bits = Vec::new();
-                    let mut fallback_reader =
-                        bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                    if fallback_reader.skip(recovery_start as u32).is_ok() {
-                        for _ in 0..residue_len {
-                            if let Ok(b) = fallback_reader.read_bit() {
-                                bits.push(b);
-                            } else {
-                                break;
-                            }
-                        }
+            }
+            
+            if alpha_mode {
+                if let Some(prev_item) = items.last_mut() {
+                    prev_item.body.alpha_alignment_padding.extend(bits.clone());
+                    for (idx, b) in bits.iter().enumerate() {
+                        prev_item.bits.push(crate::domain::item::RecordedBit {
+                            bit: *b,
+                            offset: section_bit_offset + start_offset + idx as u64,
+                        });
                     }
-
+                    prev_item.range.end = section_bit_offset + section_bits;
+                    prev_item.total_bits += residue_len;
+                    if let Some(w) = prev_item.logical_width {
+                        prev_item.logical_width = Some(w + residue_len);
+                    }
+                } else {
                     let mut residue = Item::default();
-                    residue.expected_start_bit = recovery_start;
-                    residue.code = "Opaque".to_string();
+                    residue.expected_start_bit = start_offset;
+                    residue.code = "    ".to_string();
                     residue
                         .modules
                         .push(crate::domain::item::ItemModule::Opaque(bits.clone()));
                     for (idx, b) in bits.iter().enumerate() {
                         residue.bits.push(crate::domain::item::RecordedBit {
                             bit: *b,
-                            offset: section_bit_offset + recovery_start + idx as u64,
+                            offset: section_bit_offset + start_offset + idx as u64,
                         });
                     }
-                    residue.range.start = section_bit_offset + recovery_start;
-                    residue.range.end = section_bit_offset + next_start;
+                    residue.range.start = section_bit_offset + start_offset;
+                    residue.range.end = section_bit_offset + section_bits;
                     residue.total_bits = residue_len;
-                    residue.forensic_audit.record(ForensicMetadata::new(
-                        Confidence::Speculative,
-                        Intentionality::Artifactual,
-                        "Alpha v105 item preservation",
-                    ));
                     items.push(residue);
                 }
-
-                let parse_limit = section_bits.saturating_sub(next_start);
-                match parse_item_at_with_limit(
-                    section_bytes,
-                    next_start,
-                    section_bit_offset,
-                    huffman,
-                    items.len(),
-                    alpha_mode,
-                    Some(parse_limit),
-                    None,
-                    None,
-                ) {
-                    Ok((item, consumed_bits)) => {
-                        let mut final_item = item.clone();
-                        let consumed_bits = consumed_bits.max(final_item.total_bits);
-                        if final_item.code.trim().is_empty()
-                            && final_item
-                                .modules
-                                .iter()
-                                .any(|m| matches!(m, crate::domain::item::ItemModule::Opaque(_)))
-                        {
-                            final_item.code = "Opaque".to_string();
-                        }
-                        final_item.expected_start_bit = next_start;
-                        final_item.range.start = section_bit_offset + next_start;
-                        let computed_end = section_bit_offset + next_start + consumed_bits;
-                        if final_item.range.end < computed_end {
-                            final_item.range.end = computed_end;
-                        }
-                        final_item.total_bits = consumed_bits;
-                        final_item.logical_width = Some(consumed_bits);
-                        items.push(final_item);
-                        start_offset = next_start + consumed_bits;
-                        recovery_start = start_offset;
-                    }
-                    Err(_) => {
-                        recovery_start = next_start + 8;
-                        start_offset = recovery_start;
-                    }
-                }
-            }
-        }
-
-        let mut last_end = items
-            .last()
-            .map(|it| it.range.end - section_bit_offset)
-            .unwrap_or(start_offset);
-        let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
-
-        // Slice19 seam extension:
-        // When Alpha v105 already recovered the declared item count, trailing slack is usually
-        // alignment noise. For compact overlap tail codes, preserve that slack by attaching it
-        // to the last parsed item instead of synthesizing a standalone Opaque item.
-        if alpha_mode && non_residue_count >= top_level_count as usize && last_end < section_bits {
-            if let Some(last_idx) = items.iter().rposition(|it| !it.is_residue()) {
-                let last_code = items[last_idx].code.trim();
-                let is_overlap_tail = matches!(last_code, "jav" | "buc");
-                let trailing_len = section_bits - last_end;
-                if is_overlap_tail
-                    && items[last_idx].header.is_compact
-                    && trailing_len <= 64
-                {
-                    let mut trailing_bits = Vec::new();
-                    let mut trailing_reader =
-                        bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                    if trailing_reader.skip(last_end as u32).is_ok() {
-                        for _ in 0..trailing_len {
-                            if let Ok(b) = trailing_reader.read_bit() {
-                                trailing_bits.push(b);
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-
-                    if trailing_bits.len() as u64 == trailing_len {
-                        let item = &mut items[last_idx];
-                        item.modules
-                            .push(crate::domain::item::ItemModule::Opaque(trailing_bits.clone()));
-                        for (idx, b) in trailing_bits.iter().enumerate() {
-                            item.bits.push(crate::domain::item::RecordedBit {
-                                bit: *b,
-                                offset: section_bit_offset + last_end + idx as u64,
-                            });
-                        }
-                        item.range.end = section_bit_offset + section_bits;
-                        item.total_bits += trailing_len;
-                        if let Some(logical_width) = item.logical_width {
-                            if item.total_bits > logical_width {
-                                item.logical_width = Some(item.total_bits);
-                            }
-                        } else {
-                            item.logical_width = Some(item.total_bits);
-                        }
-                        last_end = section_bits;
-                    }
-                }
-            }
-        }
-
-        // Do not synthesize a residue item for an already-satisfied empty section.
-        // This keeps zero-count sections from fabricating a trailing Opaque tail.
-        let should_capture_trailing = !(items.is_empty() && top_level_count == 0);
-
-        if should_capture_trailing && last_end < section_bits {
-            let missing = if items.len() < top_level_count as usize {
-                top_level_count as usize - items.len()
-            } else if items.is_empty() && top_level_count == 0 {
-                1 // Capture all as one residue if empty section
             } else {
-                1 // Capture trailing bits as 1 residue
-            };
-            if missing > 0 {
-                let remaining_bits = section_bits - last_end;
-                let bits_per_item = remaining_bits / missing as u64;
-
-                for i in 0..missing {
-                    let mut bits = Vec::new();
-                    let start = last_end + (i as u64 * bits_per_item);
-                    let end = if i == missing - 1 {
-                        section_bits
-                    } else {
-                        start + bits_per_item
-                    };
-                    let len = end - start;
-
-                    let mut fallback_reader =
-                        bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-                    if fallback_reader.skip(start as u32).is_ok() {
-                        for _ in 0..len {
-                            if let Ok(b) = fallback_reader.read_bit() {
-                                bits.push(b);
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-
-                    let mut is_missing_item = false;
-                    if items.len() < top_level_count as usize {
-                        is_missing_item = true;
-                    }
-
-                    let mut opaque_item = Item::default();
-                    opaque_item.expected_start_bit = start;
-                    opaque_item.code = if is_missing_item {
-                        "Opaque".to_string()
-                    } else {
-                        "    ".to_string()
-                    };
-                    if alpha_mode {
-                        opaque_item
-                            .modules
-                            .push(crate::domain::item::ItemModule::Opaque(bits.clone()));
-                        opaque_item.forensic_audit.record(ForensicMetadata::new(
-                            Confidence::Speculative,
-                            Intentionality::Artifactual,
-                            "Alpha v105 item preservation",
-                        ));
-                    } else {
-                        opaque_item
-                            .modules
-                            .push(crate::domain::item::ItemModule::Residue(bits.clone()));
-                        opaque_item.forensic_audit.record(ForensicMetadata::new(
-                            Confidence::Fragile,
-                            Intentionality::Artifactual,
-                            "Residue preservation",
-                        ));
-                    }
-                    for (idx, b) in bits.iter().enumerate() {
-                        opaque_item.bits.push(crate::domain::item::RecordedBit {
-                            bit: *b,
-                            offset: section_bit_offset + start + idx as u64,
-                        });
-                    }
-                    opaque_item.range.start = section_bit_offset + start;
-                    opaque_item.range.end = section_bit_offset + end;
-                    opaque_item.total_bits = len;
-                    items.push(opaque_item);
+                let mut residue = Item::default();
+                residue.expected_start_bit = start_offset;
+                residue.code = "    ".to_string();
+                residue
+                    .modules
+                    .push(crate::domain::item::ItemModule::Residue(bits.clone()));
+                for (idx, b) in bits.iter().enumerate() {
+                    residue.bits.push(crate::domain::item::RecordedBit {
+                        bit: *b,
+                        offset: section_bit_offset + start_offset + idx as u64,
+                    });
                 }
-            }
-        }
-
-        if alpha_mode {
-            let authority_indices: Vec<usize> = items
-                .iter()
-                .enumerate()
-                .filter(|(_, item)| {
-                    item.header.is_runeword && item.code.trim() == "xrs" && !item.is_residue()
-                })
-                .map(|(idx, _)| idx)
-                .collect();
-
-            if authority_indices.len() > 1 {
-                let mut duplicate_groups = std::collections::HashMap::<u64, Vec<usize>>::new();
-                for idx in authority_indices {
-                    duplicate_groups
-                        .entry(items[idx].range.start)
-                        .or_default()
-                        .push(idx);
-                }
-
-                let mut removals = Vec::new();
-                for mut group in duplicate_groups
-                    .into_values()
-                    .filter(|group| group.len() > 1)
-                {
-                    group.sort_unstable();
-
-                    let mut best_idx = group[0];
-                    for &idx in &group[1..] {
-                        let current = &items[idx];
-                        let best = &items[best_idx];
-                        if current.properties.len() > best.properties.len()
-                            || (current.properties.len() == best.properties.len()
-                                && current.total_bits > best.total_bits)
-                        {
-                            best_idx = idx;
-                        }
-                    }
-
-                    for idx in group {
-                        if idx != best_idx {
-                            removals.push(idx);
-                        }
-                    }
-                }
-
-                removals.sort_unstable();
-                removals.dedup();
-                for idx in removals.into_iter().rev() {
-                    items.remove(idx);
-                }
+                residue.range.start = section_bit_offset + start_offset;
+                residue.range.end = section_bit_offset + section_bits;
+                residue.total_bits = residue_len;
+                items.push(residue);
+                item_count += 1;
             }
         }
 
