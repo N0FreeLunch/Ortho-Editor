@@ -84,106 +84,20 @@ fn main() -> anyhow::Result<()> {
         eprintln!("No items parsed (or parsing failed). Semantic labeling will be limited.");
     }
 
-    let mut result = String::new();
-    result.push_str(&format!(
-        "Visualizing bits from {} to {} (width: {}, version: {})\n",
+    let use_colors = output_path.is_none() && !pure_text;
+    let result = d2r_core::verify::forensics::visualize_bits(
+        &bytes,
         start_bit,
-        start_bit + width,
         width,
-        version
-    ));
-
-    let mut last_label = String::new();
-
-    for i in 0..width {
-        let bit_idx = start_bit + i;
-        let byte_idx = bit_idx / 8;
-        let bit_in_byte = bit_idx % 8;
-
-        if byte_idx >= bytes.len() {
-            result.push_str("X"); // Out of bounds
-            continue;
-        }
-
-        let bit = (bytes[byte_idx] >> bit_in_byte) & 1 == 1;
-
-        // Semantic labeling (Recursive search)
-        let mut semantic = items.iter().find_map(|it| {
-            if let Some(s) = it.query_bit(bit_idx as u64) {
-                Some(s.label)
-            } else if (bit_idx as u64) >= it.range.start && (bit_idx as u64) < it.range.end {
-                Some(format!("Item({})", it.code.trim()))
-            } else {
-                None
-            }
-        });
-
-        // Label JM markers if not already in an item range
-        if semantic.is_none() {
-            for &jm_pos in &jm_markers {
-                let jm_bit = (jm_pos as u64) * 8;
-                if (bit_idx as u64) >= jm_bit && (bit_idx as u64) < jm_bit + 16 {
-                    semantic = Some("JM Marker".to_string());
-                    break;
-                } else if (bit_idx as u64) >= jm_bit + 16 && (bit_idx as u64) < jm_bit + 32 {
-                    semantic = Some("Item Count".to_string());
-                    break;
-                }
-            }
-        }
-
-        // ANSI colors (Safe Guard)
-        let use_colors = output_path.is_none() && !pure_text;
-
-        if use_colors {
-            if let Some(label) = &semantic {
-                // Colorize based on semantic (Simplified)
-                if label.contains("JM") {
-                    result.push_str("\x1b[91m");
-                }
-                // Bright Red for JM
-                else if label.contains("Stats") {
-                    result.push_str("\x1b[93m");
-                }
-                // Bright Yellow for Stats
-                else {
-                    result.push_str("\x1b[32m");
-                } // Green
-            } else if bit {
-                result.push_str("\x1b[32m"); // Green for 1
-            } else {
-                result.push_str("\x1b[34m"); // Blue for 0
-            }
-        }
-
-        result.push(if bit { '1' } else { '0' });
-
-        if use_colors {
-            result.push_str("\x1b[0m");
-        }
-
-        if (i + 1) % 8 == 0 {
-            result.push(' ');
-        }
-
-        if let Some(label) = semantic {
-            if label != last_label {
-                last_label = label;
-            }
-        }
-
-        if (i + 1) % 64 == 0 {
-            if !last_label.is_empty() {
-                result.push_str(&format!(" | {}", last_label));
-            }
-            result.push('\n');
-        }
-    }
-    result.push('\n');
+        version,
+        &items,
+        &jm_markers,
+        use_colors,
+    );
 
     if let Some(out) = output_path {
         let final_output = if pure_text {
-            strip_ansi_codes(&result)
+            d2r_core::verify::forensics::strip_ansi_codes(&result)
         } else {
             result
         };
@@ -195,22 +109,4 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-/// Zero-Dependency ANSI Strip Helper
-fn strip_ansi_codes(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut in_escape = false;
-    for c in input.chars() {
-        if c == '\x1b' {
-            in_escape = true;
-        } else if in_escape {
-            if c == 'm' || c == 'K' {
-                in_escape = false;
-            }
-        } else {
-            output.push(c);
-        }
-    }
-    output
 }
