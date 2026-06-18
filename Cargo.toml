@@ -100,6 +100,10 @@ name = "d2save_item_diff"
 path = "src/bin/verify/d2save_item_diff.rs"
 
 [[bin]]
+name = "inspect_items"
+path = "src/bin/inspect_items.rs"
+
+[[bin]]
 name = "d2save_bit_visualizer"
 path = "src/bin/verify/d2save_bit_visualizer.rs"
 
