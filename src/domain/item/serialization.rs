@@ -1449,13 +1449,32 @@ impl Item {
                 }
 
                 // Slice 4: Authority Overlap Boundary Repair.
-                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "jav" | "buc") {
+                // For authority markers (xrs/c8xr/rhd/wa2) always expand.
+                // For jav/buc: only expand to 512 when no next high-confidence marker
+                // constrains the boundary. If a next marker is present, trust its
+                // offset as the hard upper limit to prevent swallowing it.
+                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd" | "wa2") {
                     dynamic_limit = dynamic_limit.max(512);
+                } else if matches!(parse_code_hint_tmp.trim(), "jav" | "buc") {
+                    // Only expand when no next marker caps the limit.
+                    // `next_hi_conf_marker` was set to `section_bits` when no next
+                    // marker was found, so if limit == section_bits - start the
+                    // tail is unconstrained and we may safely open to 512.
+                    let has_next_marker_cap = next_hi_conf_marker < section_bits;
+                    if !has_next_marker_cap {
+                        dynamic_limit = dynamic_limit.max(512);
+                    }
+                    // When has_next_marker_cap is true we keep limit as-is,
+                    // so the parser cannot consume past the next marker offset.
                 }
             }
 
-            // Alpha v105 forensic: Socketed items add 8-bit alignment padding
-            if !is_compact_final && (flags_peek & 0x00000008) != 0 {
+            // Alpha v105 forensic: Socketed items add 8-bit alignment padding.
+            // Authority items (xrs, c8xr, rhd, wa2) use a fixed 512-bit body block;
+            // their socketed flag does not add extra alignment padding.
+            let is_authority_code_early =
+                alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+            if !is_compact_final && (flags_peek & 0x00000008) != 0 && !is_authority_code_early {
                 dynamic_limit += 8;
             }
 
@@ -1481,7 +1500,13 @@ impl Item {
             } else {
                 peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
             };
+            // For jav/buc in Alpha v105, force compact parse mode so entity.rs's
+            // trusted_compact_hint path can activate (it requires header.is_compact==true).
+            // Without this, a non-compact peek (e.g. wbmx) at the same offset causes
+            // AlphaShadowSkip to overflow the next-marker boundary.
             let forced_compact_for_parse = if is_compact_final {
+                Some(true)
+            } else if alpha_mode && matches!(marker.code.trim(), "jav" | "buc") {
                 Some(true)
             } else {
                 None
@@ -1626,8 +1651,7 @@ impl Item {
                     _next_expected_start = start + actual_consumed;
                     _consecutive_opaque = 0;
                 }
-                Err(e) => {
-                    eprintln!("[DEBUG-SLICE3] Parse failed for marker {} at {}: {:?}", marker.code, start, e);
+                Err(_e) => {
                     // Fail-safe: isolate as Opaque
                     let mut opaque = Item::default();
                     opaque.expected_start_bit = start;
