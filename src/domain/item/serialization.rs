@@ -1220,7 +1220,13 @@ impl Item {
                         let _ = cursor.skip(section_bit_offset + start_offset);
                         let bits_vec = cursor.read_bits_as_vec(skip as u32).unwrap_or_default();
                         
-                        if let Some(prev_item) = items.last_mut() {
+                        let is_authority_prev = if let Some(prev) = items.last() {
+                            matches!(prev.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+                        } else {
+                            false
+                        };
+
+                        if let Some(prev_item) = items.last_mut().filter(|_| !is_authority_prev) {
                             prev_item.body.alpha_alignment_padding.extend(bits_vec.clone());
                             for (idx, b) in bits_vec.iter().enumerate() {
                                 prev_item.bits.push(crate::domain::item::RecordedBit {
@@ -1294,6 +1300,7 @@ impl Item {
 
             if start > start_offset {
                 let residue_len = start - start_offset;
+
                 let mut bits = Vec::new();
                 let mut fallback_reader =
                     BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
@@ -1307,7 +1314,17 @@ impl Item {
                     }
                 }
                 
-                if let Some(prev_item) = items.last_mut() {
+                let is_authority_prev = if alpha_mode {
+                    if let Some(prev) = items.last() {
+                        matches!(prev.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if let Some(prev_item) = items.last_mut().filter(|_| !is_authority_prev) {
                     prev_item.body.alpha_alignment_padding.extend(bits.clone());
                     for (idx, b) in bits.iter().enumerate() {
                         prev_item.bits.push(crate::domain::item::RecordedBit {
@@ -1623,6 +1640,7 @@ impl Item {
                         if is_authority_final {
                             consumed_bits = consumed_bits.min(512);
                         }
+
 
                         // Greedy Slice 8 Resolution: For buc/jav tail padding, swallow trailing noise markers.
                         if matches!(marker.code.trim(), "buc" | "jav") {
