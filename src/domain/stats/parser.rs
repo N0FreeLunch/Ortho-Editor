@@ -87,15 +87,15 @@ pub fn read_item_stats<R: BitRead>(
         .with_code(trimmed_code);
     let is_alpha = axiom.is_alpha();
 
-    let is_v105_shadow_final = alpha_mode && (version == 5 || version == 1) && is_v105_shadow;
+    let is_v105_shadow_final = alpha_mode && is_v105_shadow;
     let is_shadow_container = alpha_mode && (trimmed_code == "xrs" || trimmed_code == "c8xr");
-    
+
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
-    let is_potion = trimmed_code.starts_with('h') 
-        || trimmed_code.starts_with('m') 
-        || trimmed_code.contains("hp") 
-        || trimmed_code.contains("mp") 
-        || (version == 5 && (trimmed_code.starts_with('7') || trimmed_code == "wwsw")) 
+    let is_potion = trimmed_code.starts_with('h')
+        || trimmed_code.starts_with('m')
+        || trimmed_code.contains("hp")
+        || trimmed_code.contains("mp")
+        || (version == 5 && (trimmed_code.starts_with('7') || trimmed_code == "wwsw"))
         || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
 
     if is_alpha && trimmed_code.is_empty() {
@@ -123,10 +123,8 @@ pub fn read_item_stats<R: BitRead>(
     if is_v105_shadow_final {
         let skip_bits_count = if is_shadow_container {
             30
-        } else if version == 5 {
-            47
         } else {
-            24
+            47
         };
         let skip_bits = cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;
         alpha_shadow_skip_bits = Some(skip_bits);

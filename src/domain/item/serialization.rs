@@ -1626,7 +1626,8 @@ impl Item {
                     _next_expected_start = start + actual_consumed;
                     _consecutive_opaque = 0;
                 }
-                Err(_e) => {
+                Err(e) => {
+                    eprintln!("[DEBUG-SLICE3] Parse failed for marker {} at {}: {:?}", marker.code, start, e);
                     // Fail-safe: isolate as Opaque
                     let mut opaque = Item::default();
                     opaque.expected_start_bit = start;
@@ -2133,7 +2134,8 @@ impl Item {
         let is_v105_summary =
             alpha_mode && crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_item(item.header.version, &item.code);
         if !is_v105_summary {
-            let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code));
+            let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code))
+                || (alpha_mode && item.body.code.trim() == "hla");
             let authority_runeword_hint =
                 alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "ww" | "gcw");
 

@@ -669,7 +669,7 @@ impl Item {
         let reg = crate::domain::forensic::registry::get_registry();
         let mut is_authority_overlap_code =
             alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw");
-        let mut is_v105_shadow_override = alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd");
+        let mut is_v105_shadow_override = alpha_mode && matches!(trimmed, "hla" | "xrs" | "c8xr" | "rhd");
         if alpha_mode {
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(map) = overrides.get(trimmed) {
@@ -1166,7 +1166,8 @@ impl Item {
                         });
                     emitter.write_bits(val as u32, 5)?;
                 }
-                let is_shadow = s_axiom.is_v105_shadow(self.header.flags, Some(&self.code));
+                let is_shadow = s_axiom.is_v105_shadow(self.header.flags, Some(&self.code))
+                    || is_v105_shadow_override;
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits {
                         emitter.write_bits_u64(bits, 47)?;
