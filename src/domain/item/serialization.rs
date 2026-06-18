@@ -1453,8 +1453,10 @@ impl Item {
                 // For jav/buc: only expand to 512 when no next high-confidence marker
                 // constrains the boundary. If a next marker is present, trust its
                 // offset as the hard upper limit to prevent swallowing it.
-                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd" | "wa2") {
-                    dynamic_limit = dynamic_limit.max(512);
+                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "wa2") {
+                    dynamic_limit = 512;
+                } else if parse_code_hint_tmp.trim() == "rhd" {
+                    dynamic_limit = 128;
                 } else if matches!(parse_code_hint_tmp.trim(), "jav" | "buc") {
                     // Only expand when no next marker caps the limit.
                     // `next_hi_conf_marker` was set to `section_bits` when no next
@@ -1615,6 +1617,11 @@ impl Item {
 
                         if target_width > 0 {
                             consumed_bits = target_width;
+                        }
+
+                        let is_authority_final = alpha_mode && matches!(final_item.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+                        if is_authority_final {
+                            consumed_bits = consumed_bits.min(512);
                         }
 
                         // Greedy Slice 8 Resolution: For buc/jav tail padding, swallow trailing noise markers.
@@ -2368,6 +2375,11 @@ pub fn scan_socket_children(
                         if target_width > 0 {
                             limit = Some(target_width as u64);
                         }
+                        if matches!(code.trim(), "xrs" | "c8xr" | "wa2") {
+                            limit = Some(512);
+                        } else if code.trim() == "rhd" {
+                            limit = Some(128);
+                        }
                         if _is_compact {
                             forced_compact = Some(true);
                         }
@@ -2388,9 +2400,33 @@ pub fn scan_socket_children(
                         forced_compact,
                         code_hint.as_deref(),
                     ) {
-                        let mut item_end = current_pos + consumed;
+                        let mut final_child = item;
+                        let mut consumed_bits = consumed;
+                        if alpha {
+                            let alignment_axiom = StatsAxiom::new(
+                                final_child.header.version,
+                                final_child.header.quality.unwrap_or(ItemQuality::Normal),
+                                alpha,
+                            )
+                            .with_compact(final_child.header.is_compact)
+                            .with_code(&final_child.code);
+                            let mut target_width = alignment_axiom.calculate_alignment(
+                                consumed_bits,
+                                &final_child.code,
+                                final_child.header.flags,
+                            );
+                            if target_width > 0 {
+                                consumed_bits = target_width;
+                            }
+                            let is_authority_final = matches!(final_child.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+                            if is_authority_final {
+                                consumed_bits = consumed_bits.min(512);
+                            }
+                        }
+
+                        let mut item_end = current_pos + consumed_bits;
                         if let Some(l) = limit {
-                            item_end = current_pos + consumed.max(l);
+                            item_end = current_pos + consumed_bits.max(l);
                         } else if alpha {
                             if let Some(next_start) =
                                 find_next_item_match(bytes, current_pos + 64, huffman, alpha)
@@ -2400,7 +2436,6 @@ pub fn scan_socket_children(
                                 }
                             }
                         }
-                        let mut final_child = item;
                         final_child.range.start = current_pos;
                         final_child.range.end = item_end;
                         final_child.total_bits = item_end - current_pos;
