@@ -1449,7 +1449,7 @@ impl Item {
                 }
 
                 // Slice 4: Authority Overlap Boundary Repair.
-                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd") {
+                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd" | "jav" | "buc") {
                     dynamic_limit = dynamic_limit.max(512);
                 }
             }
