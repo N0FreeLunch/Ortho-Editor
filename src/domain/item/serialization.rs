@@ -322,7 +322,7 @@ pub fn is_plausible_item_header(
     if alpha_mode {
         if let Ok(s) = std::str::from_utf8(code) {
             let trimmed = s.trim();
-            if trimmed == "xrs" || trimmed == "횧." {
+            if trimmed == "xrs" || trimmed == "mp1" {
                 return mode <= 6 && location <= 5;
             }
         }
@@ -493,7 +493,7 @@ pub fn peek_item_header_at_with_base(
                     let trimmed_ascii = ascii_code.trim();
                     if success
                         && (trimmed_ascii == "xrs"
-                            || trimmed_ascii == "횧."
+                            || trimmed_ascii == "mp1"
                             || is_v105_summary_code(&ascii_code))
                     {
                         t_code = ascii_code;
@@ -522,7 +522,7 @@ pub fn peek_item_header_at_with_base(
                         || trimmed == "acww"
                         || trimmed == "bcww"
                         || trimmed == "xrs"
-                        || trimmed == "횧.";
+                        || trimmed == "mp1";
 
                     if is_known {
                         confidence += 400;
@@ -1449,7 +1449,7 @@ impl Item {
                 }
 
                 // Slice 4: Authority Overlap Boundary Repair.
-                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd" | "jav" | "buc") {
+                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "jav" | "buc") {
                     dynamic_limit = dynamic_limit.max(512);
                 }
             }
@@ -1475,7 +1475,7 @@ impl Item {
                     .as_ref()
                 .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
                 .unwrap_or(false);
-            let is_authority_marker = alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd");
+            let is_authority_marker = alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
             let parse_code_hint = if marker_is_forced_summary || is_authority_marker {
                 marker.code.as_str()
             } else {
@@ -2137,7 +2137,7 @@ impl Item {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code))
                 || (alpha_mode && item.body.code.trim() == "hla");
             let authority_runeword_hint =
-                alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "ww" | "gcw");
+                alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw");
 
             // Slice 11: Handle JM-to-Body alignment gap
             let gap_len = if item.code.trim() == "buc" || matches!(item.header.version, 1) {
@@ -2162,6 +2162,7 @@ impl Item {
                 let is_authority = item.body.code.trim() == "xrs"
                     || item.body.code.trim() == "c8xr"
                     || item.body.code.trim() == "rhd"
+                    || item.body.code.trim() == "wa2"
                     || item.body.code.trim() == "ww"
                     || item.body.code.trim() == "gcw";
                 if item.body.code.trim() == "buc" {

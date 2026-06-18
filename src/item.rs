@@ -20,7 +20,7 @@ pub fn normalize_alpha_code_hint(code: &str) -> &str {
     let bytes: Vec<u8> = trimmed.chars().map(|c| c as u32 as u8).collect();
     if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F { return "hp1"; }
     if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4D { return "mp1"; }
-    if trimmed == "횧." { return "mp1"; }
+    if trimmed == "mp1" { return "mp1"; }
     
     trimmed
 }
