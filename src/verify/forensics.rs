@@ -220,3 +220,32 @@ pub fn strip_ansi_codes(input: &str) -> String {
     }
     output
 }
+
+/// Bit-state mapping to colored::Color for rhythmic grid / bit heatmap visualization.
+pub fn get_bit_color(
+    bit_idx: u64,
+    items: &[crate::item::Item],
+    section_bit_offset: u64,
+) -> Option<colored::Color> {
+    items.iter().find_map(|it| {
+        let rel_start = it.range.start - section_bit_offset;
+        let rel_end = it.range.end - section_bit_offset;
+        if bit_idx >= rel_start && bit_idx < rel_end {
+            if it.is_residue() {
+                Some(colored::Color::TrueColor { r: 80, g: 80, b: 80 })
+            } else if it
+                .modules
+                .iter()
+                .any(|m| matches!(m, crate::item::ItemModule::SemiOpaque { .. }))
+            {
+                Some(colored::Color::Yellow)
+            } else if it.is_opaque() {
+                Some(colored::Color::Red)
+            } else {
+                Some(colored::Color::Green)
+            }
+        } else {
+            None
+        }
+    })
+}

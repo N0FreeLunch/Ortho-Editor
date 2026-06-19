@@ -536,12 +536,7 @@ fn render_heatmap(
                 print!("{}", ".".bright_black());
             }
 
-            // Find item covering this bit
-            let item = items.iter().find(|it| {
-                let rel_start = it.range.start - section_bit_offset;
-                let rel_end = it.range.end - section_bit_offset;
-                bit_pos >= rel_start && bit_pos < rel_end
-            });
+            let bit_color = d2r_core::verify::forensics::get_bit_color(bit_pos, items, section_bit_offset);
 
             let bit_val = if (data[(bit_pos / 8) as usize] & (1 << (bit_pos % 8))) != 0 {
                 "1"
@@ -549,20 +544,8 @@ fn render_heatmap(
                 "0"
             };
 
-            if let Some(it) = item {
-                if it.is_residue() {
-                    print!("{}", bit_val.truecolor(80, 80, 80)); // Dark Gray for residue
-                } else if it
-                    .modules
-                    .iter()
-                    .any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
-                {
-                    print!("{}", bit_val.yellow()); // Yellow for SemiOpaque
-                } else if it.is_opaque() {
-                    print!("{}", bit_val.red()); // Red for Opaque
-                } else {
-                    print!("{}", bit_val.green()); // Green for normal
-                }
+            if let Some(color) = bit_color {
+                print!("{}", bit_val.color(color));
             } else {
                 print!("{}", bit_val.bright_black());
             }
