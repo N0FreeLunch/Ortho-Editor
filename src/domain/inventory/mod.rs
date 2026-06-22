@@ -24,6 +24,139 @@ pub enum InventoryError {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridMaskWidth {
+    U64,
+    U128,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridPattern {
+    width: u8,
+    height: u8,
+}
+
+impl GridPattern {
+    pub const fn new(width: u8, height: u8) -> Self {
+        Self { width, height }
+    }
+
+    pub const fn inventory() -> Self {
+        Self::new(10, 4)
+    }
+
+    pub const fn stash() -> Self {
+        Self::new(10, 10)
+    }
+
+    pub const fn cube() -> Self {
+        Self::new(3, 4)
+    }
+
+    pub const fn belt(height: u8) -> Self {
+        Self::new(4, height)
+    }
+
+    pub const fn width(self) -> u8 {
+        self.width
+    }
+
+    pub const fn height(self) -> u8 {
+        self.height
+    }
+
+    pub const fn cell_count(self) -> usize {
+        (self.width as usize) * (self.height as usize)
+    }
+
+    pub fn mask_width(self) -> GridMaskWidth {
+        if self.cell_count() <= u64::BITS as usize {
+            GridMaskWidth::U64
+        } else {
+            GridMaskWidth::U128
+        }
+    }
+
+    pub fn bit_index(self, x: u8, y: u8) -> Option<usize> {
+        if x < self.width && y < self.height {
+            Some((y as usize) * (self.width as usize) + (x as usize))
+        } else {
+            None
+        }
+    }
+
+    pub fn rect_mask_u128(self, x: u8, y: u8, w: u8, h: u8) -> Option<u128> {
+        if u16::from(x) + u16::from(w) > u16::from(self.width)
+            || u16::from(y) + u16::from(h) > u16::from(self.height)
+        {
+            return None;
+        }
+
+        let mut mask = 0u128;
+        for row in y..(y + h) {
+            for col in x..(x + w) {
+                let bit = self.bit_index(col, row)?;
+                mask |= 1u128 << bit;
+            }
+        }
+        Some(mask)
+    }
+
+    pub fn rect_mask_u64(self, x: u8, y: u8, w: u8, h: u8) -> Option<u64> {
+        if self.mask_width() != GridMaskWidth::U64 {
+            return None;
+        }
+        self.rect_mask_u128(x, y, w, h).map(|mask| mask as u64)
+    }
+
+    pub fn occupied_mask_u128(self, cells: &[bool]) -> Option<u128> {
+        if cells.len() != self.cell_count() {
+            return None;
+        }
+
+        let mut mask = 0u128;
+        for (index, occupied) in cells.iter().copied().enumerate() {
+            if occupied {
+                mask |= 1u128 << index;
+            }
+        }
+        Some(mask)
+    }
+
+    pub fn occupied_mask_u64(self, cells: &[bool]) -> Option<u64> {
+        if self.mask_width() != GridMaskWidth::U64 {
+            return None;
+        }
+        self.occupied_mask_u128(cells).map(|mask| mask as u64)
+    }
+
+    pub fn collides_u128(self, occupied_mask: u128, x: u8, y: u8, w: u8, h: u8) -> Option<bool> {
+        self.rect_mask_u128(x, y, w, h)
+            .map(|mask| occupied_mask & mask != 0)
+    }
+
+    pub fn collides_u64(self, occupied_mask: u64, x: u8, y: u8, w: u8, h: u8) -> Option<bool> {
+        if self.mask_width() != GridMaskWidth::U64 {
+            return None;
+        }
+        self.rect_mask_u64(x, y, w, h)
+            .map(|mask| occupied_mask & mask != 0)
+    }
+
+    pub fn merged_u128(self, occupied_mask: u128, x: u8, y: u8, w: u8, h: u8) -> Option<u128> {
+        self.rect_mask_u128(x, y, w, h)
+            .map(|mask| occupied_mask | mask)
+    }
+
+    pub fn merged_u64(self, occupied_mask: u64, x: u8, y: u8, w: u8, h: u8) -> Option<u64> {
+        if self.mask_width() != GridMaskWidth::U64 {
+            return None;
+        }
+        self.rect_mask_u64(x, y, w, h)
+            .map(|mask| occupied_mask | mask)
+    }
+}
+
 impl fmt::Display for InventoryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -86,6 +219,38 @@ impl InventoryGrid {
     /// Default 10x10 stash grid
     pub fn new_stash() -> Self {
         Self::new(10, 10)
+    }
+
+    pub fn pattern(&self) -> GridPattern {
+        GridPattern::new(self.width, self.height)
+    }
+
+    pub fn bitboard_mask_u128(&self) -> Option<u128> {
+        self.pattern().occupied_mask_u128(&self.grid)
+    }
+
+    pub fn bitboard_mask_u64(&self) -> Option<u64> {
+        self.pattern().occupied_mask_u64(&self.grid)
+    }
+
+    pub fn bitboard_collision_u128(&self, x: u8, y: u8, w: u8, h: u8) -> Option<bool> {
+        self.bitboard_mask_u128()
+            .and_then(|occupied| self.pattern().collides_u128(occupied, x, y, w, h))
+    }
+
+    pub fn bitboard_collision_u64(&self, x: u8, y: u8, w: u8, h: u8) -> Option<bool> {
+        self.bitboard_mask_u64()
+            .and_then(|occupied| self.pattern().collides_u64(occupied, x, y, w, h))
+    }
+
+    pub fn bitboard_merge_u128(&self, x: u8, y: u8, w: u8, h: u8) -> Option<u128> {
+        self.bitboard_mask_u128()
+            .and_then(|occupied| self.pattern().merged_u128(occupied, x, y, w, h))
+    }
+
+    pub fn bitboard_merge_u64(&self, x: u8, y: u8, w: u8, h: u8) -> Option<u64> {
+        self.bitboard_mask_u64()
+            .and_then(|occupied| self.pattern().merged_u64(occupied, x, y, w, h))
     }
 
     /// Marks a rectangle as occupied. Returns false if any cell is already occupied or out of bounds.
@@ -511,5 +676,102 @@ mod tests {
             "Index 3 should be occupied for (1,1) in 2x2 grid"
         );
         assert!(!grid.grid[0], "Index 0 should remain free");
+    }
+
+    #[test]
+    fn test_grid_pattern_bitboard_collision() {
+        let inventory = GridPattern::inventory();
+        assert_eq!(inventory.bit_index(0, 0), Some(0));
+        assert_eq!(inventory.bit_index(9, 3), Some(39));
+        assert_eq!(inventory.mask_width(), GridMaskWidth::U64);
+
+        let mut grid = InventoryGrid::new(inventory.width(), inventory.height());
+        let placements = [(0, 0, 2, 2), (4, 0, 1, 3), (7, 1, 2, 2)];
+        let mut occupied_mask = 0u128;
+
+        for &(x, y, w, h) in &placements {
+            assert!(grid.occupy(x, y, w, h));
+            let rect_mask = inventory.rect_mask_u128(x, y, w, h).unwrap();
+            assert_eq!(occupied_mask & rect_mask, 0, "placements should not overlap");
+            occupied_mask |= rect_mask;
+        }
+
+        let colliding_candidate = (1, 1, 1, 1);
+        let colliding_mask = inventory
+            .rect_mask_u128(
+                colliding_candidate.0,
+                colliding_candidate.1,
+                colliding_candidate.2,
+                colliding_candidate.3,
+            )
+            .unwrap();
+        assert_eq!(occupied_mask & colliding_mask != 0, true);
+        assert_eq!(
+            grid.bitboard_collision_u64(
+                colliding_candidate.0,
+                colliding_candidate.1,
+                colliding_candidate.2,
+                colliding_candidate.3
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            grid.occupy(
+                colliding_candidate.0,
+                colliding_candidate.1,
+                colliding_candidate.2,
+                colliding_candidate.3
+            ),
+            occupied_mask & colliding_mask == 0
+        );
+
+        let free_candidate = (2, 3, 1, 1);
+        let free_mask = inventory
+            .rect_mask_u128(
+                free_candidate.0,
+                free_candidate.1,
+                free_candidate.2,
+                free_candidate.3,
+            )
+            .unwrap();
+        assert_eq!(occupied_mask & free_mask, 0);
+        assert_eq!(
+            grid.bitboard_collision_u64(
+                free_candidate.0,
+                free_candidate.1,
+                free_candidate.2,
+                free_candidate.3
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            grid.occupy(
+                free_candidate.0,
+                free_candidate.1,
+                free_candidate.2,
+                free_candidate.3
+            ),
+            occupied_mask & free_mask == 0
+        );
+
+        let merged_mask = grid
+            .bitboard_merge_u64(0, 3, 1, 1)
+            .expect("inventory should fit in u64");
+        assert_eq!(
+            merged_mask,
+            grid.bitboard_mask_u64().unwrap() | inventory.rect_mask_u64(0, 3, 1, 1).unwrap()
+        );
+
+        let stash = GridPattern::stash();
+        assert_eq!(stash.mask_width(), GridMaskWidth::U128);
+        assert_eq!(stash.rect_mask_u64(0, 0, 10, 10), None);
+        assert_eq!(stash.rect_mask_u128(0, 0, 10, 10).unwrap().count_ones(), 100);
+
+        let cube = GridPattern::cube();
+        assert_eq!(cube.rect_mask_u64(0, 0, 3, 4).unwrap().count_ones(), 12);
+
+        let belt = GridPattern::belt(5);
+        assert_eq!(belt.bit_index(3, 4), Some(19));
+        assert_eq!(belt.mask_width(), GridMaskWidth::U64);
     }
 }
