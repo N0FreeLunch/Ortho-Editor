@@ -15,6 +15,8 @@ pub fn normalize_alpha_code_hint(code: &str) -> &str {
     if trimmed == "us g" || trimmed == "k g" { return "jav"; }
     if trimmed == "7 p" || trimmed == "80sc" { return "ks d"; }
     if trimmed == "lbl" { return "b7ts"; }
+    if trimmed == "whp1" { return "hp1"; }
+    if trimmed == "wmp1" { return "mp1"; }
     
     // Stealth codes (Alpha v105)
     let bytes: Vec<u8> = trimmed.chars().map(|c| c as u32 as u8).collect();

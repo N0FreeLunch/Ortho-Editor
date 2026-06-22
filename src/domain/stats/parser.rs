@@ -121,6 +121,9 @@ pub fn read_item_stats<R: BitRead>(
     } else {
         PropertyReaderContext { bytes: &[], item_start_bit: 0 }
     };
+    let item_start_rel = section_recovery
+        .item_start_bit
+        .saturating_sub(cursor.base_pos);
     if is_v105_shadow_final {
         let skip_bits_count = if is_shadow_container {
             30
@@ -155,7 +158,28 @@ pub fn read_item_stats<R: BitRead>(
         }
     }
 
-    if is_alpha && (is_compact || is_authority_host) {
+    crate::item_trace!(
+        "[socket-recovery] code={} alpha={} runeword={} authority_host={} socketed={} compact={} item_start_rel={} child_offsets={} authority_offsets={}",
+        trimmed_code,
+        axiom.is_alpha(),
+        is_runeword,
+        is_authority_host,
+        is_socketed,
+        is_compact,
+        item_start_rel,
+        child_offsets.len(),
+        authority_offsets.len()
+    );
+    if crate::item::item_trace_enabled() {
+        let child_preview: Vec<(u64, String)> = child_offsets
+            .iter()
+            .take(8)
+            .map(|off| (*off, child_offset_codes.get(off).cloned().unwrap_or_default()))
+            .collect();
+        eprintln!("[socket-recovery] child_preview={:?}", child_preview);
+    }
+
+    if is_alpha && is_compact {
         if trimmed_code == "7mgw" {
             let mut payload = Vec::new();
             for _ in 0..28 {
@@ -170,7 +194,7 @@ pub fn read_item_stats<R: BitRead>(
             for off in child_offsets
                 .iter()
                 .copied()
-                .filter(|off| *off > section_recovery.item_start_bit)
+                .filter(|off| *off > item_start_rel)
                 .take(3)
             {
                 let raw_code = child_offset_codes
@@ -178,7 +202,7 @@ pub fn read_item_stats<R: BitRead>(
                     .map(|s| s.as_str())
                     .unwrap_or("jew");
                 let normalized = match raw_code.trim() {
-                    "ww" => "r08",
+                    "ww" => "r13",
                     "gcw" => "r15",
                     other => other,
                 };
@@ -191,13 +215,29 @@ pub fn read_item_stats<R: BitRead>(
                 nested_items.push(child);
             }
 
+            if nested_items.len() < 3 {
+                let scan_limit = if trimmed_code.contains(' ') { 1024 } else { 512 };
+                if let Some((scanned_children, _)) = crate::domain::item::serialization::scan_socket_children(
+                    section_recovery.bytes,
+                    item_start_rel,
+                    huffman,
+                    0,
+                    axiom.is_alpha(),
+                    scan_limit,
+                ) {
+                    if scanned_children.len() > nested_items.len() {
+                        nested_items = scanned_children;
+                    }
+                }
+            }
+
             if !nested_items.is_empty() {
                 // Consume the bits for the shadow items until the next REAL marker
                 let next_real_off = authority_offsets
                     .iter()
                     .copied()
                     .find(|&off| {
-                        off > section_recovery.item_start_bit && {
+                        off > item_start_rel && {
                             let raw_code = child_offset_codes.get(&off).map(|s| s.as_str()).unwrap_or("");
                             let trimmed = raw_code.trim();
                             !matches!(trimmed, "xrs" | "c8xr" | "rhd" | "" | "ww" | "gcw")
@@ -205,10 +245,16 @@ pub fn read_item_stats<R: BitRead>(
                     });
 
                 let total_consumed = if let Some(real_off) = next_real_off {
-                    real_off - section_recovery.item_start_bit
+                    real_off - item_start_rel
                 } else {
                     // Consume until the end of the items section budget
-                    child_offsets.iter().copied().filter(|off| *off > section_recovery.item_start_bit).last().map(|off| (off + 80) - section_recovery.item_start_bit).unwrap_or(0)
+                    child_offsets
+                        .iter()
+                        .copied()
+                        .filter(|off| *off > item_start_rel)
+                        .last()
+                        .map(|off| (off + 80) - item_start_rel)
+                        .unwrap_or(0)
                 };
 
                 let current_pos = cursor.pos() - section_recovery.item_start_bit;
@@ -237,7 +283,18 @@ pub fn read_item_stats<R: BitRead>(
     // absolute_bit = section_base_abs + local_pos is computed correctly.
     let section_base_abs = cursor.base_pos;
 
-    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery.clone(), huffman, is_runeword, is_v105_shadow_final || is_shadow_container || is_authority_host, &axiom, Some(&child_offsets), Some(&child_offset_codes), |bytes, pos, huff, idx, alpha| {
+    let (props, complete, term, nested_items) = read_property_list(
+        cursor,
+        trimmed_code,
+        version,
+        section_recovery.clone(),
+        huffman,
+        is_runeword,
+        is_v105_shadow_final || is_shadow_container || is_runeword,
+        &axiom,
+        Some(&child_offsets),
+        Some(&child_offset_codes),
+        |bytes, pos, huff, idx, alpha| {
         // Use scanner-verified code as hint to ensure correct item identification
         let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
         let peek_res = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0);
@@ -264,6 +321,26 @@ pub fn read_item_stats<R: BitRead>(
         }
         Ok((item, consumed))
     })?;
+    let mut nested_items = nested_items;
+    if axiom.is_alpha() && is_runeword && nested_items.len() < 3 {
+        let scan_limit = if trimmed_code.contains(' ') {
+            1024
+        } else {
+            512
+        };
+        if let Some((scanned_children, _)) = crate::domain::item::serialization::scan_socket_children(
+            section_recovery.bytes,
+            item_start_rel,
+            huffman,
+            0,
+            axiom.is_alpha(),
+            scan_limit,
+        ) {
+            if scanned_children.len() > nested_items.len() {
+                nested_items = scanned_children;
+            }
+        }
+    }
     if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) && !is_shadow_container {
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
         cursor.begin_segment(ItemSegmentType::ExtendedStats);
@@ -307,7 +384,8 @@ where
     let start_pos = recorder.pos();
 
     let old_limit = recorder.limit();
-    let is_actual_runeword = (alpha_runeword || code.trim() == "Þ.") && axiom.is_socketed;
+    let is_authority_host = axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+    let is_actual_runeword = (alpha_runeword || code.trim() == "Þ." || is_authority_host) && axiom.is_socketed;
     if axiom.is_alpha() && is_actual_runeword {
         recorder.set_limit(u64::MAX);
     }
@@ -369,7 +447,7 @@ where
                             header_info;
                         let trimmed_peek = code_peek.trim();
                         let normalized_peek = match trimmed_peek {
-                            "ww" => "r08",
+                            "ww" => "r13",
                             "gcw" => "r15",
                             other => other,
                         };
@@ -504,7 +582,7 @@ where
              let scanner_code = child_marker_codes
                  .and_then(|codes| codes.get(&target_local_pos))
                  .map(|code| match code.trim() {
-                     "ww" => "r08",
+                     "ww" => "r13",
                      "gcw" => "r15",
                      other => other,
                  });
@@ -512,7 +590,7 @@ where
                  let (mode, loc, _x, code_peek, flags, version_peek, _is_compact, _header_bits, _nudge, _has_checksum) = header_info;
                  let trimmed_peek = code_peek.trim();
                  let normalized_peek = match trimmed_peek {
-                     "ww" => "r08",
+                     "ww" => "r13",
                      "gcw" => "r15",
                      other => other,
                  };
@@ -570,7 +648,7 @@ where
                     // Create a minimal placeholder using the scanner-verified code.
                     let mut placeholder = crate::domain::item::Item::default();
                     let sc = match normalized_code.as_str() {
-                        "ww" => "r08".to_string(),
+                        "ww" => "r13".to_string(),
                         "gcw" => "r15".to_string(),
                         c => c.to_string(),
                     };
@@ -595,7 +673,7 @@ where
                 } else {
                     let c = child.code.trim().to_string();
                     match c.as_str() {
-                        "ww" => "r08".to_string(),
+                        "ww" => "r13".to_string(),
                         "gcw" => "r15".to_string(),
                         _ => c,
                     }

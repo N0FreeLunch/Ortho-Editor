@@ -189,7 +189,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 }
                             }
 
-                            if alpha && (trimmed_code == "hp1" || trimmed_code == "xrs" || trimmed_code == "wa2") {
+                            if alpha && (trimmed_code == "hp1" || trimmed_code == "wyws" || trimmed_code == "xrs" || trimmed_code == "wa2") {
                                 confidence += 200;
                             }
                             if alpha && is_alpha_runeword_candidate && (trimmed_code == "xrs" || trimmed_code == "wa2") {
@@ -468,6 +468,7 @@ fn is_alpha_v105_slot_item(code: &str) -> bool {
         "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
         "whp1"|"whp2"|"whp3"|"whp4"|"whp5"|"wmp1"|"wmp2"|"wmp3"|"wmp4"|"wmp5"|
         "rvs"|"rvl"|"vps"|"tsc"|"isc"|"jav"|"yps"|"wps"|"w8cs"|"w88w"|"xrs"|
+        "wyws"|
         "6cs"|"7mgw"|"fsh"|"7pus"|"ww7c"|"mxh"|"d ew"|"ghm"|"amu"|"rin"|"cm1"|
         "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"|"swsp"
     ) { return true; }

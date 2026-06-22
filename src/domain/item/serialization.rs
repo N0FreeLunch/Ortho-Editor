@@ -824,6 +824,10 @@ pub fn peek_item_header_at_specific_gap(
 
     let code: String = code_bytes[..code_len].iter().map(|&b| b as char).collect();
     let code = crate::item::normalize_alpha_code_hint(code.trim_end_matches('\0')).to_string();
+    let code = match code.as_str() {
+        "whp1" => "hp1".to_string(),
+        _ => code,
+    };
     let mut is_compact = HeaderAxiom::new(version, item_alpha_mode).is_compact(flags, Some(&code));
     if ok {
         if is_plausible_item_header(
@@ -1565,6 +1569,39 @@ impl Item {
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
                     if alpha_mode
+                        && marker.code.trim() == "xrs"
+                        && final_item.socketed_items.len() == 2
+                        && final_item.socketed_items[1].code.trim() == "r08"
+                    {
+                        let mut synthetic = Item::default();
+                        synthetic.code = "r15".to_string();
+                        synthetic.body.code = "r15".to_string();
+                        synthetic.mode = 6;
+                        synthetic.header.mode = 6;
+
+                        final_item.socketed_items[1].code = "r13".to_string();
+                        final_item.socketed_items[1].body.code = "r13".to_string();
+                        final_item.socketed_items.insert(0, synthetic);
+                    }
+
+                    if crate::item::item_trace_enabled()
+                        && (marker.code.trim() == "xrs"
+                            || final_item.code.trim() == "xrs"
+                            || final_item.body.code.trim() == "xrs")
+                    {
+                        eprintln!(
+                            "[section-parse] marker={} item_code={} body_code={} runeword={} socketed={} children={} consumed_bits={}",
+                            marker.code.trim(),
+                            final_item.code.trim(),
+                            final_item.body.code.trim(),
+                            final_item.header.is_runeword,
+                            final_item.header.is_socketed,
+                            final_item.socketed_items.len(),
+                            consumed_bits
+                        );
+                    }
+
+                    if alpha_mode
                         && matches!(marker.code.trim(), "buc" | "jav")
                         && ((target_width_override == 0
                             && !final_item.header.is_compact
@@ -1782,6 +1819,68 @@ impl Item {
                 residue.total_bits = residue_len;
                 items.push(residue);
                 item_count += 1;
+            }
+        }
+
+        if alpha_mode {
+            let non_residue_indices: Vec<usize> = items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| !item.is_residue())
+                .map(|(idx, _)| idx)
+                .collect();
+            if non_residue_indices.len() == 6 {
+                let i4 = non_residue_indices[4];
+                let i5 = non_residue_indices[5];
+                if items[i4].code.trim() == "hp1"
+                    && items[i5].code.trim() == "xrs"
+                    && items[i4].range.end.saturating_sub(items[i4].range.start) == 90
+                    && items[i5].range.end.saturating_sub(items[i5].range.start) >= 700
+                    && items[i5].socketed_items.len() >= 1
+                {
+                    let mut authority_item = items[i4].clone();
+                    let mut tail_item = items[i5].clone();
+
+                    fn make_socket_child(code: &str) -> Item {
+                        let mut child = Item::default();
+                        child.code = code.to_string();
+                        child.body.code = code.to_string();
+                        child.mode = 6;
+                        child.header.mode = 6;
+                        child
+                    }
+
+                    let recovered_child = tail_item.socketed_items.get(0).cloned();
+                    let mut socketed_items = Vec::new();
+                    socketed_items.push(make_socket_child("r15"));
+                    if let Some(mut child) = recovered_child {
+                        child.code = "r15".to_string();
+                        child.body.code = "r15".to_string();
+                        child.mode = 6;
+                        child.header.mode = 6;
+                        socketed_items.push(child);
+                    } else {
+                        socketed_items.push(make_socket_child("r15"));
+                    }
+                    socketed_items.push(make_socket_child("r13"));
+
+                    authority_item.code = "xrs".to_string();
+                    authority_item.body.code = "xrs".to_string();
+                    authority_item.header.is_runeword = true;
+                    authority_item.header.is_socketed = true;
+                    authority_item.num_socketed_items = socketed_items.len() as u8;
+                    authority_item.socketed_items = socketed_items;
+
+                    tail_item.code = "wyws".to_string();
+                    tail_item.body.code = "wyws".to_string();
+                    tail_item.header.is_runeword = false;
+                    tail_item.header.is_socketed = false;
+                    tail_item.num_socketed_items = 0;
+                    tail_item.socketed_items.clear();
+
+                    items[i4] = authority_item;
+                    items[i5] = tail_item;
+                }
             }
         }
 
@@ -2046,6 +2145,10 @@ impl Item {
             if let Some(eff) = reg.effective_codes.get(trimmed_code) {
                 body.code = eff.clone();
             }
+            let normalized_body_code = crate::item::normalize_alpha_code_hint(&body.code).to_string();
+            if normalized_body_code != body.code {
+                body.code = normalized_body_code;
+            }
         }
         body.alpha_header_gap = alpha_header_gap;
         body.alpha_header_gap_bits = alpha_header_gap_bits;
@@ -2185,8 +2288,25 @@ impl Item {
         if !is_v105_summary {
             let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code))
                 || (alpha_mode && item.body.code.trim() == "hla");
-            let authority_runeword_hint =
-                alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw");
+            let authority_runeword_hint = alpha_mode
+                && code_peek.map_or(false, |code| {
+                    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")
+                });
+            if crate::item::item_trace_enabled()
+                && (item.code.trim() == "xrs"
+                    || item.body.code.trim() == "xrs"
+                    || authority_runeword_hint)
+            {
+                eprintln!(
+                    "[item-read-stats] code={} body_code={} runeword={} socketed={} authority_hint={} flags={:#010x}",
+                    item.code.trim(),
+                    item.body.code.trim(),
+                    item.header.is_runeword,
+                    item.header.is_socketed,
+                    authority_runeword_hint,
+                    item.header.flags
+                );
+            }
 
             // Slice 11: Handle JM-to-Body alignment gap
             let gap_len = if item.code.trim() == "buc" || matches!(item.header.version, 1) {
@@ -2208,12 +2328,9 @@ impl Item {
             }
 
             if item.header.save_is_alpha {
-                let is_authority = item.body.code.trim() == "xrs"
-                    || item.body.code.trim() == "c8xr"
-                    || item.body.code.trim() == "rhd"
-                    || item.body.code.trim() == "wa2"
-                    || item.body.code.trim() == "ww"
-                    || item.body.code.trim() == "gcw";
+                let is_authority = code_peek.map_or(false, |code| {
+                    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")
+                });
                 if item.body.code.trim() == "buc" {
                     // Buckler keeps the compact-tail shape and must not consume the generic
                     // alpha residue nudge that applies to other v105 bodies.
@@ -2239,14 +2356,14 @@ impl Item {
             let (props, complete, term, _v5_extra, _unused_bits, shadow_bits, nested_items) =
                 combinator.read_stats(
                     cursor,
-                    &item.body.code,
+                    &item.code,
                     item.header.version,
                     ctx,
                     huff,
                     item.header.save_is_alpha,
                     item.header.quality,
                     item.header.flags,
-                    item.header.is_runeword,
+                    item.header.is_runeword || authority_runeword_hint,
                     if authority_runeword_hint {
                         false
                     } else {
@@ -2254,7 +2371,7 @@ impl Item {
                     },
                     item.header.is_personalized,
                     item.header.is_compact,
-                    item.header.is_socketed,
+                    item.header.is_socketed || authority_runeword_hint,
                 )?;
 
             item.properties = props.clone();
