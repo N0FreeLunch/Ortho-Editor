@@ -15,6 +15,23 @@ fn is_alpha_v105_shadow_marker(code: &str) -> bool {
     matches!(trimmed, "c8xr" | "wa2" | "rhd") || (trimmed.starts_with('r') && trimmed.len() <= 3 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))
 }
 
+fn is_alpha_v105_authority_marker(code: &str) -> bool {
+    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+}
+
+fn is_alpha_v105_socket_child_marker(code: &str) -> bool {
+    let trimmed = code.trim();
+    if matches!(trimmed, "jew" | "gcw" | "ww") {
+        return true;
+    }
+
+    let bytes = trimmed.as_bytes();
+    bytes.len() >= 2
+        && bytes.len() <= 3
+        && bytes[0] == b'r'
+        && bytes[1..].iter().all(|b| b.is_ascii_digit())
+}
+
 const SCAN_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for parallel scanning
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,7 +273,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
     let mut last_offset = 0;
     let mut last_code = String::new();
     let mut accepted_count = 0;
-    let mut since_last_xrs: Option<u64> = None;
+    let mut since_last_auth: Option<(u64, u64)> = None;
     
     while i < final_markers.len() {
         let (offset, confidence, code_str) = &final_markers[i];
@@ -273,9 +290,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 max_score += 100;
             }
 
-            if let Some(xrs_off) = since_last_xrs {
-                let dist = offset - xrs_off;
-                if dist < 512 && is_alpha_v105_shadow_marker(code_str) {
+            if let Some((auth_off, auth_limit)) = since_last_auth {
+                let dist = offset - auth_off;
+                if dist < auth_limit
+                    && is_alpha_v105_shadow_marker(code_str)
+                    && !is_alpha_v105_socket_child_marker(code_str)
+                {
                     max_score -= 1500;
                 }
             }
@@ -303,9 +323,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 }
                 score += alignment_bonus;
 
-                if let Some(xrs_off) = since_last_xrs {
-                    let dist = o_offset - xrs_off;
-                    if dist < 512 && is_alpha_v105_shadow_marker(o_code) {
+                if let Some((auth_off, auth_limit)) = since_last_auth {
+                    let dist = o_offset - auth_off;
+                    if dist < auth_limit
+                        && is_alpha_v105_shadow_marker(o_code)
+                        && !is_alpha_v105_socket_child_marker(o_code)
+                    {
                         score -= 1500;
                     }
                 }
@@ -333,8 +356,10 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 if accepted_count >= expected as usize {
                     let is_aligned = if accepted_count == 0 { false } else { is_v105_aligned(o_offset - last_offset) };
                     if !is_aligned {
-                        let following_xrs = since_last_xrs.map(|off| o_offset - off < 512).unwrap_or(false);
-                        if !following_xrs {
+                        let following_auth = since_last_auth
+                            .map(|(off, limit)| o_offset - off < limit)
+                            .unwrap_or(false);
+                        if !following_auth || !is_alpha_v105_socket_child_marker(o_code) {
                             score -= 500;
                         } else {
                             score -= 100;
@@ -355,8 +380,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
         if alpha && max_score < 150 {
             if let Some(expected) = expected_count {
-                let following_xrs = since_last_xrs.map(|off| best_offset - off < 512).unwrap_or(false);
-                if following_xrs && is_alpha_v105_shadow_marker(best_code_str) {
+                let following_auth = since_last_auth
+                    .map(|(off, limit)| best_offset - off < limit)
+                    .unwrap_or(false);
+                if following_auth && is_alpha_v105_socket_child_marker(best_code_str) {
+                    status = MarkerStatus::Accepted;
+                } else if following_auth && is_alpha_v105_shadow_marker(best_code_str) {
                     status = MarkerStatus::Phantom;
                 } else if accepted_count < expected as usize {
                 } else {
@@ -381,11 +410,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 last_offset = *best_offset;
                 last_code = best_code_str.clone();
                 
-                if last_code.trim() == "xrs" {
-                    since_last_xrs = Some(last_offset);
-                } else if let Some(off) = since_last_xrs {
-                    if last_offset - off >= 512 {
-                        since_last_xrs = None;
+                if is_alpha_v105_authority_marker(&last_code) {
+                    let limit = if last_code.trim() == "rhd" { 128 } else { 512 };
+                    since_last_auth = Some((last_offset, limit));
+                } else if let Some((off, limit)) = since_last_auth {
+                    if last_offset - off >= limit {
+                        since_last_auth = None;
                     }
                 }
             } else if verbose {

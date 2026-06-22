@@ -723,7 +723,7 @@ impl Item {
                 return Ok(());
             }
         }
-        if alpha_mode && self.header.is_runeword && is_authority_overlap_code && !self.bits.is_empty() {
+        if alpha_mode && is_authority_overlap_code && !self.bits.is_empty() {
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
                 emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
@@ -809,6 +809,9 @@ impl Item {
             // We strictly bound this expansion to the specific 'hp1' code to avoid regressing other summary families.
             if self.code.trim() == "hp1" && self.total_bits == 77 {
                 final_target = 77;
+            }
+            if self.total_bits > final_target {
+                final_target = self.total_bits;
             }
 
             if final_target > current_bits {

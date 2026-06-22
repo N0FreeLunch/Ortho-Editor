@@ -2365,7 +2365,7 @@ pub fn scan_socket_children(
     limit: u64,
 ) -> Option<(Vec<Item>, u64)> {
     let mut children = Vec::new();
-    let mut current_pos = bit_pos;
+    let mut current_pos = bit_pos.saturating_add(72);
     let max_pos = bit_pos + limit;
     let section_bits = (bytes.len() * 8) as u64;
 
@@ -2401,7 +2401,12 @@ pub fn scan_socket_children(
                         if _is_compact {
                             forced_compact = Some(true);
                         }
-                        code_hint = Some(code.clone());
+                        let normalized_code = match code.trim() {
+                            "gcw" => "r15",
+                            "ww" => "r13",
+                            other => other,
+                        };
+                        code_hint = Some(normalized_code.to_string());
                     }
 
                     let remaining = section_bits.saturating_sub(current_pos);
@@ -2439,6 +2444,17 @@ pub fn scan_socket_children(
                             let is_authority_final = matches!(final_child.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
                             if is_authority_final {
                                 consumed_bits = consumed_bits.min(512);
+                            }
+                            match final_child.code.trim() {
+                                "gcw" => {
+                                    final_child.code = "r15".to_string();
+                                    final_child.body.code = "r15".to_string();
+                                }
+                                "ww" => {
+                                    final_child.code = "r13".to_string();
+                                    final_child.body.code = "r13".to_string();
+                                }
+                                _ => {}
                             }
                         }
 

@@ -88,7 +88,8 @@ pub fn read_item_stats<R: BitRead>(
     let is_alpha = axiom.is_alpha();
 
     let is_v105_shadow_final = alpha_mode && is_v105_shadow;
-    let is_shadow_container = alpha_mode && (trimmed_code == "xrs" || trimmed_code == "c8xr");
+    let is_authority_host = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "wa2");
+    let is_shadow_container = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr");
 
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
     let is_potion = trimmed_code.starts_with('h')
@@ -113,7 +114,7 @@ pub fn read_item_stats<R: BitRead>(
         return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
-    let allow_compact_recovery = is_runeword || is_shadow_container;
+    let allow_compact_recovery = is_runeword || is_shadow_container || is_authority_host;
 
     let section_recovery = if let Some((bytes, start)) = ctx {
         PropertyReaderContext { bytes, item_start_bit: start }
@@ -154,7 +155,7 @@ pub fn read_item_stats<R: BitRead>(
         }
     }
 
-    if is_alpha && (is_compact || trimmed_code == "wa2") {
+    if is_alpha && (is_compact || is_authority_host) {
         if trimmed_code == "7mgw" {
             let mut payload = Vec::new();
             for _ in 0..28 {
@@ -236,7 +237,7 @@ pub fn read_item_stats<R: BitRead>(
     // absolute_bit = section_base_abs + local_pos is computed correctly.
     let section_base_abs = cursor.base_pos;
 
-    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery.clone(), huffman, is_runeword, is_v105_shadow_final || is_shadow_container, &axiom, Some(&child_offsets), Some(&child_offset_codes), |bytes, pos, huff, idx, alpha| {
+    let (props, complete, term, nested_items) = read_property_list(cursor, trimmed_code, version, section_recovery.clone(), huffman, is_runeword, is_v105_shadow_final || is_shadow_container || is_authority_host, &axiom, Some(&child_offsets), Some(&child_offset_codes), |bytes, pos, huff, idx, alpha| {
         // Use scanner-verified code as hint to ensure correct item identification
         let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
         let peek_res = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0);
