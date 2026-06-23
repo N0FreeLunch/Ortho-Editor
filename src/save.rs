@@ -12,6 +12,7 @@ pub use crate::domain::header::axiom::{
 pub use crate::domain::stats::{AttributeSection, AttributeEntry};
 pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 pub use crate::domain::progression::{QuestSection, WaypointSection};
+use crate::domain::gateway::ItemGateway;
 use crate::domain::vo::InventoryPlacement;
 use std::io;
 use std::mem;
@@ -218,6 +219,21 @@ pub fn apply_save_side_coordinated_relocation(
 ) {
     item.set_placement(placement);
     item.set_owner_bucket(page, location, mode);
+}
+
+/// Validates a relocation target first so rejected attempts leave the item untouched.
+pub fn try_apply_save_side_coordinated_relocation(
+    item: &mut Item,
+    x: u8,
+    y: u8,
+    current_items: &[Item],
+    page: u8,
+    location: u8,
+    mode: u8,
+) -> Result<(), &'static str> {
+    let placement = ItemGateway::verify_placement_with_current_items(item, x, y, current_items)?;
+    apply_save_side_coordinated_relocation(item, placement, page, location, mode);
+    Ok(())
 }
 
 fn push_with_children(slots: &mut Vec<(Item, ItemSlotClass)>, mut item: Item) {

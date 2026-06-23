@@ -5,6 +5,7 @@ use d2r_core::save::{
     apply_save_side_coordinated_relocation, AttributeSection, classify_item_slot,
     collect_player_slots, map_core_sections, parse_quest_section, parse_skill_section,
     ItemSlotClass,
+    try_apply_save_side_coordinated_relocation,
     rebuild_status_and_player_items,
 };
 use std::fs;
@@ -313,6 +314,76 @@ fn relocation_mutation_cross_owner_helper_roundtrip() -> io::Result<()> {
     assert_eq!(classify_item_slot(roundtripped), ItemSlotClass::StashLike);
 
     assert_ne!((original_x, original_y), (new_x, new_y));
+    Ok(())
+}
+
+#[test]
+fn relocation_failure_leaves_owner_and_placement_unchanged() -> io::Result<()> {
+    let huffman = HuffmanTree::new();
+    let w_axiom = V105PropertyWidthAxiom::default();
+
+    let candidate_fixtures = [
+        "tests/fixtures/savegames/original/amazon_v105_slice2_equipment.d2s",
+        "tests/fixtures/savegames/original/amazon_v105_act2_start.d2s",
+        "tests/fixtures/savegames/original/amazon_initial.d2s",
+        "tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s",
+    ];
+
+    let mut selected = None;
+    for fixture in candidate_fixtures {
+        let bytes = load_fixture(fixture)?;
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+        if version != 105 {
+            continue;
+        }
+
+        let items = Item::read_player_items(&bytes, &huffman, true)?;
+
+        if let Some(candidate_idx) = items.iter().position(|item| {
+            matches!(classify_item_slot(item), ItemSlotClass::InventoryLike)
+                && !item.header.is_compact
+                && !item.is_opaque()
+                && !w_axiom.is_summary_item(5, &item.code)
+        }) {
+            if let Some(occupied_idx) = items.iter().position(|item| {
+                classify_item_slot(item) == ItemSlotClass::InventoryLike
+                    && (item.x != items[candidate_idx].x || item.y != items[candidate_idx].y)
+            }) {
+                selected = Some((items, candidate_idx, occupied_idx));
+                break;
+            }
+        }
+    }
+
+    let (items, candidate_idx, occupied_idx) = selected
+        .expect("fixture should contain a relocatable inventory candidate and an occupied target");
+
+    let mut candidate = items[candidate_idx].clone();
+    let original_x = candidate.x;
+    let original_y = candidate.y;
+    let original_page = candidate.page;
+    let original_location = candidate.location;
+    let original_mode = candidate.mode;
+    let original_class = classify_item_slot(&candidate);
+    let occupied_item = &items[occupied_idx];
+
+    let err = try_apply_save_side_coordinated_relocation(
+        &mut candidate,
+        occupied_item.x,
+        occupied_item.y,
+        &items,
+        4,
+        original_location,
+        original_mode,
+    )
+    .expect_err("occupied target should be rejected before mutation");
+    assert_eq!(err, "Item placement overlaps occupied inventory cells");
+    assert_eq!((candidate.x, candidate.y), (original_x, original_y));
+    assert_eq!(candidate.page, original_page);
+    assert_eq!(candidate.location, original_location);
+    assert_eq!(candidate.mode, original_mode);
+    assert_eq!(classify_item_slot(&candidate), original_class);
+
     Ok(())
 }
 
