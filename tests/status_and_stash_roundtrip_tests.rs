@@ -2,8 +2,9 @@ use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::domain::forensic::v105::axioms::V105PropertyWidthAxiom;
 use d2r_core::domain::vo::{InventoryCoordinate, InventoryPlacement, ItemSize};
 use d2r_core::save::{
-    AttributeSection, classify_item_slot, collect_player_slots, map_core_sections, parse_quest_section,
-    parse_skill_section, ItemSlotClass,
+    apply_save_side_coordinated_relocation, AttributeSection, classify_item_slot,
+    collect_player_slots, map_core_sections, parse_quest_section, parse_skill_section,
+    ItemSlotClass,
     rebuild_status_and_player_items,
 };
 use std::fs;
@@ -209,6 +210,109 @@ fn relocation_mutation_owner_bucket_reclassification_roundtrip() -> io::Result<(
     assert_eq!(roundtripped.body.mode, original_mode);
     assert_eq!(classify_item_slot(roundtripped), ItemSlotClass::StashLike);
 
+    Ok(())
+}
+
+#[test]
+fn relocation_mutation_cross_owner_helper_roundtrip() -> io::Result<()> {
+    let huffman = HuffmanTree::new();
+    let w_axiom = V105PropertyWidthAxiom::default();
+
+    let candidate_fixtures = [
+        "tests/fixtures/savegames/original/amazon_v105_slice2_equipment.d2s",
+        "tests/fixtures/savegames/original/amazon_v105_act2_start.d2s",
+        "tests/fixtures/savegames/original/amazon_initial.d2s",
+        "tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s",
+    ];
+
+    let mut selected = None;
+    for fixture in candidate_fixtures {
+        let bytes = load_fixture(fixture)?;
+        let map = map_core_sections(&bytes)?;
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+        if version != 105 {
+            continue;
+        }
+
+        let attributes = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)?;
+        let skills = parse_skill_section(&bytes, &map)?;
+        let quests = parse_quest_section(&bytes, &map)?;
+        let items = Item::read_player_items(&bytes, &huffman, true)?;
+
+        if let Some(target_idx) = items.iter().position(|item| {
+            matches!(classify_item_slot(item), ItemSlotClass::InventoryLike)
+                && !item.header.is_compact
+                && !item.is_opaque()
+                && !w_axiom.is_summary_item(5, &item.code)
+        }) {
+            selected = Some((bytes, attributes, skills, quests, items, target_idx));
+            break;
+        }
+    }
+
+    let (bytes, attributes, skills, quests, mut items, target_idx) = selected
+        .expect("fixture should contain a non-opaque inventory-like candidate");
+
+    let original_class = classify_item_slot(&items[target_idx]);
+    assert_eq!(original_class, ItemSlotClass::InventoryLike);
+
+    let original_location = items[target_idx].location;
+    let original_mode = items[target_idx].mode;
+    let original_x = items[target_idx].x;
+    let original_y = items[target_idx].y;
+    let target_code = items[target_idx].code.clone();
+
+    let new_x = if original_x == 0 { 1 } else { original_x - 1 };
+    let new_y = if original_y == 0 { 1 } else { original_y - 1 };
+    let placement = InventoryPlacement::new(
+        InventoryCoordinate::new(new_x, new_y).expect("mutated coordinate should stay in bounds"),
+        ItemSize::new(1, 1).expect("1x1 placement should be valid"),
+    )
+    .expect("mutated placement should stay within the grid");
+
+    apply_save_side_coordinated_relocation(
+        &mut items[target_idx],
+        placement,
+        4,
+        original_location,
+        original_mode,
+    );
+
+    assert_eq!(classify_item_slot(&items[target_idx]), ItemSlotClass::StashLike);
+
+    let rebuilt = rebuild_status_and_player_items(
+        &bytes,
+        Some(&attributes),
+        Some(&skills),
+        Some(&quests),
+        None,
+        None,
+        &items,
+        &huffman,
+    )?;
+
+    let reparsed_items = Item::read_player_items(&rebuilt, &huffman, true)?;
+    let roundtripped = reparsed_items
+        .iter()
+        .find(|item| {
+            item.code.trim() == target_code.trim()
+                && item.page == 4
+                && item.location == original_location
+                && item.mode == original_mode
+                && classify_item_slot(item) == ItemSlotClass::StashLike
+        })
+        .expect("cross-owner item should survive rebuild and readback");
+
+    assert_eq!((roundtripped.x, roundtripped.y), (new_x, new_y));
+    assert_eq!(roundtripped.body.x, new_x);
+    assert_eq!(roundtripped.body.y, new_y);
+    assert_eq!(roundtripped.page, 4);
+    assert_eq!(roundtripped.body.page, 4);
+    assert_eq!(roundtripped.body.location, original_location);
+    assert_eq!(roundtripped.body.mode, original_mode);
+    assert_eq!(classify_item_slot(roundtripped), ItemSlotClass::StashLike);
+
+    assert_ne!((original_x, original_y), (new_x, new_y));
     Ok(())
 }
 

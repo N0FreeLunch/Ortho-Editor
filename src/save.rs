@@ -12,6 +12,7 @@ pub use crate::domain::header::axiom::{
 pub use crate::domain::stats::{AttributeSection, AttributeEntry};
 pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 pub use crate::domain::progression::{QuestSection, WaypointSection};
+use crate::domain::vo::InventoryPlacement;
 use std::io;
 use std::mem;
 use crate::domain::forensic::v105::{V105JmMarkerAxiom, V105SectionMarkerAxiom};
@@ -204,6 +205,19 @@ pub fn collect_player_slots(
         push_with_children(&mut slots, item);
     }
     Ok(slots)
+}
+
+/// Applies one coordinated save-side relocation mutation for a single item.
+/// This keeps placement and owner-bucket changes aligned at the production seam.
+pub fn apply_save_side_coordinated_relocation(
+    item: &mut Item,
+    placement: InventoryPlacement,
+    page: u8,
+    location: u8,
+    mode: u8,
+) {
+    item.set_placement(placement);
+    item.set_owner_bucket(page, location, mode);
 }
 
 fn push_with_children(slots: &mut Vec<(Item, ItemSlotClass)>, mut item: Item) {
