@@ -378,6 +378,10 @@ name = "d2item_serialization_audit"
 path = "src/bin/verify/d2item_serialization_audit.rs"
 
 [[bin]]
+name = "d2item_section_prefix_trace"
+path = "src/bin/verify/d2item_section_prefix_trace.rs"
+
+[[bin]]
 name = "d2item_global_audit"
 path = "src/bin/verify/d2item_global_audit.rs"
 
