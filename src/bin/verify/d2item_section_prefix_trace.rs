@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::forensic::registry::get_registry;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::map_core_sections;
@@ -7,6 +8,7 @@ use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
+use std::io::Cursor;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +53,22 @@ struct SectionTrace {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+struct IsolatedInspect {
+    code: String,
+    bit_length: usize,
+    scanner_hint: String,
+    normalized_code: String,
+    final_code: String,
+    gap_len: usize,
+    gap_source: String,
+    emitter_bypass: bool,
+    ownership_hint: String,
+    ownership_reason: String,
+    contradiction_class: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 struct ItemTrace {
     item_index: usize,
     code: String,
@@ -64,6 +82,8 @@ struct ItemTrace {
     socketed_child_count: usize,
     emitted_child_count: usize,
     child_emission_skipped: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    isolated_inspect: Option<IsolatedInspect>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -288,6 +308,15 @@ fn build_prefix_trace_report(
                 }
             }
 
+            let isolated_inspect = get_isolated_inspect(
+                bytes,
+                item.range.start as usize,
+                huffman,
+                alpha_mode,
+                &item.code,
+                raw_bits.len(),
+            );
+
             item_traces.push(ItemTrace {
                 item_index,
                 code: item.code.trim().to_string(),
@@ -305,6 +334,7 @@ fn build_prefix_trace_report(
                 socketed_child_count: item.socketed_items.len(),
                 emitted_child_count: emission.emitted_child_count,
                 child_emission_skipped: emission.child_emission_skipped,
+                isolated_inspect,
             });
 
             total_items += 1;
@@ -678,5 +708,236 @@ fn truncate_code(code: &str, max_len: usize) -> String {
         let mut truncated = trimmed.chars().take(max_len - 3).collect::<String>();
         truncated.push_str("...");
         truncated
+    }
+}
+
+fn classify_trace_ownership(
+    item: &Item,
+    scanner_hint: &str,
+    normalized_code: &str,
+    final_code: &str,
+    gap_len: usize,
+    gap_source: &str,
+    emitter_bypass: bool,
+) -> (String, String) {
+    let padding_signals = emitter_bypass
+        || item.is_opaque()
+        || item.is_semi_opaque()
+        || gap_source == "normalization:opaque_fallback";
+        
+    let is_kk_seam_drift = (scanner_hint.starts_with("wc") || scanner_hint.contains("wc"))
+        && (final_code == "wwsl" || final_code == "wwu8")
+        && gap_source == "normalization:drift_realigned";
+
+    let replay_signals = gap_source == "header_gap_lookup"
+        || is_kk_seam_drift
+        || (!scanner_hint.is_empty()
+            && scanner_hint == normalized_code
+            && normalized_code == final_code
+            && gap_len > 0);
+
+    let ownership_hint = match (replay_signals, padding_signals) {
+        (true, false) => "capture_replay",
+        (false, true) => "emission_padding",
+        _ => "ambiguous",
+    };
+
+    let ownership_reason = match ownership_hint {
+        "capture_replay" => {
+            if is_kk_seam_drift {
+                format!(
+                    "k  k seam drift identified: scanner_hint='{}' misaligned to final_code='{}' under drift_realigned. This is a capture_replay parsing geometry mismatch.",
+                    scanner_hint, final_code
+                )
+            } else {
+                format!(
+                    "Header-derived replay signals dominate here: scanner_hint='{}', normalized_code='{}', final_code='{}', gap_len={}, gap_source='{}'.",
+                    scanner_hint, normalized_code, final_code, gap_len, gap_source
+                )
+            }
+        }
+        "emission_padding" => format!(
+            "Padding-preserving emission signals dominate here: emitter_bypass={}, gap_source='{}', final_code='{}'.",
+            emitter_bypass, gap_source, final_code
+        ),
+        _ => format!(
+            "Signals remain split between replay and padding: scanner_hint='{}', normalized_code='{}', final_code='{}', gap_len={}, gap_source='{}', emitter_bypass={}.",
+            scanner_hint, normalized_code, final_code, gap_len, gap_source, emitter_bypass
+        ),
+    };
+
+    (ownership_hint.to_string(), ownership_reason)
+}
+
+fn get_isolated_inspect(
+    bytes: &[u8],
+    offset: usize,
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+    section_code: &str,
+    section_len: usize,
+) -> Option<IsolatedInspect> {
+    if !is_alpha {
+        return None;
+    }
+    let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+    let _ = reader.skip(offset as u32).unwrap_or(());
+    
+    if let Ok(item) = Item::from_reader(&mut reader, huffman, is_alpha) {
+        let bit_end = reader.position_in_bits().unwrap_or(0) as usize;
+        let bit_length = bit_end.saturating_sub(offset);
+
+        let scanner_hint = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+            bytes,
+            offset as u64,
+            Some(offset as u64),
+            huffman,
+            true,
+            0,
+        )
+        .map(|p| p.3.trim().to_string())
+        .unwrap_or_default();
+
+        let (normalized_code, gap_len, gap_source) = {
+            let mut reader2 = BitReader::endian(Cursor::new(bytes), LittleEndian);
+            let _ = reader2.skip(offset as u32).unwrap_or(());
+            let mut cursor = d2r_core::data::bit_cursor::BitCursor::new(&mut reader2);
+            
+            let gap_override = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                bytes,
+                offset as u64,
+                Some(offset as u64),
+                huffman,
+                true,
+                0,
+            ).map(|p| {
+                let mut gap = p.8 as usize;
+                if p.5 == 7 && !p.6 {
+                    gap = gap.saturating_sub(45);
+                }
+                gap
+            });
+            
+            let has_checksum_peek = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                bytes,
+                offset as u64,
+                Some(offset as u64),
+                huffman,
+                true,
+                0,
+            ).map(|p| p.9);
+
+            if let Ok((header, _, _)) = d2r_core::domain::item::entity::parse_item_header(
+                &mut cursor,
+                true,
+                Some(scanner_hint.as_str()),
+                gap_override,
+                true,
+                None,
+                has_checksum_peek,
+                Some(offset as u64),
+            ) {
+                if header.is_compact {
+                    cursor.base_pos = offset as u64;
+                }
+                let s_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
+                    header.version,
+                    header.quality.unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
+                    true,
+                );
+                let is_ho = s_axiom.is_header_only(header.flags, Some(scanner_hint.as_str()).unwrap_or(""));
+
+                if is_ho {
+                    (scanner_hint.clone(), 0usize, "header_only".to_string())
+                } else {
+                    let gap_len = if scanner_hint.trim() == "buc" || matches!(header.version, 1) {
+                        0
+                    } else {
+                        s_axiom.header_gap(&scanner_hint, header.flags)
+                    };
+                    if gap_len > 0 {
+                        let _ = cursor.skip(gap_len as u64);
+                    }
+                    let mut decoded = String::new();
+                    let mut ok = true;
+                    for _ in 0..4 {
+                        if let Ok(c) = huffman.decode(&mut reader2) {
+                            decoded.push(c);
+                        } else {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if ok {
+                        let decoded_trimmed = decoded.trim().to_string();
+                        let gap_source = if gap_len > 0 {
+                            "header_gap_lookup".to_string()
+                        } else {
+                            if item.is_opaque() || item.is_semi_opaque() {
+                                "normalization:opaque_fallback".to_string()
+                            } else if decoded_trimmed == item.code.trim() {
+                                "normalization:match_target".to_string()
+                            } else {
+                                "normalization:drift_realigned".to_string()
+                            }
+                        };
+                        (decoded_trimmed, gap_len as usize, gap_source)
+                    } else {
+                        let gap_source = if item.is_opaque() || item.is_semi_opaque() {
+                            "normalization:opaque_fallback".to_string()
+                        } else {
+                            "normalization:drift_realigned".to_string()
+                        };
+                        ("".to_string(), gap_len as usize, gap_source)
+                    }
+                }
+            } else {
+                ("".to_string(), 0usize, "unresolved".to_string())
+            }
+        };
+
+        let final_code = item.code.trim().to_string();
+        
+        let emitter_bypass = {
+            let trimmed_code = item.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+            let is_target_blank = is_alpha && trimmed_code.is_empty();
+            item.is_opaque() || item.is_semi_opaque() || is_target_blank
+        };
+
+        let (ownership_hint, ownership_reason) = classify_trace_ownership(
+            &item,
+            &scanner_hint,
+            &normalized_code,
+            &final_code,
+            gap_len,
+            &gap_source,
+            emitter_bypass,
+        );
+
+        let code_mismatch = section_code.trim() != final_code.trim();
+        let len_mismatch = section_len != bit_length;
+
+        let contradiction_class = match (code_mismatch, len_mismatch) {
+            (true, true) => "both_mismatch".to_string(),
+            (true, false) => "code_mismatch".to_string(),
+            (false, true) => "length_mismatch".to_string(),
+            (false, false) => "none".to_string(),
+        };
+
+        Some(IsolatedInspect {
+            code: final_code.clone(),
+            bit_length,
+            scanner_hint,
+            normalized_code,
+            final_code,
+            gap_len,
+            gap_source,
+            emitter_bypass,
+            ownership_hint,
+            ownership_reason,
+            contradiction_class,
+        })
+    } else {
+        None
     }
 }
