@@ -1,6 +1,8 @@
 //! Gateway for external item data (Deep Links, Clipboard).
 //! This module provides the "Sandbox" zone for validating incoming item payloads.
 
+use crate::domain::inventory::get_item_size;
+use crate::domain::vo::{InventoryCoordinate, InventoryPlacement, ItemSize};
 use crate::item::{Item, HuffmanTree};
 use std::io;
 
@@ -24,16 +26,57 @@ impl ItemGateway {
         Item::from_bytes(&bytes, &huffman, false).map_err(Into::into)
     }
 
-    /// Verifies if the imported item can be placed in the current inventory.
-    /// This is an E2E "Placement Guard" check.
+    /// Verifies whether the imported item fits within the supported inventory bounds.
+    /// This is a boundary-only placement guard and does not inspect occupancy state.
     pub fn verify_placement(
-        _item: &Item,
-        _x: u8,
-        _y: u8,
-    ) -> Result<crate::domain::vo::InventoryPlacement, &'static str> {
-        // This will eventually fetch item dimensions from dataシグ(Template)
-        // and reconcile it with the requested VO coordinate.
-        // Placeholder for the next architectural slice.
-        Err("Placement verification not yet fully linked to templates")
+        item: &Item,
+        x: u8,
+        y: u8,
+    ) -> Result<InventoryPlacement, &'static str> {
+        let (width, height) = get_item_size(item.code());
+        let coordinate = InventoryCoordinate::new(x, y)?;
+        let size = ItemSize::new(width, height)?;
+        InventoryPlacement::new(coordinate, size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn load_fixture_item() -> Item {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
+        let bytes = fs::read(&fixture_path)
+            .unwrap_or_else(|err| panic!("failed to read fixture {}: {}", fixture_path.display(), err));
+        let huffman = HuffmanTree::new();
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+        let items = Item::read_player_items(&bytes, &huffman, version == 105)
+            .expect("fixture should parse into player items");
+        items
+            .into_iter()
+            .next()
+            .expect("fixture should contain at least one item")
+    }
+
+    #[test]
+    fn verify_placement_links_size_and_bounds() {
+        let item = load_fixture_item();
+        let expected_size = get_item_size(item.code());
+
+        let placement = ItemGateway::verify_placement(&item, 0, 0)
+            .expect("in-bounds placement should succeed");
+
+        assert_eq!((placement.coordinate().x(), placement.coordinate().y()), (0, 0));
+        assert_eq!(
+            (placement.size().width(), placement.size().height()),
+            expected_size
+        );
+
+        let err = ItemGateway::verify_placement(&item, 10, 0)
+            .expect_err("out-of-bounds placement should fail");
+        assert_eq!(err, "Item placement exceeds inventory boundaries");
     }
 }
