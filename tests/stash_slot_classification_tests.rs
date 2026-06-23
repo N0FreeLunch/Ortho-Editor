@@ -2,7 +2,6 @@ use d2r_core::item::HuffmanTree;
 use d2r_core::save::{ItemSlotClass, collect_player_slots};
 use std::fs;
 use std::io;
-use std::path::PathBuf;
 
 mod common;
 use common::repo_path;
@@ -25,12 +24,17 @@ fn stash_slot_classification_progression_fixture() -> io::Result<()> {
     assert!(
         slots
             .iter()
-            .any(|(_, class)| *class == ItemSlotClass::StashLike)
+            .any(|(_, class)| *class == ItemSlotClass::SocketChild)
     );
     assert!(
         slots
             .iter()
-            .any(|(_, class)| *class == ItemSlotClass::SocketChild)
+            .any(|(_, class)| *class == ItemSlotClass::InventoryLike)
+    );
+    assert!(
+        !slots
+            .iter()
+            .any(|(_, class)| *class == ItemSlotClass::StashLike)
     );
     Ok(())
 }

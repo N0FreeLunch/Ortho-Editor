@@ -1,6 +1,9 @@
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::domain::forensic::v105::axioms::V105PropertyWidthAxiom;
+use d2r_core::domain::vo::{InventoryCoordinate, InventoryPlacement, ItemSize};
 use d2r_core::save::{
-    AttributeSection, map_core_sections, parse_quest_section, parse_skill_section,
+    AttributeSection, classify_item_slot, collect_player_slots, map_core_sections, parse_quest_section,
+    parse_skill_section, ItemSlotClass,
     rebuild_status_and_player_items,
 };
 use std::fs;
@@ -38,8 +41,174 @@ fn status_and_stash_roundtrip_fixtures() -> io::Result<()> {
             &items,
             &huffman,
         )?;
-        assert_eq!(rebuilt, bytes);
+        let rebuilt_map = map_core_sections(&rebuilt)?;
+        let rebuilt_attributes = AttributeSection::parse(&rebuilt, rebuilt_map.gf_pos, rebuilt_map.if_pos)?;
+        let rebuilt_skills = parse_skill_section(&rebuilt, &rebuilt_map)?;
+        let rebuilt_quests = parse_quest_section(&rebuilt, &rebuilt_map)?;
+        let rebuilt_slots = collect_player_slots(&rebuilt, &huffman)?;
+
+        assert_eq!(rebuilt_attributes.raw_bytes, attributes.raw_bytes);
+        assert_eq!(rebuilt_skills.as_slice(), skills.as_slice());
+        assert_eq!(rebuilt_quests.as_slice(), quests.as_slice());
+        assert!(
+            rebuilt_slots
+                .iter()
+                .any(|(_, class)| *class == ItemSlotClass::InventoryLike)
+        );
     }
+    Ok(())
+}
+
+#[test]
+fn relocation_mutation_same_owner_roundtrip() -> io::Result<()> {
+    let bytes = load_fixture("tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s")?;
+    let huffman = HuffmanTree::new();
+    let map = map_core_sections(&bytes)?;
+    let attributes = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)?;
+    let skills = parse_skill_section(&bytes, &map)?;
+    let quests = parse_quest_section(&bytes, &map)?;
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let mut items = Item::read_player_items(&bytes, &huffman, version == 105)?;
+
+    let target_idx = items
+        .iter()
+        .position(|item| {
+            matches!(
+                classify_item_slot(item),
+                ItemSlotClass::InventoryLike | ItemSlotClass::StashLike
+            )
+        })
+        .expect("fixture should contain an inventory-like or stash-like item");
+
+    let original_class = classify_item_slot(&items[target_idx]);
+    let original_x = items[target_idx].x;
+    let original_y = items[target_idx].y;
+    let target_code = items[target_idx].code.clone();
+    let target_location = items[target_idx].location;
+    let target_page = items[target_idx].page;
+    let target_mode = items[target_idx].mode;
+    let new_x = if original_x == 0 { 1 } else { original_x - 1 };
+    let new_y = if original_y == 0 { 1 } else { original_y - 1 };
+
+    let placement = InventoryPlacement::new(
+        InventoryCoordinate::new(new_x, new_y).expect("mutated coordinate should stay in bounds"),
+        ItemSize::new(1, 1).expect("1x1 placement should be valid"),
+    )
+    .expect("mutated placement should stay within the grid");
+    items[target_idx].set_placement(placement);
+
+    let rebuilt = rebuild_status_and_player_items(
+        &bytes,
+        Some(&attributes),
+        Some(&skills),
+        Some(&quests),
+        None,
+        None,
+        &items,
+        &huffman,
+    )?;
+
+    let reparsed_items = Item::read_player_items(&rebuilt, &huffman, version == 105)?;
+
+    let roundtripped = reparsed_items
+        .iter()
+        .find(|item| {
+            item.code.trim() == target_code.trim()
+                && item.location == target_location
+                && item.page == target_page
+                && item.mode == target_mode
+                && classify_item_slot(item) == original_class
+        })
+        .expect("mutated item should survive rebuild and readback");
+    assert_eq!((roundtripped.x, roundtripped.y), (new_x, new_y));
+    assert_eq!(roundtripped.body.x, new_x);
+    assert_eq!(roundtripped.body.y, new_y);
+    assert_eq!(classify_item_slot(roundtripped), original_class);
+
+    assert_ne!((original_x, original_y), (new_x, new_y));
+    Ok(())
+}
+
+#[test]
+fn relocation_mutation_owner_bucket_reclassification_roundtrip() -> io::Result<()> {
+    let huffman = HuffmanTree::new();
+    let w_axiom = V105PropertyWidthAxiom::default();
+
+    let candidate_fixtures = [
+        "tests/fixtures/savegames/original/amazon_v105_slice2_equipment.d2s",
+        "tests/fixtures/savegames/original/amazon_v105_act2_start.d2s",
+        "tests/fixtures/savegames/original/amazon_initial.d2s",
+        "tests/fixtures/savegames/original/amazon_lvl2_progression_complex.d2s",
+    ];
+
+    let mut selected = None;
+    for fixture in candidate_fixtures {
+        let bytes = load_fixture(fixture)?;
+        let map = map_core_sections(&bytes)?;
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+        if version != 105 {
+            continue;
+        }
+
+        let attributes = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)?;
+        let skills = parse_skill_section(&bytes, &map)?;
+        let quests = parse_quest_section(&bytes, &map)?;
+        let items = Item::read_player_items(&bytes, &huffman, true)?;
+
+        if let Some(target_idx) = items.iter().position(|item| {
+            matches!(
+                classify_item_slot(item),
+                ItemSlotClass::InventoryLike | ItemSlotClass::EquipmentLike
+            ) && !item.header.is_compact
+                && !item.is_opaque()
+                && !w_axiom.is_summary_item(5, &item.code)
+        }) {
+            selected = Some((bytes, attributes, skills, quests, items, target_idx));
+            break;
+        }
+    }
+
+    let (bytes, attributes, skills, quests, mut items, target_idx) = selected
+        .expect("fixture should contain a non-opaque owner-bucket candidate");
+
+    let original_class = classify_item_slot(&items[target_idx]);
+    let original_location = items[target_idx].location;
+    let original_mode = items[target_idx].mode;
+    let target_code = items[target_idx].code.clone();
+
+    items[target_idx].set_owner_bucket(4, original_location, original_mode);
+
+    assert_ne!(original_class, ItemSlotClass::StashLike);
+    assert_eq!(classify_item_slot(&items[target_idx]), ItemSlotClass::StashLike);
+
+    let rebuilt = rebuild_status_and_player_items(
+        &bytes,
+        Some(&attributes),
+        Some(&skills),
+        Some(&quests),
+        None,
+        None,
+        &items,
+        &huffman,
+    )?;
+
+    let reparsed_items = Item::read_player_items(&rebuilt, &huffman, true)?;
+    let roundtripped = reparsed_items
+        .iter()
+        .find(|item| {
+            item.code.trim() == target_code.trim()
+                && item.page == 4
+                && item.location == original_location
+                && item.mode == original_mode
+                && classify_item_slot(item) == ItemSlotClass::StashLike
+        })
+        .expect("reclassified item should survive rebuild and readback");
+    assert_eq!(roundtripped.page, 4);
+    assert_eq!(roundtripped.body.page, 4);
+    assert_eq!(roundtripped.body.location, original_location);
+    assert_eq!(roundtripped.body.mode, original_mode);
+    assert_eq!(classify_item_slot(roundtripped), ItemSlotClass::StashLike);
+
     Ok(())
 }
 

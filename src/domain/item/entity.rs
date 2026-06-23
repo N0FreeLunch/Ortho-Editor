@@ -400,11 +400,31 @@ impl Item {
     }
 
     pub fn set_placement(&mut self, placement: crate::domain::vo::InventoryPlacement) {
-        self.header.x = placement.coordinate().x();
-        self.header.y = placement.coordinate().y();
-        self.body.x = self.header.x;
-        self.body.y = self.header.y;
+        self.sync_coordinate_fields(placement.coordinate().x(), placement.coordinate().y());
+    }
+
+    fn sync_coordinate_fields(&mut self, x: u8, y: u8) {
+        self.header.x = x;
+        self.header.y = y;
+        self.body.x = x;
+        self.body.y = y;
         self.bits.clear();
+    }
+
+    fn sync_owner_bucket_fields(&mut self, page: u8, location: u8, mode: u8) {
+        self.header.page = page;
+        self.header.location = location;
+        self.header.mode = mode;
+        self.body.page = page;
+        self.body.location = location;
+        self.body.mode = mode;
+        self.bits.clear();
+    }
+
+    /// Synchronizes the item's owner-bucket state across header and body.
+    /// Use this when the item must move between inventory, equipment, or stash buckets.
+    pub fn set_owner_bucket(&mut self, page: u8, location: u8, mode: u8) {
+        self.sync_owner_bucket_fields(page, location, mode);
     }
 
     pub fn set_property_value(
@@ -816,17 +836,16 @@ impl Item {
 
             if final_target > current_bits {
                 let padding_needed = (final_target - current_bits) as u32;
-                let padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
-                    let mut bits = self.body.alpha_alignment_padding.clone();
-                    if bits.len() < padding_needed as usize {
-                        bits.resize(padding_needed as usize, false);
-                    } else {
-                        bits.truncate(padding_needed as usize);
-                    }
-                    bits
+                let mut padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
+                    self.body.alpha_alignment_padding.clone()
                 } else {
                     vec![false; padding_needed as usize]
                 };
+                if padding_bits.len() < padding_needed as usize {
+                    padding_bits.resize(padding_needed as usize, false);
+                } else {
+                    padding_bits.truncate(padding_needed as usize);
+                }
                 AlphaHeaderGap { bits: padding_bits }.emit(emitter)?;
             }
 
