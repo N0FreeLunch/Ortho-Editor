@@ -30,7 +30,7 @@ mod tests {
         
         let huffman = HuffmanTree::new();
         // Alpha mode = true
-        let items = Item::read_player_items(&bytes[jm_pos..], &huffman, true).expect("Parsing failed");
+        let items = Item::read_player_items(&bytes, &huffman, true).expect("Parsing failed");
         
         println!("Items recovered: {}", items.len());
         let mut recovered_codes = Vec::new();
@@ -121,27 +121,6 @@ mod tests {
             // But for these specific Alpha fixtures, we aim for 100% segment matching.
             for i in 0..reserialized_items.len() {
                 if reserialized_items[i] != original_payload[i] {
-                    println!("[TEST-DEBUG] Byte mismatch at offset {} in fixture {}", i, fixture_path);
-                    println!("[TEST-DEBUG] reserialized: {:08b} ({}), original: {:08b} ({})", reserialized_items[i], reserialized_items[i], original_payload[i], original_payload[i]);
-                    // Print surrounding bytes in binary
-                    let start_print = i.saturating_sub(4);
-                    let end_print = (i + 4).min(reserialized_items.len());
-                    for j in start_print..end_print {
-                        println!("Byte [{}]: reserialized={:08b}, original={:08b}", j, reserialized_items[j], original_payload[j]);
-                    }
-                    // Print overlapping items
-                    for (idx, item) in items.iter().enumerate() {
-                        let start_byte = (item.range.start - (jm_pos as u64) * 8 - 32) / 8;
-                        let end_byte = (item.range.end - (jm_pos as u64) * 8 - 32 + 7) / 8;
-                        if i as u64 >= start_byte && i as u64 <= end_byte {
-                            println!("[TEST-DEBUG] Overlapping item: idx={}, code={}, start_bit={}, end_bit={}, start_byte={}, end_byte={}", 
-                                     idx, item.code.trim(), item.range.start, item.range.end, start_byte, end_byte);
-                            println!("[TEST-DEBUG] Item properties: {:?}", item.properties.iter().map(|p| (p.stat_id, p.value)).collect::<Vec<_>>());
-                            if !item.socketed_items.is_empty() {
-                                println!("[TEST-DEBUG] Socketed items: {:?}", item.socketed_items.iter().map(|c| c.code.trim()).collect::<Vec<_>>());
-                            }
-                        }
-                    }
                     assert_eq!(
                         reserialized_items[i], 
                         original_payload[i], 

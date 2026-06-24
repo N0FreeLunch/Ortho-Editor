@@ -301,7 +301,11 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             }
         }
         
-        let lookahead_limit = if alpha { offset + 128 } else { offset + 120 };
+        let lookahead_limit = if alpha {
+            if is_alpha_v105_compact_limit_item(code_str) { offset + 72 } else { offset + 128 }
+        } else {
+            offset + 120
+        };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
             let (o_offset, o_conf, o_code) = &final_markers[j];
@@ -334,7 +338,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                 }
 
                 if alpha {
-                    let next_window = o_offset + 128;
+                    let next_window = if is_alpha_v105_compact_limit_item(o_code) { o_offset + 72 } else { o_offset + 128 };
                     let mut k = j + 1;
                     while k < final_markers.len() && final_markers[k].0 < next_window {
                         let k_offset = final_markers[k].0;
@@ -473,6 +477,19 @@ fn is_alpha_v105_slot_item(code: &str) -> bool {
         "vbt"|"vgl"|"hbl"|"tri"|"dr1"|"key"|"mac"|"ulss"|"9tr"|"swsp"
     ) { return true; }
     crate::domain::forensic::v105::axioms::is_v105_summary_code(code)
+}
+
+fn is_alpha_v105_compact_limit_item(code: &str) -> bool {
+    let trimmed = code.trim();
+    if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) {
+        return true;
+    }
+    matches!(trimmed, 
+        "hp1"|"hp2"|"hp3"|"hp4"|"hp5"|"mp1"|"mp2"|"mp3"|"mp4"|"mp5"|
+        "whp1"|"whp2"|"whp3"|"whp4"|"whp5"|"wmp1"|"wmp2"|"wmp3"|"wmp4"|"wmp5"|
+        "rvs"|"rvl"|"vps"|"tsc"|"isc"|"yps"|"wps"|"w8cs"|"w88w"|
+        "wyws"|"e w"|"key"|"mac"|"ulss"|"9tr"
+    )
 }
 
 fn is_v105_aligned(diff: u64) -> bool {
