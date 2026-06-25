@@ -1,5 +1,6 @@
 use d2r_core::inventory::InventoryGrid;
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::verify::alpha_inventory_routing::{alpha_inventory_route, AlphaInventoryRoute};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
@@ -65,17 +66,20 @@ fn main() {
 
     for (i, item) in items.iter().enumerate() {
         let category = d2r_core::inventory::get_item_category(&item.code);
-        let route = inventory_validation_route(item, version == 105);
+        let route = alpha_inventory_route(item, version == 105);
         println!(
             "  - Item[{:>2}]: code='{}' -> category='{}' -> route='{}'",
-            i, item.code, category, route
+            i, item.code, category, route.as_str()
         );
     }
     println!();
 
     let inventory_candidates: Vec<_> = items
         .into_iter()
-        .filter(|item| inventory_validation_route(item, version == 105) == "inventory")
+        .filter(|item| matches!(
+            alpha_inventory_route(item, version == 105),
+            AlphaInventoryRoute::Inventory
+        ))
         .collect();
 
     println!(
@@ -100,45 +104,4 @@ fn main() {
     println!("\n[Final Inventory Layout]");
     let grid = InventoryGrid::from_save_bytes(&bytes, &huffman);
     grid.debug_print();
-}
-
-fn inventory_validation_route(item: &Item, is_alpha: bool) -> &'static str {
-    let is_true_pot = is_true_potion(&item.code);
-
-    if item.mode == 1 {
-        if is_true_pot {
-            "belt"
-        } else {
-            "equipment"
-        }
-    } else if item.mode == 2 {
-        if is_alpha && !is_true_pot && item.location != 2 {
-            match item.location {
-                4 => "stash",
-                7 => "cube",
-                _ => "inventory",
-            }
-        } else {
-            "belt"
-        }
-    } else {
-        match item.location {
-            0 => {
-                if is_true_pot && item.x == 0 && item.y == 0 {
-                    "belt"
-                } else {
-                    "inventory"
-                }
-            }
-            2 => "belt",
-            4 => "stash",
-            7 => "cube",
-            _ => "inventory",
-        }
-    }
-}
-
-fn is_true_potion(code: &str) -> bool {
-    let trimmed = code.trim().to_lowercase();
-    trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed.starts_with("rv")
 }

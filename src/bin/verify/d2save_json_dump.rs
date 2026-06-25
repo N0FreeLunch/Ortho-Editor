@@ -4,6 +4,7 @@ use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::progression::Progression;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
+use d2r_core::verify::alpha_inventory_routing::{alpha_inventory_route, AlphaInventoryRoute};
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -223,13 +224,8 @@ fn main() {
                 "socketed_items": socket_json
             });
 
-            let is_true_pot = is_true_potion(&item.code);
-
-            if item.mode == 1 {
-                if is_true_pot {
-                    // In Alpha v105, potions in the first belt row often show mode 1
-                    belt_json.push(item_data);
-                } else {
+            match alpha_inventory_route(item, is_alpha) {
+                AlphaInventoryRoute::Equipment => {
                     let mut eq_data = item_data.clone();
                     // Alpha v105 heuristic: 0=Armor, 1=Weapon1 observed in fixtures
                     let slot_name = if is_alpha {
@@ -246,33 +242,17 @@ fn main() {
                     eq_data["slot_en"] = json!(slot_name);
                     equipment_json.push(eq_data);
                 }
-            } else if item.mode == 2 {
-                // In Alpha v105, mode 2 often signals Belt (location 2), but sometimes weapons/scrolls/armor
-                // incorrectly show mode 2 while in inventory (location 0).
-                if is_alpha && !is_true_pot && item.location != 2 {
-                    // Fall back to location-based routing
-                    match item.location {
-                        4 => stash_json.push(item_data),
-                        7 => cube_json.push(item_data),
-                        _ => inventory_json.push(item_data),
-                    }
-                } else {
+                AlphaInventoryRoute::Belt => {
                     belt_json.push(item_data);
                 }
-            } else {
-                match item.location {
-                    0 => {
-                        // Heuristic: If it's a true potion at (0,0) in inventory, it's likely a belt item with shifted parse
-                        if is_true_pot && item.x == 0 && item.y == 0 {
-                            belt_json.push(item_data);
-                        } else {
-                            inventory_json.push(item_data);
-                        }
-                    }
-                    2 => belt_json.push(item_data),
-                    4 => stash_json.push(item_data),
-                    7 => cube_json.push(item_data),
-                    _ => inventory_json.push(item_data), // Default to inventory
+                AlphaInventoryRoute::Inventory => {
+                    inventory_json.push(item_data);
+                }
+                AlphaInventoryRoute::Stash => {
+                    stash_json.push(item_data);
+                }
+                AlphaInventoryRoute::Cube => {
+                    cube_json.push(item_data);
                 }
             }
         }
@@ -480,12 +460,6 @@ fn alpha_mercenary_slot_semantics(
 
 fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
     bytes.windows(2).position(|window| window == marker)
-}
-
-// Helper: check if item is a true potion (hp, mp, rv)
-fn is_true_potion(code: &str) -> bool {
-    let trimmed = code.trim().to_lowercase();
-    trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed.starts_with("rv")
 }
 
 // Helper: map body slot index to EN slot name string
