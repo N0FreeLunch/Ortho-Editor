@@ -41,38 +41,25 @@ fn main() {
 
     let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
     let huffman = HuffmanTree::new();
-
-    // Find all JM markers
-    let mut jm_positions: Vec<usize> = Vec::new();
-    for i in 0..bytes.len().saturating_sub(1) {
-        if bytes[i] == b'J' && bytes[i + 1] == b'M' {
-            jm_positions.push(i);
+    let items = match Item::read_player_items(&bytes, &huffman, version == 105) {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("[ERROR] Failed to read player items: {}", e);
+            process::exit(1);
         }
-    }
+    };
 
-    if jm_positions.is_empty() {
-        println!("[WARN] No JM markers found.");
-        return;
-    }
-
-    // Usually the first JM is Player Items
-    let first_jm = jm_positions[0];
-    let item_count = u16::from_le_bytes([bytes[first_jm + 2], bytes[first_jm + 3]]);
-
-    let mut reader = bitstream_io::BitReader::endian(
-        std::io::Cursor::new(&bytes[first_jm + 4..]),
-        bitstream_io::LittleEndian,
-    );
-
-    let mut items = Vec::new();
-    for _ in 0..item_count {
-        let _ = bitstream_io::BitRead::byte_align(&mut reader);
-        if let Ok(item) = Item::from_reader(&mut reader, &huffman, version == 105) {
-            items.push(item);
-        } else {
-            break;
-        }
-    }
+    let items: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            let trimmed_code = item.code.trim();
+            !item.is_residue()
+                && !trimmed_code.is_empty()
+                && trimmed_code != "ks d"
+                && trimmed_code != "b7ts"
+                && trimmed_code != "wyws"
+        })
+        .collect();
 
     println!("  Analyzing {} items in Player section...", items.len());
 
