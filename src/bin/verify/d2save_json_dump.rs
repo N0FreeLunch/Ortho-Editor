@@ -172,6 +172,7 @@ fn main() {
     // Parse player items to build equipment, inventory, belt, stash, and cube lists
     let mut equipment_json = Vec::new();
     let mut inventory_json = Vec::new();
+    let mut unknown_json = Vec::new();
     let mut belt_json = Vec::new();
     let mut stash_json = Vec::new();
     let mut cube_json = Vec::new();
@@ -248,6 +249,9 @@ fn main() {
                 AlphaInventoryRoute::Inventory => {
                     inventory_json.push(item_data);
                 }
+                AlphaInventoryRoute::Unknown => {
+                    unknown_json.push(item_data);
+                }
                 AlphaInventoryRoute::Stash => {
                     stash_json.push(item_data);
                 }
@@ -290,6 +294,7 @@ fn main() {
         "quests": quests_json,
         "equipment": equipment_json,
         "inventory": inventory_json,
+        "unknown": unknown_json,
         "belt": belt_json,
         "stash": stash_json,
         "cube": cube_json,

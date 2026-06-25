@@ -74,13 +74,36 @@ fn main() {
     }
     println!();
 
-    let inventory_candidates: Vec<_> = items
-        .into_iter()
-        .filter(|item| matches!(
-            alpha_inventory_route(item, version == 105),
-            AlphaInventoryRoute::Inventory
-        ))
-        .collect();
+    let mut inventory_candidates = Vec::new();
+    let mut unknown_candidates = Vec::new();
+
+    for item in items.into_iter() {
+        match alpha_inventory_route(&item, version == 105) {
+            AlphaInventoryRoute::Inventory => inventory_candidates.push(item),
+            AlphaInventoryRoute::Unknown => unknown_candidates.push(item),
+            _ => {}
+        }
+    }
+
+    println!(
+        "  Surfacing {} unknown Alpha fragments before inventory validation...",
+        unknown_candidates.len()
+    );
+    for (i, item) in unknown_candidates.iter().enumerate() {
+        let category = d2r_core::inventory::get_item_category(&item.code);
+        println!(
+            "  - Unknown[{:>2}]: code='{}' -> category='{}' -> route='{}' @ location={} mode={} x={} y={}",
+            i,
+            item.code,
+            category,
+            AlphaInventoryRoute::Unknown.as_str(),
+            item.location,
+            item.mode,
+            item.x,
+            item.y
+        );
+    }
+    println!();
 
     println!(
         "  Validating {} inventory candidates after routing...",

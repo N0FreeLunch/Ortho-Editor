@@ -7,6 +7,7 @@ pub enum AlphaInventoryRoute {
     Inventory,
     Stash,
     Cube,
+    Unknown,
 }
 
 impl AlphaInventoryRoute {
@@ -17,6 +18,7 @@ impl AlphaInventoryRoute {
             Self::Inventory => "inventory",
             Self::Stash => "stash",
             Self::Cube => "cube",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -35,7 +37,7 @@ pub fn alpha_inventory_route(item: &Item, is_alpha: bool) -> AlphaInventoryRoute
             match item.location {
                 4 => AlphaInventoryRoute::Stash,
                 7 => AlphaInventoryRoute::Cube,
-                _ => AlphaInventoryRoute::Inventory,
+                _ => AlphaInventoryRoute::Unknown,
             }
         } else {
             AlphaInventoryRoute::Belt
@@ -46,12 +48,13 @@ pub fn alpha_inventory_route(item: &Item, is_alpha: bool) -> AlphaInventoryRoute
                 if is_true_pot && item.x == 0 && item.y == 0 {
                     AlphaInventoryRoute::Belt
                 } else {
-                    AlphaInventoryRoute::Inventory
+                    AlphaInventoryRoute::Unknown
                 }
             }
             2 => AlphaInventoryRoute::Belt,
             4 => AlphaInventoryRoute::Stash,
             7 => AlphaInventoryRoute::Cube,
+            _ if is_alpha => AlphaInventoryRoute::Unknown,
             _ => AlphaInventoryRoute::Inventory,
         }
     }
