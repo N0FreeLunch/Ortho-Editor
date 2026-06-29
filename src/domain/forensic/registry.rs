@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct AlphaForensics {
     pub version: String,
     pub stats: HashMap<String, StatInfo>,
@@ -51,9 +51,17 @@ pub struct StatInfo {
 static REGISTRY: OnceLock<AlphaForensics> = OnceLock::new();
 
 pub fn get_registry() -> &'static AlphaForensics {
-    REGISTRY.get_or_init(|| {
-        load_registry().expect("Failed to load Alpha v105 forensic registry")
-    })
+    #[cfg(target_family = "wasm")]
+    {
+        REGISTRY.get_or_init(AlphaForensics::default)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    {
+        REGISTRY.get_or_init(|| {
+            load_registry().expect("Failed to load Alpha v105 forensic registry")
+        })
+    }
 }
 
 /// Returns Err if any effective_id appears in both mappings and stats,

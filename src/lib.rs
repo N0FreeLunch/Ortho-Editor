@@ -221,6 +221,7 @@ mod os_priority {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn init_rayon_thread_pool() {
     RAYON_INIT.call_once(|| {
         // Lower OS process priority to avoid starving other processes or agents
@@ -259,3 +260,6 @@ pub fn init_rayon_thread_pool() {
             .build_global();
     });
 }
+
+#[cfg(target_family = "wasm")]
+pub fn init_rayon_thread_pool() {}
