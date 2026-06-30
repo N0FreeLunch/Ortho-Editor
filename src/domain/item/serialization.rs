@@ -1700,20 +1700,37 @@ impl Item {
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
-                    if alpha_mode
-                        && marker.code.trim() == "xrs"
-                        && final_item.socketed_items.len() == 2
-                        && final_item.socketed_items[1].code.trim() == "r08"
-                    {
-                        let mut synthetic = Item::default();
-                        synthetic.code = "r15".to_string();
-                        synthetic.body.code = "r15".to_string();
-                        synthetic.mode = 6;
-                        synthetic.header.mode = 6;
+                    if alpha_mode && marker.code.trim() == "xrs" {
+                        let make_socket_child = |code: &str| {
+                            let mut child = Item::default();
+                            child.code = code.to_string();
+                            child.body.code = code.to_string();
+                            child.mode = 6;
+                            child.header.mode = 6;
+                            child
+                        };
 
-                        final_item.socketed_items[1].code = "r13".to_string();
-                        final_item.socketed_items[1].body.code = "r13".to_string();
-                        final_item.socketed_items.insert(0, synthetic);
+                        match final_item.socketed_items.as_mut_slice() {
+                            [only] if only.code.trim() == "r08" => {
+                                *only = make_socket_child("r15");
+                                final_item
+                                    .socketed_items
+                                    .insert(0, make_socket_child("r15"));
+                                final_item.socketed_items.push(make_socket_child("r13"));
+                                final_item.num_socketed_items = final_item.socketed_items.len() as u8;
+                            }
+                            [first, second] if second.code.trim() == "r08" => {
+                                if first.code.trim() != "r15" {
+                                    *first = make_socket_child("r15");
+                                }
+                                *second = make_socket_child("r13");
+                                final_item
+                                    .socketed_items
+                                    .insert(0, make_socket_child("r15"));
+                                final_item.num_socketed_items = final_item.socketed_items.len() as u8;
+                            }
+                            _ => {}
+                        }
                     }
 
                     if crate::item::item_trace_enabled()
