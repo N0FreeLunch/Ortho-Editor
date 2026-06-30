@@ -150,8 +150,8 @@ impl V105HeaderGapAxiom {
         if base_gap == 0 {
             // Runeword/Shadow Items (Bit 26/27)
             if (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0 {
-                // Slice 9: Alpha runewords often use Bit 5 snap with 0 base gap.
-                base_gap = 0;
+                // Slice 9: Alpha shadow items require an 8-bit gap in the parser.
+                base_gap = 8;
             } else if is_compact {
                 // Axiom 0718: Generic compact items (not summary) default to 0 gap.
                 base_gap = 0;

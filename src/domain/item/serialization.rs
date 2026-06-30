@@ -2366,7 +2366,12 @@ impl Item {
         let has_checksum_peek = peek.as_ref().map(|p| p.9);
 
         let abs_start_bit = Some(start_bit);
-        let forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
+        let mut forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
+        if let Some(code) = code_peek {
+            if matches!(code.trim(), "jav" | "buc" | "us g") {
+                forced_compact = Some(true);
+            }
+        }
         let (header, alpha_header_gap, alpha_header_gap_bits) =
             crate::domain::item::entity::parse_item_header(
                 cursor,
@@ -2534,7 +2539,7 @@ impl Item {
         if header.save_is_alpha {
             let reg = crate::domain::forensic::registry::get_registry();
             if body.code.trim().is_empty() {
-                if let Some(hint) = code_hint {
+                if let Some(hint) = code_hint.or(code_peek) {
                     let trimmed_hint = hint.trim();
                     let anchored_hint = !trimmed_hint.is_empty()
                         && (crate::domain::forensic::v105::axioms::is_v105_summary_code(
@@ -2563,7 +2568,7 @@ impl Item {
                     }
                 }
             }
-            if let Some(hint) = code_hint {
+            if let Some(hint) = code_hint.or(code_peek) {
                 let trimmed_hint = hint.trim();
                 if (trimmed_hint == "xrs" || trimmed_hint == "c8xr") && body.code.trim().is_empty()
                 {
@@ -3475,6 +3480,6 @@ mod tests {
         let bytes = emitter.into_bytes();
         let items = Item::read_section(&bytes, 0, 1, &huffman, true, false).unwrap();
         assert!(!items.is_empty());
-        assert!(items.iter().any(|it| it.code == "Opaque"));
+        assert!(items.iter().any(|it| it.modules.iter().any(|m| matches!(m, crate::domain::item::ItemModule::SemiOpaque { .. } | crate::domain::item::ItemModule::Opaque(_)))));
     }
 }
