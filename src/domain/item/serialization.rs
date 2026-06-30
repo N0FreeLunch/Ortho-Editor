@@ -22,6 +22,10 @@ pub fn calculate_property_residue(version: u8) -> usize {
         as usize
 }
 
+fn is_alpha_v105_authority_code(code: &str) -> bool {
+    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+}
+
 pub fn find_next_item_match(
     bytes: &[u8],
     pos: u64,
@@ -1305,7 +1309,7 @@ impl Item {
                         let bits_vec = cursor.read_bits_as_vec(skip as u32).unwrap_or_default();
                         
                         let is_authority_prev = if let Some(prev) = items.last() {
-                            matches!(prev.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+                            is_alpha_v105_authority_code(prev.code.as_str())
                         } else {
                             false
                         };
@@ -1446,7 +1450,7 @@ impl Item {
                 
                 let is_authority_prev = if alpha_mode {
                     if let Some(prev) = items.last() {
-                        matches!(prev.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+                        is_alpha_v105_authority_code(prev.code.as_str())
                     } else {
                         false
                     }
@@ -1603,10 +1607,12 @@ impl Item {
                 // For jav/buc: only expand to 512 when no next high-confidence marker
                 // constrains the boundary. If a next marker is present, trust its
                 // offset as the hard upper limit to prevent swallowing it.
-                if matches!(parse_code_hint_tmp.trim(), "xrs" | "c8xr" | "wa2") {
-                    dynamic_limit = 512;
-                } else if parse_code_hint_tmp.trim() == "rhd" {
-                    dynamic_limit = 128;
+                if is_alpha_v105_authority_code(parse_code_hint_tmp) {
+                    dynamic_limit = if parse_code_hint_tmp.trim() == "rhd" {
+                        128
+                    } else {
+                        512
+                    };
                 } else if matches!(parse_code_hint_tmp.trim(), "jav" | "buc") {
                     // Only expand when no next marker caps the limit and no registry override exists.
                     // `next_hi_conf_marker` was set to `section_bits` when no next
@@ -1624,8 +1630,7 @@ impl Item {
             // Alpha v105 forensic: Socketed items add 8-bit alignment padding.
             // Authority items (xrs, c8xr, rhd, wa2) use a fixed 512-bit body block;
             // their socketed flag does not add extra alignment padding.
-            let is_authority_code_early =
-                alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+            let is_authority_code_early = alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
             if !is_compact_final && (flags_peek & 0x00000008) != 0 && !is_authority_code_early {
                 dynamic_limit += 8;
             }
@@ -1646,7 +1651,7 @@ impl Item {
                     .as_ref()
                 .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
                 .unwrap_or(false);
-            let is_authority_marker = alpha_mode && matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+            let is_authority_marker = alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
             let parse_code_hint = if marker_is_forced_summary || is_authority_marker {
                 marker.code.as_str()
             } else {
@@ -1758,7 +1763,7 @@ impl Item {
                     // ensure the parser uses it (prevents Huffman collisions).
                     if alpha_mode && !marker.code.trim().is_empty() {
                         let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code);
-                        let is_authority = matches!(marker.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+                        let is_authority = is_alpha_v105_authority_code(marker.code.as_str());
 
                         if is_authority {
                             let forced_code = if marker.code.trim() == "wa2" { "wa2 " } else { "xrs " };
@@ -1800,7 +1805,7 @@ impl Item {
                             consumed_bits = target_width;
                         }
 
-                        let is_authority_final = alpha_mode && matches!(final_item.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+                        let is_authority_final = alpha_mode && is_alpha_v105_authority_code(final_item.code.as_str());
                         if is_authority_final {
                             consumed_bits = consumed_bits.min(512);
                         }
@@ -2968,7 +2973,7 @@ pub fn scan_socket_children(
                             if target_width > 0 {
                                 consumed_bits = target_width;
                             }
-                            let is_authority_final = matches!(final_child.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+                            let is_authority_final = is_alpha_v105_authority_code(final_child.code.as_str());
                             if is_authority_final {
                                 consumed_bits = consumed_bits.min(512);
                             }
