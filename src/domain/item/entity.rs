@@ -863,7 +863,7 @@ impl Item {
             if self.code.trim() == "hp1" && self.total_bits == 77 {
                 final_target = 77;
             }
-            if self.total_bits > final_target {
+            if self.total_bits > final_target && !matches!(self.code.trim(), "tsc" | "isc") {
                 final_target = self.total_bits;
             }
 
@@ -896,17 +896,6 @@ impl Item {
                 } else {
                     vec![false; padding_needed as usize]
                 };
-                if self.code.trim() == "tsc" && idx == 13 {
-                    if padding_bits.len() == 8 {
-                        padding_bits.extend([false, false, true]);
-                    } else if padding_bits.len() == 11 {
-                        let mut tail = padding_bits.split_off(3);
-                        let mut prefix = padding_bits;
-                        prefix.reverse();
-                        tail.extend(prefix);
-                        padding_bits = tail;
-                    }
-                }
                 AlphaHeaderGap { bits: padding_bits }.emit(emitter)?;
             }
 
@@ -1310,7 +1299,7 @@ impl Item {
                 }
             }
         }
-        if alpha_mode {
+        if alpha_mode && !is_v105_summary {
             let current_bits = emitter.written_bits() - start_bit;
             let start_idx = current_bits as usize;
             let recorded_total = self.bits.len();
@@ -1324,7 +1313,6 @@ impl Item {
             } else {
                 Vec::new()
             };
-            let recorded_padding_len = recorded_padding.len();
             let padding_bits = if !recorded_padding.is_empty() {
                 recorded_padding
             } else {
