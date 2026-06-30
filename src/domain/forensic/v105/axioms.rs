@@ -772,7 +772,7 @@ impl V105PropertyWidthAxiom {
     pub fn socket_bits(&self) -> u32 { 4 }
     pub fn set_list_bits(&self) -> u32 { 5 }
     pub fn teleport_bits(&self) -> u32 { 5 }
-    pub fn v5_runeword_extra_bits(&self) -> u32 { 1 }
+    pub fn v5_runeword_extra_bits(&self) -> u32 { 2 }
     pub fn ear_class_bits(&self) -> u32 { 3 }
     pub fn ear_level_bits(&self) -> u32 { 7 }
     

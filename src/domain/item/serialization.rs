@@ -2797,6 +2797,7 @@ impl Item {
                         cursor,
                         item.header.version,
                         rhythm_recovery,
+                        item.header.is_compact,
                         item.header.is_runeword,
                         &mut item.forensic_audit,
                     )?;

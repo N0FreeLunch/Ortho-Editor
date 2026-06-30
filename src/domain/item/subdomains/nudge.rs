@@ -13,6 +13,7 @@ impl NudgeCombinator {
         cursor: &mut BitCursor<R>,
         version: u8,
         rhythm_recovery: bool,
+        is_compact: bool,
         is_runeword: bool,
         audit: &mut ForensicAudit,
     ) -> ParsingResult<()> {
@@ -20,10 +21,14 @@ impl NudgeCombinator {
         
         // forensic-1363: In Alpha v105, version 1 runewords (xrs) do NOT use the 2-bit property residue nudge
         // if they are correctly aligned via resolve_gap. Standard runewords also skip this.
-        if p_nudge > 0 && !rhythm_recovery && !is_runeword && cursor.remaining() >= p_nudge as u64 {
+        if p_nudge > 0 && !is_compact && !rhythm_recovery && !is_runeword {
+            let saved_pos = cursor.pos();
             cursor.push_context("AlphaPropertyResidueNudge");
-            let _ = cursor.read_bits::<u32>(p_nudge as u32)?;
-            audit.record(V105PropertyNudgeAxiom::default().metadata());
+            if cursor.read_bits::<u32>(p_nudge as u32).is_ok() {
+                audit.record(V105PropertyNudgeAxiom::default().metadata());
+            } else {
+                cursor.rollback(saved_pos);
+            }
             cursor.pop_context();
         }
         Ok(())

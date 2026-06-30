@@ -1082,9 +1082,9 @@ impl Item {
             }
 
             if alpha_mode && h_axiom.is_alpha() && !self.header.is_compact {
-                if let Some(nudge) = self.body.alpha_nudge {
-                    emitter.write_bits(nudge as u32, w_axiom.nudge_bits(self.header.version) as u32)?;
-                }
+                // Alpha v5/body nudge must stay present even when the stored value is absent.
+                let nudge = self.body.alpha_nudge.unwrap_or(0);
+                emitter.write_bits(nudge as u32, w_axiom.nudge_bits(self.header.version) as u32)?;
             }
 
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
@@ -1212,9 +1212,9 @@ impl Item {
                 }
                 if reads_dur && s_axiom.reads_durability() {
                     let m_dur = self.max_durability.unwrap_or(0);
-                    emitter.write_bits(m_dur, 8)?;
+                    emitter.write_bits(m_dur, w_axiom.stat_bits(73))?;
                     if m_dur > 0 {
-                        emitter.write_bits(self.current_durability.unwrap_or(0), 9)?;
+                        emitter.write_bits(self.current_durability.unwrap_or(0), w_axiom.stat_bits(72))?;
                         emitter.write_bit(false)?;
                     }
                 }
@@ -1920,12 +1920,16 @@ pub fn parse_item_body<R: BitRead>(
             }
         }
 
+        let body_is_template = crate::domain::item::serialization::item_template(&code).is_some();
         let mut alpha_nudge = None;
         if alpha_mode {
             if h_axiom.is_alpha()
-                && !header.is_compact
+                && (!header.is_compact || body_is_template)
                 && !w_axiom.is_summary_item(header.version, &code)
             {
+                if body_is_template && header.is_compact && cursor.pos() > code_start {
+                    cursor.rollback(cursor.pos() - 1);
+                }
                 if header.version == 5 {
                     let nudge_val =
                         cursor.read_bits::<u8>(w_axiom.nudge_bits(header.version) as u32)?;
@@ -1937,7 +1941,6 @@ pub fn parse_item_body<R: BitRead>(
                 }
             }
         }
-
         if alpha_code_bits.is_empty() {
             let code_end = cursor.pos();
             if code_end > code_start {
@@ -2004,7 +2007,7 @@ impl ExtendedStatsData {
         let version = header.version;
         let is_compact = header.is_compact;
         let is_socketed_flag = header.is_socketed;
-        let is_runeword = header.is_runeword;
+        let is_runeword = axiom.is_runeword(header.flags);
         let is_personalized = header.is_personalized;
         let h_axiom = HeaderAxiom::new(version, alpha_mode);
         let w_axiom = V105PropertyWidthAxiom::default();
