@@ -2584,13 +2584,27 @@ impl Item {
                 body.code = normalized_body_code;
             }
         }
+
+        let body_is_template = crate::domain::item::serialization::item_template(body.code.trim()).is_some();
+        let mut header = header.clone();
+        if header.save_is_alpha && body_is_template {
+            // Synthetic alpha base templates can re-enter through the compact seam.
+            // Re-open the normal body/quality path when the recovered code is a real template.
+            header.is_compact = false;
+            header.is_runeword = false;
+        }
+
         body.alpha_header_gap = alpha_header_gap;
         body.alpha_header_gap_bits = alpha_header_gap_bits;
 
         let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, header.save_is_alpha)
             .with_compact(header.is_compact)
             .with_code(&body.code);
-        let detected_runeword = axiom.is_runeword(header.flags);
+        let hinted_template = code_hint
+            .map(|hint| crate::domain::item::serialization::item_template(hint.trim()))
+            .flatten();
+        let detected_runeword =
+            header.is_runeword && !body_is_template && hinted_template.is_none();
 
         // Slice 9: Alpha v105 runewords are shadow containers and skip standard extended stats.
         let skip_ext_stats = header.save_is_alpha && detected_runeword;

@@ -291,6 +291,11 @@ impl HeaderAxiom {
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed) || trimmed == "ucb8" || trimmed == "bwcw" {
                 return false;
             }
+
+            // Preserve normal alpha base templates from the broad v5/v1 fallback.
+            if crate::domain::item::serialization::item_template(trimmed).is_some() {
+                return false;
+            }
             
             // Alpha Forensic (Slice 19): Only trust bit 26 if we have a valid checksum 
             // or if it's one of the known complex versions (1 or 5).
