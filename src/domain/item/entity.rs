@@ -2069,7 +2069,8 @@ impl ExtendedStatsData {
                                 .read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32))));
                         data.id = Some(0);
                     }
-                } else {
+                // Mirror the emitter: alpha items only carry id/level here on v0/v2.
+                } else if !alpha_mode || version == 0 || version == 2 {
                     data.id = Some(read_or_truncate!(
                         cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)
                     ));
