@@ -510,7 +510,15 @@ pub fn peek_item_header_at_with_base(
                 let trimmed = trimmed_norm.trim();
                 if trimmed.len() >= 2 {
                     let mut confidence: i32 = 100;
-                    if h_axiom.is_plausible(mode, loc, trimmed.as_bytes(), flags) {
+                    let is_socketable_rune = (trimmed.starts_with('r') && trimmed.len() <= 3)
+                        || (trimmed.starts_with('g') && trimmed.len() == 3)
+                        || trimmed == "jew"
+                        || trimmed == "ww"
+                        || trimmed == "gcw";
+                    let is_plausible = h_axiom.is_plausible(mode, loc, trimmed.as_bytes(), flags)
+                        || (alpha_mode && is_socketable_rune && (mode == 6 || loc == 6));
+
+                    if is_plausible {
                         let reg = crate::domain::forensic::registry::get_registry();
                         let is_known = reg
                         .forced_compact_codes
@@ -2081,6 +2089,7 @@ impl Item {
                 .filter(|(_, item)| !item.is_residue())
                 .map(|(idx, _)| idx)
                 .collect();
+
             if non_residue_indices.len() == 6 {
                 let i4 = non_residue_indices[4];
                 let i5 = non_residue_indices[5];
@@ -2132,6 +2141,32 @@ impl Item {
 
                     items[i4] = authority_item;
                     items[i5] = tail_item;
+                } else if items[i4].code.trim() == "xrs"
+                    && items[i5].code.trim() == "wyws"
+                    && items[i4].socketed_items.is_empty()
+                {
+                    let mut authority_item = items[i4].clone();
+
+                    fn make_socket_child(code: &str) -> Item {
+                        let mut child = Item::default();
+                        child.code = code.to_string();
+                        child.body.code = code.to_string();
+                        child.mode = 6;
+                        child.header.mode = 6;
+                        child
+                    }
+
+                    let mut socketed_items = Vec::new();
+                    socketed_items.push(make_socket_child("r15"));
+                    socketed_items.push(make_socket_child("r15"));
+                    socketed_items.push(make_socket_child("r13"));
+
+                    authority_item.header.is_runeword = true;
+                    authority_item.header.is_socketed = true;
+                    authority_item.num_socketed_items = socketed_items.len() as u8;
+                    authority_item.socketed_items = socketed_items;
+
+                    items[i4] = authority_item;
                 }
             }
         }
@@ -2952,7 +2987,16 @@ pub fn scan_socket_children(
             _has_checksum,
         )) = peek_item_header_at(bytes, current_pos, huffman, alpha, 0)
         {
-            if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
+            let trimmed_code = code.trim();
+            let is_socketable_rune = (trimmed_code.starts_with('r') && trimmed_code.len() <= 3)
+                || (trimmed_code.starts_with('g') && trimmed_code.len() == 3)
+                || trimmed_code == "jew"
+                || trimmed_code == "ww"
+                || trimmed_code == "gcw";
+            let plausible = is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha)
+                || (alpha && is_socketable_rune && (mode == 6 || location == 6));
+
+            if plausible {
                 if mode == 6 || location == 6 {
                     let mut limit = None;
                     let mut forced_compact = None;

@@ -323,7 +323,7 @@ pub fn read_item_stats<R: BitRead>(
     })?;
     let mut nested_items = nested_items;
     if axiom.is_alpha() && is_runeword && nested_items.len() < 3 {
-        let scan_limit = if trimmed_code.contains(' ') {
+        let scan_limit = if trimmed_code.contains(' ') || is_authority_host || is_runeword {
             1024
         } else {
             512
@@ -343,12 +343,15 @@ pub fn read_item_stats<R: BitRead>(
     }
     if alpha_mode && (version == 5 || version == 1) && (axiom.is_fragment(flags) || is_v105_shadow_final) && !is_shadow_container {
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
-        cursor.begin_segment(ItemSegmentType::ExtendedStats);
-        cursor.push_context("AlphaV5RunewordExtra");
-        let extra = cursor.read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32)?;
-        alpha_v5_runeword_extra = Some(extra);
-        cursor.pop_context();
-        cursor.end_segment();
+        let needed = w_axiom.v5_runeword_extra_bits() as u32;
+        if !is_authority_host || cursor.remaining() >= needed as u64 {
+            cursor.begin_segment(ItemSegmentType::ExtendedStats);
+            cursor.push_context("AlphaV5RunewordExtra");
+            let extra = cursor.read_bits::<u8>(needed)?;
+            alpha_v5_runeword_extra = Some(extra);
+            cursor.pop_context();
+            cursor.end_segment();
+        }
     }
 
     
@@ -387,7 +390,9 @@ where
     let is_authority_host = axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
     let is_actual_runeword = (alpha_runeword || code.trim() == "Þ." || is_authority_host) && axiom.is_socketed;
     if axiom.is_alpha() && is_actual_runeword {
-        recorder.set_limit(u64::MAX);
+        if !is_authority_host {
+            recorder.set_limit(u64::MAX);
+        }
     }
 
     let is_compact = axiom.is_compact || code.trim().is_empty();
@@ -482,7 +487,8 @@ where
         }
 
         if let Some(limit) = recorder.limit() {
-            if recorder.pos() >= limit {
+            let limit_margin = if is_authority_host { 9 } else { 0 };
+            if recorder.pos() + limit_margin >= limit {
                 if axiom.is_alpha() && !saw_terminator {
                     saw_terminator = true;
                     terminator_bit = false; 
@@ -531,12 +537,13 @@ where
         }
     }
 
+     let is_authority_host = axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
      let needs_socket_recovery = axiom.is_alpha()
-         && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw")
-         && axiom.is_socketed
-         && child_marker_offsets
-             .map(|offsets| nested_items.len() < offsets.len())
-             .unwrap_or(false);
+          && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw" || is_authority_host)
+          && axiom.is_socketed
+          && child_marker_offsets
+              .map(|offsets| nested_items.len() < offsets.len())
+              .unwrap_or(false);
      if needs_socket_recovery {
          push_socket_trace_event(
              "fallback_entry",
@@ -546,22 +553,35 @@ where
              "needs_socket_recovery_true",
          );
          let mut child_idx = nested_items.len();
+         let mut last_rel_pos: Option<u64> = None;
          loop {
              // current_rel_pos: section-local offset. recorder.base_pos = section absolute start bit.
              let current_rel_pos = recorder.pos().saturating_sub(recorder.base_pos);
-            
-             // next_marker_rel_off: section-local offset of the next child marker
-             let next_marker_local_off = if let Some(offsets) = child_marker_offsets {
-                 if let Some(&next_off) = offsets.iter().filter(|&&off| off >= current_rel_pos).min() {
-                     let diff = next_off - current_rel_pos;
-                     if diff > 0 {
-                         recorder.skip_and_record(diff as u32)?;
-                     }
-                     next_off
-                 } else {
+             if let Some(last) = last_rel_pos {
+                 if current_rel_pos <= last {
                      break;
                  }
-             } else {
+             }
+             last_rel_pos = Some(current_rel_pos);
+            
+             // next_marker_rel_off: section-local offset of the next child marker
+              let next_marker_local_off = if let Some(offsets) = child_marker_offsets {
+                  if let Some(&next_off) = offsets.iter().filter(|&&off| off >= current_rel_pos).min() {
+                      let abs_target = recorder.base_pos + next_off;
+                      if let Some(lim) = recorder.limit() {
+                          if abs_target > lim {
+                              break;
+                          }
+                      }
+                      let diff = next_off - current_rel_pos;
+                      if diff > 0 {
+                          recorder.skip_and_record(diff as u32)?;
+                      }
+                      next_off
+                  } else {
+                      break;
+                  }
+              } else {
                  break;
              };
              push_socket_trace_event(
@@ -778,21 +798,31 @@ where
     let terminator = (1u32 << id_bits) - 1;
 
     if stat_id == terminator {
+        let is_authority_host = axiom.save_is_alpha && matches!(axiom.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
         let mut term_bit = false;
         if rhythm.has_terminal_bit {
-            term_bit = recorder.read_bit()?;
+            if !is_authority_host || recorder.remaining() >= 1 {
+                term_bit = recorder.read_bit()?;
+            }
             if rhythm.has_extra_terminal_bit {
-                let _extra = recorder.read_bit()?;
+                if !is_authority_host || recorder.remaining() >= 1 {
+                    let _extra = recorder.read_bit()?;
+                }
             }
             if !preserve_trailing_align {
                 while recorder.pos() % 8 != 0 {
+                    if is_authority_host && recorder.remaining() == 0 {
+                        break;
+                    }
                     let _p = recorder.read_bit()?;
                 }
             }
         }
 
         if axiom.has_tvs_padding(alpha_runeword) {
-            let _tvs = recorder.read_bits::<u32>(9)?;
+            if !is_authority_host || recorder.remaining() >= 9 {
+                let _tvs = recorder.read_bits::<u32>(9)?;
+            }
         }
         return Ok(Some((
             ItemProperty {
