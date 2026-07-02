@@ -212,6 +212,11 @@ mod roundtrip_tests {
 
         // Mutate internal properties:
         // In Alpha v105 Authority, ID 9 (maxmana) exists.
+        // NOTE: The legacy TODO-011 specifies "Enhanced Defense" (ID 16/31), but this active ignored
+        // test currently targets maxmana (ID 9). Furthermore, the authority runeword item 'xrs'
+        // is classified as Compact/ContextRequired and parses with an empty properties list
+        // under the current Alpha v105 rules. Therefore, mutating properties on it will fail.
+        // This test remains ignored to document this gap.
         let target_stat_id = 9;
         use d2r_core::domain::vo::ItemStatValue;
         let new_val = ItemStatValue::new(100).unwrap();
