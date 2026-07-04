@@ -470,7 +470,7 @@ mod roundtrip_tests {
 
     #[test]
     fn test_isolated_buc_item_contract() {
-        // Load the full save to get a properly parsed buc Item struct (with bits populated)
+        // Load the full save to get a properly parsed jav Item struct (with bits populated)
         let bytes = fs::read(repo_path(
             "tests/fixtures/savegames/original/amazon_10_scrolls.d2s",
         ))
@@ -481,39 +481,39 @@ mod roundtrip_tests {
         let items =
             Item::read_player_items(&bytes, &huffman, alpha_mode).expect("items should parse");
 
-        // Find the buc (buckler) item — canonical Alpha v105 selector truth
-        let (idx, buc) = items
+        // Find the jav item — canonical Alpha v105 selector truth
+        let (idx, jav) = items
             .iter()
             .enumerate()
-            .find(|(_, item)| item.code.trim() == "buc")
-            .expect("buc item must exist in amazon_10_scrolls fixture");
+            .find(|(_, item)| item.code.trim() == "jav")
+            .expect("jav item must exist in amazon_10_scrolls fixture");
 
-        // Contract: buc is SemanticCanonical under compact_standalone_contract
-        let contract = compact_standalone_contract(buc);
+        // Contract: jav is SemanticCanonical under compact_standalone_contract
+        let contract = compact_standalone_contract(jav);
         assert_ne!(
             contract,
             CompactStandaloneContract::ContextRequired,
-            "buc should not be ContextRequired — contract regression detected"
+            "jav should not be ContextRequired — contract regression detected"
         );
 
-        // Isolated roundtrip: serialize buc alone, then parse only those bytes back
-        let reserialized = buc
+        // Isolated roundtrip: serialize jav alone, then parse only those bytes back
+        let reserialized = jav
             .to_bytes(idx, &huffman, alpha_mode)
-            .expect("buc should re-serialize");
+            .expect("jav should re-serialize");
 
         // Attempt 1: Parse with original alpha_mode
-        let buc_back = match contract {
+        let jav_back = match contract {
             CompactStandaloneContract::WireCanonical
             | CompactStandaloneContract::SemanticCanonical => {
                 match Item::from_bytes(&reserialized, &huffman, alpha_mode) {
                     Ok(item) => item,
                     Err(e) => {
-                        println!("[retry] buc Attempt 1 (alpha_mode={}) failed: {:?}. Trying Attempt 2 (alpha_mode=false)...", alpha_mode, e);
+                        println!("[retry] jav Attempt 1 (alpha_mode={}) failed: {:?}. Trying Attempt 2 (alpha_mode=false)...", alpha_mode, e);
                         // Attempt 2: Try with alpha_mode = false (Retail-style parse)
                         match Item::from_bytes(&reserialized, &huffman, false) {
                             Ok(item) => item,
                             Err(e2) => panic!(
-                                "buc isolated from_bytes failed both attempts. \
+                                "jav isolated from_bytes failed both attempts. \
                                  Attempt 1 (alpha={}): {:?}. \
                                  Attempt 2 (alpha=false): {:?}. \
                                  Escalate to Slice 2 planning.",
@@ -527,15 +527,15 @@ mod roundtrip_tests {
         };
 
         // Assertion: code and all stat properties must survive the isolated roundtrip
-        assert_code_contract(buc, &buc_back, contract);
+        assert_code_contract(jav, &jav_back, contract);
         assert_eq!(
-            buc.properties.len(),
-            buc_back.properties.len(),
-            "buc properties count mismatch after isolated roundtrip"
+            jav.properties.len(),
+            jav_back.properties.len(),
+            "jav properties count mismatch after isolated roundtrip"
         );
-        for (p1, p2) in buc.properties.iter().zip(buc_back.properties.iter()) {
-            assert_eq!(p1.stat_id, p2.stat_id, "buc stat_id mismatch");
-            assert_eq!(p1.value, p2.value, "buc stat value mismatch");
+        for (p1, p2) in jav.properties.iter().zip(jav_back.properties.iter()) {
+            assert_eq!(p1.stat_id, p2.stat_id, "jav stat_id mismatch");
+            assert_eq!(p1.value, p2.value, "jav stat value mismatch");
         }
     }
 

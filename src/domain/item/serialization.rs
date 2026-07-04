@@ -1624,9 +1624,18 @@ impl Item {
                 }
             }
 
+            let marker_code_trimmed = marker.code.trim();
+            let is_trusted_compact_marker = matches!(marker_code_trimmed, "jav" | "buc");
+            if is_trusted_compact_marker {
+                is_compact_final = true;
+            }
             let mut target_width_override = 0u32;
             if alpha_mode {
-                let parse_code_hint_tmp = peek_code_hint.as_deref().unwrap_or(marker.code.as_str());
+                let parse_code_hint_tmp = if is_trusted_compact_marker {
+                    marker.code.as_str()
+                } else {
+                    peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
+                };
                 target_width_override = crate::domain::forensic::v105::axioms::get_v105_target_width(
                     version_peek,
                     parse_code_hint_tmp,
@@ -1675,7 +1684,6 @@ impl Item {
             }
 
             let reg = crate::domain::forensic::registry::get_registry();
-            let marker_code_trimmed = marker.code.trim();
             let marker_is_forced_summary = reg
                 .force_summary_rhythm_codes
                 .as_ref()
@@ -1687,7 +1695,10 @@ impl Item {
                 .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
                 .unwrap_or(false);
             let is_authority_marker = alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
-            let parse_code_hint = if marker_is_forced_summary || is_authority_marker {
+            let parse_code_hint = if marker_is_forced_summary
+                || is_authority_marker
+                || matches!(marker_code_trimmed, "jav" | "buc")
+            {
                 marker.code.as_str()
             } else {
                 peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
@@ -2418,7 +2429,6 @@ impl Item {
         let code_peek = code_hint
             .filter(|hint| !hint.trim().is_empty())
             .or(peek.as_ref().map(|p| p.3.as_str()));
-        let code_peek = code_peek;
         let gap_override = peek.as_ref().map(|p| {
             let mut gap = p.8 as usize;
             // Alpha v105 version 7 non-compact items reuse the legacy gap budget
@@ -2655,7 +2665,11 @@ impl Item {
 
         let body_is_template = crate::domain::item::serialization::item_template(body.code.trim()).is_some();
         let mut header = header.clone();
-        if header.save_is_alpha && body_is_template && !header.is_runeword && !matches!(body.code.trim(), "xrs" | "c8xr" | "rhd") {
+        if header.save_is_alpha
+            && body_is_template
+            && !header.is_runeword
+            && !matches!(body.code.trim(), "xrs" | "c8xr" | "rhd" | "jav" | "buc")
+        {
             // Synthetic alpha base templates can re-enter through the compact seam.
             // Re-open the normal body/quality path when the recovered code is a real template.
             header.is_compact = false;
@@ -2805,8 +2819,9 @@ impl Item {
         let is_v105_summary =
             alpha_mode && crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_item(item.header.version, &item.code);
         if !is_v105_summary {
-            let is_v105_shadow = axiom.is_v105_shadow(item.header.flags, Some(&item.code))
-                || (alpha_mode && item.body.code.trim() == "hla");
+            let is_v105_shadow = !code_peek.map_or(false, |code| matches!(code.trim(), "jav" | "buc"))
+                && (axiom.is_v105_shadow(item.header.flags, Some(&item.code))
+                    || (alpha_mode && item.body.code.trim() == "hla"));
             let authority_runeword_hint = alpha_mode
                 && code_peek.map_or(false, |code| {
                     matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")
