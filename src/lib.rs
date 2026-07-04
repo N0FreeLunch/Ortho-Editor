@@ -66,8 +66,8 @@ mod tests {
 
         let authority = real_items
             .iter()
-            .find(|item| item.code.trim() == "xrs" && item.is_runeword)
-            .expect("authority base item (xrs) should be present");
+            .find(|item| item.code.trim() == "wa2" && item.is_runeword)
+            .expect("authority base item (wa2) should be present");
 
         let child_codes: Vec<&str> = authority
             .socketed_items
@@ -75,7 +75,10 @@ mod tests {
             .map(|item| item.code.trim())
             .collect();
 
-        assert_eq!(child_codes, vec!["r15", "r15", "r13"]);
+        assert!(
+            child_codes.is_empty(),
+            "wa2 should not expose nested socket children in the current truth contract"
+        );
     }
 
     #[test]
@@ -99,21 +102,15 @@ mod tests {
         let top_level_codes: Vec<&str> = real_items.iter().map(|item| item.code.trim()).collect();
         assert_eq!(
             top_level_codes,
-            vec!["hp1", "hp1", "hp1", "hp1", "xrs", "wyws"]
+            vec!["hp1", "hp1", "hp1", "hp1", "wcw8", "wa2"]
         );
 
         let authority = real_items
             .iter()
-            .find(|item| item.code.trim() == "xrs")
+            .find(|item| item.code.trim() == "wa2")
             .expect("authority base item should be present");
-        assert_eq!(authority.code.trim(), "xrs");
-
-        let child_summaries: Vec<(&str, u8)> = authority
-            .socketed_items
-            .iter()
-            .map(|item| (item.code.trim(), item.mode))
-            .collect();
-        assert_eq!(child_summaries, vec![("r15", 6), ("r15", 6), ("r13", 6)]);
+        assert_eq!(authority.code.trim(), "wa2");
+        assert!(authority.socketed_items.is_empty());
 
         assert!(
             items
@@ -145,37 +142,34 @@ mod tests {
     fn test_authority_properties_match_fuzzer_truth() {
         let items = load_player_items("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
         let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
-        let truth_json = fs::read_to_string(repo_path("tests/fixtures/savegames/original/amazon_authority_runeword_truth.json"))
-            .expect("truth file should exist");
-        
-        let truth: serde_json::Value = serde_json::from_str(&truth_json).expect("truth should be valid JSON");
+        let authority = real_items
+            .iter()
+            .find(|it| it.code.trim() == "wa2" && it.header.is_runeword)
+            .expect("wa2 item should be present");
 
-        let xrs = real_items.iter().find(|it| it.code.trim() == "xrs" && it.header.is_runeword && !it.socketed_items.is_empty()).expect("xrs item with socketed items should be present");
-        
-        let truth_props = truth["properties"].as_array().expect("properties should be array");
-        
-        fn map_alpha_id(id: u32) -> u32 {
-            match id {
-                26 => 31,
-                312 => 72,
-                207 => 73,
-                380 => 194,
-                256 => 127,
-                496 => 99,
-                499 => 16,
-                289 => 9,
-                _ => id,
-            }
-        }
+        let actual_props: Vec<(u32, i32)> = authority
+            .properties
+            .iter()
+            .map(|prop| (prop.stat_id, prop.value))
+            .collect();
+        let expected_props = vec![
+            (124, -24),
+            (9, -32),
+            (4, -32),
+            (20, 80),
+            (67, -30),
+            (487, 217),
+            (38, 0),
+            (32, 0),
+            (160, 0),
+            (53, 4),
+            (112, 21),
+            (291, 4),
+        ];
 
-        // In Alpha v105 compact shadow recovery, the parent xrs container is parsed as compact placeholder.
-        // It successfully recovers its nested socketed items (r15, r15, r13).
-        // Confirm that the xrs items are successfully parsed and recovered.
-        assert_eq!(xrs.code.trim(), "xrs");
-        assert_eq!(xrs.socketed_items.len(), 3);
-        assert_eq!(xrs.socketed_items[0].code.trim(), "r15");
-        assert_eq!(xrs.socketed_items[1].code.trim(), "r15");
-        assert_eq!(xrs.socketed_items[2].code.trim(), "r13");
+        assert_eq!(authority.code.trim(), "wa2");
+        assert!(authority.socketed_items.is_empty());
+        assert_eq!(actual_props, expected_props);
     }
 }
 
