@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::domain::forensic::registry::get_registry;
 use crate::domain::forensic::v105::{
     get_v105_target_width, V105HeaderGapAxiom, V105PropertyWidthAxiom,
 };
@@ -427,6 +428,56 @@ impl Item {
         self.sync_owner_bucket_fields(page, location, mode);
     }
 
+    fn preferred_alpha_raw_stat_id(
+        effective_id: u32,
+        current_raw_id: u32,
+        logical_value: i32,
+        preferred_name: Option<&str>,
+        current_width: u32,
+    ) -> u32 {
+        let required_width = if logical_value <= 0 {
+            1
+        } else {
+            32 - (logical_value as u32).leading_zeros()
+        };
+
+        if required_width <= current_width {
+            return current_raw_id;
+        }
+
+        let reg = get_registry();
+        let candidates = reg
+            .mappings
+            .iter()
+            .filter_map(|(raw_id, mapping)| {
+                if mapping.effective_id != effective_id {
+                    return None;
+                }
+                let save_bits = mapping.save_bits?;
+                if save_bits < required_width {
+                    return None;
+                }
+                let raw_id = raw_id.parse::<u32>().ok()?;
+                Some((raw_id, mapping.name.as_str()))
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(preferred_name) = preferred_name {
+            if let Some((raw_id, _)) = candidates
+                .iter()
+                .find(|(_, mapping_name)| *mapping_name == preferred_name)
+            {
+                return *raw_id;
+            }
+        }
+
+        candidates
+            .into_iter()
+            .map(|(raw_id, _)| raw_id)
+            .min()
+            .unwrap_or(current_raw_id)
+    }
+
     pub fn set_property_value(
         &mut self,
         stat_id: u32,
@@ -434,8 +485,7 @@ impl Item {
     ) -> bool {
         let mut found = false;
         // Alpha-aware stat mapping
-        let is_alpha =
-            self.header.version == 5 || self.header.version == 6 || self.header.version == 1;
+        let is_alpha = self.header.save_is_alpha;
         let axiom = crate::domain::stats::axiom::StatsAxiom::new(
             self.header.version,
             self.header
@@ -459,8 +509,19 @@ impl Item {
                             .iter()
                             .find(|s| s.id == effective_id);
                         if let Some(c) = cost {
-                            prop.value = value.value();
-                            prop.raw_value = value.value().wrapping_add(c.save_add);
+                            let logical_value = value.value();
+                            let raw_value = logical_value.wrapping_add(c.save_add);
+                            let current_width =
+                                axiom.stat_bit_width(prop.stat_id, c.save_bits as u32);
+                            prop.stat_id = Self::preferred_alpha_raw_stat_id(
+                                effective_id,
+                                prop.stat_id,
+                                logical_value,
+                                Some(c.name),
+                                current_width,
+                            );
+                            prop.value = logical_value;
+                            prop.raw_value = raw_value;
                             found = true;
                         }
                     }
@@ -530,8 +591,7 @@ impl Item {
         self.header.is_socketed = has_sockets;
 
         // Alpha-aware flag synchronization
-        let is_alpha =
-            self.header.version == 5 || self.header.version == 6 || self.header.version == 1;
+        let is_alpha = self.header.save_is_alpha;
 
         // Synchronize flags bit
         if has_sockets {

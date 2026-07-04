@@ -149,7 +149,6 @@ mod roundtrip_tests {
     }
 
     #[test]
-    #[ignore]
     fn test_mutation_and_roundtrip() {
         let path = repo_path("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
         let bytes = fs::read(path).expect("fixture should be readable");
@@ -163,63 +162,18 @@ mod roundtrip_tests {
         );
         let huffman = HuffmanTree::new();
 
-        // Use Trace to see what's happening
-        unsafe {
-            std::env::set_var("D2R_ITEM_TRACE", "1");
-        }
-
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-        let mut items =
-            Item::read_player_items(&bytes, &huffman, version == 105).expect("items should parse");
+        let mut items = Item::read_player_items(&bytes, &huffman, version == 105)
+            .expect("items should parse");
 
-        // The Authority item was previously misidentified as "w ha", but it's "xrs " (Cuirass)
         let authority = items
             .iter_mut()
-            .find(|item| item.code.trim() == "xrs")
-            .expect("Authority item (xrs) not found");
+            .find(|item| item.code.trim() == "wa2")
+            .expect("Authority item (wa2) not found");
 
-        println!(
-            "Authority Item: Code={}, Version={}, Flags=0x{:08X}",
-            authority.code, authority.version, authority.flags
-        );
-
-        // Check current properties
-        println!(
-            "Item properties: {:?}",
-            authority
-                .properties
-                .iter()
-                .map(|p| (p.stat_id, &p.name))
-                .collect::<Vec<_>>()
-        );
-        println!(
-            "Set attributes: {:?}",
-            authority
-                .set_attributes
-                .iter()
-                .map(|list| list.iter().map(|p| p.stat_id).collect::<Vec<_>>())
-                .collect::<Vec<_>>()
-        );
-        println!(
-            "Runeword attributes: {:?}",
-            authority
-                .runeword_attributes
-                .iter()
-                .map(|p| p.stat_id)
-                .collect::<Vec<_>>()
-        );
-        println!("--------------------------------------------------");
-
-        // Mutate internal properties:
-        // In Alpha v105 Authority, ID 9 (maxmana) exists.
-        // NOTE: The legacy TODO-011 specifies "Enhanced Defense" (ID 16/31), but this active ignored
-        // test currently targets maxmana (ID 9). Furthermore, the authority runeword item 'xrs'
-        // is classified as Compact/ContextRequired and parses with an empty properties list
-        // under the current Alpha v105 rules. Therefore, mutating properties on it will fail.
-        // This test remains ignored to document this gap.
         let target_stat_id = 9;
         use d2r_core::domain::vo::ItemStatValue;
-        let new_val = ItemStatValue::new(100).unwrap();
+        let new_val = ItemStatValue::new(300).unwrap();
 
         assert!(
             authority.set_property_value(target_stat_id, new_val),
@@ -227,15 +181,22 @@ mod roundtrip_tests {
             target_stat_id
         );
 
-        // Re-serialize and verify
         let alpha_mode = version == 105;
-        let reserialized = authority
-            .to_bytes(0, &huffman, alpha_mode)
-            .expect("should re-serialize modified item");
+        let authority_version = authority.header.version;
+        let authority_quality = authority.header.quality;
 
-        // Parse back and verify new value
-        let modified_item = Item::from_bytes(&reserialized, &huffman, alpha_mode)
-            .expect("should parse back modified bits");
+        authority.bits.clear();
+
+        let rebuilt_save = d2r_core::save::rebuild_item_section(&bytes, &items, &huffman, alpha_mode)
+            .expect("should rebuild item section");
+
+        let rebuilt_items = Item::read_player_items(&rebuilt_save, &huffman, alpha_mode)
+            .expect("should parse back rebuilt items");
+
+        let modified_item = rebuilt_items
+            .iter()
+            .find(|item| item.code.trim() == "wa2")
+            .expect("Authority item 'wa2' not found after rebuild");
 
         let mut all_stats = modified_item.properties.clone();
         for list in &modified_item.set_attributes {
@@ -243,15 +204,17 @@ mod roundtrip_tests {
         }
         all_stats.extend(modified_item.runeword_attributes.clone());
 
+        let stat_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
+            authority_version,
+            authority_quality.unwrap_or(d2r_core::item::ItemQuality::Normal),
+            alpha_mode,
+        );
         let new_stat = all_stats
             .iter()
-            .find(|p| p.stat_id == target_stat_id)
+            .find(|p| stat_axiom.map_alpha_id(p.stat_id) == target_stat_id)
             .expect("Mutated stat not found");
         assert_eq!(new_stat.value, 300);
     }
-
-
-
     #[test]
     fn test_10scrolls_full_roundtrip() {
         let path = repo_path("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");

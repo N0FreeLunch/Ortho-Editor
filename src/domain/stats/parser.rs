@@ -938,6 +938,13 @@ where
     recorder.push_context(&format!("Stat({})", stat_id));
     let entry_end = recorder.pos();
     recorder.pop_context();
+    let logical_value = if handled || effective_width > 32 {
+        0
+    } else {
+        stat_cost
+            .map(|stat| raw_value.wrapping_sub(stat.save_add))
+            .unwrap_or(raw_value)
+    };
     
     Ok(Some((
         ItemProperty {
@@ -945,7 +952,7 @@ where
             raw_value: raw_value as i32,
             param,
             name: String::new(),
-            value: 0,
+            value: logical_value,
             range: ItemBitRange { start: entry_start, end: entry_end },
         },
         false,
