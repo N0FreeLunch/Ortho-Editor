@@ -4,7 +4,7 @@
 mod roundtrip_tests {
     use d2r_core::domain::vo::align_to_byte;
     use d2r_core::item::{normalize_alpha_code_hint, HuffmanTree, Item};
-    use d2r_core::verify::{Verifier, bit_diff::BitDiffVerifier};
+    use d2r_core::verify::{bit_diff::BitDiffVerifier, Verifier};
     use std::fs;
     use std::path::PathBuf;
 
@@ -152,20 +152,11 @@ mod roundtrip_tests {
     fn test_mutation_and_roundtrip() {
         let path = repo_path("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
         let bytes = fs::read(path).expect("fixture should be readable");
-        println!(
-            "Save Signature: 0x{:08X}",
-            u32::from_le_bytes(bytes[0..4].try_into().unwrap())
-        );
-        println!(
-            "Save Version: 0x{:08X}",
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap())
-        );
         let huffman = HuffmanTree::new();
 
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
         let mut items = Item::read_player_items(&bytes, &huffman, version == 105)
             .expect("items should parse");
-
         let authority = items
             .iter_mut()
             .find(|item| item.code.trim() == "wa2")
@@ -184,15 +175,17 @@ mod roundtrip_tests {
         let alpha_mode = version == 105;
         let authority_version = authority.header.version;
         let authority_quality = authority.header.quality;
+        authority.bits.clear(); // trigger rebuild from fields
+        let _ = authority
+            .to_bits(0, &huffman, alpha_mode)
+            .expect("to_bits should succeed");
 
-        authority.bits.clear();
-
-        let rebuilt_save = d2r_core::save::rebuild_item_section(&bytes, &items, &huffman, alpha_mode)
-            .expect("should rebuild item section");
+        let rebuilt_save =
+            d2r_core::save::rebuild_item_section(&bytes, &items, &huffman, alpha_mode)
+                .expect("should rebuild item section");
 
         let rebuilt_items = Item::read_player_items(&rebuilt_save, &huffman, alpha_mode)
             .expect("should parse back rebuilt items");
-
         let modified_item = rebuilt_items
             .iter()
             .find(|item| item.code.trim() == "wa2")
@@ -215,6 +208,7 @@ mod roundtrip_tests {
             .expect("Mutated stat not found");
         assert_eq!(new_stat.value, 300);
     }
+
     #[test]
     fn test_10scrolls_full_roundtrip() {
         let path = repo_path("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
@@ -236,7 +230,9 @@ mod roundtrip_tests {
                 continue;
             }
             // 2. Re-serialize
-            let reserialized = item.to_bytes(i, &huffman, item.header.save_is_alpha).expect("should re-serialize");
+            let reserialized = item
+                .to_bytes(i, &huffman, item.header.save_is_alpha)
+                .expect("should re-serialize");
 
             // 3. Parse back and verify basic identity
             let contract = compact_standalone_contract(item);
@@ -278,10 +274,10 @@ mod roundtrip_tests {
     #[test]
     fn test_full_save_roundtrip_regression() -> std::io::Result<()> {
         use d2r_core::save::{
-            AttributeSection, map_core_sections, parse_quest_section, parse_skill_section,
-            rebuild_status_and_player_items,
+            map_core_sections, parse_quest_section, parse_skill_section,
+            rebuild_status_and_player_items, AttributeSection,
         };
-        use d2r_core::verify::sba::{SbaBaseline, flatten_item, verify_baseline};
+        use d2r_core::verify::sba::{flatten_item, verify_baseline, SbaBaseline};
 
         let fixtures = [
             "tests/fixtures/savegames/original/TESTAMAZON.d2s",
@@ -316,7 +312,8 @@ mod roundtrip_tests {
             let rebuilt_gf = attributes.to_bytes(version == 105)?;
             let section_axiom = d2r_core::domain::forensic::v105::V105SectionMarkerAxiom::default();
             let skill_end = if version == 105 {
-                map.jm_positions[0].min(map.if_pos + section_axiom.if_len() + d2r_core::save::SKILL_SECTION_LEN)
+                map.jm_positions[0]
+                    .min(map.if_pos + section_axiom.if_len() + d2r_core::save::SKILL_SECTION_LEN)
             } else {
                 map.if_pos + section_axiom.if_len() + d2r_core::save::SKILL_SECTION_LEN
             };
@@ -335,12 +332,12 @@ mod roundtrip_tests {
             // 3. 100% Binary match requirement for these specific fixtures
             let verifier = BitDiffVerifier;
             let report = verifier.verify(&bytes, &rebuilt);
-            
+
             if !report.is_success {
                 // SBA Forensic Analysis
                 let is_alpha = version == 105;
                 let mut issues = Vec::new();
-                
+
                 let mut exp_flattened = Vec::new();
                 for (i, item) in items.iter().enumerate() {
                     flatten_item(item, &i.to_string(), &mut exp_flattened);
@@ -364,7 +361,10 @@ mod roundtrip_tests {
                 }
 
                 for issue in issues {
-                    eprintln!("[FORENSIC] Structural Mismatch: {} | Kind: {}", issue.message, issue.kind);
+                    eprintln!(
+                        "[FORENSIC] Structural Mismatch: {} | Kind: {}",
+                        issue.message, issue.kind
+                    );
                 }
 
                 let jm_pos = map.first_jm();
@@ -380,12 +380,17 @@ mod roundtrip_tests {
                             // Now find segment in item
                             for seg in &item.segments {
                                 if rel_bit >= seg.start && rel_bit < seg.end {
-                                    label = Some(format!("Item({}) -> {}", item.code.trim(), seg.label));
+                                    label = Some(format!(
+                                        "Item({}) -> {}",
+                                        item.code.trim(),
+                                        seg.label
+                                    ));
                                     break;
                                 }
                             }
                             if label.is_none() {
-                                label = Some(format!("Item({}) -> Unknown Segment", item.code.trim()));
+                                label =
+                                    Some(format!("Item({}) -> Unknown Segment", item.code.trim()));
                             }
                             break;
                         }
@@ -399,7 +404,11 @@ mod roundtrip_tests {
                 let _ = std::fs::write("tmp/reproduced.d2s", &rebuilt);
                 eprintln!("[INFO] Failure artifact saved to tmp/reproduced.d2s for d2save_verify");
             }
-            assert!(report.is_success, "Full save binary mismatch for {}", fixture);
+            assert!(
+                report.is_success,
+                "Full save binary mismatch for {}",
+                fixture
+            );
         }
         Ok(())
     }
@@ -409,7 +418,7 @@ mod roundtrip_tests {
         use d2r_core::item::Item;
         let mut item = Item::empty_for_tests();
         item.header.version = 5; // Alpha-like
-        
+
         // Set initial values
         item.set_defense(Some(100));
         item.set_durability(Some(10), Some(20));
@@ -469,8 +478,8 @@ mod roundtrip_tests {
         let huffman = HuffmanTree::new();
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
         let alpha_mode = version == 105;
-        let items = Item::read_player_items(&bytes, &huffman, alpha_mode)
-            .expect("items should parse");
+        let items =
+            Item::read_player_items(&bytes, &huffman, alpha_mode).expect("items should parse");
 
         // Find the buc (buckler) item — canonical Alpha v105 selector truth
         let (idx, buc) = items
@@ -491,10 +500,11 @@ mod roundtrip_tests {
         let reserialized = buc
             .to_bytes(idx, &huffman, alpha_mode)
             .expect("buc should re-serialize");
-        
+
         // Attempt 1: Parse with original alpha_mode
         let buc_back = match contract {
-            CompactStandaloneContract::WireCanonical | CompactStandaloneContract::SemanticCanonical => {
+            CompactStandaloneContract::WireCanonical
+            | CompactStandaloneContract::SemanticCanonical => {
                 match Item::from_bytes(&reserialized, &huffman, alpha_mode) {
                     Ok(item) => item,
                     Err(e) => {
@@ -539,8 +549,8 @@ mod roundtrip_tests {
         let huffman = HuffmanTree::new();
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
         let alpha_mode = version == 105;
-        let items = Item::read_player_items(&bytes, &huffman, alpha_mode)
-            .expect("items should parse");
+        let items =
+            Item::read_player_items(&bytes, &huffman, alpha_mode).expect("items should parse");
 
         // Find a tsc (Town Portal Scroll) — ContextRequired compact item
         let (idx, scroll) = items
@@ -570,9 +580,5 @@ mod roundtrip_tests {
         // This is the explicit Isolated Item Contract for ContextRequired class:
         // to_bytes succeeds; from_bytes is not attempted (context-dependent parse).
         // If future slices make tsc standalone-parseable, this assertion must be updated.
-        println!(
-            "[contract] tsc ContextRequired: to_bytes={} bytes, from_bytes skipped (context-dependent)",
-            reserialized.len()
-        );
     }
 }

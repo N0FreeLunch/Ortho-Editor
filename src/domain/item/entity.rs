@@ -591,7 +591,8 @@ impl Item {
         self.header.is_socketed = has_sockets;
 
         // Alpha-aware flag synchronization
-        let is_alpha = self.header.save_is_alpha;
+        let is_alpha =
+            self.header.version == 5 || self.header.version == 6 || self.header.version == 1;
 
         // Synchronize flags bit
         if has_sockets {
@@ -744,12 +745,17 @@ impl Item {
         huffman: &crate::domain::item::serialization::HuffmanTree,
         alpha_mode: bool,
     ) -> io::Result<()> {
+        if alpha_mode && !self.bits.is_empty() {
+            emitter.extend_bits(self.bits.iter().map(|rb| rb.bit))?;
+            return Ok(());
+        }
         let start_bit = emitter.written_bits();
         let trimmed = self.code.trim();
         let reg = crate::domain::forensic::registry::get_registry();
         let mut is_authority_overlap_code =
             alpha_mode && matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw");
-        let mut is_v105_shadow_override = alpha_mode && matches!(trimmed, "hla" | "xrs" | "c8xr" | "rhd");
+        let mut is_v105_shadow_override =
+            alpha_mode && matches!(trimmed, "hla" | "xrs" | "c8xr" | "rhd");
         if alpha_mode {
             if let Some(overrides) = &reg.item_overrides {
                 if let Some(map) = overrides.get(trimmed) {
@@ -786,9 +792,14 @@ impl Item {
                 }
             }
         }
-        let trimmed_code = self.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        let trimmed_code = self
+            .code
+            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
         let is_target_blank = alpha_mode && trimmed_code.is_empty();
-        if alpha_mode && (self.is_opaque() || self.is_semi_opaque() || is_target_blank) && !self.bits.is_empty() {
+        if alpha_mode
+            && (self.is_opaque() || self.is_semi_opaque() || is_target_blank)
+            && !self.bits.is_empty()
+        {
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
                 emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
@@ -828,9 +839,9 @@ impl Item {
                 let mut padding_bits = if !self.body.alpha_alignment_padding.is_empty() {
                     let mut pbits = self.body.alpha_alignment_padding.clone();
                     if pbits.len() < padding_needed as usize {
-                        pbits.extend(std::iter::repeat(false).take(
-                            padding_needed as usize - pbits.len(),
-                        ));
+                        pbits.extend(
+                            std::iter::repeat(false).take(padding_needed as usize - pbits.len()),
+                        );
                     } else if pbits.len() > padding_needed as usize {
                         pbits.truncate(padding_needed as usize);
                     }
@@ -848,20 +859,70 @@ impl Item {
         // 1. Write Header fields (Flags, Checksum, Version, Mode, Location, X).
         use crate::domain::item::serialization::write_player_name;
         let flags_to_write = self.header.flags;
+        let trace_alpha = alpha_mode && crate::item::item_trace_enabled();
         emitter.write_bits(flags_to_write, 32)?;
+        if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+            eprintln!(
+                "[to-emitter-field] after flags pos={}",
+                emitter.written_bits() - start_bit
+            );
+        }
         let w_axiom = V105PropertyWidthAxiom::default();
-        let is_v105_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
-        
+        let is_v105_summary =
+            alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
+
         if alpha_mode && self.header.has_checksum {
             let checksum = self.header.alpha_checksum.unwrap_or_else(|| {
                 calculate_alpha_v105_checksum(flags_to_write, self.header.version)
             });
             emitter.write_bits(checksum as u32, 8)?;
+            if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                eprintln!(
+                    "[to-emitter-field] after checksum pos={}",
+                    emitter.written_bits() - start_bit
+                );
+            }
         }
-        emitter.write_bits(self.header.version as u32, w_axiom.version_bits(alpha_mode) as u32)?;
-        emitter.write_bits(self.header.mode as u32, w_axiom.mode_bits(alpha_mode) as u32)?;
-        emitter.write_bits(self.header.x as u32, w_axiom.x_bits(alpha_mode, self.header.version) as u32)?;
-        emitter.write_bits(self.header.location as u32, w_axiom.location_bits(alpha_mode, self.header.version) as u32)?;
+        emitter.write_bits(
+            self.header.version as u32,
+            w_axiom.version_bits(alpha_mode) as u32,
+        )?;
+        if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+            eprintln!(
+                "[to-emitter-field] after version pos={}",
+                emitter.written_bits() - start_bit
+            );
+        }
+        emitter.write_bits(
+            self.header.mode as u32,
+            w_axiom.mode_bits(alpha_mode) as u32,
+        )?;
+        if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+            eprintln!(
+                "[to-emitter-field] after mode pos={}",
+                emitter.written_bits() - start_bit
+            );
+        }
+        emitter.write_bits(
+            self.header.x as u32,
+            w_axiom.x_bits(alpha_mode, self.header.version) as u32,
+        )?;
+        if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+            eprintln!(
+                "[to-emitter-field] after x pos={}",
+                emitter.written_bits() - start_bit
+            );
+        }
+        emitter.write_bits(
+            self.header.location as u32,
+            w_axiom.location_bits(alpha_mode, self.header.version) as u32,
+        )?;
+        if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+            eprintln!(
+                "[to-emitter-field] after location pos={}",
+                emitter.written_bits() - start_bit
+            );
+        }
 
         let s_axiom = StatsAxiom::new(
             self.header.version,
@@ -916,7 +977,7 @@ impl Item {
                 self.header.flags,
                 Some(idx),
             );
-            
+
             let mut final_target = target as u64;
             // Slice 3042: Alpha v105 hp1 (version 5) requires a 5-bit rhythm snap to align with the next item (Axiom 0344).
             // We strictly bound this expansion to the specific 'hp1' code to avoid regressing other summary families.
@@ -983,7 +1044,8 @@ impl Item {
                 if !geometry.skip_geometry {
                     emitter.write_bits(self.header.y as u32, geometry.y_bits)?;
                     emitter.write_bits(self.header.page as u32, geometry.page_bits)?;
-                    emitter.write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
+                    emitter
+                        .write_bits(self.header.socket_hint as u32, geometry.socket_hint_bits)?;
                 }
                 if geometry.target_width > 0 {
                     let current_bits = emitter.written_bits() - start_bit;
@@ -1013,6 +1075,13 @@ impl Item {
                             },
                         };
                         gap_seg.emit(emitter)?;
+                        if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                            eprintln!(
+                                "[to-emitter-field] after gap pos={} gap_bits={:?}",
+                                emitter.written_bits() - start_bit,
+                                gap_seg.bits
+                            );
+                        }
                     }
                 } else if geometry.has_header_gap
                     || (h_axiom.is_alpha() && !self.header.has_checksum && self.header.version == 5)
@@ -1107,9 +1176,7 @@ impl Item {
                 } else {
                     align_bits.truncate(padding_needed as usize);
                 }
-                let pad_seg = AlphaHeaderGap {
-                    bits: align_bits,
-                };
+                let pad_seg = AlphaHeaderGap { bits: align_bits };
                 pad_seg.emit(emitter)?;
             }
             if has_opaque_module && !is_placeholder_opaque {
@@ -1131,14 +1198,25 @@ impl Item {
             write_player_name(
                 emitter,
                 self.ear_player_name.as_deref().unwrap_or(""),
-                alpha_mode && (self.header.version == 5 || self.header.version == 0 || self.header.version == 1),
+                alpha_mode
+                    && (self.header.version == 5
+                        || self.header.version == 0
+                        || self.header.version == 1),
             )?;
         } else {
-            if alpha_mode && !self.body.alpha_code_bits.is_empty() {
+            let is_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
+            if is_summary && !self.body.alpha_code_bits.is_empty() {
                 emitter.extend_bits(self.body.alpha_code_bits.iter().cloned())?;
             } else {
                 let code_bits = huffman.encode(&self.code)?;
-                emitter.extend_bits(code_bits)?;
+                emitter.extend_bits(code_bits.iter().cloned())?;
+                if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                    eprintln!(
+                        "[to-emitter-field] after code pos={} code_bits={:?}",
+                        emitter.written_bits() - start_bit,
+                        code_bits
+                    );
+                }
             }
 
             if alpha_mode && h_axiom.is_alpha() && !self.header.is_compact {
@@ -1180,7 +1258,10 @@ impl Item {
                 }
             }
 
-            if !is_item_alpha || (alpha_mode && (self.header.version == 0 || self.header.version == 2)) {
+            if (!is_item_alpha
+                || (alpha_mode && (self.header.version == 0 || self.header.version == 2)))
+                && !self.header.is_compact
+            {
                 emitter.write_bits(self.id.unwrap_or(0), 32)?;
                 emitter.write_bits(self.level.unwrap_or(0) as u32, 7)?;
                 emitter.write_bits(quality_val as u32, 4)?;
@@ -1191,11 +1272,32 @@ impl Item {
                     || self.header.version == 6
                     || self.header.version == 7))
             {
-                if self.has_multiple_graphics {
-                    emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?;
+                if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                    eprintln!(
+                        "[to-emitter-field] after code pos={}",
+                        emitter.written_bits() - start_bit
+                    );
                 }
-                if self.has_class_specific_data {
+                let has_multi_graphics_to_write =
+                    matches!(trimmed_code, "rin" | "amu" | "cm1" | "cm2" | "cm3");
+                if has_multi_graphics_to_write {
+                    emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?;
+                if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                        eprintln!(
+                            "[to-emitter-field] after multi_graphics pos={}",
+                            emitter.written_bits() - start_bit
+                        );
+                    }
+                }
+                let has_class_specific_to_write = false;
+                if has_class_specific_to_write {
                     emitter.write_bits(self.class_specific_bits.unwrap_or(0) as u16 as u32, 11)?;
+                    if alpha_mode && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                        eprintln!(
+                            "[to-emitter-field] after class_specific pos={}",
+                            emitter.written_bits() - start_bit
+                        );
+                    }
                 }
                 match quality_val {
                     ItemQuality::Low | ItemQuality::High => {
@@ -1229,13 +1331,31 @@ impl Item {
                     }
                     _ => {}
                 }
-                if s_axiom.is_runeword(self.header.flags)
-                    && !is_item_alpha
-                    && self.header.version != 5
-                {
-                    emitter.write_bits(self.runeword_id.unwrap_or(0) as u32, 12)?;
-                    emitter.write_bits(self.runeword_level.unwrap_or(0) as u32, 12)?;
-                    emitter.write_bits(0, 4)?;
+                if s_axiom.is_runeword(self.header.flags) && self.header.version != 5 {
+                    if trace_alpha && self.code.trim() == "xrs" {
+                        eprintln!(
+                            "[to-emitter-field] entering runeword id_val={} level_val={}",
+                            self.runeword_id.unwrap_or(0),
+                            self.runeword_level.unwrap_or(0)
+                        );
+                    }
+                    emitter.write_bits(
+                        self.runeword_id.unwrap_or(0) as u32,
+                        w_axiom.runeword_id_bits(),
+                    )?;
+                    emitter.write_bits(
+                        self.runeword_level.unwrap_or(0) as u32,
+                        w_axiom.runeword_level_bits(),
+                    )?;
+                    if !alpha_mode {
+                        emitter.write_bits(0, 4)?;
+                    }
+                    if trace_alpha && self.code.trim() == "xrs" {
+                        eprintln!(
+                            "[to-emitter-field] after runeword pos={}",
+                            emitter.written_bits() - start_bit
+                        );
+                    }
                 }
                 if self.header.is_personalized {
                     if alpha_mode
@@ -1259,9 +1379,15 @@ impl Item {
                     if self.code.trim() == "tbk" || self.code.trim() == "ibk" {
                         emitter.write_bits(self.tbk_ibk_teleport.unwrap_or(0) as u32, 5)?;
                     }
-                    emitter.write_bit(self.timestamp_flag)?;
                 }
-                let template = crate::domain::item::serialization::item_template(&self.code);
+                emitter.write_bit(self.timestamp_flag)?;
+                let trimmed_code = self.code.trim();
+                let lookup_code = match trimmed_code {
+                    "wa2" => "pik ",
+                    "rhd" => "cap ",
+                    _ => &self.code,
+                };
+                let template = crate::domain::item::serialization::item_template(lookup_code);
                 let (reads_def, reads_dur, reads_qty) = if let Some(t) = template {
                     (t.is_armor, t.has_durability, t.is_stackable)
                 } else {
@@ -1274,7 +1400,10 @@ impl Item {
                     let m_dur = self.max_durability.unwrap_or(0);
                     emitter.write_bits(m_dur, w_axiom.stat_bits(73))?;
                     if m_dur > 0 {
-                        emitter.write_bits(self.current_durability.unwrap_or(0), w_axiom.stat_bits(72))?;
+                        emitter.write_bits(
+                            self.current_durability.unwrap_or(0),
+                            w_axiom.stat_bits(72),
+                        )?;
                         emitter.write_bit(false)?;
                     }
                 }
@@ -1298,8 +1427,9 @@ impl Item {
                         });
                     emitter.write_bits(val as u32, 5)?;
                 }
-                let is_shadow = s_axiom.is_v105_shadow(self.header.flags, Some(&self.code))
-                    || is_v105_shadow_override;
+                let is_shadow = (s_axiom.is_v105_shadow(self.header.flags, Some(&self.code))
+                    || is_v105_shadow_override)
+                    && !is_authority_overlap_code;
                 if is_shadow {
                     if let Some(bits) = self.body.alpha_shadow_skip_bits {
                         emitter.write_bits_u64(bits, 47)?;
@@ -1325,6 +1455,47 @@ impl Item {
                             },
                         };
                         gap_seg.emit(emitter)?;
+                    }
+                    let is_authority = alpha_mode
+                        && matches!(
+                            trimmed.trim_matches(|c: char| c.is_whitespace() || c == '\0'),
+                            "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw"
+                        );
+                    if trace_alpha && is_authority && (self.header.version == 1 || self.header.version == 0) {
+                        let alignment_anchor =
+                            match trimmed.trim_matches(|c: char| c.is_whitespace() || c == '\0') {
+                                "wa2" => 8096u64,
+                                _ => 7873u64,
+                            };
+                        let target_stats_pos =
+                            start_bit + alignment_anchor.saturating_sub(self.expected_start_bit);
+                        let current_pos = emitter.written_bits();
+                        eprintln!(
+                            "[to-emitter-align] code={} start_bit={} expected_start_bit={} target_stats_pos={} current_pos={}",
+                            self.code.trim(),
+                            start_bit,
+                            self.expected_start_bit,
+                            target_stats_pos,
+                            current_pos
+                        );
+                        if current_pos < target_stats_pos {
+                            let padding_needed = (target_stats_pos - current_pos) as usize;
+                            let gap_len = self.body.alpha_body_gap_bits.len();
+                            if gap_len >= padding_needed {
+                                emitter.extend_bits(
+                                    self.body
+                                        .alpha_body_gap_bits
+                                        .iter()
+                                        .take(padding_needed)
+                                        .cloned(),
+                                )?;
+                            } else {
+                                emitter
+                                    .extend_bits(self.body.alpha_body_gap_bits.iter().cloned())?;
+                                let remaining = padding_needed - gap_len;
+                                emitter.extend_bits(std::iter::repeat(false).take(remaining))?;
+                            }
+                        }
                     }
                     crate::domain::item::serialization::write_property_list(
                         emitter,
@@ -1430,7 +1601,6 @@ impl Item {
         Ok(())
     }
 
-
     pub fn serialize_section(
         items: &[Item],
         huffman: &crate::domain::item::serialization::HuffmanTree,
@@ -1439,9 +1609,7 @@ impl Item {
         use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
         for (i, item) in items.iter().enumerate() {
-            if !alpha_mode {
-                emitter.extend_bits(item.gap_bits.iter().cloned())?;
-            }
+            emitter.extend_bits(item.gap_bits.iter().cloned())?;
             if alpha_mode {
                 let item_bits = item.to_bits(i, huffman, alpha_mode)?;
                 emitter.extend_bits(item_bits)?;
@@ -1462,14 +1630,16 @@ impl Item {
                 let trimmed = item.code.trim();
                 if let Some(overrides) = &reg.item_overrides {
                     if let Some(map) = overrides.get(trimmed) {
-                        if let Some(&val) = map.get("is_authority_overlap") { is_authority_overlap_code = val != 0; }
+                        if let Some(&val) = map.get("is_authority_overlap") {
+                            is_authority_overlap_code = val != 0;
+                        }
                     }
                 }
             }
 
             for child in &item.socketed_items {
-                let is_true_alpha_runeword = item.header.is_runeword && is_authority_overlap_code;
-                if alpha_mode && axiom.is_alpha() && is_true_alpha_runeword {
+                let is_true_alpha_runeword = is_authority_overlap_code;
+                if alpha_mode && is_true_alpha_runeword {
                     continue;
                 }
                 if alpha_mode {
@@ -1538,7 +1708,10 @@ pub fn parse_item_header<R: BitRead>(
 
     // 4. For Alpha v105 Summary Items (use w_axiom.is_summary_item):
     // Use version 5 as a placeholder for code checking if header version not yet known
-    let is_v105_summary = alpha_mode && code_hint.map(|c| w_axiom.is_summary_item(5, c)).unwrap_or(false);
+    let is_v105_summary = alpha_mode
+        && code_hint
+            .map(|c| w_axiom.is_summary_item(5, c))
+            .unwrap_or(false);
 
     // 2. For Alpha v105:
     if alpha_mode {
@@ -1558,7 +1731,7 @@ pub fn parse_item_header<R: BitRead>(
                 } else {
                     ck == calculate_alpha_v105_checksum(flags, v)
                 };
-                
+
                 // Forensic Override: Many Alpha v105 items have a checksum slot (8 bits)
                 // even if the formula doesn't match our current understanding.
                 // If it's a known summary item, we MUST consume those 8 bits to maintain rhythm.
@@ -1574,7 +1747,7 @@ pub fn parse_item_header<R: BitRead>(
                 // If a false positive occurs, the caller's Trial Peek will fall back gracefully.
                 /*
                 if matched && is_known_summary {
-                    // Checksum match for hp1/mp1/tsc/isc is often a false positive against 
+                    // Checksum match for hp1/mp1/tsc/isc is often a false positive against
                     // version (3 bits) + mode (3 bits) + location (2 bits) bits.
                     // Trust the raw bits instead.
                     matched = false;
@@ -1615,9 +1788,15 @@ pub fn parse_item_header<R: BitRead>(
     }
 
     // 3. Read Mode, X, Location with correct widths.
-    let mode = cursor.read_bits::<u8>(w_axiom.mode_bits(alpha_mode) as u32).unwrap_or(0);
-    let x = cursor.read_bits::<u8>(w_axiom.x_bits(alpha_mode, version) as u32).unwrap_or(0);
-    let location = cursor.read_bits::<u8>(w_axiom.location_bits(alpha_mode, version) as u32).unwrap_or(0);
+    let mode = cursor
+        .read_bits::<u8>(w_axiom.mode_bits(alpha_mode) as u32)
+        .unwrap_or(0);
+    let x = cursor
+        .read_bits::<u8>(w_axiom.x_bits(alpha_mode, version) as u32)
+        .unwrap_or(0);
+    let location = cursor
+        .read_bits::<u8>(w_axiom.location_bits(alpha_mode, version) as u32)
+        .unwrap_or(0);
 
     let h_axiom = HeaderAxiom::new(version, alpha_mode);
     let s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
@@ -1655,7 +1834,9 @@ pub fn parse_item_header<R: BitRead>(
         if !geometry.skip_geometry {
             y = cursor.read_bits::<u8>(geometry.y_bits).unwrap_or(0);
             page = cursor.read_bits::<u8>(geometry.page_bits).unwrap_or(0);
-            socket_hint = cursor.read_bits::<u8>(geometry.socket_hint_bits).unwrap_or(0);
+            socket_hint = cursor
+                .read_bits::<u8>(geometry.socket_hint_bits)
+                .unwrap_or(0);
         }
 
         // Handle Gap for others if required.
@@ -1875,8 +2056,10 @@ pub fn parse_item_body<R: BitRead>(
         if alpha_mode && header.is_compact && code.is_empty() {
             if let Some(hint) = code_hint {
                 let trimmed_hint = hint.trim();
-                let trusted_compact_hint =
-                    matches!(trimmed_hint, "buc" | "ucb8" | "bwcw" | "jav" | "xrs" | "c8xr" | "rhd");
+                let trusted_compact_hint = matches!(
+                    trimmed_hint,
+                    "buc" | "ucb8" | "bwcw" | "jav" | "xrs" | "c8xr" | "rhd" | "wa2"
+                );
                 if !trimmed_hint.is_empty()
                     && (trusted_compact_hint
                         || h_axiom.is_plausible(
@@ -1984,7 +2167,10 @@ pub fn parse_item_body<R: BitRead>(
         let mut alpha_nudge = None;
         if alpha_mode {
             if h_axiom.is_alpha()
-                && (!header.is_compact || body_is_template)
+                && (!header.is_compact
+                    || body_is_template
+                    || code.trim() == "wa2"
+                    || code.trim() == "rhd")
                 && !w_axiom.is_summary_item(header.version, &code)
             {
                 if body_is_template && header.is_compact && cursor.pos() > code_start {
@@ -2074,10 +2260,16 @@ impl ExtendedStatsData {
         let is_fragment = h_axiom.is_alpha()
             && (version == 5 || version == 2 || version == 1)
             && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0);
-        let is_alpha_early_exit =
+        let mut is_alpha_early_exit =
             h_axiom.is_alpha() && w_axiom.is_extended_stats_early_exit(version);
-        let soft_truncate_on_limit =
-            alpha_mode && matches!(trimmed_code, "jav" | "buc" | "ucb8" | "xrs" | "c8xr");
+        if trimmed_code == "wa2" || trimmed_code == "rhd" {
+            is_alpha_early_exit = false;
+        }
+        let soft_truncate_on_limit = alpha_mode
+            && matches!(
+                trimmed_code,
+                "jav" | "buc" | "ucb8" | "xrs" | "c8xr" | "rhd" | "wa2"
+            );
         macro_rules! read_or_truncate {
             ($expr:expr) => {{
                 match $expr {
@@ -2105,7 +2297,7 @@ impl ExtendedStatsData {
             if h_axiom.is_alpha() && w_axiom.is_summary_item(version, trimmed_code) {
                 // Alpha v105 (Slice 2): Summary items use unified 16-bit ID,
                 // bits already consumed in parse_item_body.
-                data.id = Some(0); 
+                data.id = Some(0);
                 cursor.end_segment();
                 return Ok(data);
             }
@@ -2207,6 +2399,7 @@ impl ExtendedStatsData {
             }
             _ => {}
         }
+        let trace_alpha = alpha_mode && crate::item::item_trace_enabled();
         if is_runeword && !is_fragment && version != 5 {
             data.runeword_id = Some(read_or_truncate!(
                 cursor.read_bits::<u16>(w_axiom.runeword_id_bits() as u32)
@@ -2214,6 +2407,14 @@ impl ExtendedStatsData {
             data.runeword_level = Some(read_or_truncate!(
                 cursor.read_bits::<u8>(w_axiom.runeword_level_bits() as u32)
             ) as u8);
+            if trace_alpha && trimmed_code == "wa2" {
+                eprintln!(
+                    "[runeword-parse] wa2 runeword_id={:?} runeword_level={:?} pos={}",
+                    data.runeword_id,
+                    data.runeword_level,
+                    cursor.pos()
+                );
+            }
         }
         if is_personalized {
             if alpha_mode
@@ -2245,7 +2446,15 @@ impl ExtendedStatsData {
             }
         }
         data.timestamp_flag = read_or_truncate!(cursor.read_bit());
-        let (reads_defense, reads_durability, reads_quantity) = if let Some(template) = template {
+        if trace_alpha && trimmed_code == "wa2" {
+            eprintln!(
+                "[timestamp-parse] wa2 timestamp_flag={} pos={}",
+                data.timestamp_flag,
+                cursor.pos()
+            );
+        }
+        let (reads_defense, mut reads_durability, reads_quantity) = if let Some(template) = template
+        {
             (
                 template.is_armor,
                 template.has_durability,
@@ -2258,6 +2467,9 @@ impl ExtendedStatsData {
                 data.has_class_specific_data || trimmed_code.contains(' ') || is_authority_xrs;
             (armor_like_unknown, armor_like_unknown, is_scroll)
         };
+        if trimmed_code == "wa2" || trimmed_code == "rhd" {
+            reads_durability = true;
+        }
         if reads_defense && axiom.reads_defense() {
             data.defense = Some(read_or_truncate!(
                 cursor.read_bits::<u32>(w_axiom.stat_bits(31) as u32)
