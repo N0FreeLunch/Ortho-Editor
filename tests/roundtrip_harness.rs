@@ -39,7 +39,7 @@ mod roundtrip_tests {
             "jav" | "buc" => CompactStandaloneContract::SemanticCanonical,
             // These compact Alpha items still rely on section context/hints for
             // deterministic standalone re-parse.
-            "xrs" | "c8xr" | "rhd" | "hp1" | "mp1" | "tsc" | "isc" => {
+            "xrs" | "c8xr" | "rhd" | "wa2" | "hp1" | "mp1" | "tsc" | "isc" => {
                 CompactStandaloneContract::ContextRequired
             }
             _ => CompactStandaloneContract::WireCanonical,
