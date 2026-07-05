@@ -2113,11 +2113,19 @@ impl Item {
                                 offset: item.range.start + idx as u64,
                             })
                             .collect();
-                        item.modules.clear();
-                        item.modules.push(crate::domain::item::ItemModule::Opaque(
-                            raw_bits.clone(),
-                        ));
-                        item.body.alpha_alignment_padding = raw_bits;
+                        let preserve_trusted_compact_tail = matches!(
+                            item.code.trim(),
+                            "jav" | "buc"
+                        );
+                        if preserve_trusted_compact_tail {
+                            item.body.alpha_alignment_padding = raw_bits;
+                        } else {
+                            item.modules.clear();
+                            item.modules.push(crate::domain::item::ItemModule::Opaque(
+                                raw_bits.clone(),
+                            ));
+                            item.body.alpha_alignment_padding = raw_bits;
+                        }
                     }
                 }
             }
@@ -2403,8 +2411,25 @@ impl Item {
             cursor.rollback(saved);
 
             // Resolve: Select the path that yields a valid summary code.
-            let true_is_summary = true_result.as_ref().map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3)).unwrap_or(false);
-            let false_is_summary = false_result.as_ref().map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3)).unwrap_or(false);
+            let is_trusted_compact_code = |code: &str| {
+                matches!(code.trim(), "jav" | "buc" | "us g")
+            };
+            let true_is_summary = true_result
+                .as_ref()
+                .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3))
+                .unwrap_or(false);
+            let false_is_summary = false_result
+                .as_ref()
+                .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3))
+                .unwrap_or(false);
+            let true_is_trusted_compact = true_result
+                .as_ref()
+                .map(|r| is_trusted_compact_code(&r.3))
+                .unwrap_or(false);
+            let false_is_trusted_compact = false_result
+                .as_ref()
+                .map(|r| is_trusted_compact_code(&r.3))
+                .unwrap_or(false);
 
             if true_is_summary && !false_is_summary {
                 peek = true_result;
@@ -2421,6 +2446,12 @@ impl Item {
                 } else {
                     peek = true_result;
                 }
+            } else if true_is_trusted_compact && !false_is_trusted_compact {
+                peek = true_result;
+            } else if false_is_trusted_compact && !true_is_trusted_compact {
+                peek = false_result;
+            } else if true_is_trusted_compact && false_is_trusted_compact {
+                peek = true_result;
             } else {
                 peek = None;
             }
@@ -2654,13 +2685,21 @@ impl Item {
                 }
             }
             let trimmed_code = body.code.trim();
-            if let Some(eff) = reg.effective_codes.get(trimmed_code) {
-                body.code = eff.clone();
-            }
-            let normalized_body_code = crate::item::normalize_alpha_code_hint(&body.code).to_string();
-            if normalized_body_code != body.code {
-                body.code = normalized_body_code;
-            }
+            body.code = match trimmed_code {
+                // Capture-replay aliases for the live `jav` witness.
+                "g71" | "wl l" | "us g" | "k g" => "jav".to_string(),
+                other => {
+                    let mut code = other.to_string();
+                    if let Some(eff) = reg.effective_codes.get(other) {
+                        code = eff.clone();
+                    }
+                    let normalized_body_code = crate::item::normalize_alpha_code_hint(&code).to_string();
+                    if normalized_body_code != code {
+                        code = normalized_body_code;
+                    }
+                    code
+                }
+            };
         }
 
         let body_is_template = crate::domain::item::serialization::item_template(body.code.trim()).is_some();
@@ -3004,9 +3043,17 @@ impl Item {
                 item.range.end = cursor.pos();
                 item.total_bits = item.range.end - item.range.start;
 
+                let preserve_trusted_compact_tail = alpha_mode
+                    && code_peek
+                        .map(|code| matches!(code.trim(), "jav" | "buc" | "us g"))
+                        .unwrap_or(false);
                 if alpha_mode {
-                    item.modules
-                        .push(crate::domain::item::ItemModule::Opaque(residue_bits));
+                    if preserve_trusted_compact_tail {
+                        item.body.alpha_alignment_padding.extend(residue_bits);
+                    } else {
+                        item.modules
+                            .push(crate::domain::item::ItemModule::Opaque(residue_bits));
+                    }
                 } else {
                     item.modules
                         .push(crate::domain::item::ItemModule::Residue(residue_bits));
