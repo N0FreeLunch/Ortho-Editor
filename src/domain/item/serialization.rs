@@ -2688,6 +2688,7 @@ impl Item {
             body.code = match trimmed_code {
                 // Capture-replay aliases for the live `jav` witness.
                 "g71" | "wl l" | "us g" | "k g" => "jav".to_string(),
+                "wucb" => "ucb8".to_string(),
                 other => {
                     let mut code = other.to_string();
                     if let Some(eff) = reg.effective_codes.get(other) {
@@ -2700,6 +2701,14 @@ impl Item {
                     code
                 }
             };
+            if let Some(hint) = code_hint.or(code_peek) {
+                let trimmed_hint = hint.trim();
+                // Keep the final item owner aligned with the trusted UCB8 witness when
+                // the serialized body still collapses to the drifted `wucb` alias.
+                if trimmed_hint == "ucb8" && body.code.trim() == "wucb" {
+                    body.code = trimmed_hint.to_string();
+                }
+            }
         }
 
         let body_is_template = crate::domain::item::serialization::item_template(body.code.trim()).is_some();
