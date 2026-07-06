@@ -179,28 +179,43 @@ fn analyze_non_compact_item(bytes: &[u8], bit_start: usize, huffman: &HuffmanTre
 fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     map.insert("code".to_string(), json!(item.code.trim()));
-    map.insert("bit_length".to_string(), json!(item.range.end - item.range.start));
-    map.insert("stats".to_string(), json!(item.properties.iter().map(|p| {
-        json!({
-            "id": p.stat_id,
-            "name": p.name,
-            "is_unknown": p.name.starts_with("Unknown")
-        })
-    }).collect::<Vec<_>>()));
-    
+    map.insert(
+        "bit_length".to_string(),
+        json!(item.range.end - item.range.start),
+    );
+    map.insert(
+        "stats".to_string(),
+        json!(
+            item.properties
+                .iter()
+                .map(|p| {
+                    json!({
+                        "id": p.stat_id,
+                        "name": p.name,
+                        "is_unknown": p.name.starts_with("Unknown")
+                    })
+                })
+                .collect::<Vec<_>>()
+        ),
+    );
+
     let residue = item.modules.iter().find_map(|m| {
         if let d2r_core::item::ItemModule::Residue(bits) = m {
-            Some(bits.iter().map(|&b| if b { '1' } else { '0' }).collect::<String>())
+            Some(
+                bits.iter()
+                    .map(|&b| if b { '1' } else { '0' })
+                    .collect::<String>(),
+            )
         } else {
             None
         }
     });
     map.insert("residue_bits".to_string(), json!(residue));
-    
+
     if let Some(prov) = provenance {
         map.insert("provenance".to_string(), prov);
     }
-    
+
     serde_json::Value::Object(map)
 }
 
@@ -217,10 +232,15 @@ fn classify_trace_ownership(
         || item.is_opaque()
         || item.is_semi_opaque()
         || gap_source == "normalization:opaque_fallback";
-        
+
     let is_kk_seam_drift = (scanner_hint.starts_with("wc") || scanner_hint.contains("wc"))
         && (final_code == "wwsl" || final_code == "wwu8")
         && gap_source == "normalization:drift_realigned";
+
+    let recovery_signals = !scanner_hint.is_empty()
+        && scanner_hint == final_code
+        && normalized_code != final_code
+        && gap_source.starts_with("normalization:");
 
     let replay_signals = gap_source == "header_gap_lookup"
         || is_kk_seam_drift
@@ -229,13 +249,21 @@ fn classify_trace_ownership(
             && normalized_code == final_code
             && gap_len > 0);
 
-    let ownership_hint = match (replay_signals, padding_signals) {
-        (true, false) => "capture_replay",
-        (false, true) => "emission_padding",
-        _ => "ambiguous",
+    let ownership_hint = if recovery_signals {
+        "recovery_path"
+    } else if replay_signals && !padding_signals {
+        "capture_replay"
+    } else if padding_signals && !replay_signals {
+        "emission_padding"
+    } else {
+        "ambiguous"
     };
 
     let ownership_reason = match ownership_hint {
+        "recovery_path" => format!(
+            "Recovered final_code='{}' from the scanner/header hint while normalized_code='{}' diverged via '{}'. Residual ambiguity is confined to the normalization track, not split ownership.",
+            final_code, normalized_code, gap_source
+        ),
         "capture_replay" => {
             if is_kk_seam_drift {
                 format!(
@@ -335,70 +363,84 @@ fn main() {
                 let bit_end = reader.position_in_bits().unwrap_or(0) as usize;
 
                 let provenance = if trace_provenance && is_alpha {
-                    let scanner_hint = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                        &bytes,
-                        offset as u64,
-                        Some(offset as u64),
-                        &huffman,
-                        true,
-                        0,
-                    )
-                    .map(|p| p.3.trim().to_string())
-                    .unwrap_or_default();
+                    let scanner_hint =
+                        d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                            &bytes,
+                            offset as u64,
+                            Some(offset as u64),
+                            &huffman,
+                            true,
+                            0,
+                        )
+                        .map(|p| p.3.trim().to_string())
+                        .unwrap_or_default();
 
                     let (normalized_code, gap_len, gap_source) = {
                         let mut reader2 = BitReader::endian(Cursor::new(&bytes), LittleEndian);
                         let _ = reader2.skip(offset as u32).unwrap_or(());
                         let mut cursor = d2r_core::data::bit_cursor::BitCursor::new(&mut reader2);
-                        
-                        let gap_override = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                            &bytes,
-                            offset as u64,
-                            Some(offset as u64),
-                            &huffman,
-                            true,
-                            0,
-                        ).map(|p| {
-                            let mut gap = p.8 as usize;
-                            if p.5 == 7 && !p.6 {
-                                gap = gap.saturating_sub(45);
-                            }
-                            gap
-                        });
-                        
-                        let has_checksum_peek = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                            &bytes,
-                            offset as u64,
-                            Some(offset as u64),
-                            &huffman,
-                            true,
-                            0,
-                        ).map(|p| p.9);
 
-                        if let Ok((header, _, _)) = d2r_core::domain::item::entity::parse_item_header(
-                            &mut cursor,
-                            true,
-                            Some(scanner_hint.as_str()),
-                            gap_override,
-                            true,
-                            None,
-                            has_checksum_peek,
-                            Some(offset as u64),
-                        ) {
+                        let gap_override =
+                            d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                                &bytes,
+                                offset as u64,
+                                Some(offset as u64),
+                                &huffman,
+                                true,
+                                0,
+                            )
+                            .map(|p| {
+                                let mut gap = p.8 as usize;
+                                if p.5 == 7 && !p.6 {
+                                    gap = gap.saturating_sub(45);
+                                }
+                                gap
+                            });
+
+                        let has_checksum_peek =
+                            d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                                &bytes,
+                                offset as u64,
+                                Some(offset as u64),
+                                &huffman,
+                                true,
+                                0,
+                            )
+                            .map(|p| p.9);
+
+                        if let Ok((header, _, _)) =
+                            d2r_core::domain::item::entity::parse_item_header(
+                                &mut cursor,
+                                true,
+                                Some(scanner_hint.as_str()),
+                                gap_override,
+                                true,
+                                None,
+                                has_checksum_peek,
+                                Some(offset as u64),
+                            )
+                        {
                             if header.is_compact {
                                 cursor.base_pos = offset as u64;
                             }
                             let s_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
                                 header.version,
-                                header.quality.unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
+                                header.quality.unwrap_or(
+                                    d2r_core::domain::item::quality::ItemQuality::Normal,
+                                ),
                                 true,
                             );
-                            let is_ho = s_axiom.is_header_only(header.flags, Some(scanner_hint.as_str()).unwrap_or(""));
+                            let is_ho = s_axiom.is_header_only(
+                                header.flags,
+                                Some(scanner_hint.as_str()).unwrap_or(""),
+                            );
 
                             if is_ho {
                                 (scanner_hint.clone(), 0usize, "header_only".to_string())
                             } else {
-                                let gap_len = if scanner_hint.trim() == "buc" || matches!(header.version, 1) {
+                                let gap_len = if scanner_hint.trim() == "buc"
+                                    || matches!(header.version, 1)
+                                {
                                     0
                                 } else {
                                     s_axiom.header_gap(&scanner_hint, header.flags)
@@ -445,9 +487,11 @@ fn main() {
                     };
 
                     let final_code = item.code.trim().to_string();
-                    
+
                     let emitter_bypass = {
-                        let trimmed_code = item.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+                        let trimmed_code = item
+                            .code
+                            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
                         let is_target_blank = is_alpha && trimmed_code.is_empty();
                         item.is_opaque() || item.is_semi_opaque() || is_target_blank
                     };
@@ -475,9 +519,12 @@ fn main() {
                     // DIAGNOSTICS-CONTRACT: Exposes registry overrides to prevent AI reasoning desync.
                     // Do not remove this block unless performing structural refactoring of the diagnostics channel.
                     let reg = d2r_core::domain::forensic::registry::get_registry();
-                    let reg_override = reg.item_overrides.as_ref()
+                    let reg_override = reg
+                        .item_overrides
+                        .as_ref()
                         .and_then(|overrides| {
-                            overrides.get(&clean_scanner)
+                            overrides
+                                .get(&clean_scanner)
                                 .or_else(|| overrides.get(&clean_final))
                         })
                         .map(|map| json!(map))
@@ -510,14 +557,38 @@ fn main() {
                     );
                     if let Some(ref prov) = provenance {
                         println!("  [PROVENANCE]");
-                        println!("    Scanner Hint   : {}", prov["scanner_hint"].as_str().unwrap_or(""));
-                        println!("    Normalized Code: {}", prov["normalized_code"].as_str().unwrap_or(""));
-                        println!("    Final Code     : {}", prov["final_code"].as_str().unwrap_or(""));
-                        println!("    Gap Len        : {}", prov["gap_len"].as_u64().unwrap_or(0));
-                        println!("    Gap Source     : {}", prov["gap_source"].as_str().unwrap_or(""));
-                        println!("    Emitter Bypass : {}", prov["emitter_bypass"].as_bool().unwrap_or(false));
-                        println!("    Ownership Hint : {}", prov["ownership_hint"].as_str().unwrap_or(""));
-                        println!("    Ownership Reason: {}", prov["ownership_reason"].as_str().unwrap_or(""));
+                        println!(
+                            "    Scanner Hint   : {}",
+                            prov["scanner_hint"].as_str().unwrap_or("")
+                        );
+                        println!(
+                            "    Normalized Code: {}",
+                            prov["normalized_code"].as_str().unwrap_or("")
+                        );
+                        println!(
+                            "    Final Code     : {}",
+                            prov["final_code"].as_str().unwrap_or("")
+                        );
+                        println!(
+                            "    Gap Len        : {}",
+                            prov["gap_len"].as_u64().unwrap_or(0)
+                        );
+                        println!(
+                            "    Gap Source     : {}",
+                            prov["gap_source"].as_str().unwrap_or("")
+                        );
+                        println!(
+                            "    Emitter Bypass : {}",
+                            prov["emitter_bypass"].as_bool().unwrap_or(false)
+                        );
+                        println!(
+                            "    Ownership Hint : {}",
+                            prov["ownership_hint"].as_str().unwrap_or("")
+                        );
+                        println!(
+                            "    Ownership Reason: {}",
+                            prov["ownership_reason"].as_str().unwrap_or("")
+                        );
                         if !prov["registry_override"].is_null() {
                             println!("    Registry Override: {:?}", prov["registry_override"]);
                         }
@@ -539,20 +610,22 @@ fn main() {
                 // Do not remove this block unless performing structural refactoring of the diagnostics channel.
                 let mut prescription = String::new();
                 if is_alpha {
-                    let peeked_code = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                        &bytes,
-                        offset as u64,
-                        Some(offset as u64),
-                        &huffman,
-                        true,
-                        0,
-                    ).map(|p| {
-                        p.3.split_whitespace()
-                            .next()
-                            .unwrap_or("")
-                            .trim_matches(|c: char| c.is_whitespace() || c == '\0')
-                            .to_string()
-                    });
+                    let peeked_code =
+                        d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                            &bytes,
+                            offset as u64,
+                            Some(offset as u64),
+                            &huffman,
+                            true,
+                            0,
+                        )
+                        .map(|p| {
+                            p.3.split_whitespace()
+                                .next()
+                                .unwrap_or("")
+                                .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+                                .to_string()
+                        });
 
                     if let Some(ref code) = peeked_code {
                         let reg = d2r_core::domain::forensic::registry::get_registry();
@@ -573,10 +646,7 @@ fn main() {
                     } else {
                         format!("Error at offset {}: {}{}", offset, e, prescription)
                     };
-                    println!(
-                        "{}",
-                        json!({ "errors": [err_msg] })
-                    );
+                    println!("{}", json!({ "errors": [err_msg] }));
                 } else {
                     if prescription.is_empty() {
                         eprintln!("Error at offset {}: {}", offset, e);
