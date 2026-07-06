@@ -2163,6 +2163,17 @@ pub fn parse_item_body<R: BitRead>(
             }
         }
 
+        if alpha_mode {
+            if let Some(hint) = code_hint {
+                let trimmed_hint = hint.trim();
+                // Keep the body owner aligned with the trusted UCB8 witness when the
+                // raw Huffman decode collapses to the drifted `wucb` alias.
+                if trimmed_hint == "ucb8" && code.trim() == "wucb" {
+                    code = trimmed_hint.to_string();
+                }
+            }
+        }
+
         let body_is_template = crate::domain::item::serialization::item_template(&code).is_some();
         let mut alpha_nudge = None;
         if alpha_mode {

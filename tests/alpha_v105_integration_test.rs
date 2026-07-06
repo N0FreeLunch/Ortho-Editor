@@ -42,9 +42,17 @@ mod tests {
         
         assert_eq!(items.len() as u16, count, "Should recover all identified items (16)");
         
-        // Verify specifically jav (14) and buc (15) are found in the sequence.
-        assert!(recovered_codes.contains(&"jav".to_string()), "Javelin should be found");
-        assert!(recovered_codes.contains(&"buc".to_string()), "Buckler should be found");
+        // Verify specifically jav (14) and ucb8 (15) are found in the sequence.
+        assert_eq!(recovered_codes.get(14).map(String::as_str), Some("jav"));
+        assert_eq!(recovered_codes.get(15).map(String::as_str), Some("ucb8"));
+        assert!(
+            recovered_codes.contains(&"ucb8".to_string()),
+            "UCB8 should be preserved as the body owner for the witness"
+        );
+        assert!(
+            !recovered_codes.contains(&"wucb".to_string()),
+            "The drifted wucb alias should not survive the body-code normalization"
+        );
         
         // Final assertion: we have exactly 16 items.
         assert_eq!(items.len(), 16);
