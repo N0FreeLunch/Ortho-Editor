@@ -114,10 +114,14 @@ fn main() -> anyhow::Result<()> {
     if items_only || json_items || is_json {
         let (inventory, errors, total_jm_sections) =
             collect_item_inventory(&bytes, save.header.version == 105, verbose_markers);
-        
+
         if is_json {
             use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
-            let status = if errors.is_empty() { ReportStatus::Ok } else { ReportStatus::Warn };
+            let status = if errors.is_empty() {
+                ReportStatus::Ok
+            } else {
+                ReportStatus::Warn
+            };
             let results = json!({
                 "total_jm_sections": total_jm_sections,
                 "items": inventory,
@@ -536,7 +540,8 @@ fn render_heatmap(
                 print!("{}", ".".bright_black());
             }
 
-            let bit_color = d2r_core::verify::forensics::get_bit_color(bit_pos, items, section_bit_offset);
+            let bit_color =
+                d2r_core::verify::forensics::get_bit_color(bit_pos, items, section_bit_offset);
 
             let bit_val = if (data[(bit_pos / 8) as usize] & (1 << (bit_pos % 8))) != 0 {
                 "1"

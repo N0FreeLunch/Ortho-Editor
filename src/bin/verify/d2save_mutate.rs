@@ -216,7 +216,8 @@ fn mutate_marker_and_finalize(
     force_fix: bool,
 ) -> anyhow::Result<()> {
     mutate_marker(bytes, map, name, shift)?;
-    d2r_core::save::finalize_save_bytes(bytes, force_fix).context("Failed to finalize save bytes")?;
+    d2r_core::save::finalize_save_bytes(bytes, force_fix)
+        .context("Failed to finalize save bytes")?;
     Ok(())
 }
 
@@ -227,7 +228,7 @@ fn is_non_editable_forensic_item(item: &Item) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use d2r_core::save::{recalculate_checksum, Save};
+    use d2r_core::save::{Save, recalculate_checksum};
     use std::path::PathBuf;
 
     fn editable_item() -> Item {

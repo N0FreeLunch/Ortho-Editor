@@ -309,7 +309,11 @@ fn main() -> anyhow::Result<()> {
     };
 
     if use_json {
-        let metadata = ReportMetadata::new("d2item_socket_fuzzer", &payload.fixture.to_string_lossy(), env!("CARGO_PKG_VERSION"));
+        let metadata = ReportMetadata::new(
+            "d2item_socket_fuzzer",
+            &payload.fixture.to_string_lossy(),
+            env!("CARGO_PKG_VERSION"),
+        );
         let report = Report::new(metadata, ReportStatus::Ok).with_results(payload);
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());

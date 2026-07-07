@@ -152,7 +152,10 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Err(e) => {
-            issues.push(ForensicIssue::new("AttributeParseError", &e.to_string()).with_offset(map.gf_pos as u64 * 8));
+            issues.push(
+                ForensicIssue::new("AttributeParseError", &e.to_string())
+                    .with_offset(map.gf_pos as u64 * 8),
+            );
         }
     }
 
@@ -177,12 +180,15 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
-                // If unknown class, we still might want to expose raw slots in JSON, 
+                // If unknown class, we still might want to expose raw slots in JSON,
                 // but for now let's follow the text mode logic.
             }
         }
         Err(e) => {
-            issues.push(ForensicIssue::new("SkillParseError", &e.to_string()).with_offset(map.if_pos as u64 * 8));
+            issues.push(
+                ForensicIssue::new("SkillParseError", &e.to_string())
+                    .with_offset(map.if_pos as u64 * 8),
+            );
         }
     }
 
@@ -202,7 +208,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     if is_json {
-        let status = if issues.is_empty() { ReportStatus::Ok } else { ReportStatus::Warn };
+        let status = if issues.is_empty() {
+            ReportStatus::Ok
+        } else {
+            ReportStatus::Warn
+        };
         let report = Report::new(
             ReportMetadata::new("d2save_status_inspect", path, env!("CARGO_PKG_VERSION")),
             status,
@@ -221,22 +231,19 @@ fn main() -> anyhow::Result<()> {
         println!("Header Level: {}", header_summary.level);
         println!(
             "Header Class: {} ({})",
-            header_summary.class,
-            header_summary.class_name
+            header_summary.class, header_summary.class_name
         );
         println!("File Size:    {}", header_summary.file_size);
 
         println!("\n--- Attributes (gf section at {}) ---", map.gf_pos);
-        if attribute_summaries.is_empty() && !issues.iter().any(|i| i.kind == "AttributeParseError") {
-             println!("  No attributes found.");
+        if attribute_summaries.is_empty() && !issues.iter().any(|i| i.kind == "AttributeParseError")
+        {
+            println!("  No attributes found.");
         }
         for attr in &attribute_summaries {
             println!(
                 "  StatID {:>3} {:<20}: Raw={} Actual={}",
-                attr.stat_id,
-                attr.name,
-                attr.raw_value,
-                attr.actual_value
+                attr.stat_id, attr.name, attr.raw_value, attr.actual_value
             );
         }
         for issue in issues.iter().filter(|i| i.kind == "AttributeParseError") {
@@ -261,14 +268,10 @@ fn main() -> anyhow::Result<()> {
         for jm in &jm_marker_summaries {
             println!(
                 "  JM[{}]: offset={} (bit {}), count={}",
-                jm.index,
-                jm.offset,
-                jm.bit_offset,
-                jm.count
+                jm.index, jm.offset, jm.bit_offset, jm.count
             );
         }
     }
 
     Ok(())
 }
-

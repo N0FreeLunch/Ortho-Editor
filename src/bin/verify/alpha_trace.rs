@@ -6,9 +6,24 @@ use std::fs;
 
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("d2item_alpha_trace");
-    parser.add_spec(ArgSpec::option("file", Some('f'), Some("file"), "Path to the savegame file (.d2s)"));
-    parser.add_spec(ArgSpec::option("offset", Some('o'), Some("offset"), "Bit offset to start parsing from (default: 0)"));
-    parser.add_spec(ArgSpec::flag("alpha", Some('a'), Some("alpha"), "Enable Alpha v105 parsing rules"));
+    parser.add_spec(ArgSpec::option(
+        "file",
+        Some('f'),
+        Some("file"),
+        "Path to the savegame file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "offset",
+        Some('o'),
+        Some("offset"),
+        "Bit offset to start parsing from (default: 0)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "alpha",
+        Some('a'),
+        Some("alpha"),
+        "Enable Alpha v105 parsing rules",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     use d2r_core::verify::args::ArgError;
@@ -25,8 +40,14 @@ fn main() -> Result<()> {
         }
     };
 
-    let file_path = parsed.get("file").cloned().context("File path required (--file)")?;
-    let offset_str = parsed.get("offset").cloned().unwrap_or_else(|| "0".to_string());
+    let file_path = parsed
+        .get("file")
+        .cloned()
+        .context("File path required (--file)")?;
+    let offset_str = parsed
+        .get("offset")
+        .cloned()
+        .unwrap_or_else(|| "0".to_string());
     let offset: u64 = offset_str.parse().context("Invalid offset")?;
     let alpha = parsed.is_set("alpha");
 
@@ -35,11 +56,11 @@ fn main() -> Result<()> {
         env::set_var("D2R_ITEM_TRACE", "1");
     }
 
-    let bytes = fs::read(&file_path)
-        .with_context(|| format!("Failed to read file: {}", file_path))?;
-    
+    let bytes =
+        fs::read(&file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
+
     let huffman = HuffmanTree::new();
-    
+
     println!("Tracing items in {} (alpha={})", file_path, alpha);
     if offset > 0 {
         println!("Targeted trace starting at bit offset {}", offset);
@@ -91,7 +112,7 @@ fn print_item_trace(idx: usize, item: &Item) {
         item.header.x,
         item.header.has_checksum
     );
-    
+
     if !item.stats.properties.is_empty() {
         println!("  Properties ({}):", item.stats.properties.len());
         for prop in &item.stats.properties {

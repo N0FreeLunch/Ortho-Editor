@@ -1,10 +1,10 @@
 use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter};
-use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::progression::Progression;
+use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::item::{HuffmanTree, Item};
-use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
-use d2r_core::verify::alpha_inventory_routing::{alpha_inventory_route, AlphaInventoryRoute};
+use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
+use d2r_core::verify::alpha_inventory_routing::{AlphaInventoryRoute, alpha_inventory_route};
 use serde_json::json;
 use std::env;
 use std::fs;

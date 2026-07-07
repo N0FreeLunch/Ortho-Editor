@@ -341,8 +341,12 @@ fn main() -> io::Result<()> {
                         2 => "Hell",
                         _ => "?",
                     };
-                    out.println(&format!("  [{:<6}] Act {} - {}", diff_str, quest.act, quest.name));
-                    completed_quests.push(format!("[{}] Act {} - {}", diff_str, quest.act, quest.name));
+                    out.println(&format!(
+                        "  [{:<6}] Act {} - {}",
+                        diff_str, quest.act, quest.name
+                    ));
+                    completed_quests
+                        .push(format!("[{}] Act {} - {}", diff_str, quest.act, quest.name));
                     completed_any = true;
                 }
             }
@@ -429,7 +433,10 @@ fn main() -> io::Result<()> {
             bytes.len()
         };
 
-        out.println(&format!("JM Section at 0x{:04X}: {} items", start_pos, count_val));
+        out.println(&format!(
+            "JM Section at 0x{:04X}: {} items",
+            start_pos, count_val
+        ));
         if count_val > 0 {
             let section_data = &bytes[start_pos + 4..end_marker];
 
@@ -448,7 +455,10 @@ fn main() -> io::Result<()> {
                     if let Some(c) = code {
                         // Only dump window for plausible codes in the interesting region
                         if b >= 1000 && b <= 2000 {
-                            out.println(&format!("  [Probe] Plausible Header at bit {} (Code: '{}')", b, c));
+                            out.println(&format!(
+                                "  [Probe] Plausible Header at bit {} (Code: '{}')",
+                                b, c
+                            ));
                             dump_bit_window(&mut out, section_data, b);
                         }
                     } else if b == 1127 {
@@ -488,27 +498,31 @@ fn main() -> io::Result<()> {
                 completed_quests,
                 activated_waypoints,
             },
-            items: items.iter().enumerate().map(|(i, item)| {
-                let quality_str = match item.quality {
-                    Some(ItemQuality::Normal) => "Normal",
-                    Some(ItemQuality::Magic) => "Magic",
-                    Some(ItemQuality::Set) => "Set",
-                    Some(ItemQuality::Unique) => "Unique",
-                    Some(ItemQuality::Rare) => "Rare",
-                    Some(ItemQuality::Crafted) => "Crafted",
-                    _ => "Other",
-                };
-                ItemSummary {
-                    index: i,
-                    code: item.code.clone(),
-                    bits: item.bits.len(),
-                    quality: quality_str.to_string(),
-                    is_runeword: item.is_runeword,
-                    mode: item.mode,
-                    page: item.page,
-                    location: item.location,
-                }
-            }).collect(),
+            items: items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    let quality_str = match item.quality {
+                        Some(ItemQuality::Normal) => "Normal",
+                        Some(ItemQuality::Magic) => "Magic",
+                        Some(ItemQuality::Set) => "Set",
+                        Some(ItemQuality::Unique) => "Unique",
+                        Some(ItemQuality::Rare) => "Rare",
+                        Some(ItemQuality::Crafted) => "Crafted",
+                        _ => "Other",
+                    };
+                    ItemSummary {
+                        index: i,
+                        code: item.code.clone(),
+                        bits: item.bits.len(),
+                        quality: quality_str.to_string(),
+                        is_runeword: item.is_runeword,
+                        mode: item.mode,
+                        page: item.page,
+                        location: item.location,
+                    }
+                })
+                .collect(),
         };
 
         let metadata = ReportMetadata::new("d2item_chunk_verify", path, env!("CARGO_PKG_VERSION"));
@@ -605,7 +619,10 @@ fn print_detail(out: &mut OutputManager, index: usize, item: &Item) {
         "Location: Mode={} Page={} X={} Y={} Loc={}",
         item.mode, item.page, item.x, item.y, item.location
     ));
-    out.println(&format!("Properties Complete: {}", item.properties_complete));
+    out.println(&format!(
+        "Properties Complete: {}",
+        item.properties_complete
+    ));
     out.println("");
     out.println("Properties:");
     for prop in &item.properties {

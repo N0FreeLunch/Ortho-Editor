@@ -1,6 +1,6 @@
 use d2r_core::inventory::InventoryGrid;
 use d2r_core::item::{HuffmanTree, Item};
-use d2r_core::verify::alpha_inventory_routing::{alpha_inventory_route, AlphaInventoryRoute};
+use d2r_core::verify::alpha_inventory_routing::{AlphaInventoryRoute, alpha_inventory_route};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use std::env;
 use std::fs;
@@ -69,7 +69,10 @@ fn main() {
         let route = alpha_inventory_route(item, version == 105);
         println!(
             "  - Item[{:>2}]: code='{}' -> category='{}' -> route='{}'",
-            i, item.code, category, route.as_str()
+            i,
+            item.code,
+            category,
+            route.as_str()
         );
     }
     println!();

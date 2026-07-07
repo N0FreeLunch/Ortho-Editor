@@ -259,7 +259,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let metadata = ReportMetadata::new("d2item_property_fuzzer", file_path, env!("CARGO_PKG_VERSION"));
+    let metadata = ReportMetadata::new(
+        "d2item_property_fuzzer",
+        file_path,
+        env!("CARGO_PKG_VERSION"),
+    );
     let report = Report::new(metadata, ReportStatus::Ok).with_results(results.clone());
 
     if om.is_json() {
@@ -277,7 +281,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     om.println("Fuzzing complete. Results in tmp/fuzz_outputs/");
-    
+
     Ok(())
 }
 

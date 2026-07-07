@@ -11,7 +11,7 @@ use std::{env, fs};
 
 const VISUAL_WIDTH: usize = 72;
 
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
 
 #[derive(Debug, Clone, Serialize)]
 struct ScannerPayload {
@@ -163,15 +163,23 @@ fn main() -> Result<()> {
     let section_reports = build_sections(&bytes, &huffman, registry, alpha_mode, &jm_positions);
 
     if json_mode {
-        let metadata = ReportMetadata::new("d2item_scanner_visualizer", file_path, env!("CARGO_PKG_VERSION"));
+        let metadata = ReportMetadata::new(
+            "d2item_scanner_visualizer",
+            file_path,
+            env!("CARGO_PKG_VERSION"),
+        );
         let payload = ScannerPayload {
             alpha_mode,
             sections: section_reports,
         };
-        
+
         let has_parse_error = payload.sections.iter().any(|s| s.parse_error.is_some());
-        let status = if has_parse_error { ReportStatus::Fail } else { ReportStatus::Ok };
-        
+        let status = if has_parse_error {
+            ReportStatus::Fail
+        } else {
+            ReportStatus::Ok
+        };
+
         let mut issues = Vec::new();
         for (i, section) in payload.sections.iter().enumerate() {
             if let Some(err) = &section.parse_error {
@@ -290,11 +298,15 @@ fn build_timeline(
         parsed_ranges.push((item.range.start, item.range.end));
         let registry_tags = build_registry_tags(&item.code, registry);
         let (stat_tags, stat_validation_ok) = build_stat_validation_tags(item);
-        
+
         let mut owner_seam = "entity.rs".to_string();
         if item.is_residue() {
             owner_seam = "serialization.rs (Residue)".to_string();
-        } else if let Some(m) = context.markers.iter().find(|m| (context.section_bit_offset + m.offset) == item.range.start) {
+        } else if let Some(m) = context
+            .markers
+            .iter()
+            .find(|m| (context.section_bit_offset + m.offset) == item.range.start)
+        {
             if item.code.trim() == m.code.trim() {
                 owner_seam = "scanner.rs (Matched)".to_string();
             } else if m.status == MarkerStatus::Accepted {

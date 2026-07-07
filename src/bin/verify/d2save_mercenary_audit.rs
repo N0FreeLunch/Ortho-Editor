@@ -4,7 +4,7 @@ use d2r_core::save::map_core_sections;
 use d2r_core::verify::OutputManager;
 use d2r_core::verify::args::{ArgError, ArgParser};
 use d2r_core::verify::forensics::ForensicIssue;
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::{env, fs, process};
 
@@ -78,10 +78,12 @@ fn main() -> anyhow::Result<()> {
             Err(e) => {
                 let msg = format!("Cannot read file: {}", e);
                 if is_json {
-                    let metadata = ReportMetadata::new("d2save_mercenary_audit", path, env!("CARGO_PKG_VERSION"));
-                    let payload = MercenaryPayload {
-                        mercenary: None,
-                    };
+                    let metadata = ReportMetadata::new(
+                        "d2save_mercenary_audit",
+                        path,
+                        env!("CARGO_PKG_VERSION"),
+                    );
+                    let payload = MercenaryPayload { mercenary: None };
                     let report = Report::new(metadata, ReportStatus::Fail)
                         .with_results(payload)
                         .with_issues(vec![ReportIssue {
@@ -102,14 +104,25 @@ fn main() -> anyhow::Result<()> {
         match audit_result {
             Ok((payload, issues, status)) => {
                 if is_json {
-                    let metadata = ReportMetadata::new("d2save_mercenary_audit", path, env!("CARGO_PKG_VERSION"));
-                    let report_status = if status == "Fail" { ReportStatus::Fail } else { ReportStatus::Ok };
-                    
-                    let report_issues = issues.iter().map(|i| ReportIssue {
-                        kind: i.kind.clone(),
-                        message: i.message.clone(),
-                        bit_offset: i.bit_offset,
-                    }).collect();
+                    let metadata = ReportMetadata::new(
+                        "d2save_mercenary_audit",
+                        path,
+                        env!("CARGO_PKG_VERSION"),
+                    );
+                    let report_status = if status == "Fail" {
+                        ReportStatus::Fail
+                    } else {
+                        ReportStatus::Ok
+                    };
+
+                    let report_issues = issues
+                        .iter()
+                        .map(|i| ReportIssue {
+                            kind: i.kind.clone(),
+                            message: i.message.clone(),
+                            bit_offset: i.bit_offset,
+                        })
+                        .collect();
 
                     let report = Report::new(metadata, report_status)
                         .with_results(payload)
@@ -125,10 +138,12 @@ fn main() -> anyhow::Result<()> {
             Err(e) => {
                 let msg = format!("Audit failed: {}", e);
                 if is_json {
-                    let metadata = ReportMetadata::new("d2save_mercenary_audit", path, env!("CARGO_PKG_VERSION"));
-                    let payload = MercenaryPayload {
-                        mercenary: None,
-                    };
+                    let metadata = ReportMetadata::new(
+                        "d2save_mercenary_audit",
+                        path,
+                        env!("CARGO_PKG_VERSION"),
+                    );
+                    let payload = MercenaryPayload { mercenary: None };
                     let report = Report::new(metadata, ReportStatus::Fail)
                         .with_results(payload)
                         .with_issues(vec![ReportIssue {
@@ -152,13 +167,16 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<(MercenaryPayload, Vec<ForensicIssue>, String)> {
+fn audit_mercenary(
+    path: &str,
+    bytes: &[u8],
+    _verbose: bool,
+) -> anyhow::Result<(MercenaryPayload, Vec<ForensicIssue>, String)> {
     let map = map_core_sections(bytes).map_err(|e| anyhow::anyhow!("Map error: {}", e))?;
     let w4_data = map.w4_pos.map(|pos| {
         let w4_end = map.jf_pos.unwrap_or(bytes.len());
         &bytes[pos..w4_end]
     });
-
 
     let mut issues = Vec::new();
 
@@ -342,7 +360,13 @@ fn audit_mercenary(path: &str, bytes: &[u8], _verbose: bool) -> anyhow::Result<(
     ))
 }
 
-fn print_report_text(om: &mut OutputManager, path: &str, payload: &MercenaryPayload, issues: &[ForensicIssue], verbose: bool) {
+fn print_report_text(
+    om: &mut OutputManager,
+    path: &str,
+    payload: &MercenaryPayload,
+    issues: &[ForensicIssue],
+    verbose: bool,
+) {
     om.println(&format!("=== File: {} ===", path));
     if let Some(merc) = &payload.mercenary {
         om.println("Hybrid Decoded:");

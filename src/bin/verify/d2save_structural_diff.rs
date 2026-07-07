@@ -179,7 +179,10 @@ fn main() {
                 out.println(&format!("  {:<15}: {:>4} bytes{}", label, count, mask_note));
             }
             if length_delta != 0 {
-                out.println(&format!("  {:<15}: {:>4} bytes", "Length Delta", length_delta));
+                out.println(&format!(
+                    "  {:<15}: {:>4} bytes",
+                    "Length Delta", length_delta
+                ));
             }
             out.println("");
 
@@ -189,7 +192,10 @@ fn main() {
                     "  {:>8}  {:<12}  {:>8}  {:>8}",
                     "Offset", "Section", "A", "B"
                 ));
-                out.println(&format!("  {:->8}  {:->12}  {:->8}  {:->8}", "", "", "", ""));
+                out.println(&format!(
+                    "  {:->8}  {:->12}  {:->8}  {:->8}",
+                    "", "", "", ""
+                ));
 
                 for d in &details {
                     if !show_all && d.is_masked {
@@ -209,7 +215,7 @@ fn main() {
                 }
             } else if unmasked_count == 0 && !details.is_empty() {
                 out.println(
-                    "  [INFO] Only masked sections (Checksum) differ. Use --all to see details."
+                    "  [INFO] Only masked sections (Checksum) differ. Use --all to see details.",
                 );
             } else if unmasked_count > 0 {
                 out.println(&format!(

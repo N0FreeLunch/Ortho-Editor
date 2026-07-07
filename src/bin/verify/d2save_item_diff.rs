@@ -227,7 +227,10 @@ fn main() {
         "  {:>10}  {:>10}  {:>10}  {:>10}",
         "Rel Offset", "Abs A", "A (hex)", "B (hex)"
     ));
-    out.println(&format!("  {:->10}  {:->10}  {:->10}  {:->10}", "", "", "", ""));
+    out.println(&format!(
+        "  {:->10}  {:->10}  {:->10}  {:->10}",
+        "", "", "", ""
+    ));
     for &i in diffs.iter().take(30) {
         let a_val = items_a[i];
         let b_val = items_b[i];

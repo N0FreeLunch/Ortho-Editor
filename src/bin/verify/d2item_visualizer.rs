@@ -22,7 +22,7 @@ enum SectionFocus {
     Filter(String),
 }
 
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
+use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
 
 #[derive(Debug, Clone, Serialize)]
 struct VisualizerPayload {
@@ -184,7 +184,8 @@ fn run() -> Result<i32> {
     let bytes = match fs::read(&file) {
         Ok(bytes) => bytes,
         Err(err) => {
-            let metadata = ReportMetadata::new("d2item_visualizer", &file, env!("CARGO_PKG_VERSION"));
+            let metadata =
+                ReportMetadata::new("d2item_visualizer", &file, env!("CARGO_PKG_VERSION"));
             let payload = VisualizerPayload {
                 alpha_mode: false,
                 section: section_raw,
@@ -224,7 +225,9 @@ fn run() -> Result<i32> {
                     message: format!("Failed to read file: {err}"),
                     bit_offset: None,
                 }])
-                .with_hints(vec!["Check the file path or point the visualizer at a .d2s fixture.".to_string()]);
+                .with_hints(vec![
+                    "Check the file path or point the visualizer at a .d2s fixture.".to_string(),
+                ]);
 
             emit_report(&report, json_mode)?;
             return Ok(1);
@@ -305,7 +308,12 @@ fn run() -> Result<i32> {
     }
 
     let hint = if !issues.is_empty() {
-        Some(build_hint(&section_focus, offset, range, item_reports.is_empty()))
+        Some(build_hint(
+            &section_focus,
+            offset,
+            range,
+            item_reports.is_empty(),
+        ))
     } else {
         None
     };
@@ -337,18 +345,27 @@ fn run() -> Result<i32> {
 
     let mut report = Report::new(metadata, status)
         .with_results(payload)
-        .with_issues(issues.into_iter().map(|msg| ReportIssue {
-            kind: "general".to_string(),
-            message: msg,
-            bit_offset: None,
-        }).collect());
+        .with_issues(
+            issues
+                .into_iter()
+                .map(|msg| ReportIssue {
+                    kind: "general".to_string(),
+                    message: msg,
+                    bit_offset: None,
+                })
+                .collect(),
+        );
 
     if let Some(h) = hint {
         report = report.with_hints(vec![h]);
     }
 
     emit_report(&report, json_mode)?;
-    Ok(if report.status == ReportStatus::Ok { 0 } else { 1 })
+    Ok(if report.status == ReportStatus::Ok {
+        0
+    } else {
+        1
+    })
 }
 
 fn emit_report(report: &Report<VisualizerPayload>, json_mode: bool) -> Result<()> {
@@ -513,7 +530,6 @@ fn print_human_report(report: &Report<VisualizerPayload>) {
         printed += 1;
     }
 }
-
 
 fn print_segment_tree(
     item: &ItemReport,

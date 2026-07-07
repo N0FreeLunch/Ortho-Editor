@@ -49,7 +49,12 @@ fn main() -> anyhow::Result<()> {
         Some("item-index"),
         "Target specific item index",
     ));
-    parser.add_spec(ArgSpec::flag("json", None, Some("json"), "Output results in JSON format"));
+    parser.add_spec(ArgSpec::flag(
+        "json",
+        None,
+        Some("json"),
+        "Output results in JSON format",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -179,11 +184,19 @@ fn main() -> anyhow::Result<()> {
     }
 
     if use_json {
-        let metadata = ReportMetadata::new("d2item_stat_fuzzer_v105", fixture_path, env!("CARGO_PKG_VERSION"));
+        let metadata = ReportMetadata::new(
+            "d2item_stat_fuzzer_v105",
+            fixture_path,
+            env!("CARGO_PKG_VERSION"),
+        );
         let report = Report {
             metadata,
             forensic_context: None,
-            status: if results.winner.is_some() { ReportStatus::Ok } else { ReportStatus::Fail },
+            status: if results.winner.is_some() {
+                ReportStatus::Ok
+            } else {
+                ReportStatus::Fail
+            },
             scan_results: Some(results),
             issues: Vec::new(),
             forensic_issues: Vec::new(),

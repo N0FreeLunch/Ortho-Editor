@@ -1,8 +1,8 @@
 use d2r_core::item::{HuffmanTree, peek_item_header_at};
 use d2r_core::verify::OutputManager;
-use d2r_core::verify::{Report, ReportMetadata, ReportStatus, ReportIssue};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use d2r_core::verify::desync::dump_bits_at;
+use d2r_core::verify::{Report, ReportIssue, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::path::PathBuf;

@@ -1,9 +1,9 @@
-use bitstream_io::{BitRead, BitReader, LittleEndian};
-use std::fs;
-use std::io::Cursor;
 use anyhow::{Context, Result};
+use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::verify::args::{ArgParser, ArgSpec};
 use std::env;
+use std::fs;
+use std::io::Cursor;
 
 fn read_bits<R: BitRead>(reader: &mut R, n: u32) -> u32 {
     let mut value = 0u32;
@@ -19,8 +19,18 @@ fn read_bits<R: BitRead>(reader: &mut R, n: u32) -> u32 {
 
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("d2item_find_sequence");
-    parser.add_spec(ArgSpec::option("file", Some('f'), Some("file"), "Path to the savegame file (.d2s)"));
-    parser.add_spec(ArgSpec::option("offset", Some('o'), Some("offset"), "Bit offset to start searching from"));
+    parser.add_spec(ArgSpec::option(
+        "file",
+        Some('f'),
+        Some("file"),
+        "Path to the savegame file (.d2s)",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "offset",
+        Some('o'),
+        Some("offset"),
+        "Bit offset to start searching from",
+    ));
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     use d2r_core::verify::args::ArgError;
@@ -37,12 +47,18 @@ fn main() -> Result<()> {
         }
     };
 
-    let file_path = parsed.get("file").cloned().context("File path required (--file)")?;
-    let offset_str = parsed.get("offset").cloned().context("Offset required (--offset)")?;
+    let file_path = parsed
+        .get("file")
+        .cloned()
+        .context("File path required (--file)")?;
+    let offset_str = parsed
+        .get("offset")
+        .cloned()
+        .context("Offset required (--offset)")?;
     let start_bit: u64 = offset_str.parse().context("Invalid offset")?;
 
-    let bytes = fs::read(&file_path)
-        .with_context(|| format!("Failed to read file: {}", file_path))?;
+    let bytes =
+        fs::read(&file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
 
     println!(
         "--- Alpha v105 Property Brute Force (Start: {}) ---",
@@ -86,6 +102,6 @@ fn main() -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }

@@ -1,6 +1,6 @@
-use anyhow::{Result, anyhow, Context};
+use anyhow::{Context, Result, anyhow};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus, ReportIssue};
+use d2r_core::verify::{OutputManager, Report, ReportIssue, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -68,19 +68,27 @@ fn main() -> Result<()> {
             if part.contains('-') {
                 let bounds: Vec<&str> = part.split('-').collect();
                 if bounds.len() != 2 {
-                    return Err(anyhow!("Invalid range format: '{}'. Expected 'start-end'.", part));
+                    return Err(anyhow!(
+                        "Invalid range format: '{}'. Expected 'start-end'.",
+                        part
+                    ));
                 }
                 let start_str = bounds[0].trim();
                 let end_str = bounds[1].trim();
-                let start = start_str
-                    .parse::<usize>()
-                    .map_err(|_| anyhow!("Invalid bit offset: '{}' in range '{}'.", start_str, part))?;
-                let end = end_str
-                    .parse::<usize>()
-                    .map_err(|_| anyhow!("Invalid bit offset: '{}' in range '{}'.", end_str, part))?;
+                let start = start_str.parse::<usize>().map_err(|_| {
+                    anyhow!("Invalid bit offset: '{}' in range '{}'.", start_str, part)
+                })?;
+                let end = end_str.parse::<usize>().map_err(|_| {
+                    anyhow!("Invalid bit offset: '{}' in range '{}'.", end_str, part)
+                })?;
 
                 if start > end {
-                    return Err(anyhow!("Reverse range is not allowed: '{}' ({} > {}).", part, start, end));
+                    return Err(anyhow!(
+                        "Reverse range is not allowed: '{}' ({} > {}).",
+                        part,
+                        start,
+                        end
+                    ));
                 }
                 for bit in start..=end {
                     allowed_bits.push(bit);
@@ -100,7 +108,11 @@ fn main() -> Result<()> {
     let bytes_b = fs::read(path_b).with_context(|| format!("Cannot read '{}'", path_b))?;
 
     if bytes_a.len() != bytes_b.len() {
-        let msg = format!("Length mismatch: A={} bytes, B={} bytes", bytes_a.len(), bytes_b.len());
+        let msg = format!(
+            "Length mismatch: A={} bytes, B={} bytes",
+            bytes_a.len(),
+            bytes_b.len()
+        );
         if om.is_json() {
             let report = Report::<()>::new(
                 ReportMetadata::new("d2save_dsa", path_a, env!("CARGO_PKG_VERSION")),
@@ -141,7 +153,11 @@ fn main() -> Result<()> {
     }
 
     if om.is_json() {
-        let status = if violations.is_empty() { ReportStatus::Ok } else { ReportStatus::Fail };
+        let status = if violations.is_empty() {
+            ReportStatus::Ok
+        } else {
+            ReportStatus::Fail
+        };
         let mut report = Report::new(
             ReportMetadata::new("d2save_dsa", path_a, env!("CARGO_PKG_VERSION")),
             status,
@@ -154,7 +170,7 @@ fn main() -> Result<()> {
             violations: violations.clone(),
         })
         .with_forensic_context();
-        
+
         if !violations.is_empty() {
             report = report.with_issues(vec![ReportIssue {
                 kind: "BitViolation".to_string(),
@@ -162,7 +178,7 @@ fn main() -> Result<()> {
                 bit_offset: Some(violations[0].abs_bit as u64),
             }]);
         }
-        
+
         om.json(&serde_json::to_string_pretty(&report)?);
     } else {
         om.println("=== Domain Symmetry Auditor (DSA) ===");
@@ -184,12 +200,15 @@ fn main() -> Result<()> {
                 ));
             }
             if violations.len() > 20 {
-                om.println(&format!("  ... and {} more violations", violations.len() - 20));
+                om.println(&format!(
+                    "  ... and {} more violations",
+                    violations.len() - 20
+                ));
             }
             om.summary(&format!("{} violations found.", violations.len()));
             process::exit(1);
         }
     }
-    
+
     Ok(())
 }

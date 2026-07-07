@@ -5,7 +5,7 @@ use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use serde::Serialize;
 use std::env;
 use std::fs;
-use std::io::{Cursor};
+use std::io::Cursor;
 
 #[derive(Serialize, Clone)]
 struct PropertyEntry {
@@ -67,12 +67,45 @@ fn main() -> anyhow::Result<()> {
         .description("Bitstream Structural Fuzzer & Analyzer for D2R Alpha v105\nRank bit-width candidates based on terminator alignment.");
 
     parser.add_arg("save_path", "Path to save file");
-    parser.add_spec(ArgSpec::option("start-bit", None, Some("start-bit"), "Start bit offset").with_default("0"));
-    parser.add_spec(ArgSpec::flag("brute", None, Some("brute"), "Brute-force scan for best start-bit within 1000 bits"));
-    parser.add_spec(ArgSpec::flag("heatmap", None, Some("heatmap"), "Show candidate heatmap and overlap diagnostics"));
-    parser.add_spec(ArgSpec::flag("simulate", None, Some("simulate"), "Run sequence-aware path simulation"));
-    parser.add_spec(ArgSpec::option("width-range", None, Some("width-range"), "Bit width range to sweep (n..m)").with_default("10..25"));
-    parser.add_spec(ArgSpec::option("max-props", None, Some("max-props"), "Maximum properties to read per width").with_default("64"));
+    parser.add_spec(
+        ArgSpec::option("start-bit", None, Some("start-bit"), "Start bit offset").with_default("0"),
+    );
+    parser.add_spec(ArgSpec::flag(
+        "brute",
+        None,
+        Some("brute"),
+        "Brute-force scan for best start-bit within 1000 bits",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "heatmap",
+        None,
+        Some("heatmap"),
+        "Show candidate heatmap and overlap diagnostics",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "simulate",
+        None,
+        Some("simulate"),
+        "Run sequence-aware path simulation",
+    ));
+    parser.add_spec(
+        ArgSpec::option(
+            "width-range",
+            None,
+            Some("width-range"),
+            "Bit width range to sweep (n..m)",
+        )
+        .with_default("10..25"),
+    );
+    parser.add_spec(
+        ArgSpec::option(
+            "max-props",
+            None,
+            Some("max-props"),
+            "Maximum properties to read per width",
+        )
+        .with_default("64"),
+    );
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -91,11 +124,14 @@ fn main() -> anyhow::Result<()> {
     let show_json = parsed.is_json();
     let show_heatmap = parsed.is_set("heatmap");
     let show_simulate = parsed.is_set("simulate");
-    
+
     let range_str = parsed.get("width-range").unwrap();
     let range_parts: Vec<&str> = range_str.split("..").collect();
     let (width_range_start, width_range_end) = if range_parts.len() == 2 {
-        (range_parts[0].parse::<u32>()?, range_parts[1].parse::<u32>()?)
+        (
+            range_parts[0].parse::<u32>()?,
+            range_parts[1].parse::<u32>()?,
+        )
     } else {
         anyhow::bail!("Invalid range format (expected n..m)");
     };
@@ -407,7 +443,8 @@ fn main() -> anyhow::Result<()> {
             simulation: simulation_paths,
             best_properties: best_props,
         };
-        let metadata = ReportMetadata::new("d2item_structural_fuzzer", path, env!("CARGO_PKG_VERSION"));
+        let metadata =
+            ReportMetadata::new("d2item_structural_fuzzer", path, env!("CARGO_PKG_VERSION"));
         let report = Report::new(metadata, ReportStatus::Ok).with_results(payload);
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     } else {
