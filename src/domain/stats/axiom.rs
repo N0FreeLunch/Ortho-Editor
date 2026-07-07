@@ -382,7 +382,7 @@ impl StatsAxiom {
                 };
             }
 
-            if self.version == 0 && _is_runeword {
+            if self.version == 0 && _is_runeword && !matches!(self.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2") {
                 return PropertyRhythm {
                     id_bits: 9,
                     value_bits: Some(7),
@@ -478,7 +478,7 @@ impl StatsAxiom {
         !self.is_compact
     }
     pub fn reads_durability(&self) -> bool {
-        !self.is_compact
+        !self.is_compact || self.code.trim() == "wa2" || self.code.trim() == "rhd"
     }
     pub fn reads_quantity(&self) -> bool {
         !self.is_compact

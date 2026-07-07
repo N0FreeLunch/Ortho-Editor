@@ -286,6 +286,10 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
     let reg = crate::domain::forensic::registry::get_registry();
 
+    if matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2") {
+        return 0;
+    }
+
     // Registry overrides take absolute precedence (Axiom 0365)
     if let Some(overrides) = &reg.item_overrides {
         if let Some(map) = overrides.get(trimmed) {
@@ -318,6 +322,11 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
+        if trimmed.starts_with('r') && trimmed.len() <= 3 {
+            if let Some(&rune_w) = reg.axioms.get("rune_fixed_width") {
+                return rune_w as u32;
+            }
+        }
         let base_width = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72) as u32;
         if version == 4 {
             return base_width + 1; // Alpha v105 Version 4 compact items require 1-bit nudge (Slice 5)
@@ -664,7 +673,7 @@ impl V105PropertyWidthAxiom {
             }
         }
 
-        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" {
+        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
             return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
         if trimmed.is_empty() && code.chars().any(|c| c.is_whitespace()) {
