@@ -181,16 +181,13 @@ fn main() -> Result<()> {
         .with_context(|| format!("Failed to map JM sections in {}", path))?;
     let jm_positions = section_map.jm_positions;
 
-    let payload = build_prefix_trace_report(
-        path,
-        version,
-        alpha_mode,
-        &bytes,
-        &jm_positions,
-        &huffman,
-    )?;
+    let payload =
+        build_prefix_trace_report(path, version, alpha_mode, &bytes, &jm_positions, &huffman)?;
 
-    let has_divergence = payload.sections.iter().any(|section| section.first_divergence.is_some());
+    let has_divergence = payload
+        .sections
+        .iter()
+        .any(|section| section.first_divergence.is_some());
     let status = if has_divergence {
         ReportStatus::Warn
     } else {
@@ -198,7 +195,11 @@ fn main() -> Result<()> {
     };
 
     let report = Report::new(
-        ReportMetadata::new("d2item_section_prefix_trace", path, env!("CARGO_PKG_VERSION")),
+        ReportMetadata::new(
+            "d2item_section_prefix_trace",
+            path,
+            env!("CARGO_PKG_VERSION"),
+        ),
         status,
     )
     .with_results(payload);
@@ -266,16 +267,16 @@ fn build_prefix_trace_report(
 
         for (item_index, item) in items.iter().enumerate() {
             let raw_bits = bits_from_range(bytes, item.range.start, item.range.end);
-            let serialized_local = item
-                .to_bits(item_index, huffman, alpha_mode)
-                .with_context(|| {
-                    format!(
-                        "Failed to serialize item {} ({}) locally in section {}",
-                        item_index,
-                        item.code.trim(),
-                        section_index + 1
-                    )
-                })?;
+            let serialized_local =
+                item.to_bits(item_index, huffman, alpha_mode)
+                    .with_context(|| {
+                        format!(
+                            "Failed to serialize item {} ({}) locally in section {}",
+                            item_index,
+                            item.code.trim(),
+                            section_index + 1
+                        )
+                    })?;
 
             let local_check = compare_exact_bits(&raw_bits, &serialized_local, item.range.start);
             if local_check.matches {
@@ -296,9 +297,11 @@ fn build_prefix_trace_report(
 
             let mut checkpoint_mismatch = None;
             if first_divergence.is_none() {
-                if let Some(mismatch) =
-                    compare_prefix_progress(&original_payload_bits, &emitted_prefix, payload_start_bit)
-                {
+                if let Some(mismatch) = compare_prefix_progress(
+                    &original_payload_bits,
+                    &emitted_prefix,
+                    payload_start_bit,
+                ) {
                     checkpoint_mismatch = Some(mismatch.clone());
                     first_divergence = Some(PrefixDivergence {
                         item_index: Some(item_index),
@@ -349,14 +352,18 @@ fn build_prefix_trace_report(
         }
 
         if first_divergence.is_none() && emitted_prefix.len() != original_payload_bits.len() {
-            let mismatch_bit = payload_start_bit + emitted_prefix.len().min(original_payload_bits.len()) as u64;
+            let mismatch_bit =
+                payload_start_bit + emitted_prefix.len().min(original_payload_bits.len()) as u64;
             let (expected_bit, actual_bit) = if emitted_prefix.len() < original_payload_bits.len() {
                 (
                     original_payload_bits.get(emitted_prefix.len()).copied(),
                     None,
                 )
             } else {
-                (None, emitted_prefix.get(original_payload_bits.len()).copied())
+                (
+                    None,
+                    emitted_prefix.get(original_payload_bits.len()).copied(),
+                )
             };
             if let Some(last_item) = item_traces.last_mut() {
                 last_item.prefix_checkpoint.matches = false;
@@ -461,15 +468,16 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
     ));
     out.summary(&format!(
         "Verdict: {} | Status: {} | Local matches: {}/{} | Divergent sections: {}",
-        payload.verdict, status, payload.local_match_count, payload.total_items, payload.sections_with_divergence
+        payload.verdict,
+        status,
+        payload.local_match_count,
+        payload.total_items,
+        payload.sections_with_divergence
     ));
 
     for section in &payload.sections {
         if let Some(divergence) = &section.first_divergence {
-            let code = divergence
-                .item_code
-                .as_deref()
-                .unwrap_or("<unknown>");
+            let code = divergence.item_code.as_deref().unwrap_or("<unknown>");
             out.summary(&format!(
                 "Section {} @ JM byte {}: prefix diverges at bit {} (byte {}), item {} {}",
                 section.section_index,
@@ -515,7 +523,11 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
                     } else {
                         "fail"
                     },
-                    if item.prefix_checkpoint.matches { "ok" } else { "fail" },
+                    if item.prefix_checkpoint.matches {
+                        "ok"
+                    } else {
+                        "fail"
+                    },
                     item.emitted_child_count,
                     item.socketed_child_count,
                     if item.child_emission_skipped {
@@ -544,9 +556,8 @@ fn emit_item_section_bits(
     };
 
     let mut emitted_child_count = 0usize;
-    let child_emission_skipped = alpha_mode
-        && item.header.is_runeword
-        && is_authority_overlap_code(item, alpha_mode);
+    let child_emission_skipped =
+        alpha_mode && item.header.is_runeword && is_authority_overlap_code(item, alpha_mode);
 
     if !child_emission_skipped {
         for child in &item.socketed_items {
@@ -724,10 +735,15 @@ fn classify_trace_ownership(
         || item.is_opaque()
         || item.is_semi_opaque()
         || gap_source == "normalization:opaque_fallback";
-        
+
     let is_kk_seam_drift = (scanner_hint.starts_with("wc") || scanner_hint.contains("wc"))
         && (final_code == "wwsl" || final_code == "wwu8")
         && gap_source == "normalization:drift_realigned";
+
+    let recovery_signals = !scanner_hint.is_empty()
+        && scanner_hint == final_code
+        && normalized_code != final_code
+        && gap_source.starts_with("normalization:");
 
     let replay_signals = gap_source == "header_gap_lookup"
         || is_kk_seam_drift
@@ -736,13 +752,21 @@ fn classify_trace_ownership(
             && normalized_code == final_code
             && gap_len > 0);
 
-    let ownership_hint = match (replay_signals, padding_signals) {
-        (true, false) => "capture_replay",
-        (false, true) => "emission_padding",
-        _ => "ambiguous",
+    let ownership_hint = if recovery_signals {
+        "recovery_path"
+    } else if replay_signals && !padding_signals {
+        "capture_replay"
+    } else if padding_signals && !replay_signals {
+        "emission_padding"
+    } else {
+        "ambiguous"
     };
 
     let ownership_reason = match ownership_hint {
+        "recovery_path" => format!(
+            "Recovered final_code='{}' from the scanner/header hint while normalized_code='{}' diverged via '{}'. Residual ambiguity is confined to the normalization track, not split ownership.",
+            final_code, normalized_code, gap_source
+        ),
         "capture_replay" => {
             if is_kk_seam_drift {
                 format!(
@@ -782,7 +806,7 @@ fn get_isolated_inspect(
     }
     let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(offset as u32).unwrap_or(());
-    
+
     if let Ok(item) = Item::from_reader(&mut reader, huffman, is_alpha) {
         let bit_end = reader.position_in_bits().unwrap_or(0) as usize;
         let bit_length = bit_end.saturating_sub(offset);
@@ -802,30 +826,34 @@ fn get_isolated_inspect(
             let mut reader2 = BitReader::endian(Cursor::new(bytes), LittleEndian);
             let _ = reader2.skip(offset as u32).unwrap_or(());
             let mut cursor = d2r_core::data::bit_cursor::BitCursor::new(&mut reader2);
-            
-            let gap_override = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                bytes,
-                offset as u64,
-                Some(offset as u64),
-                huffman,
-                true,
-                0,
-            ).map(|p| {
-                let mut gap = p.8 as usize;
-                if p.5 == 7 && !p.6 {
-                    gap = gap.saturating_sub(45);
-                }
-                gap
-            });
-            
-            let has_checksum_peek = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                bytes,
-                offset as u64,
-                Some(offset as u64),
-                huffman,
-                true,
-                0,
-            ).map(|p| p.9);
+
+            let gap_override =
+                d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                    bytes,
+                    offset as u64,
+                    Some(offset as u64),
+                    huffman,
+                    true,
+                    0,
+                )
+                .map(|p| {
+                    let mut gap = p.8 as usize;
+                    if p.5 == 7 && !p.6 {
+                        gap = gap.saturating_sub(45);
+                    }
+                    gap
+                });
+
+            let has_checksum_peek =
+                d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                    bytes,
+                    offset as u64,
+                    Some(offset as u64),
+                    huffman,
+                    true,
+                    0,
+                )
+                .map(|p| p.9);
 
             if let Ok((header, _, _)) = d2r_core::domain::item::entity::parse_item_header(
                 &mut cursor,
@@ -842,10 +870,13 @@ fn get_isolated_inspect(
                 }
                 let s_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
                     header.version,
-                    header.quality.unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
+                    header
+                        .quality
+                        .unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
                     true,
                 );
-                let is_ho = s_axiom.is_header_only(header.flags, Some(scanner_hint.as_str()).unwrap_or(""));
+                let is_ho =
+                    s_axiom.is_header_only(header.flags, Some(scanner_hint.as_str()).unwrap_or(""));
 
                 if is_ho {
                     (scanner_hint.clone(), 0usize, "header_only".to_string())
@@ -897,9 +928,11 @@ fn get_isolated_inspect(
         };
 
         let final_code = item.code.trim().to_string();
-        
+
         let emitter_bypass = {
-            let trimmed_code = item.code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+            let trimmed_code = item
+                .code
+                .trim_matches(|c: char| c.is_whitespace() || c == '\0');
             let is_target_blank = is_alpha && trimmed_code.is_empty();
             item.is_opaque() || item.is_semi_opaque() || is_target_blank
         };
