@@ -207,8 +207,9 @@ fn is_alpha(bytes: &[u8]) -> bool {
 
 fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
     let is_alpha_socketed_host = alpha_mode && !item.socketed_items.is_empty();
+    let preserve_raw_bits = is_alpha_socketed_host || should_preserve_alpha_compare_bits(item, alpha_mode);
     let mut strict_item = item.clone();
-    if !is_alpha_socketed_host {
+    if !preserve_raw_bits {
         strict_item.bits.clear();
     }
     let reserialized_bits: Vec<bool> = if alpha_mode {
@@ -417,6 +418,14 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String, bytes_a: &[u8]
         item_diff.is_match = false;
     }
     item_diff
+}
+
+fn should_preserve_alpha_compare_bits(item: &Item, alpha_mode: bool) -> bool {
+    if !alpha_mode {
+        return false;
+    }
+
+    matches!(item.code.trim(), "w8cs")
 }
 
 #[cfg(test)]
