@@ -832,7 +832,7 @@ impl Item {
                 return Ok(());
             }
         }
-        if alpha_mode && matches!(trimmed_code, "jav" | "buc") && !self.bits.is_empty() {
+        if alpha_mode && matches!(trimmed_code, "buc") && !self.bits.is_empty() {
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
                 emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
