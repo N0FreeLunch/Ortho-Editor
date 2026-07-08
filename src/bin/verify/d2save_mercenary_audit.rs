@@ -182,11 +182,19 @@ fn audit_mercenary(
 
     let (merc, raw_w4_present) = if let Some(w4) = w4_data {
         let merc = MercenaryState::from_hybrid(bytes, Some(w4));
-        (Some(merc), true)
+        if merc.exists() {
+            (Some(merc), true)
+        } else {
+            (None, false)
+        }
     } else {
-        issues.push(ForensicIssue::new("SectionMissing", "w4 section NOT found"));
-        let merc = MercenaryState::from_hybrid(bytes, None);
-        (Some(merc), false)
+        let merc_header = MercenaryState::from_hybrid(bytes, None);
+        if merc_header.exists() {
+            issues.push(ForensicIssue::new("SectionMissing", "w4 section is missing"));
+            (Some(merc_header), false)
+        } else {
+            (None, false)
+        }
     };
 
     // Equipment Audit (Slice 4)

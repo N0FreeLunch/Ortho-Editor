@@ -201,6 +201,11 @@ impl MercenaryState {
         let header = [0u8; 175]; // Dummy header for legacy compat if needed, but better use hybrid.
         Self::from_hybrid(&header, Some(bytes))
     }
+
+    /// Returns true if the mercenary exists/is active based on forensic signals.
+    pub fn exists(&self) -> bool {
+        self.experience > 0 || self.subtype_id > 0 || self.class_id > 0
+    }
 }
 
 #[cfg(test)]
