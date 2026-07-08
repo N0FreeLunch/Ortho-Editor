@@ -798,6 +798,20 @@ impl Item {
             .code
             .trim_matches(|c: char| c.is_whitespace() || c == '\0');
         let is_target_blank = alpha_mode && trimmed_code.is_empty();
+        if alpha_mode && matches!(trimmed_code, "jav" | "buc") {
+            let raw_bits = if !self.bits.is_empty() {
+                self.bits.iter().map(|rb| rb.bit).collect::<Vec<bool>>()
+            } else if !self.body.alpha_alignment_padding.is_empty() {
+                self.body.alpha_alignment_padding.clone()
+            } else {
+                Vec::new()
+            };
+
+            if !raw_bits.is_empty() {
+                emitter.extend_bits(raw_bits)?;
+                return Ok(());
+            }
+        }
         if alpha_mode
             && (self.is_opaque() || self.is_semi_opaque() || is_target_blank)
             && !self.bits.is_empty()
@@ -987,7 +1001,7 @@ impl Item {
             if self.code.trim() == "hp1" && self.total_bits == 77 {
                 final_target = 77;
             }
-            if self.total_bits > final_target && !matches!(self.code.trim(), "tsc" | "isc") {
+            if self.total_bits > final_target {
                 final_target = self.total_bits;
             }
 

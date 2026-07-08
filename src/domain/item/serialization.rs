@@ -1874,17 +1874,6 @@ impl Item {
                         }
 
 
-                        // Greedy Slice 8 Resolution: For buc/jav tail padding, swallow trailing noise markers.
-                        if matches!(marker.code.trim(), "buc" | "jav") {
-                            let total_rem = section_bits - start;
-                            if consumed_bits < total_rem
-                                && total_rem < 512
-                                && total_rem % 8 == 0
-                                && (non_residue_count + 1 >= top_level_count as usize)
-                            {
-                                consumed_bits = total_rem;
-                            }
-                        }
                     }
 
                     if final_item.code.trim().is_empty()
@@ -2095,7 +2084,9 @@ impl Item {
 
         if alpha_mode {
             for item in &mut items {
-                let needs_raw_capture = item.bits.len() < item.total_bits as usize;
+                let preserve_trusted_compact_tail = matches!(item.code.trim(), "jav" | "buc");
+                let needs_raw_capture =
+                    preserve_trusted_compact_tail || item.bits.len() < item.total_bits as usize;
 
                 if needs_raw_capture {
                     let local_start = item.range.start.saturating_sub(section_bit_offset);
@@ -2113,10 +2104,6 @@ impl Item {
                                 offset: item.range.start + idx as u64,
                             })
                             .collect();
-                        let preserve_trusted_compact_tail = matches!(
-                            item.code.trim(),
-                            "jav" | "buc"
-                        );
                         if preserve_trusted_compact_tail {
                             item.body.alpha_alignment_padding = raw_bits;
                         } else {
@@ -2460,16 +2447,21 @@ impl Item {
         let code_peek = code_hint
             .filter(|hint| !hint.trim().is_empty())
             .or(peek.as_ref().map(|p| p.3.as_str()));
-        let gap_override = peek.as_ref().map(|p| {
+        let gap_code = code_peek.map(crate::item::normalize_alpha_code_hint);
+        let gap_override = peek.as_ref().and_then(|p| {
+            if matches!(gap_code.map(|code| code.trim()), Some("jav") | Some("buc")) {
+                return None;
+            }
+
             let mut gap = p.8 as usize;
             // Alpha v105 version 7 non-compact items reuse the legacy gap budget
             // differently from the earlier compact/summary cases. Keep the
             // original trial width for compact items, but trim the version-7
-            // non-compact hints so `buc`/`jav` stay aligned.
+            // non-compact hints so other families stay aligned.
             if alpha_mode && p.5 == 7 && !p.6 {
                 gap = gap.saturating_sub(45);
             }
-            gap
+            Some(gap)
         });
         let has_checksum_peek = peek.as_ref().map(|p| p.9);
 
