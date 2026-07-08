@@ -745,7 +745,7 @@ impl Item {
         huffman: &crate::domain::item::serialization::HuffmanTree,
         alpha_mode: bool,
     ) -> io::Result<()> {
-        if alpha_mode && !self.bits.is_empty() {
+        if alpha_mode && !self.bits.is_empty() && self.socketed_items.is_empty() {
             emitter.extend_bits(self.bits.iter().map(|rb| rb.bit))?;
             return Ok(());
         }
@@ -768,6 +768,8 @@ impl Item {
                 }
             }
         }
+        let preserve_raw_authority_bits =
+            alpha_mode && is_authority_overlap_code && self.socketed_items.is_empty();
         // Slice 2: Opaque pass-through
         let is_placeholder_opaque = self.code.trim().is_empty() || self.code == "Opaque";
         let has_opaque_module = self
@@ -814,13 +816,14 @@ impl Item {
                 return Ok(());
             }
         }
-        if alpha_mode && is_authority_overlap_code && !self.bits.is_empty() {
+        if preserve_raw_authority_bits && !self.bits.is_empty() {
             let take = self.total_bits.min(self.bits.len() as u64) as usize;
             if take > 0 {
                 emitter.extend_bits(self.bits[..take].iter().map(|rb| rb.bit))?;
             }
-            // Slice 7: Dynamic Interval Capture. Honor total_bits for authority containers (xrs, wa2, etc)
-            // to preserve the full 512-bit (or larger) block.
+            // Slice 7: Dynamic Interval Capture. Honor total_bits for authority containers
+            // only when they do not own socketed children; child-owned seams need the
+            // structured emitter path so nested emission can stay honest.
             if self.total_bits > take as u64 {
                 let padding_needed = (self.total_bits - take as u64) as u32;
                 emitter.extend_bits(std::iter::repeat(false).take(padding_needed as usize))?;
@@ -1587,7 +1590,7 @@ impl Item {
         let mut final_bits =
             s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
 
-        if self.total_bits > final_bits {
+        if preserve_raw_authority_bits && self.total_bits > final_bits {
             final_bits = self.total_bits;
         }
 
