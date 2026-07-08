@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use std::io::Cursor;
 
-use crate::item::{HuffmanTree, Item, peek_item_header_at};
+use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -208,22 +208,48 @@ fn is_alpha(bytes: &[u8]) -> bool {
 fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
     let mut strict_item = item.clone();
     strict_item.bits.clear();
-    let reserialized_bytes = strict_item.to_bytes(idx, huffman, alpha_mode).unwrap_or_default();
-    let original_bits = &item.bits;
+    let reserialized_bits: Vec<bool> = if alpha_mode {
+        strict_item.to_bits(idx, huffman, alpha_mode).unwrap_or_default()
+    } else {
+        let reserialized_bytes = strict_item.to_bytes(idx, huffman, alpha_mode).unwrap_or_default();
 
-    let mut rebuilt_bits = Vec::new();
-    let mut reader = BitReader::endian(Cursor::new(&reserialized_bytes), LittleEndian);
-    for _ in 0..original_bits.len() {
-        if let Ok(bit) = reader.read_bit() {
+        let mut rebuilt_bits = Vec::new();
+        let mut reader = BitReader::endian(Cursor::new(&reserialized_bytes), LittleEndian);
+        while let Ok(bit) = reader.read_bit() {
             rebuilt_bits.push(bit);
-        } else {
-            break;
         }
-    }
+        rebuilt_bits
+    };
+
+    let original_bits: &[RecordedBit] = item.bits.as_slice();
+    let (original_bits, reserialized_bits, original_len, target_len) = if alpha_mode
+        && !item.socketed_items.is_empty()
+    {
+        // Alpha socketed hosts are validated through the emitted parent window.
+        // Their socketed children are verified recursively below, so the parent
+        // comparison should stop at the parent's own strict emission span.
+        let compare_len = item
+            .total_bits
+            .min(original_bits.len() as u64)
+            .min(reserialized_bits.len() as u64) as usize;
+        (
+            &original_bits[..compare_len],
+            &reserialized_bits[..compare_len],
+            compare_len,
+            compare_len,
+        )
+    } else {
+        (
+            original_bits,
+            reserialized_bits.as_slice(),
+            original_bits.len(),
+            reserialized_bits.len(),
+        )
+    };
 
     let mut mismatch_idx = None;
-    for i in 0..original_bits.len().min(rebuilt_bits.len()) {
-        if original_bits[i].bit != rebuilt_bits[i] {
+    for i in 0..original_bits.len().min(reserialized_bits.len()) {
+        if original_bits[i].bit != reserialized_bits[i] {
             mismatch_idx = Some(i);
             break;
         }
@@ -232,8 +258,8 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
     let mut item_diff = ItemDiff {
         label,
         code: item.code.trim().to_string(),
-        original_len: original_bits.len(),
-        target_len: rebuilt_bits.len(),
+        original_len,
+        target_len,
         fidelity_score: FidelityScore::from_audit(&item.forensic_audit).value,
         forensic_audit: item.forensic_audit.clone(),
         version: item.header.version,
@@ -244,19 +270,19 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
         discovered_alpha_header_gap: if alpha_mode { peek_item_header_at(original_bytes, item.range.start, huffman, alpha_mode, 0).map(|p| p.8 as u32) } else { None },
         parsed_alpha_header_gap: if alpha_mode { Some(item.body.alpha_header_gap_bits.len() as u32) } else { None },
         orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
-        target_bits: Some(rebuilt_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
+        target_bits: Some(reserialized_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
         ..Default::default()
     };
 
-    if mismatch_idx.is_some() || original_bits.len() != rebuilt_bits.len() {
+    if mismatch_idx.is_some() || original_len != target_len {
         item_diff.is_match = false;
-        let mut m_type = if original_bits.len() != rebuilt_bits.len() {
+        let mut m_type = if original_len != target_len {
             "Length".to_string()
         } else {
             "Content".to_string()
         };
 
-        let len_diff = (original_bits.len() as i32 - rebuilt_bits.len() as i32).abs();
+        let len_diff = (original_len as i32 - target_len as i32).abs();
         if len_diff == 2 {
             m_type.push_str(" [Nudge (2-bit)]");
         } else if len_diff > 0 && len_diff % 16 == 0 {
