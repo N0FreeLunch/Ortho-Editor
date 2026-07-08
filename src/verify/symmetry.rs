@@ -428,7 +428,7 @@ fn should_preserve_alpha_compare_bits(item: &Item, alpha_mode: bool) -> bool {
     let trimmed = item.code.trim();
     // Preserve compare bits for ambiguous alpha families and raw non-ASCII codes
     // that the strict rebuild cannot canonically round-trip yet.
-    matches!(trimmed, "w8cs") || !trimmed.is_ascii()
+    !trimmed.is_ascii()
 }
 
 #[cfg(test)]
