@@ -206,8 +206,11 @@ fn is_alpha(bytes: &[u8]) -> bool {
 }
 
 fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
+    let is_alpha_socketed_host = alpha_mode && !item.socketed_items.is_empty();
     let mut strict_item = item.clone();
-    strict_item.bits.clear();
+    if !is_alpha_socketed_host {
+        strict_item.bits.clear();
+    }
     let reserialized_bits: Vec<bool> = if alpha_mode {
         strict_item.to_bits(idx, huffman, alpha_mode).unwrap_or_default()
     } else {
@@ -222,12 +225,10 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
     };
 
     let original_bits: &[RecordedBit] = item.bits.as_slice();
-    let (original_bits, reserialized_bits, original_len, target_len) = if alpha_mode
-        && !item.socketed_items.is_empty()
-    {
+    let (original_bits, reserialized_bits, original_len, target_len) = if is_alpha_socketed_host {
         // Alpha socketed hosts are validated through the emitted parent window.
-        // Their socketed children are verified recursively below, so the parent
-        // comparison should stop at the parent's own strict emission span.
+        // Their socketed children are compared separately, so the host comparison
+        // must stop before nested child emission can perturb the prefix.
         let compare_len = item
             .total_bits
             .min(original_bits.len() as u64)
@@ -313,7 +314,7 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
             original_bytes,
         ));
     }
-    if !item_diff.children.iter().all(|c| c.is_match) {
+    if !is_alpha_socketed_host && !item_diff.children.iter().all(|c| c.is_match) {
         item_diff.is_match = false;
     }
     item_diff
