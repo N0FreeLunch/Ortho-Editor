@@ -705,7 +705,7 @@ impl V105PropertyWidthAxiom {
                     return false;
                 }
                 // Exclude known non-summary equipment-like shadows even if in forced_compact
-                if trimmed == "jav" || trimmed == "buc" || trimmed == "ks d" {
+                if trimmed == "jav" || trimmed == "buc" || trimmed == "ks d" || trimmed == "w8cs" {
                     return false;
                 }
                 return true;
