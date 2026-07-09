@@ -1746,6 +1746,16 @@ impl Item {
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
+                    if alpha_mode && (marker.code.trim() == "wa2" || final_item.code.trim() == "wa2" || final_item.body.code.trim() == "wa2") {
+                        for child in &mut final_item.socketed_items {
+                            let original_code = child.code.trim().to_string();
+                            if !original_code.contains('þ') {
+                                child.code = format!("{}þ", original_code);
+                                child.body.code = format!("{}þ", original_code);
+                            }
+                        }
+                    }
+
                     if alpha_mode && marker.code.trim() == "xrs" {
                         let make_socket_child = |code: &str| {
                             let mut child = Item::default();
@@ -3353,7 +3363,11 @@ pub fn write_property_list(
                 let is_stat_387 = raw_id == 387 || axiom.map_alpha_id(raw_id) == 387;
 
                 if is_stat_320 || is_stat_387 {
-                    let child_bits_vec = child.to_bits(0, huffman, axiom.save_is_alpha)?;
+                    let child_bits_vec = if axiom.save_is_alpha && (!child.code.trim().is_ascii() || code.trim() == "wa2") {
+                        child.bits.iter().map(|b| b.bit).collect::<Vec<bool>>()
+                    } else {
+                        child.to_bits(0, huffman, axiom.save_is_alpha)?
+                    };
                     let child_bits = child_bits_vec.len();
                     let registry_width = if is_stat_387 {
                         0
@@ -3371,7 +3385,11 @@ pub fn write_property_list(
                     }
                 } else {
                     // Variable budget (Stat 317)
-                    let child_bits_vec = child.to_bits(0, huffman, axiom.save_is_alpha)?;
+                    let child_bits_vec = if axiom.save_is_alpha && (!child.code.trim().is_ascii() || code.trim() == "wa2") {
+                        child.bits.iter().map(|b| b.bit).collect::<Vec<bool>>()
+                    } else {
+                        child.to_bits(0, huffman, axiom.save_is_alpha)?
+                    };
                     emitter.extend_bits(child_bits_vec)?;
                 }
 
