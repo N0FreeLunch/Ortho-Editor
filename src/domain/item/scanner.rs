@@ -68,6 +68,8 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             }
         }
     }
+
+    let mut has_alpha_item = false;
     
     let num_chunks = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
     let markers: Vec<(u64, u32, String)> = (0..num_chunks)
@@ -141,8 +143,12 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                         }
                     }
 
-                    if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = header_candidate {   
+                    if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) = header_candidate {
+                        let use_v105_alignment = alpha && version != 6;
                         if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha) {
+                            if alpha && version != 6 {
+                                has_alpha_item = true;
+                            }
                             let trimmed_code = code.trim();
                             let is_known = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code) 
                                 || crate::domain::item::serialization::item_template(&code).is_some();
@@ -165,7 +171,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             let is_v105_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&code);
                             
                             let mut forced_80 = false;
-                            if alpha && !is_compact && !is_forced {
+                            if use_v105_alignment && !is_compact && !is_forced {
                                 if is_v105_summary {
                                     if let Some(next_header) = peek_item_header_at(bytes, scan_pos + 80, huffman, alpha, 0) {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) = next_header;
@@ -183,7 +189,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 confidence += 300;
                             }
 
-                            if alpha && !is_compact && !is_forced && !forced_80 && !(is_alpha_runeword_candidate && has_checksum) && !is_v105_summary && !override_noncompact {
+                            if use_v105_alignment && !is_compact && !is_forced && !forced_80 && !(is_alpha_runeword_candidate && has_checksum) && !is_v105_summary && !override_noncompact {
                                 if !verify_marker_lookahead(bytes, scan_pos + _header_len, huffman, alpha) {
                                     continue;
                                 }
@@ -202,7 +208,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                                 confidence += 100;
                             }
                             
-                            if alpha {
+                            if use_v105_alignment {
                                 let rem = scan_pos % 8;
                                 let body_start = scan_pos + _header_len;
                                 if body_start % 8 == 5 {
@@ -229,7 +235,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                             }
 
                             if confidence > max_confidence 
-                                || (alpha && confidence == max_confidence && (scan_pos % 8 == 2))
+                                || (alpha && version != 6 && confidence == max_confidence && (scan_pos % 8 == 2))
                             {
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
@@ -244,11 +250,15 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
                     let jump = if alpha {
                         if let Some((_, _, _, _, f, v, _, _, _, _)) = peek_item_header_at(bytes, best_offset, huffman, alpha, 0) {
-                             let mut j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
-                             if (best_code.trim() == "xrs" || best_code.trim() == "wa2") && j == 0 {
-                                 j = 150; 
+                             if v != 6 {
+                                 let mut j = crate::domain::forensic::v105::axioms::get_v105_target_width(v, &best_code, f, Some(local_markers.len())) as u64;
+                                 if (best_code.trim() == "xrs" || best_code.trim() == "wa2") && j == 0 {
+                                     j = 150;
+                                 }
+                                 if j > 0 { j } else { 72 }
+                             } else {
+                                 72
                              }
-                             if j > 0 { j } else { 72 }
                         } else { 72 }
 
                     } else {
@@ -279,8 +289,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         let (offset, confidence, code_str) = &final_markers[i];
         let mut best_idx = i;
         let mut max_score = *confidence as i32;
+        let use_v105_alignment = alpha && has_alpha_item;
 
-        if alpha && accepted_count > 0 {
+        if use_v105_alignment && accepted_count > 0 {
             let diff = offset - last_offset;
             if is_alpha_v105_slot_item(&last_code) {
                 if diff == 80 { max_score += 350; }
@@ -301,7 +312,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
             }
         }
         
-        let lookahead_limit = if alpha {
+        let lookahead_limit = if use_v105_alignment {
             if is_alpha_v105_compact_limit_item(code_str) { offset + 72 } else { offset + 128 }
         } else {
             offset + 120
@@ -310,8 +321,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
             let (o_offset, o_conf, o_code) = &final_markers[j];
             let mut score = *o_conf as i32;
+            let next_use_v105_alignment = alpha && has_alpha_item;
             
-            if alpha && accepted_count > 0 {
+            if next_use_v105_alignment && accepted_count > 0 {
                 let diff = o_offset - last_offset;
                 let mut alignment_bonus = 0;
                 if is_alpha_v105_slot_item(&last_code) {
@@ -337,7 +349,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                     }
                 }
 
-                if alpha {
+                if next_use_v105_alignment {
                     let next_window = if is_alpha_v105_compact_limit_item(o_code) { o_offset + 72 } else { o_offset + 128 };
                     let mut k = j + 1;
                     while k < final_markers.len() && final_markers[k].0 < next_window {
@@ -381,8 +393,9 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
 
         let (best_offset, best_confidence, best_code_str) = &final_markers[best_idx];
         let mut status = MarkerStatus::Accepted;
+        let use_v105_alignment = alpha && has_alpha_item;
 
-        if alpha && max_score < 150 {
+        if use_v105_alignment && max_score < 150 {
             if let Some(expected) = expected_count {
                 let following_auth = since_last_auth
                     .map(|(off, limit)| best_offset - off < limit)
