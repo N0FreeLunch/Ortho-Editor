@@ -2,14 +2,16 @@ use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 
-use d2r_core::save::{Save, find_jm_markers};
 use d2r_core::item::{HuffmanTree, Item, ItemModule};
+use d2r_core::save::{find_jm_markers, Save};
 use d2r_core::verify::args::{ArgError, ArgParser};
 
 #[derive(serde::Serialize)]
 struct OpaqueItem {
     index: usize,
+    section_item_index: usize,
     section: String,
+    section_header_byte_offset: u64,
     code: String,
     bit_start: u64,
     bit_end: u64,
@@ -19,6 +21,24 @@ struct OpaqueItem {
     module_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     module_body_hex: Option<String>,
+    parser_probe: Option<ParserProbe>,
+}
+
+#[derive(serde::Serialize)]
+struct ParserProbe {
+    probe_source: String,
+    candidate_start_bit: u64,
+    candidate_limit_bits: u64,
+    code_hint: Option<String>,
+    forced_compact: Option<bool>,
+    outcome: String,
+    module_kind: Option<String>,
+    failure_error: Option<String>,
+    failure_context_stack: Option<Vec<String>>,
+    failure_bit_offset_abs: Option<u64>,
+    failure_bit_offset_rel: Option<u64>,
+    failure_context_relative_offset: Option<u64>,
+    failure_hint: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -55,12 +75,62 @@ fn bits_to_bytes(bits: &[bool]) -> Vec<u8> {
     bytes
 }
 
+fn probe_parser(item: &Item) -> ParserProbe {
+    let candidate_start_bit = item.range.start;
+    let candidate_limit_bits = item.total_bits as u64;
+    let code_hint = match item.code.trim() {
+        "" | "Opaque" => None,
+        code => Some(code.to_string()),
+    };
+
+    let (outcome, module_kind, failure_error) = item
+        .modules
+        .iter()
+        .find_map(|module| match module {
+                    ItemModule::SemiOpaque { reason, .. } => Some((
+                        "semi_opaque",
+                        "SemiOpaque",
+                        Some(reason.clone()),
+                    )),
+                    ItemModule::Opaque { .. } => Some((
+                        "opaque",
+                        "Opaque",
+                        Some("Section parsing preserved an opaque module without a structured parser failure.".to_string()),
+                    )),
+                    ItemModule::Residue { .. } => Some((
+                        "opaque",
+                        "Residue",
+                        Some("Section parsing preserved residue without a structured parser failure.".to_string()),
+                    )),
+                    _ => None,
+                })
+        .unwrap_or(("parsed", "Structured", None));
+
+    ParserProbe {
+        probe_source: "retained_section_result".to_string(),
+        candidate_start_bit,
+        candidate_limit_bits,
+        code_hint,
+        forced_compact: None,
+        outcome: outcome.to_string(),
+        module_kind: Some(module_kind.to_string()),
+        failure_error,
+        failure_context_stack: None,
+        failure_bit_offset_abs: None,
+        failure_bit_offset_rel: None,
+        failure_context_relative_offset: None,
+        failure_hint: None,
+    }
+}
+
 fn main() -> Result<()> {
     let mut parser = ArgParser::new("d2item_opaque_snapshot")
         .description("Dumps raw payload of opaque/semi-opaque items from a D2R save file to JSON");
 
     parser.add_arg("save_file", "path to the save file (.d2s)");
-    parser.add_flag("json", "print machine-readable report (JSON)").long("json");
+    parser
+        .add_flag("json", "print machine-readable report (JSON)")
+        .long("json");
 
     let args: Vec<_> = env::args_os().skip(1).collect();
     let parsed = match parser.parse(args) {
@@ -122,7 +192,7 @@ fn main() -> Result<()> {
             }
         };
 
-        for item in items {
+        for (section_item_index, item) in items.into_iter().enumerate() {
             let is_opaque = item.code == "Opaque" || item.is_opaque();
             let mut semi_opaque_module = None;
             for module in &item.modules {
@@ -136,15 +206,21 @@ fn main() -> Result<()> {
                 let raw_bits = bits_from_range(&bytes, item.range.start, item.range.end);
                 let hex_payload = hex::encode(bits_to_bytes(&raw_bits));
 
-                let (module_reason, module_body_hex) = if let Some((body_bits, reason)) = semi_opaque_module {
-                    (Some(reason.clone()), Some(hex::encode(bits_to_bytes(body_bits))))
-                } else {
-                    (None, None)
-                };
+                let (module_reason, module_body_hex) =
+                    if let Some((body_bits, reason)) = semi_opaque_module {
+                        (
+                            Some(reason.clone()),
+                            Some(hex::encode(bits_to_bytes(body_bits))),
+                        )
+                    } else {
+                        (None, None)
+                    };
 
                 opaque_items.push(OpaqueItem {
                     index: global_index,
+                    section_item_index,
                     section: section_label.to_string(),
+                    section_header_byte_offset: pos as u64,
                     code: item.code.trim().to_string(),
                     bit_start: item.range.start,
                     bit_end: item.range.end,
@@ -152,6 +228,7 @@ fn main() -> Result<()> {
                     hex_payload,
                     module_reason,
                     module_body_hex,
+                    parser_probe: Some(probe_parser(&item)),
                 });
             }
             global_index += 1;
@@ -164,7 +241,13 @@ fn main() -> Result<()> {
         opaque_items,
     };
 
-    println!("{}", serde_json::to_string_pretty(&report)?);
+    let report_json = serde_json::to_string_pretty(&report)?;
+    if let Some(output_path) = parsed.get("output") {
+        fs::write(output_path, &report_json)
+            .with_context(|| format!("Cannot write report to '{}'", output_path))?;
+    } else {
+        println!("{}", report_json);
+    }
 
     Ok(())
 }
