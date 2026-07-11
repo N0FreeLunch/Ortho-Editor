@@ -1969,10 +1969,22 @@ impl Item {
                     if crate::item::item_trace_enabled() {
                         eprintln!("[outer-parse-failure] marker={} error={:?}", marker.code.trim(), _e);
                     }
+                    let failure_json = serde_json::json!({
+                        "error": format!("{:?}", &_e.error),
+                        "context_stack": &_e.context_stack,
+                        "bit_offset": _e.bit_offset,
+                        "context_relative_offset": _e.context_relative_offset,
+                        "hint": &_e.hint,
+                    });
                     // Fail-safe: isolate as Opaque
                     let mut opaque = Item::default();
                     opaque.expected_start_bit = start;
                     opaque.code = "Opaque".to_string();
+                    opaque.forensic_audit.record(ForensicMetadata::new(
+                        Confidence::VerifiedTruth,
+                        Intentionality::Artifactual,
+                        format!("parser_failure_json:{}", failure_json),
+                    ));
                     let mut bits = Vec::new();
                     let mut fallback_reader =
                         BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
