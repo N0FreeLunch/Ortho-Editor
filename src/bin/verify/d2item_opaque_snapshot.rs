@@ -24,7 +24,7 @@ struct OpaqueItem {
     parser_probe: Option<ParserProbe>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 struct ParserProbe {
     probe_source: String,
     candidate_start_bit: u64,
@@ -39,6 +39,15 @@ struct ParserProbe {
     failure_bit_offset_rel: Option<u64>,
     failure_context_relative_offset: Option<u64>,
     failure_hint: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ParserFailureEnvelope {
+    error: String,
+    context_stack: Vec<String>,
+    bit_offset: u64,
+    context_relative_offset: u64,
+    hint: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -75,7 +84,26 @@ fn bits_to_bytes(bits: &[bool]) -> Vec<u8> {
     bytes
 }
 
-fn probe_parser(item: &Item) -> ParserProbe {
+fn parser_failure_envelope(item: &Item) -> Result<Option<ParserFailureEnvelope>> {
+    const PREFIX: &str = "parser_failure_json:";
+    let findings: Vec<_> = item
+        .forensic_audit
+        .findings
+        .iter()
+        .filter_map(|finding| finding.rationale.strip_prefix(PREFIX))
+        .collect();
+
+    if findings.len() > 1 {
+        anyhow::bail!("multiple conflicting parser_failure_json findings");
+    }
+
+    findings
+        .first()
+        .map(|json| serde_json::from_str(json).context("malformed parser_failure_json finding"))
+        .transpose()
+}
+
+fn probe_parser(item: &Item) -> Result<ParserProbe> {
     let candidate_start_bit = item.range.start;
     let candidate_limit_bits = item.total_bits as u64;
     let code_hint = match item.code.trim() {
@@ -106,7 +134,30 @@ fn probe_parser(item: &Item) -> ParserProbe {
                 })
         .unwrap_or(("parsed", "Structured", None));
 
-    ParserProbe {
+    let failure = parser_failure_envelope(item)?;
+    let (
+        failure_error,
+        failure_context_stack,
+        failure_bit_offset_abs,
+        failure_bit_offset_rel,
+        failure_context_relative_offset,
+        failure_hint,
+    ) = match failure {
+        Some(failure) => {
+            let relative = failure.bit_offset.checked_sub(candidate_start_bit);
+            (
+                Some(failure.error),
+                Some(failure.context_stack),
+                Some(failure.bit_offset),
+                relative,
+                Some(failure.context_relative_offset),
+                failure.hint,
+            )
+        }
+        None => (failure_error, None, None, None, None, None),
+    };
+
+    Ok(ParserProbe {
         probe_source: "retained_section_result".to_string(),
         candidate_start_bit,
         candidate_limit_bits,
@@ -115,12 +166,12 @@ fn probe_parser(item: &Item) -> ParserProbe {
         outcome: outcome.to_string(),
         module_kind: Some(module_kind.to_string()),
         failure_error,
-        failure_context_stack: None,
-        failure_bit_offset_abs: None,
-        failure_bit_offset_rel: None,
-        failure_context_relative_offset: None,
-        failure_hint: None,
-    }
+        failure_context_stack,
+        failure_bit_offset_abs,
+        failure_bit_offset_rel,
+        failure_context_relative_offset,
+        failure_hint,
+    })
 }
 
 fn main() -> Result<()> {
@@ -228,7 +279,7 @@ fn main() -> Result<()> {
                     hex_payload,
                     module_reason,
                     module_body_hex,
-                    parser_probe: Some(probe_parser(&item)),
+                    parser_probe: Some(probe_parser(&item)?),
                 });
             }
             global_index += 1;
@@ -250,4 +301,32 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+use d2r_core::domain::item::{Confidence, ForensicMetadata, Intentionality};
+
+#[test]
+fn parser_failure_envelope_projection() {
+    let mut item = Item::default();
+    item.range.start = 7661;
+    item.total_bits = 168;
+    item.code = "Opaque".to_string();
+    item.modules.push(ItemModule::Opaque(Vec::new()));
+    item.forensic_audit.record(ForensicMetadata::new(
+        Confidence::VerifiedTruth,
+        Intentionality::Artifactual,
+        r#"parser_failure_json:{"error":"Io(\"boundary\")","context_stack":["Root","ExtendedStats"],"bit_offset":7829,"context_relative_offset":80,"hint":"limit"}"#,
+    ));
+
+    let probe = probe_parser(&item).expect("valid parser failure envelope");
+    assert_eq!(probe.failure_error.as_deref(), Some("Io(\"boundary\")"));
+    assert_eq!(
+        probe.failure_context_stack.as_deref(),
+        Some(["Root".to_string(), "ExtendedStats".to_string()].as_slice())
+    );
+    assert_eq!(probe.failure_bit_offset_abs, Some(7829));
+    assert_eq!(probe.failure_bit_offset_rel, Some(168));
+    assert_eq!(probe.failure_context_relative_offset, Some(80));
+    assert_eq!(probe.failure_hint.as_deref(), Some("limit"));
 }
