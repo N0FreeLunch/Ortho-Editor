@@ -24,6 +24,7 @@ struct OpaqueItem {
     module_body_hex: Option<String>,
     parser_probe: Option<ParserProbe>,
     boundary_candidates: Vec<BoundaryCandidate>,
+    extension_sweep: Vec<ExtensionSweepRecord>,
 }
 
 #[derive(serde::Serialize, Debug, PartialEq, Eq)]
@@ -32,6 +33,20 @@ struct BoundaryCandidate {
     code: String,
     status: String,
     distance_from_retained_end: i64,
+}
+
+#[derive(serde::Serialize, Debug)]
+struct ExtensionSweepRecord {
+    extension_bits: u64,
+    candidate_limit_bits: u64,
+    ownership_crossing: bool,
+    outcome: String,
+    module_kind: Option<String>,
+    consumed_bits: Option<u64>,
+    failure_error: Option<String>,
+    failure_bit_offset_abs: Option<u64>,
+    failure_bit_offset_rel: Option<u64>,
+    failure_context_stack: Option<Vec<String>>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -101,6 +116,87 @@ fn collect_boundary_candidates(
             .then_with(|| a.status.cmp(&b.status))
     });
     candidates
+}
+
+fn build_extension_sweep(
+    item: &Item,
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+    item_index: usize,
+    boundary_candidates: &[BoundaryCandidate],
+) -> Vec<ExtensionSweepRecord> {
+    let candidate_start_bit = item.range.start;
+    let retained_limit_bits = item.total_bits as u64;
+    let code_hint = match item.code.trim() {
+        "" | "Opaque" => None,
+        code => Some(code),
+    };
+    let accepted_at_retained_end = boundary_candidates.iter().any(|candidate| {
+        candidate.status == "accepted" && candidate.distance_from_retained_end == 0
+    });
+
+    (0..=16)
+        .map(|extension_bits| {
+            let candidate_limit_bits = retained_limit_bits + extension_bits;
+            let candidate_bits = bits_from_range(
+                bytes,
+                candidate_start_bit,
+                candidate_start_bit.saturating_add(candidate_limit_bits),
+            );
+            let candidate_bytes = bits_to_bytes(&candidate_bits);
+            let live_result = d2r_core::domain::item::serialization::parse_item_at_with_limit(
+                &candidate_bytes,
+                0,
+                candidate_start_bit,
+                huffman,
+                item_index,
+                is_alpha,
+                Some(candidate_limit_bits),
+                None,
+                code_hint,
+            );
+            match live_result {
+                Ok((reparsed, consumed_bits)) => {
+                    let module_kind = reparsed.modules.iter().find_map(|module| match module {
+                        ItemModule::SemiOpaque { .. } => Some("SemiOpaque"),
+                        ItemModule::Opaque { .. } => Some("Opaque"),
+                        ItemModule::Residue { .. } => Some("Residue"),
+                        _ => None,
+                    });
+                    let outcome = match module_kind {
+                        Some("SemiOpaque") => "semi_opaque",
+                        Some(_) => "opaque",
+                        None => "parsed",
+                    };
+                    ExtensionSweepRecord {
+                        extension_bits,
+                        candidate_limit_bits,
+                        ownership_crossing: extension_bits > 0 && accepted_at_retained_end,
+                        outcome: outcome.to_string(),
+                        module_kind: Some(module_kind.unwrap_or("Structured").to_string()),
+                        consumed_bits: Some(consumed_bits),
+                        failure_error: None,
+                        failure_bit_offset_abs: None,
+                        failure_bit_offset_rel: None,
+                        failure_context_stack: None,
+                    }
+                }
+                Err(failure) => ExtensionSweepRecord {
+                    extension_bits,
+                    candidate_limit_bits,
+                    ownership_crossing: extension_bits > 0 && accepted_at_retained_end,
+                    outcome: "parse_failure".to_string(),
+                    module_kind: None,
+                    consumed_bits: None,
+                    failure_error: Some(failure.error.to_string()),
+                    failure_bit_offset_abs: Some(failure.bit_offset),
+                    failure_bit_offset_rel: failure.bit_offset.checked_sub(candidate_start_bit),
+                    failure_context_stack: Some(failure.context_stack),
+                },
+            }
+        })
+        .collect()
 }
 
 fn bits_from_range(bytes: &[u8], start_bit: u64, end_bit: u64) -> Vec<bool> {
@@ -340,6 +436,19 @@ fn main() -> Result<()> {
                     } else {
                         (None, None)
                     };
+                let boundary_candidates = collect_boundary_candidates(
+                    &scanner_markers,
+                    section_bit_offset,
+                    item.range.end,
+                );
+                let extension_sweep = build_extension_sweep(
+                    &item,
+                    &bytes,
+                    &huffman,
+                    is_alpha,
+                    global_index,
+                    &boundary_candidates,
+                );
 
                 opaque_items.push(OpaqueItem {
                     index: global_index,
@@ -360,11 +469,8 @@ fn main() -> Result<()> {
                         is_alpha,
                         global_index,
                     )),
-                    boundary_candidates: collect_boundary_candidates(
-                        &scanner_markers,
-                        section_bit_offset,
-                        item.range.end,
-                    ),
+                    boundary_candidates,
+                    extension_sweep,
                 });
             }
             global_index += 1;
@@ -433,4 +539,36 @@ fn boundary_candidate_reports_absolute_position_status_and_distance() {
     assert_eq!(candidates[1].absolute_bit_position, 8893);
     assert_eq!(candidates[1].status, "rejected");
     assert_eq!(candidates[1].distance_from_retained_end, -8);
+}
+
+#[test]
+fn extension_sweep_is_ordered_bounded_and_marks_boundary_crossing() {
+    let mut item = Item::default();
+    item.range.start = 0;
+    item.total_bits = 1;
+    item.code = "Opaque".to_string();
+    item.modules.push(ItemModule::Opaque(Vec::new()));
+    let boundary_candidates = vec![BoundaryCandidate {
+        absolute_bit_position: 1,
+        code: "next".to_string(),
+        status: "accepted".to_string(),
+        distance_from_retained_end: 0,
+    }];
+
+    let sweep = build_extension_sweep(
+        &item,
+        &[0, 0, 0],
+        &HuffmanTree::new(),
+        true,
+        0,
+        &boundary_candidates,
+    );
+    assert_eq!(sweep.len(), 17);
+    for (expected_extension, record) in (0u64..=16).zip(&sweep) {
+        assert_eq!(record.extension_bits, expected_extension);
+        assert_eq!(record.candidate_limit_bits, 1 + expected_extension);
+        assert_eq!(record.ownership_crossing, expected_extension > 0);
+    }
+    assert_eq!(sweep[0].outcome, "parse_failure");
+    assert_eq!(sweep[0].failure_bit_offset_rel, Some(1));
 }
