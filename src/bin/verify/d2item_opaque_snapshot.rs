@@ -31,6 +31,8 @@ struct ParserProbe {
     candidate_limit_bits: u64,
     code_hint: Option<String>,
     forced_compact: Option<bool>,
+    retained_outcome: String,
+    retained_module_kind: String,
     outcome: String,
     module_kind: Option<String>,
     failure_error: Option<String>,
@@ -39,15 +41,6 @@ struct ParserProbe {
     failure_bit_offset_rel: Option<u64>,
     failure_context_relative_offset: Option<u64>,
     failure_hint: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct ParserFailureEnvelope {
-    error: String,
-    context_stack: Vec<String>,
-    bit_offset: u64,
-    context_relative_offset: u64,
-    hint: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -84,26 +77,13 @@ fn bits_to_bytes(bits: &[bool]) -> Vec<u8> {
     bytes
 }
 
-fn parser_failure_envelope(item: &Item) -> Result<Option<ParserFailureEnvelope>> {
-    const PREFIX: &str = "parser_failure_json:";
-    let findings: Vec<_> = item
-        .forensic_audit
-        .findings
-        .iter()
-        .filter_map(|finding| finding.rationale.strip_prefix(PREFIX))
-        .collect();
-
-    if findings.len() > 1 {
-        anyhow::bail!("multiple conflicting parser_failure_json findings");
-    }
-
-    findings
-        .first()
-        .map(|json| serde_json::from_str(json).context("malformed parser_failure_json finding"))
-        .transpose()
-}
-
-fn probe_parser(item: &Item) -> Result<ParserProbe> {
+fn probe_parser(
+    item: &Item,
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+    item_index: usize,
+) -> ParserProbe {
     let candidate_start_bit = item.range.start;
     let candidate_limit_bits = item.total_bits as u64;
     let code_hint = match item.code.trim() {
@@ -111,42 +91,73 @@ fn probe_parser(item: &Item) -> Result<ParserProbe> {
         code => Some(code.to_string()),
     };
 
-    let (outcome, module_kind, failure_error) = item
+    let (retained_outcome, retained_module_kind) = item
         .modules
         .iter()
         .find_map(|module| match module {
-                    ItemModule::SemiOpaque { reason, .. } => Some((
-                        "semi_opaque",
-                        "SemiOpaque",
-                        Some(reason.clone()),
-                    )),
-                    ItemModule::Opaque { .. } => Some((
-                        "opaque",
-                        "Opaque",
-                        Some("Section parsing preserved an opaque module without a structured parser failure.".to_string()),
-                    )),
-                    ItemModule::Residue { .. } => Some((
-                        "opaque",
-                        "Residue",
-                        Some("Section parsing preserved residue without a structured parser failure.".to_string()),
-                    )),
-                    _ => None,
-                })
-        .unwrap_or(("parsed", "Structured", None));
+            ItemModule::SemiOpaque { .. } => Some(("semi_opaque", "SemiOpaque")),
+            ItemModule::Opaque { .. } => Some(("opaque", "Opaque")),
+            ItemModule::Residue { .. } => Some(("opaque", "Residue")),
+            _ => None,
+        })
+        .unwrap_or(("parsed", "Structured"));
 
-    let failure = parser_failure_envelope(item)?;
+    let candidate_bits = bits_from_range(
+        bytes,
+        candidate_start_bit,
+        candidate_start_bit.saturating_add(candidate_limit_bits),
+    );
+    let candidate_bytes = bits_to_bytes(&candidate_bits);
+    let live_result = d2r_core::domain::item::serialization::parse_item_at_with_limit(
+        &candidate_bytes,
+        0,
+        candidate_start_bit,
+        huffman,
+        item_index,
+        is_alpha,
+        Some(candidate_limit_bits),
+        None,
+        code_hint.as_deref(),
+    );
     let (
+        outcome,
+        module_kind,
         failure_error,
         failure_context_stack,
         failure_bit_offset_abs,
         failure_bit_offset_rel,
         failure_context_relative_offset,
         failure_hint,
-    ) = match failure {
-        Some(failure) => {
+    ) = match live_result {
+        Ok((reparsed, _consumed_bits)) => {
+            let module_kind = reparsed.modules.iter().find_map(|module| match module {
+                ItemModule::SemiOpaque { .. } => Some("SemiOpaque"),
+                ItemModule::Opaque { .. } => Some("Opaque"),
+                ItemModule::Residue { .. } => Some("Residue"),
+                _ => None,
+            });
+            let outcome = match module_kind {
+                Some("SemiOpaque") => "semi_opaque",
+                Some(_) => "opaque",
+                None => "parsed",
+            };
+            (
+                outcome.to_string(),
+                Some(module_kind.unwrap_or("Structured").to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        Err(failure) => {
             let relative = failure.bit_offset.checked_sub(candidate_start_bit);
             (
-                Some(failure.error),
+                "parse_failure".to_string(),
+                None,
+                Some(failure.error.to_string()),
                 Some(failure.context_stack),
                 Some(failure.bit_offset),
                 relative,
@@ -154,24 +165,25 @@ fn probe_parser(item: &Item) -> Result<ParserProbe> {
                 failure.hint,
             )
         }
-        None => (failure_error, None, None, None, None, None),
     };
 
-    Ok(ParserProbe {
-        probe_source: "retained_section_result".to_string(),
+    ParserProbe {
+        probe_source: "bounded_live_reparse".to_string(),
         candidate_start_bit,
         candidate_limit_bits,
         code_hint,
         forced_compact: None,
-        outcome: outcome.to_string(),
-        module_kind: Some(module_kind.to_string()),
+        retained_outcome: retained_outcome.to_string(),
+        retained_module_kind: retained_module_kind.to_string(),
+        outcome,
+        module_kind,
         failure_error,
         failure_context_stack,
         failure_bit_offset_abs,
         failure_bit_offset_rel,
         failure_context_relative_offset,
         failure_hint,
-    })
+    }
 }
 
 fn main() -> Result<()> {
@@ -279,7 +291,13 @@ fn main() -> Result<()> {
                     hex_payload,
                     module_reason,
                     module_body_hex,
-                    parser_probe: Some(probe_parser(&item)?),
+                    parser_probe: Some(probe_parser(
+                        &item,
+                        &bytes,
+                        &huffman,
+                        is_alpha,
+                        global_index,
+                    )),
                 });
             }
             global_index += 1;
@@ -303,30 +321,19 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-use d2r_core::domain::item::{Confidence, ForensicMetadata, Intentionality};
-
 #[test]
-fn parser_failure_envelope_projection() {
+fn bounded_live_reparse_reports_concrete_failure() {
     let mut item = Item::default();
-    item.range.start = 7661;
-    item.total_bits = 168;
+    item.range.start = 0;
+    item.total_bits = 1;
     item.code = "Opaque".to_string();
     item.modules.push(ItemModule::Opaque(Vec::new()));
-    item.forensic_audit.record(ForensicMetadata::new(
-        Confidence::VerifiedTruth,
-        Intentionality::Artifactual,
-        r#"parser_failure_json:{"error":"Io(\"boundary\")","context_stack":["Root","ExtendedStats"],"bit_offset":7829,"context_relative_offset":80,"hint":"limit"}"#,
-    ));
 
-    let probe = probe_parser(&item).expect("valid parser failure envelope");
-    assert_eq!(probe.failure_error.as_deref(), Some("Io(\"boundary\")"));
-    assert_eq!(
-        probe.failure_context_stack.as_deref(),
-        Some(["Root".to_string(), "ExtendedStats".to_string()].as_slice())
-    );
-    assert_eq!(probe.failure_bit_offset_abs, Some(7829));
-    assert_eq!(probe.failure_bit_offset_rel, Some(168));
-    assert_eq!(probe.failure_context_relative_offset, Some(80));
-    assert_eq!(probe.failure_hint.as_deref(), Some("limit"));
+    let probe = probe_parser(&item, &[0], &HuffmanTree::new(), true, 0);
+    assert_eq!(probe.probe_source, "bounded_live_reparse");
+    assert_eq!(probe.retained_outcome, "opaque");
+    assert_eq!(probe.retained_module_kind, "Opaque");
+    assert_eq!(probe.outcome, "parse_failure");
+    assert!(probe.failure_error.is_some());
+    assert!(probe.failure_bit_offset_abs.is_some());
 }
