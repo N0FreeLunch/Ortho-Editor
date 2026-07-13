@@ -24,6 +24,7 @@ struct OpaqueItem {
     module_body_hex: Option<String>,
     parser_probe: Option<ParserProbe>,
     boundary_candidates: Vec<BoundaryCandidate>,
+    extension_sweep_summary: ExtensionSweepSummary,
     extension_sweep: Vec<ExtensionSweepRecord>,
 }
 
@@ -47,6 +48,17 @@ struct ExtensionSweepRecord {
     failure_bit_offset_abs: Option<u64>,
     failure_bit_offset_rel: Option<u64>,
     failure_context_stack: Option<Vec<String>>,
+}
+
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+struct ExtensionSweepSummary {
+    row_count: usize,
+    base_outcome: Option<String>,
+    positive_extension_count: usize,
+    positive_ownership_crossing_count: usize,
+    failure_offset_tracks_candidate_limit: bool,
+    first_non_failure_extension_bits: Option<u64>,
+    first_structured_extension_bits: Option<u64>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -206,6 +218,40 @@ fn build_extension_sweep(
             }
         })
         .collect()
+}
+
+fn summarize_extension_sweep(rows: &[ExtensionSweepRecord]) -> ExtensionSweepSummary {
+    let failures = rows
+        .iter()
+        .filter(|record| record.outcome == "parse_failure")
+        .collect::<Vec<_>>();
+    ExtensionSweepSummary {
+        row_count: rows.len(),
+        base_outcome: rows
+            .iter()
+            .find(|record| record.extension_bits == 0)
+            .map(|record| record.outcome.clone()),
+        positive_extension_count: rows
+            .iter()
+            .filter(|record| record.extension_bits > 0)
+            .count(),
+        positive_ownership_crossing_count: rows
+            .iter()
+            .filter(|record| record.extension_bits > 0 && record.ownership_crossing)
+            .count(),
+        failure_offset_tracks_candidate_limit: !failures.is_empty()
+            && failures
+                .iter()
+                .all(|record| record.failure_bit_offset_rel == Some(record.candidate_limit_bits)),
+        first_non_failure_extension_bits: rows
+            .iter()
+            .find(|record| record.outcome != "parse_failure")
+            .map(|record| record.extension_bits),
+        first_structured_extension_bits: rows
+            .iter()
+            .find(|record| record.outcome == "parsed")
+            .map(|record| record.extension_bits),
+    }
 }
 
 fn bits_from_range(bytes: &[u8], start_bit: u64, end_bit: u64) -> Vec<bool> {
@@ -496,6 +542,7 @@ fn main() -> Result<()> {
                     global_index,
                     &boundary_candidates,
                 );
+                let extension_sweep_summary = summarize_extension_sweep(&extension_sweep);
 
                 opaque_items.push(OpaqueItem {
                     index: global_index,
@@ -517,6 +564,7 @@ fn main() -> Result<()> {
                         global_index,
                     )?),
                     boundary_candidates,
+                    extension_sweep_summary,
                     extension_sweep,
                 });
             }
@@ -667,4 +715,32 @@ fn extension_sweep_is_ordered_bounded_and_marks_boundary_crossing() {
     }
     assert_eq!(sweep[0].outcome, "parse_failure");
     assert_eq!(sweep[0].failure_bit_offset_rel, Some(1));
+}
+
+#[test]
+fn extension_sweep_summary_classifies_limit_tracking_boundary_crossing() {
+    let rows = (0u64..=16)
+        .map(|extension_bits| ExtensionSweepRecord {
+            extension_bits,
+            candidate_limit_bits: 149 + extension_bits,
+            ownership_crossing: extension_bits > 0,
+            outcome: "parse_failure".to_string(),
+            module_kind: None,
+            consumed_bits: None,
+            failure_error: Some("limit".to_string()),
+            failure_bit_offset_abs: Some(8901 + extension_bits),
+            failure_bit_offset_rel: Some(149 + extension_bits),
+            failure_context_stack: Some(vec!["Root".to_string(), "ExtendedStats".to_string()]),
+        })
+        .collect::<Vec<_>>();
+
+    let summary = summarize_extension_sweep(&rows);
+
+    assert_eq!(summary.row_count, 17);
+    assert_eq!(summary.base_outcome.as_deref(), Some("parse_failure"));
+    assert_eq!(summary.positive_extension_count, 16);
+    assert_eq!(summary.positive_ownership_crossing_count, 16);
+    assert!(summary.failure_offset_tracks_candidate_limit);
+    assert_eq!(summary.first_non_failure_extension_bits, None);
+    assert_eq!(summary.first_structured_extension_bits, None);
 }
