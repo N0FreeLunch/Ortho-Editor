@@ -4,6 +4,56 @@ use d2r_core::domain::item::quality::ItemQuality;
 use d2r_core::domain::stats::StatsAxiom;
 use d2r_core::verify::args::{ArgError, ArgParser};
 
+#[derive(Clone, serde::Serialize)]
+struct Candidate {
+    offset: u64,
+    end_offset: u64,
+    stats_read: usize,
+    terminator_found: bool,
+    parity_gap: u64,
+    score: i32,
+    status: &'static str,
+    trace: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ScanInput<'a> {
+    file: &'a str,
+    depth: usize,
+    version: u8,
+    alpha: bool,
+    runeword: bool,
+    code: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct ScanWindow {
+    start_bit: u64,
+    end_bit_exclusive: u64,
+}
+
+#[derive(serde::Serialize)]
+struct ScanReport<'a> {
+    schema_version: u32,
+    input: ScanInput<'a>,
+    scan: ScanWindow,
+    best_candidate: Option<Candidate>,
+    candidates: Vec<Candidate>,
+}
+
+fn write_json_output(
+    value: &impl serde::Serialize,
+    output_path: Option<&String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let json = serde_json::to_string_pretty(value)?;
+    if let Some(path) = output_path {
+        std::fs::write(path, json)?;
+    } else {
+        println!("{}", json);
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2item_rhythm_oracle")
         .description("Scores bitstreams by validating 9-bit stat ID rhythms and searching for the 0x1FF terminator.");
@@ -165,17 +215,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             best_offset = offset;
         }
 
-        if !is_scan || terminator_found {
-            results.push((
-                offset,
-                temp_pos,
-                stats_read,
-                terminator_found,
-                parity_gap,
-                score,
-                trace,
-            ));
-        }
+        let status = if !terminator_found || score < 50 {
+            "Likely Ghost Code"
+        } else {
+            "Valid Rhythm"
+        };
+
+        results.push(Candidate {
+            offset,
+            end_offset: temp_pos,
+            stats_read,
+            terminator_found,
+            parity_gap,
+            score,
+            status,
+            trace,
+        });
+    }
+
+    if is_scan && args.is_json() {
+        let best_candidate = results
+            .iter()
+            .find(|candidate| candidate.offset == best_offset)
+            .cloned();
+        let report = ScanReport {
+            schema_version: 1,
+            input: ScanInput {
+                file: file_path,
+                depth: max_depth,
+                version,
+                alpha: is_alpha,
+                runeword: is_runeword,
+                code: item_code,
+            },
+            scan: ScanWindow {
+                start_bit: start_bit_offset,
+                end_bit_exclusive: start_bit_offset + scan_range,
+            },
+            best_candidate,
+            candidates: results,
+        };
+        write_json_output(&report, args.get("output"))?;
+        return Ok(());
     }
 
     if is_scan {
@@ -188,40 +269,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("------------------------------------");
     }
 
-    for (offset, end_pos, stats_read, terminator_found, parity_gap, score, trace) in results {
-        if is_scan && score < best_score && !terminator_found {
+    for candidate in results {
+        if is_scan && candidate.score < best_score && !candidate.terminator_found {
             continue;
         }
 
-        let is_ghost = if !terminator_found || score < 50 {
-            "Likely Ghost Code"
-        } else {
-            "Valid Rhythm"
-        };
-
         if args.is_json() {
-            let output = serde_json::json!({
-                "offset": offset,
-                "end_offset": end_pos,
-                "stats_read": stats_read,
-                "terminator_found": terminator_found,
-                "parity_gap": parity_gap,
-                "score": score,
-                "status": is_ghost,
-                "trace": trace,
-            });
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            write_json_output(&candidate, args.get("output"))?;
         } else {
-            println!("Analysis for offset: {}", offset);
+            println!("Analysis for offset: {}", candidate.offset);
             println!("------------------------------------");
-            println!("Stats Read:       {}", stats_read);
-            println!("Terminator Found: {}", terminator_found);
-            println!("Parity Gap:       {}", parity_gap);
-            println!("Fidelity Score:   {}", score);
-            println!("Status:           {}", is_ghost);
-            println!("End Offset:       {}", end_pos);
+            println!("Stats Read:       {}", candidate.stats_read);
+            println!("Terminator Found: {}", candidate.terminator_found);
+            println!("Parity Gap:       {}", candidate.parity_gap);
+            println!("Fidelity Score:   {}", candidate.score);
+            println!("Status:           {}", candidate.status);
+            println!("End Offset:       {}", candidate.end_offset);
             println!("\nTrace:");
-            for t in trace {
+            for t in candidate.trace {
                 println!("  {}", t);
             }
             println!("\n");
@@ -229,4 +294,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_report() -> ScanReport<'static> {
+        let candidate = Candidate {
+            offset: 9674,
+            end_offset: 9683,
+            stats_read: 0,
+            terminator_found: true,
+            parity_gap: 3,
+            score: 160,
+            status: "Valid Rhythm",
+            trace: vec!["Terminator (0x1FF) at bit 9674".to_string()],
+        };
+        ScanReport {
+            schema_version: 1,
+            input: ScanInput {
+                file: "fixture.d2s",
+                depth: 16,
+                version: 5,
+                alpha: true,
+                runeword: false,
+                code: "wyws",
+            },
+            scan: ScanWindow {
+                start_bit: 9674,
+                end_bit_exclusive: 9752,
+            },
+            best_candidate: Some(candidate.clone()),
+            candidates: vec![candidate],
+        }
+    }
+
+    #[test]
+    fn scan_report_json_has_required_contract() {
+        let value = serde_json::to_value(sample_report()).expect("report should serialize");
+        for key in [
+            "schema_version",
+            "input",
+            "scan",
+            "best_candidate",
+            "candidates",
+        ] {
+            assert!(value.get(key).is_some(), "missing top-level key: {key}");
+        }
+        assert_eq!(value["scan"]["start_bit"], 9674);
+        assert_eq!(value["scan"]["end_bit_exclusive"], 9752);
+
+        let candidate = &value["candidates"][0];
+        for key in [
+            "offset",
+            "end_offset",
+            "stats_read",
+            "terminator_found",
+            "parity_gap",
+            "score",
+            "status",
+            "trace",
+        ] {
+            assert!(candidate.get(key).is_some(), "missing candidate key: {key}");
+        }
+    }
+
+    #[test]
+    fn write_json_output_creates_parseable_file() {
+        let path = std::env::temp_dir().join(format!(
+            "d2item-rhythm-oracle-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should follow Unix epoch")
+                .as_nanos()
+        ));
+        let path_string = path.to_string_lossy().into_owned();
+
+        write_json_output(&sample_report(), Some(&path_string)).expect("output should be written");
+        let bytes = std::fs::read(&path).expect("output file should exist");
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("output should contain valid JSON");
+        assert_eq!(value["best_candidate"]["offset"], 9674);
+        assert_eq!(value["best_candidate"]["score"], 160);
+
+        std::fs::remove_file(path).expect("temporary output should be removable");
+    }
 }
