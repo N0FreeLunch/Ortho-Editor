@@ -68,6 +68,15 @@ struct ParserProbe {
     failure_hint: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct ParserFailureEnvelope {
+    error: String,
+    context_stack: Vec<String>,
+    bit_offset: u64,
+    context_relative_offset: u64,
+    hint: Option<String>,
+}
+
 #[derive(serde::Serialize)]
 struct OpaqueSnapshotReport {
     save_file: String,
@@ -226,13 +235,49 @@ fn bits_to_bytes(bits: &[bool]) -> Vec<u8> {
     bytes
 }
 
+fn parser_failure_envelope(item: &Item) -> Result<Option<ParserFailureEnvelope>> {
+    const PREFIX: &str = "parser_failure_json:";
+    let findings = item
+        .forensic_audit
+        .findings
+        .iter()
+        .filter_map(|finding| finding.rationale.strip_prefix(PREFIX))
+        .collect::<Vec<_>>();
+
+    if findings.len() > 1 {
+        anyhow::bail!("multiple conflicting parser_failure_json findings");
+    }
+
+    findings
+        .first()
+        .map(|json| serde_json::from_str(json).context("malformed parser_failure_json finding"))
+        .transpose()
+}
+
+fn apply_preserved_failure(item: &Item, probe: &mut ParserProbe) -> Result<()> {
+    if probe.failure_error.is_some() {
+        return Ok(());
+    }
+
+    if let Some(failure) = parser_failure_envelope(item)? {
+        probe.failure_bit_offset_rel = failure.bit_offset.checked_sub(probe.candidate_start_bit);
+        probe.failure_error = Some(failure.error);
+        probe.failure_context_stack = Some(failure.context_stack);
+        probe.failure_bit_offset_abs = Some(failure.bit_offset);
+        probe.failure_context_relative_offset = Some(failure.context_relative_offset);
+        probe.failure_hint = failure.hint;
+    }
+
+    Ok(())
+}
+
 fn probe_parser(
     item: &Item,
     bytes: &[u8],
     huffman: &HuffmanTree,
     is_alpha: bool,
     item_index: usize,
-) -> ParserProbe {
+) -> Result<ParserProbe> {
     let candidate_start_bit = item.range.start;
     let candidate_limit_bits = item.total_bits as u64;
     let code_hint = match item.code.trim() {
@@ -316,7 +361,7 @@ fn probe_parser(
         }
     };
 
-    ParserProbe {
+    let mut probe = ParserProbe {
         probe_source: "bounded_live_reparse".to_string(),
         candidate_start_bit,
         candidate_limit_bits,
@@ -332,7 +377,9 @@ fn probe_parser(
         failure_bit_offset_rel,
         failure_context_relative_offset,
         failure_hint,
-    }
+    };
+    apply_preserved_failure(item, &mut probe)?;
+    Ok(probe)
 }
 
 fn main() -> Result<()> {
@@ -468,7 +515,7 @@ fn main() -> Result<()> {
                         &huffman,
                         is_alpha,
                         global_index,
-                    )),
+                    )?),
                     boundary_candidates,
                     extension_sweep,
                 });
@@ -502,13 +549,62 @@ fn bounded_live_reparse_reports_concrete_failure() {
     item.code = "Opaque".to_string();
     item.modules.push(ItemModule::Opaque(Vec::new()));
 
-    let probe = probe_parser(&item, &[0], &HuffmanTree::new(), true, 0);
+    let probe = probe_parser(&item, &[0], &HuffmanTree::new(), true, 0)
+        .expect("bounded live reparse should return a probe");
     assert_eq!(probe.probe_source, "bounded_live_reparse");
     assert_eq!(probe.retained_outcome, "opaque");
     assert_eq!(probe.retained_module_kind, "Opaque");
     assert_eq!(probe.outcome, "parse_failure");
     assert!(probe.failure_error.is_some());
     assert!(probe.failure_bit_offset_abs.is_some());
+}
+
+#[cfg(test)]
+use d2r_core::domain::item::{Confidence, ForensicMetadata, Intentionality};
+
+#[test]
+fn retained_failure_envelope_survives_live_opaque_reparse() {
+    let mut item = Item::default();
+    item.range.start = 7661;
+    item.total_bits = 168;
+    item.code = "Opaque".to_string();
+    item.modules.push(ItemModule::Opaque(Vec::new()));
+    item.forensic_audit.record(ForensicMetadata::new(
+        Confidence::VerifiedTruth,
+        Intentionality::Artifactual,
+        r#"parser_failure_json:{"error":"Io(\"boundary\")","context_stack":["Root","ExtendedStats"],"bit_offset":7829,"context_relative_offset":80,"hint":"limit"}"#,
+    ));
+    let mut probe = ParserProbe {
+        probe_source: "bounded_live_reparse".to_string(),
+        candidate_start_bit: 7661,
+        candidate_limit_bits: 168,
+        code_hint: None,
+        forced_compact: None,
+        retained_outcome: "opaque".to_string(),
+        retained_module_kind: "Opaque".to_string(),
+        outcome: "opaque".to_string(),
+        module_kind: Some("Opaque".to_string()),
+        failure_error: None,
+        failure_context_stack: None,
+        failure_bit_offset_abs: None,
+        failure_bit_offset_rel: None,
+        failure_context_relative_offset: None,
+        failure_hint: None,
+    };
+
+    apply_preserved_failure(&item, &mut probe).expect("valid preserved failure envelope");
+
+    assert_eq!(probe.outcome, "opaque");
+    assert_eq!(probe.module_kind.as_deref(), Some("Opaque"));
+    assert_eq!(probe.failure_error.as_deref(), Some("Io(\"boundary\")"));
+    assert_eq!(probe.failure_bit_offset_abs, Some(7829));
+    assert_eq!(probe.failure_bit_offset_rel, Some(168));
+    assert_eq!(probe.failure_context_relative_offset, Some(80));
+    assert_eq!(
+        probe.failure_context_stack.as_deref(),
+        Some(["Root".to_string(), "ExtendedStats".to_string()].as_slice())
+    );
+    assert_eq!(probe.failure_hint.as_deref(), Some("limit"));
 }
 
 #[test]
