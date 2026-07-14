@@ -41,6 +41,7 @@ struct ExtensionSweepRecord {
     extension_bits: u64,
     candidate_limit_bits: u64,
     ownership_crossing: bool,
+    retained_interval_crossing: bool,
     outcome: String,
     module_kind: Option<String>,
     consumed_bits: Option<u64>,
@@ -59,6 +60,8 @@ struct ExtensionSweepSummary {
     failure_offset_tracks_candidate_limit: bool,
     first_non_failure_extension_bits: Option<u64>,
     first_structured_extension_bits: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    first_structured_extension_crosses_retained_interval: Option<bool>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -194,6 +197,7 @@ fn build_extension_sweep(
                         extension_bits,
                         candidate_limit_bits,
                         ownership_crossing: extension_bits > 0 && accepted_at_retained_end,
+                        retained_interval_crossing: extension_bits > 0,
                         outcome: outcome.to_string(),
                         module_kind: Some(module_kind.unwrap_or("Structured").to_string()),
                         consumed_bits: Some(consumed_bits),
@@ -207,6 +211,7 @@ fn build_extension_sweep(
                     extension_bits,
                     candidate_limit_bits,
                     ownership_crossing: extension_bits > 0 && accepted_at_retained_end,
+                    retained_interval_crossing: extension_bits > 0,
                     outcome: "parse_failure".to_string(),
                     module_kind: None,
                     consumed_bits: None,
@@ -251,6 +256,10 @@ fn summarize_extension_sweep(rows: &[ExtensionSweepRecord]) -> ExtensionSweepSum
             .iter()
             .find(|record| record.outcome == "parsed")
             .map(|record| record.extension_bits),
+        first_structured_extension_crosses_retained_interval: rows
+            .iter()
+            .find(|record| record.outcome == "parsed")
+            .map(|record| record.retained_interval_crossing),
     }
 }
 
@@ -712,6 +721,7 @@ fn extension_sweep_is_ordered_bounded_and_marks_boundary_crossing() {
         assert_eq!(record.extension_bits, expected_extension);
         assert_eq!(record.candidate_limit_bits, 1 + expected_extension);
         assert_eq!(record.ownership_crossing, expected_extension > 0);
+        assert_eq!(record.retained_interval_crossing, expected_extension > 0);
     }
     assert_eq!(sweep[0].outcome, "parse_failure");
     assert_eq!(sweep[0].failure_bit_offset_rel, Some(1));
@@ -724,6 +734,7 @@ fn extension_sweep_summary_classifies_limit_tracking_boundary_crossing() {
             extension_bits,
             candidate_limit_bits: 149 + extension_bits,
             ownership_crossing: extension_bits > 0,
+            retained_interval_crossing: extension_bits > 0,
             outcome: "parse_failure".to_string(),
             module_kind: None,
             consumed_bits: None,
@@ -743,4 +754,5 @@ fn extension_sweep_summary_classifies_limit_tracking_boundary_crossing() {
     assert!(summary.failure_offset_tracks_candidate_limit);
     assert_eq!(summary.first_non_failure_extension_bits, None);
     assert_eq!(summary.first_structured_extension_bits, None);
+    assert_eq!(summary.first_structured_extension_crosses_retained_interval, None);
 }
