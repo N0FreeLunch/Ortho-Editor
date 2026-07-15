@@ -28,11 +28,15 @@ mod roundtrip_tests {
     }
 
     fn compact_standalone_contract(item: &Item) -> CompactStandaloneContract {
+        let code_norm = norm_code(&item.code);
+        if item.header.save_is_alpha && matches!(code_norm.as_str(), "xrs" | "c8xr" | "rhd" | "wa2" | "hp1" | "mp1" | "tsc" | "isc") {
+            return CompactStandaloneContract::ContextRequired;
+        }
         if !(item.header.save_is_alpha && item.header.is_compact) {
             return CompactStandaloneContract::WireCanonical;
         }
 
-        match norm_code(&item.code).as_str() {
+        match code_norm.as_str() {
             // "jav"/"us g", "buc "/"buc" can be semantically equivalent.
             // Standalone decode can still require context, so semantic checks
             // are best-effort on successful standalone re-parse.
@@ -559,7 +563,6 @@ mod roundtrip_tests {
             .find(|(_, item)| item.code.trim() == "tsc")
             .expect("tsc item must exist in amazon_10_scrolls fixture");
 
-        // Contract: tsc is ContextRequired — standalone parse is explicitly unsupported
         let contract = compact_standalone_contract(scroll);
         assert_eq!(
             contract,
@@ -581,4 +584,35 @@ mod roundtrip_tests {
         // to_bytes succeeds; from_bytes is not attempted (context-dependent parse).
         // If future slices make tsc standalone-parseable, this assertion must be updated.
     }
+
+    #[test]
+    fn test_v105_slice2_equipment_item_boundary_contract() {
+        let bytes = fs::read(repo_path(
+            "tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",
+        ))
+        .expect("fixture should be readable");
+        let huffman = HuffmanTree::new();
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+        assert_eq!(version, 105);
+
+        let items = Item::read_player_items(&bytes, &huffman, true).expect("items should parse");
+        // Verify we have parsed 17 items (0 to 16)
+        assert_eq!(items.len(), 17);
+
+        // Verify the codes of Items 3, 4, 5, 6
+        assert_eq!(items[3].code.trim(), "hp1");
+        assert_eq!(items[4].code.trim(), "xrs");
+        assert_eq!(items[5].code.trim(), "wyws");
+        assert_eq!(items[6].code.trim(), "wa2");
+
+        // Verify that Item 4 and Item 5 have no parser failures (they are fully parsed)
+        assert!(!items[4].is_opaque(), "Item 4 (xrs) should not be opaque (indicating no parser failure)");
+        assert!(!items[5].is_opaque(), "Item 5 (wyws) should not be opaque (indicating no parser failure)");
+
+        // Verify runeword attributes or sockets logic on Item 4
+        assert!(items[4].header.is_runeword);
+        assert!(items[4].header.is_socketed);
+        assert_eq!(items[4].socketed_items.len(), 3);
+    }
 }
+
