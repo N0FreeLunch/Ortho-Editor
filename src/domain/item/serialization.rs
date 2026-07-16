@@ -3015,14 +3015,18 @@ impl Item {
         .with_compact(item.header.is_compact)
         .with_socketed(item.header.is_socketed || (alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")))
         .with_code(&item.code);
-        let nudge_comb = NudgeCombinator;
-        let padding = nudge_comb.apply_alignment_padding(
-            cursor,
-            start_bit,
-            &item.code,
-            item.header.flags,
-            &axiom,
-        )?;
+        let padding = if item.header.is_compact {
+            Vec::new()
+        } else {
+            let nudge_comb = NudgeCombinator;
+            nudge_comb.apply_alignment_padding(
+                cursor,
+                start_bit,
+                &item.code,
+                item.header.flags,
+                &axiom,
+            )?
+        };
         item.body.alpha_alignment_padding.extend(padding);
 
         item.range.end = cursor.pos();
