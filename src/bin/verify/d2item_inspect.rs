@@ -373,6 +373,20 @@ fn main() {
 
     if let Some(offset) = bit_offset {
         if trace_segments {
+            let trace_header = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                &bytes,
+                offset as u64,
+                Some(offset as u64),
+                &huffman,
+                is_alpha,
+                0,
+            )
+            .map(|peek| (peek.3.trim().to_string(), peek.6));
+            let trace_limit = (bytes.len() as u64 * 8).saturating_sub(offset as u64);
+            let trace_code_hint = trace_header.as_ref().map(|(code, _)| code.as_str());
+            let trace_forced_compact = trace_header
+                .as_ref()
+                .and_then(|(_, is_compact)| (*is_compact).then_some(true));
             match d2r_core::domain::item::serialization::parse_item_at_with_limit(
                 &bytes,
                 offset as u64,
@@ -380,12 +394,12 @@ fn main() {
                 &huffman,
                 0,
                 is_alpha,
-                Some(264),
-                Some(false),
-                Some("wcw8"),
+                Some(trace_limit),
+                trace_forced_compact,
+                trace_code_hint,
             ) {
                 Ok((item, bit_end)) => {
-                    let trace_end = offset as u64 + 264;
+                    let trace_end = item.range.end;
                     let coordinate = coordinate_bit.map(|absolute| {
                         let item_local = (absolute >= item.range.start && absolute < trace_end)
                             .then(|| absolute - item.range.start);
@@ -439,7 +453,7 @@ fn main() {
                             "Trace segments for '{}' bits {}-{}",
                             item.code.trim(),
                             item.range.start,
-                            bit_end
+                            item.range.end
                         );
                         println!(
                             "{}",
