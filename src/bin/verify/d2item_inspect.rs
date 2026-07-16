@@ -312,6 +312,18 @@ fn main() {
         Some("trace-provenance"),
         "Trace item code provenance (scanner hint, normalized code, final code)",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "trace-segments",
+        None,
+        Some("trace-segments"),
+        "Expose parser semantic segments for a boundary-correct item parse",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "coordinate-bit",
+        None,
+        Some("coordinate-bit"),
+        "Crosswalk an absolute bit coordinate against the parsed item segments",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -331,6 +343,10 @@ fn main() {
         .get("bit-offset")
         .and_then(|s| s.parse::<usize>().ok());
     let trace_provenance = parsed.is_set("trace-provenance");
+    let trace_segments = parsed.is_set("trace-segments");
+    let coordinate_bit = parsed
+        .get("coordinate-bit")
+        .and_then(|s| s.parse::<u64>().ok());
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -356,6 +372,94 @@ fn main() {
     let is_alpha = version_raw == 105 || version_raw == 6;
 
     if let Some(offset) = bit_offset {
+        if trace_segments {
+            match d2r_core::domain::item::serialization::parse_item_at_with_limit(
+                &bytes,
+                offset as u64,
+                0,
+                &huffman,
+                0,
+                is_alpha,
+                Some(264),
+                Some(false),
+                Some("wcw8"),
+            ) {
+                Ok((item, bit_end)) => {
+                    let trace_end = offset as u64 + 264;
+                    let coordinate = coordinate_bit.map(|absolute| {
+                        let item_local = (absolute >= item.range.start && absolute < trace_end)
+                            .then(|| absolute - item.range.start);
+                        let owner_segments = item_local
+                            .map(|local| {
+                                item.segments
+                                    .iter()
+                                    .filter(|segment| segment.start <= local && local < segment.end)
+                                    .map(|segment| {
+                                        json!({
+                                            "label": segment.label,
+                                            "start": segment.start,
+                                            "end": segment.end,
+                                            "depth": segment.depth
+                                        })
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        json!({
+                            "absolute": absolute,
+                            "item_local": item_local,
+                            "owner_segments": owner_segments
+                        })
+                    });
+                    let segments = item
+                        .segments
+                        .iter()
+                        .map(|segment| {
+                            json!({
+                                "label": segment.label,
+                                "start": segment.start,
+                                "end": segment.end,
+                                "depth": segment.depth
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    if is_json {
+                        println!(
+                            "{}",
+                            json!({
+                                "item": item_to_json(&item, None),
+                                "range": {"start": item.range.start, "end": trace_end},
+                                "parser_consumed_bits": bit_end,
+                                "coordinate": coordinate,
+                                "segments": segments
+                            })
+                        );
+                    } else {
+                        println!(
+                            "Trace segments for '{}' bits {}-{}",
+                            item.code.trim(),
+                            item.range.start,
+                            bit_end
+                        );
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(
+                                &json!({"coordinate": coordinate, "segments": segments})
+                            )
+                            .unwrap_or_default()
+                        );
+                    }
+                }
+                Err(e) => {
+                    if is_json {
+                        println!("{}", json!({"errors": [e.to_string()]}));
+                    } else {
+                        eprintln!("Failed to trace item at offset {}: {}", offset, e);
+                    }
+                }
+            }
+            return;
+        }
         let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
         let _ = reader.skip(offset as u32).unwrap_or(());
         match Item::from_reader(&mut reader, &huffman, is_alpha) {
