@@ -1642,6 +1642,9 @@ impl Item {
                     flags_peek,
                     Some(item_count),
                 );
+                if parse_code_hint_tmp.trim() == "hla" {
+                    target_width_override = 168;
+                }
                 if target_width_override > 0 {
                     dynamic_limit = target_width_override as u64;
                 }
