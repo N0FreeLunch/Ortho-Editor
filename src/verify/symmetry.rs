@@ -28,6 +28,14 @@ pub struct ItemDiff {
     pub first_mismatch_offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_bit_offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_bit_value: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_bit_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_bit_source_label_unavailable: Option<bool>,
     pub fidelity_score: f32,
     pub forensic_audit: ForensicAudit,
     pub version: u8,
@@ -310,6 +318,12 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
         item_diff.mismatch_type = Some(m_type);
         if let Some(idx) = mismatch_idx {
             item_diff.first_mismatch_offset = Some(idx as u64);
+            if let Some(recorded_bit) = original_bits.get(idx) {
+                item_diff.recorded_bit_offset = Some(recorded_bit.offset);
+                item_diff.recorded_bit_value = Some(recorded_bit.bit);
+                item_diff.recorded_bit_source = Some("original_item_bits".to_string());
+                item_diff.recorded_bit_source_label_unavailable = Some(true);
+            }
             item_diff.segment = Some(
                 item
                     .query_bit(idx as u64)
