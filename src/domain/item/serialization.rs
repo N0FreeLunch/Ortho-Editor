@@ -2986,15 +2986,15 @@ impl Item {
                     item.header.save_is_alpha,
                     item.header.quality,
                     item.header.flags,
-                    item.header.is_runeword || authority_runeword_hint,
-                    if authority_runeword_hint {
+                    item.header.is_runeword || (authority_runeword_hint && !item.header.is_compact),
+                    if authority_runeword_hint && !item.header.is_compact {
                         false
                     } else {
                         is_v105_shadow || rhythm_recovery
                     },
                     item.header.is_personalized,
                     item.header.is_compact,
-                    item.header.is_socketed || authority_runeword_hint,
+                    item.header.is_socketed || (authority_runeword_hint && !item.header.is_compact),
                 )?;
 
             item.properties = props.clone();
