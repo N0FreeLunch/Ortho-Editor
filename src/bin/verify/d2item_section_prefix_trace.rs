@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::forensic::registry::get_registry;
 use d2r_core::item::{HuffmanTree, Item};
@@ -72,6 +72,10 @@ struct IsolatedInspect {
 struct ItemTrace {
     item_index: usize,
     code: String,
+    bit_source_contract: &'static str,
+    raw_capture_available: bool,
+    raw_capture_len_bits: usize,
+    emission_bit_source: &'static str,
     raw_start_bit: u64,
     raw_end_bit: u64,
     raw_len_bits: usize,
@@ -323,6 +327,10 @@ fn build_prefix_trace_report(
             item_traces.push(ItemTrace {
                 item_index,
                 code: item.code.trim().to_string(),
+                bit_source_contract: "parsed_item_replay",
+                raw_capture_available: true,
+                raw_capture_len_bits: raw_bits.len(),
+                emission_bit_source: "parsed_item_to_bits",
                 raw_start_bit: item.range.start,
                 raw_end_bit: item.range.end,
                 raw_len_bits: raw_bits.len(),
