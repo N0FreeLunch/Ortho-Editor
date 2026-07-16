@@ -44,6 +44,14 @@ pub struct ItemDiff {
     pub orig_bits: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_bits: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_source_contract: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_bits_preserved: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comparison_bit_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reserialized_bit_source: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<ItemDiff>,
 }
@@ -273,6 +281,14 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
         parsed_alpha_header_gap: if alpha_mode { Some(item.body.alpha_header_gap_bits.len() as u32) } else { None },
         orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
         target_bits: Some(reserialized_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
+        bit_source_contract: Some(if preserve_raw_bits {
+            "raw_capture_preserving_rebuild"
+        } else {
+            "strict_rebuild_after_cached_bits_clear"
+        }.to_string()),
+        cached_bits_preserved: Some(preserve_raw_bits),
+        comparison_bit_source: Some("original_item_bits".to_string()),
+        reserialized_bit_source: Some("item_to_bits".to_string()),
         ..Default::default()
     };
 

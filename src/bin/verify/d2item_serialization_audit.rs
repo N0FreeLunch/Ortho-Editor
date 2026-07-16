@@ -1,5 +1,5 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff};
+use d2r_core::verify::symmetry::{ItemDiff, calculate_symmetry_diff};
 use std::env;
 use std::fs;
 
@@ -69,9 +69,7 @@ fn main() {
     match calculate_symmetry_diff(&bytes, None, options) {
         Ok(report) => {
             if use_json {
-                let mut json = serde_json::to_value(&report).unwrap();
-                annotate_audit_contracts(&mut json, is_alpha_mode(&bytes));
-                om.json(&serde_json::to_string_pretty(&json).unwrap());
+                om.json(&serde_json::to_string_pretty(&report).unwrap());
             } else if let Some(out_path) = visual_out {
                 generate_html_visual_report(&report, path, &out_path);
                 om.summary(&format!("Visual diff report generated at {}", out_path));
@@ -112,76 +110,6 @@ fn main() {
         Err(e) => {
             eprintln!("Error during symmetry audit: {}", e);
             std::process::exit(1);
-        }
-    }
-}
-
-fn is_alpha_mode(bytes: &[u8]) -> bool {
-    bytes.len() >= 8
-        && matches!(
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])),
-            105 | 6
-        )
-}
-
-fn annotate_audit_contracts(value: &mut serde_json::Value, alpha_mode: bool) {
-    let Some(items) = value
-        .get_mut("items")
-        .and_then(|items| items.as_array_mut())
-    else {
-        return;
-    };
-
-    for item in items {
-        annotate_audit_item_contract(item, alpha_mode);
-    }
-}
-
-fn annotate_audit_item_contract(value: &mut serde_json::Value, alpha_mode: bool) {
-    let Some(object) = value.as_object_mut() else {
-        return;
-    };
-
-    let code = object
-        .get("code")
-        .and_then(|code| code.as_str())
-        .unwrap_or_default();
-    let has_socketed_children = object
-        .get("children")
-        .and_then(|children| children.as_array())
-        .is_some_and(|children| !children.is_empty());
-    let cached_bits_preserved = alpha_mode && (has_socketed_children || !code.is_ascii());
-
-    object.insert(
-        "bit_source_contract".to_string(),
-        serde_json::Value::String(
-            if cached_bits_preserved {
-                "raw_capture_preserving_rebuild"
-            } else {
-                "strict_rebuild_after_cached_bits_clear"
-            }
-            .to_string(),
-        ),
-    );
-    object.insert(
-        "cached_bits_preserved".to_string(),
-        serde_json::Value::Bool(cached_bits_preserved),
-    );
-    object.insert(
-        "comparison_bit_source".to_string(),
-        serde_json::Value::String("original_item_bits".to_string()),
-    );
-    object.insert(
-        "reserialized_bit_source".to_string(),
-        serde_json::Value::String("item_to_bits".to_string()),
-    );
-
-    if let Some(children) = object
-        .get_mut("children")
-        .and_then(|children| children.as_array_mut())
-    {
-        for child in children {
-            annotate_audit_item_contract(child, alpha_mode);
         }
     }
 }
