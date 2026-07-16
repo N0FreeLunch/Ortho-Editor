@@ -185,18 +185,17 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     );
     map.insert(
         "stats".to_string(),
-        json!(
-            item.properties
-                .iter()
-                .map(|p| {
-                    json!({
-                        "id": p.stat_id,
-                        "name": p.name,
-                        "is_unknown": p.name.starts_with("Unknown")
-                    })
+        json!(item
+            .properties
+            .iter()
+            .map(|p| {
+                json!({
+                    "id": p.stat_id,
+                    "name": p.name,
+                    "is_unknown": p.name.starts_with("Unknown")
                 })
-                .collect::<Vec<_>>()
-        ),
+            })
+            .collect::<Vec<_>>()),
     );
 
     let residue = item.modules.iter().find_map(|m| {
@@ -217,6 +216,177 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     }
 
     serde_json::Value::Object(map)
+}
+
+fn compare_first_difference_offset(left: &[bool], right: &[bool], base_bit: u64) -> Option<u64> {
+    let compare_len = left.len().min(right.len());
+    if let Some(idx) = left[..compare_len]
+        .iter()
+        .zip(&right[..compare_len])
+        .position(|(lhs, rhs)| lhs != rhs)
+    {
+        return Some(base_bit + idx as u64);
+    }
+
+    if left.len() != right.len() {
+        return Some(base_bit + compare_len as u64);
+    }
+
+    None
+}
+
+fn classify_local_73_padding_influence(
+    with_padding_bits: &[bool],
+    without_padding_bits: &[bool],
+    base_bit: u64,
+) -> (String, String) {
+    let local_bit = 73usize;
+    let local_bit_offset = base_bit + local_bit as u64;
+    let first_difference_offset =
+        compare_first_difference_offset(with_padding_bits, without_padding_bits, base_bit)
+            .map(|offset| offset.to_string())
+            .unwrap_or_else(|| "none".to_string());
+
+    if with_padding_bits.len() <= local_bit || without_padding_bits.len() <= local_bit {
+        return (
+            "unobservable".to_string(),
+            format!(
+                "Local bit 73 is unavailable because strict rebuild lengths are {} and {} bits; first difference offset = {}.",
+                with_padding_bits.len(),
+                without_padding_bits.len(),
+                first_difference_offset
+            ),
+        );
+    }
+
+    let with_bit = with_padding_bits[local_bit];
+    let without_bit = without_padding_bits[local_bit];
+
+    if with_bit != without_bit {
+        (
+            "influences_local_73".to_string(),
+            format!(
+                "Local bit 73 changes from {} to {} at absolute bit {}; first difference offset = {}.",
+                u8::from(with_bit),
+                u8::from(without_bit),
+                local_bit_offset,
+                first_difference_offset
+            ),
+        )
+    } else {
+        (
+            "does_not_influence_local_73".to_string(),
+            format!(
+                "Local bit 73 remains {} in both strict rebuilds at absolute bit {}; first difference offset = {}.",
+                u8::from(with_bit),
+                local_bit_offset,
+                first_difference_offset
+            ),
+        )
+    }
+}
+
+fn section_context_report(
+    item: &Item,
+    section_item_index: usize,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+) -> serde_json::Value {
+    let mut with_padding_item = item.clone();
+    with_padding_item.bits.clear();
+    let with_padding_bits = match with_padding_item.to_bits(section_item_index, huffman, alpha_mode)
+    {
+        Ok(bits) => bits,
+        Err(e) => {
+            return json!({
+                "section_item_index": section_item_index,
+                "code": item.code.trim(),
+                "range_start": item.range.start,
+                "range_end": item.range.end,
+                "segments": item.segments.clone(),
+                "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
+                "strict_with_padding_bits": serde_json::Value::Null,
+                "strict_without_padding_bits": serde_json::Value::Null,
+                "first_difference_offset": serde_json::Value::Null,
+                "local_73_padding_influence": "unobservable",
+                "local_73_padding_influence_reason": format!(
+                    "Failed to rebuild the retained-padding strict view for section item {}: {}",
+                    section_item_index,
+                    e
+                ),
+                "errors": [e.to_string()],
+            });
+        }
+    };
+
+    let mut without_padding_item = item.clone();
+    without_padding_item.bits.clear();
+    without_padding_item.body.alpha_alignment_padding.clear();
+    let without_padding_bits =
+        match without_padding_item.to_bits(section_item_index, huffman, alpha_mode) {
+            Ok(bits) => bits,
+            Err(e) => {
+                return json!({
+                    "section_item_index": section_item_index,
+                    "code": item.code.trim(),
+                    "range_start": item.range.start,
+                    "range_end": item.range.end,
+                    "segments": item.segments.clone(),
+                    "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
+                    "strict_with_padding_bits": with_padding_bits,
+                    "strict_without_padding_bits": serde_json::Value::Null,
+                    "first_difference_offset": serde_json::Value::Null,
+                    "local_73_padding_influence": "unobservable",
+                    "local_73_padding_influence_reason": format!(
+                        "Failed to rebuild the cleared-padding strict view for section item {}: {}",
+                        section_item_index,
+                        e
+                    ),
+                    "errors": [e.to_string()],
+                });
+            }
+        };
+
+    let first_difference_offset = compare_first_difference_offset(
+        &with_padding_bits,
+        &without_padding_bits,
+        item.range.start,
+    );
+    let (local_73_padding_influence, local_73_padding_influence_reason) =
+        classify_local_73_padding_influence(
+            &with_padding_bits,
+            &without_padding_bits,
+            item.range.start,
+        );
+
+    let segments = item
+        .segments
+        .iter()
+        .map(|segment| {
+            json!({
+                "label": segment.label,
+                "start": segment.start,
+                "end": segment.end,
+                "depth": segment.depth
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "section_item_index": section_item_index,
+        "code": item.code.trim(),
+        "range_start": item.range.start,
+        "range_end": item.range.end,
+        "segments": segments,
+        "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
+        "strict_with_padding_bit_count": with_padding_bits.len(),
+        "strict_with_padding_bits": with_padding_bits,
+        "strict_without_padding_bit_count": without_padding_bits.len(),
+        "strict_without_padding_bits": without_padding_bits,
+        "first_difference_offset": first_difference_offset,
+        "local_73_padding_influence": local_73_padding_influence,
+        "local_73_padding_influence_reason": local_73_padding_influence_reason,
+    })
 }
 
 fn classify_trace_ownership(
@@ -319,6 +489,18 @@ fn main() {
         "Expose parser semantic segments for a boundary-correct item parse",
     ));
     parser.add_spec(ArgSpec::option(
+        "section-item",
+        None,
+        Some("section-item"),
+        "Select a zero-based player-item section index after read_player_items parsing",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "section-context",
+        None,
+        Some("section-context"),
+        "Expose strict section-context rebuild comparison for a selected player-item entry",
+    ));
+    parser.add_spec(ArgSpec::option(
         "coordinate-bit",
         None,
         Some("coordinate-bit"),
@@ -344,6 +526,10 @@ fn main() {
         .and_then(|s| s.parse::<usize>().ok());
     let trace_provenance = parsed.is_set("trace-provenance");
     let trace_segments = parsed.is_set("trace-segments");
+    let section_item = parsed
+        .get("section-item")
+        .and_then(|s| s.parse::<usize>().ok());
+    let section_context = parsed.is_set("section-context");
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
@@ -373,15 +559,16 @@ fn main() {
 
     if let Some(offset) = bit_offset {
         if trace_segments {
-            let trace_header = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-                &bytes,
-                offset as u64,
-                Some(offset as u64),
-                &huffman,
-                is_alpha,
-                0,
-            )
-            .map(|peek| (peek.3.trim().to_string(), peek.6));
+            let trace_header =
+                d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                    &bytes,
+                    offset as u64,
+                    Some(offset as u64),
+                    &huffman,
+                    is_alpha,
+                    0,
+                )
+                .map(|peek| (peek.3.trim().to_string(), peek.6));
             let trace_limit = (bytes.len() as u64 * 8).saturating_sub(offset as u64);
             let trace_code_hint = trace_header.as_ref().map(|(code, _)| code.as_str());
             let trace_forced_compact = trace_header
@@ -780,6 +967,71 @@ fn main() {
 
     // 1. Try reading as player items (save file format)
     if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
+        if let Some(section_item_index) = section_item {
+            if section_item_index >= items.len() {
+                if is_json {
+                    println!(
+                        "{}",
+                        json!({
+                            "errors": [format!(
+                                "Requested section item {} but only {} top-level items were parsed",
+                                section_item_index,
+                                items.len()
+                            )]
+                        })
+                    );
+                } else {
+                    eprintln!(
+                        "Requested section item {} but only {} top-level items were parsed",
+                        section_item_index,
+                        items.len()
+                    );
+                }
+                return;
+            }
+
+            let item = &items[section_item_index];
+            if section_context {
+                let report = section_context_report(item, section_item_index, &huffman, is_alpha);
+                if is_json {
+                    println!("{}", report);
+                } else {
+                    println!(
+                        "Section item {} '{}' bits {}-{}",
+                        section_item_index,
+                        item.code.trim(),
+                        item.range.start,
+                        item.range.end
+                    );
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&report).unwrap_or_default()
+                    );
+                }
+                return;
+            }
+
+            if is_json {
+                println!(
+                    "{}",
+                    json!({
+                        "section_item_index": section_item_index,
+                        "item": item_to_json(item, None),
+                        "errors": []
+                    })
+                );
+            } else {
+                println!(
+                    "Section item {}: '{}' range {}-{}",
+                    section_item_index,
+                    item.code.trim(),
+                    item.range.start,
+                    item.range.end
+                );
+            }
+            return;
+        }
+
         if is_json {
             let item_objs: Vec<_> = items.iter().map(|it| item_to_json(it, None)).collect();
             println!("{}", json!({"items": item_objs, "errors": []}));
