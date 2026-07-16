@@ -113,7 +113,7 @@ pub fn scan_item_markers(bytes: &[u8], huffman: &HuffmanTree, alpha: bool, secti
                         peek_item_header_at(bytes, scan_pos, huffman, alpha, 0);
                     if alpha {
                         let reg = crate::domain::forensic::registry::get_registry();
-                        for alt_gap in [6u64, 35, 46] {
+                        for alt_gap in [6u64, 27, 35, 46] {
                             if let Some((mode, location, _x, code, flags, version, is_compact, _header_len, _nudge, has_checksum)) =
                                 peek_item_header_at_specific_gap(bytes, scan_pos, huffman, alpha, alt_gap)
                             {

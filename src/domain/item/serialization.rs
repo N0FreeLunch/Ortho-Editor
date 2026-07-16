@@ -1695,13 +1695,18 @@ impl Item {
                 .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
                 .unwrap_or(false);
             let is_authority_marker = alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
-            let parse_code_hint = if marker_is_forced_summary
+            let parse_code_hint_raw = if marker_is_forced_summary
                 || is_authority_marker
                 || matches!(marker_code_trimmed, "jav" | "buc")
             {
                 marker.code.as_str()
             } else {
                 peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
+            };
+            let parse_code_hint = if parse_code_hint_raw.trim() == "hla" {
+                "xrs "
+            } else {
+                parse_code_hint_raw
             };
             // For jav/buc in Alpha v105, force compact parse mode so entity.rs's
             // trusted_compact_hint path can activate (it requires header.is_compact==true).
