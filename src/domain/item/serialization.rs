@@ -2938,7 +2938,7 @@ impl Item {
                 if item.body.code.trim() == "buc" {
                     // Buckler keeps the compact-tail shape and must not consume the generic
                     // alpha residue nudge that applies to other v105 bodies.
-                } else if is_authority && ctx.is_some() {
+                } else if is_authority && ctx.is_some() && !item.header.is_compact {
                     if crate::item::item_trace_enabled() {
                         eprintln!(
                             "[auth-check] code={} version={} pos={}",
@@ -3163,9 +3163,9 @@ pub fn scan_socket_children(
                             limit = Some(target_width as u64);
                         }
                         if matches!(code.trim(), "xrs" | "c8xr" | "wa2") {
-                            limit = Some(512);
+                            limit = Some(if _is_compact { 168 } else { 512 });
                         } else if code.trim() == "rhd" {
-                            limit = Some(128);
+                            limit = Some(if _is_compact { 168 } else { 128 });
                         }
                         if _is_compact {
                             forced_compact = Some(true);

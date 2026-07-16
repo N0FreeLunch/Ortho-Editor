@@ -94,8 +94,8 @@ pub fn read_item_stats<R: BitRead>(
     let is_alpha = axiom.is_alpha();
 
     let is_v105_shadow_final = alpha_mode && is_v105_shadow;
-    let is_authority_host = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "wa2");
-    let is_shadow_container = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr");
+    let is_authority_host = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "wa2") && !is_compact;
+    let is_shadow_container = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr") && !is_compact;
 
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
     let is_potion = trimmed_code.starts_with('h')
