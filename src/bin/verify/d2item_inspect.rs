@@ -380,14 +380,25 @@ fn section_context_report(
         let target_phase = strict_emission_phases
             .iter()
             .find(|phase| phase.start <= target_local_bit && target_local_bit < phase.end);
+        let target_phases = strict_emission_phases
+            .iter()
+            .filter(|phase| {
+                phase.start <= target_local_bit
+                    && target_local_bit < phase.end
+                    && phase.label != "summary_body_and_alignment"
+            })
+            .collect::<Vec<_>>();
         json!({
             "strict_emission_phases": strict_emission_phases,
             "target_phase": target_phase,
-            "strict_emission_phase_observable": target_phase.is_some(),
-            "strict_emission_phase_unobservable_reason": if target_phase.is_some() {
+            "target_containing_subphases": target_phases,
+            "strict_emission_phase_observable": target_phases.len() == 1,
+            "strict_emission_phase_unobservable_reason": if target_phases.len() == 1 {
                 serde_json::Value::Null
-            } else {
+            } else if target_phases.is_empty() {
                 json!("No recorded phase contains target local bit 73")
+            } else {
+                json!("Multiple recorded phases contain target local bit 73")
             },
         })
     } else {

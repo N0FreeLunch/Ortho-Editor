@@ -1016,14 +1016,27 @@ impl Item {
         let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
         // 2. Handle Alpha v105 summary items (Potions, Scrolls):
         if is_v105_summary {
-            let s_start = emitter.written_bits();
             // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
+            let subphase_start = emitter.written_bits();
             emitter.write_bits(self.header.y as u32, 3)?;
+            record_emission_phase(
+                &mut phases,
+                "summary_y",
+                subphase_start,
+                emitter.written_bits(),
+            );
             // Write Gap.
             let gap_bits = w_axiom.summary_gap_bits(&self.code);
             if gap_bits > 0 {
+                let subphase_start = emitter.written_bits();
                 let gap_val = self.body.alpha_header_gap.unwrap_or(0);
                 emitter.write_bits(gap_val, gap_bits)?;
+                record_emission_phase(
+                    &mut phases,
+                    "summary_gap_from_alpha_header_gap",
+                    subphase_start,
+                    emitter.written_bits(),
+                );
             }
 
             // Write 16-bit ID (Slice 2): Unified 16-bit ID field.
@@ -1046,7 +1059,21 @@ impl Item {
             } else {
                 self.id.unwrap_or(0)
             };
+            let id_source = if !self.body.alpha_code_bits.is_empty() {
+                "alpha_code_bits"
+            } else if !self.body.alpha_alignment_padding.is_empty() {
+                "alpha_alignment_padding"
+            } else {
+                "item_id"
+            };
+            let subphase_start = emitter.written_bits();
             emitter.write_bits(id_val, 16)?;
+            record_emission_phase(
+                &mut phases,
+                &format!("summary_identifier_from_{id_source}"),
+                subphase_start,
+                emitter.written_bits(),
+            );
 
             // Align to target width (72 or 80 bits).
             let current_bits = emitter.written_bits() - start_bit;
@@ -1068,6 +1095,7 @@ impl Item {
             }
 
             if final_target > current_bits {
+                let subphase_start = emitter.written_bits();
                 let padding_needed = (final_target - current_bits) as u32;
                 let mut padding_bits = if !self.bits.is_empty() {
                     let total_parsed = self.bits.len();
@@ -1097,10 +1125,17 @@ impl Item {
                     vec![false; padding_needed as usize]
                 };
                 AlphaHeaderGap { bits: padding_bits }.emit(emitter)?;
+                record_emission_phase(
+                    &mut phases,
+                    "summary_target_width_alignment",
+                    subphase_start,
+                    emitter.written_bits(),
+                );
             }
 
             // Summary items can still carry trailing preserved tails
             if is_authority_overlap_code {
+                let subphase_start = emitter.written_bits();
                 for module in &self.modules {
                     match module {
                         ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
@@ -1109,6 +1144,12 @@ impl Item {
                         _ => {}
                     }
                 }
+                record_emission_phase(
+                    &mut phases,
+                    "summary_authority_residue",
+                    subphase_start,
+                    emitter.written_bits(),
+                );
             }
             record_emission_phase(
                 &mut phases,
