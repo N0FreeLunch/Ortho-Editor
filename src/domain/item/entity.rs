@@ -53,6 +53,30 @@ pub struct ItemBitRange {
     pub end: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EmissionPhase {
+    pub label: String,
+    pub start: u64,
+    pub end: u64,
+}
+
+fn record_emission_phase(
+    phases: &mut Option<&mut Vec<EmissionPhase>>,
+    label: &str,
+    start: u64,
+    end: u64,
+) {
+    if let Some(phases) = phases.as_deref_mut() {
+        if end > start {
+            phases.push(EmissionPhase {
+                label: label.to_string(),
+                start,
+                end,
+            });
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BitSegment {
     pub start: u64,
@@ -738,6 +762,25 @@ impl Item {
         Ok(emitter.into_bits())
     }
 
+    pub fn to_bits_with_phase_trace(
+        &self,
+        idx: usize,
+        huffman: &crate::domain::item::serialization::HuffmanTree,
+        alpha_mode: bool,
+    ) -> io::Result<(Vec<bool>, Vec<EmissionPhase>)> {
+        use crate::domain::item::serialization::BitEmitter;
+        let mut emitter = BitEmitter::new();
+        let mut phases = Vec::new();
+        self.to_emitter_with_phase_trace(
+            idx,
+            &mut emitter,
+            huffman,
+            alpha_mode,
+            Some(&mut phases),
+        )?;
+        Ok((emitter.into_bits(), phases))
+    }
+
     pub fn to_emitter(
         &self,
         idx: usize,
@@ -745,11 +788,23 @@ impl Item {
         huffman: &crate::domain::item::serialization::HuffmanTree,
         alpha_mode: bool,
     ) -> io::Result<()> {
+        self.to_emitter_with_phase_trace(idx, emitter, huffman, alpha_mode, None)
+    }
+
+    fn to_emitter_with_phase_trace(
+        &self,
+        idx: usize,
+        emitter: &mut crate::domain::item::serialization::BitEmitter,
+        huffman: &crate::domain::item::serialization::HuffmanTree,
+        alpha_mode: bool,
+        mut phases: Option<&mut Vec<EmissionPhase>>,
+    ) -> io::Result<()> {
         if alpha_mode && !self.bits.is_empty() && self.socketed_items.is_empty() {
             emitter.extend_bits(self.bits.iter().map(|rb| rb.bit))?;
             return Ok(());
         }
         let start_bit = emitter.written_bits();
+        let mut phase_start = start_bit;
         let trimmed = self.code.trim();
         let reg = crate::domain::forensic::registry::get_registry();
         let mut is_authority_overlap_code =
@@ -934,6 +989,13 @@ impl Item {
             self.header.location as u32,
             w_axiom.location_bits(alpha_mode, self.header.version) as u32,
         )?;
+        record_emission_phase(
+            &mut phases,
+            "header_fields",
+            phase_start,
+            emitter.written_bits(),
+        );
+        phase_start = emitter.written_bits();
         if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
             eprintln!(
                 "[to-emitter-field] after location pos={}",
@@ -1048,6 +1110,12 @@ impl Item {
                     }
                 }
             }
+            record_emission_phase(
+                &mut phases,
+                "summary_body_and_alignment",
+                phase_start,
+                emitter.written_bits(),
+            );
             return Ok(());
         }
 
@@ -1138,10 +1206,24 @@ impl Item {
             }
         }
 
+        record_emission_phase(
+            &mut phases,
+            "geometry_and_header_gap",
+            phase_start,
+            emitter.written_bits(),
+        );
+        phase_start = emitter.written_bits();
+
         // Slice 4: Check for SemiOpaque body preservation
         for module in &self.modules {
             if let ItemModule::SemiOpaque { body_bits, .. } = module {
                 emitter.extend_bits(body_bits.iter().cloned())?;
+                record_emission_phase(
+                    &mut phases,
+                    "semi_opaque_body",
+                    phase_start,
+                    emitter.written_bits(),
+                );
                 return Ok(());
             }
         }
@@ -1206,6 +1288,12 @@ impl Item {
                     }
                 }
             }
+            record_emission_phase(
+                &mut phases,
+                "header_only_alignment_and_residue",
+                phase_start,
+                emitter.written_bits(),
+            );
             return Ok(());
         }
 
@@ -1600,6 +1688,13 @@ impl Item {
         if !alpha_mode && self.header.version != 5 && self.header.version != 7 {
             emitter.write_bit(false)?;
         }
+        record_emission_phase(
+            &mut phases,
+            "item_header_and_metadata",
+            phase_start,
+            emitter.written_bits(),
+        );
+        phase_start = emitter.written_bits();
         let current_bits = emitter.written_bits();
         let mut final_bits =
             s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
@@ -1615,6 +1710,12 @@ impl Item {
             };
             pad_seg.emit(emitter)?;
         }
+        record_emission_phase(
+            &mut phases,
+            "alignment_and_residue",
+            phase_start,
+            emitter.written_bits(),
+        );
         Ok(())
     }
 

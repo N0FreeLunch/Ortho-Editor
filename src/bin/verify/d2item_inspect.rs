@@ -291,6 +291,7 @@ fn section_context_report(
     section_item_index: usize,
     huffman: &HuffmanTree,
     alpha_mode: bool,
+    emit_phase_trace: bool,
 ) -> serde_json::Value {
     let mut with_padding_item = item.clone();
     with_padding_item.bits.clear();
@@ -347,6 +348,55 @@ fn section_context_report(
             }
         };
 
+    let (strict_emission_bits, strict_emission_phases) = if emit_phase_trace {
+        match without_padding_item.to_bits_with_phase_trace(section_item_index, huffman, alpha_mode)
+        {
+            Ok((bits, phases)) => (Some(bits), phases),
+            Err(e) => {
+                return json!({
+                    "section_item_index": section_item_index,
+                    "code": item.code.trim(),
+                    "range_start": item.range.start,
+                    "range_end": item.range.end,
+                    "strict_bit_count": without_padding_bits.len(),
+                    "target_local_bit": 73,
+                    "target_absolute_bit": item.range.start + 73,
+                    "strict_emission_phases": [],
+                    "target_phase": serde_json::Value::Null,
+                    "strict_emission_phase_observable": false,
+                    "strict_emission_phase_unobservable_reason": format!(
+                        "Strict emission trace failed for section item {}: {}",
+                        section_item_index, e
+                    ),
+                });
+            }
+        }
+    } else {
+        (None, Vec::new())
+    };
+
+    let strict_emission_phase_report = if emit_phase_trace {
+        let target_local_bit = 73u64;
+        let target_phase = strict_emission_phases
+            .iter()
+            .find(|phase| phase.start <= target_local_bit && target_local_bit < phase.end);
+        json!({
+            "strict_emission_phases": strict_emission_phases,
+            "target_phase": target_phase,
+            "strict_emission_phase_observable": target_phase.is_some(),
+            "strict_emission_phase_unobservable_reason": if target_phase.is_some() {
+                serde_json::Value::Null
+            } else {
+                json!("No recorded phase contains target local bit 73")
+            },
+        })
+    } else {
+        json!({})
+    };
+    let target_phase = strict_emission_phases
+        .iter()
+        .find(|phase| phase.start <= 73 && 73 < phase.end);
+
     let first_difference_offset = compare_first_difference_offset(
         &with_padding_bits,
         &without_padding_bits,
@@ -383,9 +433,27 @@ fn section_context_report(
         "strict_with_padding_bits": with_padding_bits,
         "strict_without_padding_bit_count": without_padding_bits.len(),
         "strict_without_padding_bits": without_padding_bits,
+        "strict_bit_count": strict_emission_bits
+            .as_ref()
+            .map(|bits| bits.len())
+            .unwrap_or_else(|| item.range.end.saturating_sub(item.range.start) as usize),
+        "target_local_bit": 73,
+        "target_absolute_bit": item.range.start + 73,
+        "strict_emission_phases": if emit_phase_trace {
+            json!(strict_emission_phases)
+        } else {
+            json!([])
+        },
+        "target_phase": if emit_phase_trace {
+            json!(target_phase)
+        } else {
+            serde_json::Value::Null
+        },
+        "strict_emission_phase_observable": emit_phase_trace && target_phase.is_some(),
         "first_difference_offset": first_difference_offset,
         "local_73_padding_influence": local_73_padding_influence,
         "local_73_padding_influence_reason": local_73_padding_influence_reason,
+        "strict_emission_phase_provenance": strict_emission_phase_report,
     })
 }
 
@@ -500,6 +568,12 @@ fn main() {
         Some("section-context"),
         "Expose strict section-context rebuild comparison for a selected player-item entry",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "emit-phase-trace",
+        None,
+        Some("emit-phase-trace"),
+        "Expose bounded strict-emission phase provenance for a selected section item",
+    ));
     parser.add_spec(ArgSpec::option(
         "coordinate-bit",
         None,
@@ -530,6 +604,7 @@ fn main() {
         .get("section-item")
         .and_then(|s| s.parse::<usize>().ok());
     let section_context = parsed.is_set("section-context");
+    let emit_phase_trace = parsed.is_set("emit-phase-trace");
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
@@ -992,7 +1067,13 @@ fn main() {
 
             let item = &items[section_item_index];
             if section_context {
-                let report = section_context_report(item, section_item_index, &huffman, is_alpha);
+                let report = section_context_report(
+                    item,
+                    section_item_index,
+                    &huffman,
+                    is_alpha,
+                    emit_phase_trace,
+                );
                 if is_json {
                     println!("{}", report);
                 } else {
