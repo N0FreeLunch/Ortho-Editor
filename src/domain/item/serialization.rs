@@ -2068,6 +2068,14 @@ impl Item {
                             offset: section_bit_offset + start_offset + idx as u64,
                         });
                     }
+                    prev_item.segments.push(crate::domain::item::BitSegment {
+                        start: (section_bit_offset + start_offset)
+                            .saturating_sub(prev_item.range.start),
+                        end: (section_bit_offset + section_bits)
+                            .saturating_sub(prev_item.range.start),
+                        label: "alpha_alignment_padding_tail_capture".to_string(),
+                        depth: 0,
+                    });
                     prev_item.range.end = section_bit_offset + section_bits;
                     prev_item.total_bits += residue_len;
                     if let Some(w) = prev_item.logical_width {
