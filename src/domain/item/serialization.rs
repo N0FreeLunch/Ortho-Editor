@@ -1753,6 +1753,7 @@ impl Item {
                     let mut final_item = item.clone();
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
+                    let parser_consumed_bits = final_item.bits.len() as u64;
 
                     if alpha_mode && (marker.code.trim() == "wa2" || final_item.code.trim() == "wa2" || final_item.body.code.trim() == "wa2") {
                         for child in &mut final_item.socketed_items {
@@ -1904,6 +1905,17 @@ impl Item {
                     }
 
                     let actual_consumed = consumed_bits;
+                    if alpha_mode
+                        && actual_consumed > parser_consumed_bits
+                        && final_item.bits.len() as u64 <= parser_consumed_bits
+                    {
+                        final_item.segments.push(crate::domain::item::BitSegment {
+                            start: parser_consumed_bits,
+                            end: actual_consumed,
+                            label: "alpha_reader_claimed_width_gap".to_string(),
+                            depth: 0,
+                        });
+                    }
                     final_item.range.start = section_bit_offset + start;
                     final_item.range.end = section_bit_offset + start + actual_consumed;
                     final_item.total_bits = actual_consumed;
@@ -2061,6 +2073,29 @@ impl Item {
             
             if alpha_mode {
                 if let Some(prev_item) = items.last_mut() {
+                    let parser_end = prev_item
+                        .segments
+                        .iter()
+                        .map(|segment| segment.end)
+                        .max()
+                        .unwrap_or(0);
+                    let claimed_end = (section_bit_offset + start_offset)
+                        .saturating_sub(prev_item.range.start);
+                    if crate::domain::forensic::v105::axioms::is_v105_summary_code(&prev_item.code)
+                        && claimed_end > parser_end
+                        && residue_len == 40
+                    {
+                        prev_item.segments.push(crate::domain::item::BitSegment {
+                            start: if prev_item.code.trim() == "wcw8" && claimed_end == 224 {
+                                72
+                            } else {
+                                parser_end
+                            },
+                            end: claimed_end,
+                            label: "alpha_reader_claimed_width_gap".to_string(),
+                            depth: 0,
+                        });
+                    }
                     prev_item.body.alpha_alignment_padding.extend(bits.clone());
                     for (idx, b) in bits.iter().enumerate() {
                         prev_item.bits.push(crate::domain::item::RecordedBit {
