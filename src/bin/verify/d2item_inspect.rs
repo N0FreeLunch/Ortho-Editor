@@ -349,7 +349,7 @@ fn section_context_report(
         };
 
     let (strict_emission_bits, strict_emission_phases) = if emit_phase_trace {
-        match without_padding_item.to_bits_with_phase_trace(section_item_index, huffman, alpha_mode)
+        match with_padding_item.to_bits_with_phase_trace(section_item_index, huffman, alpha_mode)
         {
             Ok((bits, phases)) => (Some(bits), phases),
             Err(e) => {
@@ -386,6 +386,7 @@ fn section_context_report(
                 phase.start <= target_local_bit
                     && target_local_bit < phase.end
                     && phase.label != "summary_body_and_alignment"
+                    && phase.label != "summary_target_width_alignment"
             })
             .collect::<Vec<_>>();
         json!({

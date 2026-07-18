@@ -1124,7 +1124,37 @@ impl Item {
                 } else {
                     vec![false; padding_needed as usize]
                 };
-                AlphaHeaderGap { bits: padding_bits }.emit(emitter)?;
+                let retained_material_count = if !self.bits.is_empty() {
+                    self.bits.len().min(padding_needed as usize)
+                } else {
+                    self.body
+                        .alpha_alignment_padding
+                        .len()
+                        .min(padding_needed as usize)
+                };
+                let zero_fill_count =
+                    (padding_needed as usize).saturating_sub(retained_material_count);
+                if zero_fill_count > 0 {
+                    let zero_fill_start = emitter.written_bits();
+                    emitter.extend_bits(std::iter::repeat(false).take(zero_fill_count))?;
+                    record_emission_phase(
+                        &mut phases,
+                        "summary_target_width_alignment_zero_fill",
+                        zero_fill_start,
+                        emitter.written_bits(),
+                    );
+                }
+                let retained_start = emitter.written_bits();
+                AlphaHeaderGap {
+                    bits: padding_bits.split_off(zero_fill_count),
+                }
+                .emit(emitter)?;
+                record_emission_phase(
+                    &mut phases,
+                    "summary_target_width_alignment_retained_material",
+                    retained_start,
+                    emitter.written_bits(),
+                );
                 record_emission_phase(
                     &mut phases,
                     "summary_target_width_alignment",
