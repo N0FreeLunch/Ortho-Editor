@@ -5,6 +5,7 @@ use serde_json::json;
 use std::env;
 use std::fs;
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 
 fn print_bits_window(bytes: &[u8], start_bit: usize, bit_count: usize) {
     let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
@@ -525,6 +526,104 @@ fn section_segment_witness_report(items: &[Item], fixture: &str) -> serde_json::
     })
 }
 
+fn collect_d2s_paths(root: &Path, paths: &mut Vec<PathBuf>, errors: &mut Vec<serde_json::Value>) {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            errors.push(json!({
+                "path": root.to_string_lossy(),
+                "error": format!("Failed to read directory: {}", error)
+            }));
+            return;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                errors.push(json!({
+                    "path": root.to_string_lossy(),
+                    "error": format!("Failed to enumerate directory entry: {}", error)
+                }));
+                continue;
+            }
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            collect_d2s_paths(&path, paths, errors);
+        } else if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("d2s"))
+        {
+            paths.push(path);
+        }
+    }
+}
+
+fn section_segment_witness_directory_report(directory: &str) -> serde_json::Value {
+    let root = Path::new(directory);
+    let mut paths = Vec::new();
+    let mut errors = Vec::new();
+    collect_d2s_paths(root, &mut paths, &mut errors);
+    paths.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
+
+    let huffman = HuffmanTree::new();
+    let mut fixtures = Vec::new();
+    let mut candidate_fixture_count = 0;
+    let mut candidate_count = 0;
+
+    for path in paths {
+        let fixture = path.to_string_lossy().to_string();
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                errors.push(json!({
+                    "fixture": fixture,
+                    "error": format!("Failed to read file: {}", error)
+                }));
+                continue;
+            }
+        };
+        let version_raw = if bytes.len() >= 8 {
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
+        } else {
+            0
+        };
+        let is_alpha = version_raw == 105 || version_raw == 6;
+        let items = match Item::read_player_items(&bytes, &huffman, is_alpha) {
+            Ok(items) => items,
+            Err(error) => {
+                errors.push(json!({
+                    "fixture": fixture,
+                    "error": format!("Failed to parse player items: {}", error)
+                }));
+                continue;
+            }
+        };
+        let report = section_segment_witness_report(&items, &fixture);
+        let fixture_candidate_count = report
+            .get("candidate_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if fixture_candidate_count > 0 {
+            candidate_fixture_count += 1;
+        }
+        candidate_count += fixture_candidate_count;
+        fixtures.push(report);
+    }
+
+    json!({
+        "directory": directory,
+        "fixture_count": fixtures.len(),
+        "candidate_fixture_count": candidate_fixture_count,
+        "candidate_count": candidate_count,
+        "fixtures": fixtures,
+        "errors": errors
+    })
+}
+
 fn classify_trace_ownership(
     item: &Item,
     scanner_hint: &str,
@@ -683,6 +782,11 @@ fn main() {
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
+
+    if section_segment_witnesses && is_json && Path::new(path).is_dir() {
+        println!("{}", section_segment_witness_directory_report(path));
+        return;
+    }
 
     let bytes = match fs::read(path) {
         Ok(b) => b,
