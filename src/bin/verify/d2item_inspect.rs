@@ -469,6 +469,62 @@ fn section_context_report(
     })
 }
 
+fn section_segment_witness_report(items: &[Item], fixture: &str) -> serde_json::Value {
+    const CLAIMED_GAP_LABEL: &str = "alpha_reader_claimed_width_gap";
+    const CLAIMED_GAP_START: u64 = 72;
+    const CLAIMED_GAP_END: u64 = 224;
+    const PADDING_TAIL_LABEL: &str = "alpha_alignment_padding_tail_capture";
+    const PADDING_TAIL_START: u64 = 224;
+    const PADDING_TAIL_END: u64 = 264;
+
+    let candidates = items
+        .iter()
+        .enumerate()
+        .filter_map(|(section_item_index, item)| {
+            let segments = item
+                .segments
+                .iter()
+                .filter(|segment| {
+                    segment.depth == 0
+                        && ((segment.label == CLAIMED_GAP_LABEL
+                            && segment.start == CLAIMED_GAP_START
+                            && segment.end == CLAIMED_GAP_END)
+                            || (segment.label == PADDING_TAIL_LABEL
+                                && segment.start == PADDING_TAIL_START
+                                && segment.end == PADDING_TAIL_END))
+                })
+                .map(|segment| {
+                    json!({
+                        "label": segment.label,
+                        "start": segment.start,
+                        "end": segment.end,
+                        "depth": segment.depth
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            if segments.len() == 2 {
+                Some(json!({
+                    "section_item_index": section_item_index,
+                    "code": item.code.trim(),
+                    "range_start": item.range.start,
+                    "range_end": item.range.end,
+                    "segments": segments
+                }))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "fixture": fixture,
+        "top_level_item_count": items.len(),
+        "candidate_count": candidates.len(),
+        "candidates": candidates
+    })
+}
+
 fn classify_trace_ownership(
     item: &Item,
     scanner_hint: &str,
@@ -581,6 +637,12 @@ fn main() {
         "Expose strict section-context rebuild comparison for a selected player-item entry",
     ));
     parser.add_spec(ArgSpec::flag(
+        "section-segment-witnesses",
+        None,
+        Some("section-segment-witnesses"),
+        "Enumerate player-item entries containing the claimed-gap segment pair",
+    ));
+    parser.add_spec(ArgSpec::flag(
         "emit-phase-trace",
         None,
         Some("emit-phase-trace"),
@@ -616,6 +678,7 @@ fn main() {
         .get("section-item")
         .and_then(|s| s.parse::<usize>().ok());
     let section_context = parsed.is_set("section-context");
+    let section_segment_witnesses = parsed.is_set("section-segment-witnesses");
     let emit_phase_trace = parsed.is_set("emit-phase-trace");
     let coordinate_bit = parsed
         .get("coordinate-bit")
@@ -1054,6 +1117,15 @@ fn main() {
 
     // 1. Try reading as player items (save file format)
     if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
+        if section_segment_witnesses {
+            if !is_json {
+                eprintln!("--section-segment-witnesses requires --json");
+                return;
+            }
+            println!("{}", section_segment_witness_report(&items, path));
+            return;
+        }
+
         if let Some(section_item_index) = section_item {
             if section_item_index >= items.len() {
                 if is_json {
