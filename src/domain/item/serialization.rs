@@ -1753,7 +1753,6 @@ impl Item {
                     let mut final_item = item.clone();
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
-                    let parser_consumed_bits = final_item.bits.len() as u64;
 
                     if alpha_mode && (marker.code.trim() == "wa2" || final_item.code.trim() == "wa2" || final_item.body.code.trim() == "wa2") {
                         for child in &mut final_item.socketed_items {
@@ -1840,6 +1839,9 @@ impl Item {
                             consumed_bits = retry_consumed;
                         }
                     }
+
+                    let parser_consumed_bits = final_item.bits.len() as u64;
+                    final_item.record_parser_consumed_bits(parser_consumed_bits);
 
                     // Axiom 0344: In Alpha v105, if the scanner found a valid code,
                     // ensure the parser uses it (prevents Huffman collisions).
@@ -2910,6 +2912,7 @@ impl Item {
             segments: Vec::new(),
             expected_start_bit: start_bit,
             forensic_audit: ForensicAudit::new(),
+            parser_consumption: Default::default(),
         };
 
         item.id = item.header.id;
@@ -3759,5 +3762,24 @@ mod tests {
         let items = Item::read_section(&bytes, 0, 1, &huffman, true, false).unwrap();
         assert!(!items.is_empty());
         assert!(items.iter().any(|it| it.modules.iter().any(|m| matches!(m, crate::domain::item::ItemModule::SemiOpaque { .. } | crate::domain::item::ItemModule::Opaque(_)))));
+    }
+
+    #[test]
+    fn item16_parser_consumption_provenance() {
+        let bytes = std::fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+            .expect("Item 16 fixture not found");
+        let items = Item::read_player_items(&bytes, &HuffmanTree::new(), true)
+            .expect("Alpha v105 fixture should parse");
+        let item = items
+            .iter()
+            .find(|item| item.code.trim() == "wcw8")
+            .expect("Item 16 wcw8 should be present");
+
+        assert_eq!(Item::default().parser_consumed_bits(), None);
+        assert_eq!(item.parser_consumed_bits(), Some(224));
+
+        let mut changed = item.clone();
+        changed.record_parser_consumed_bits(999);
+        assert_eq!(item, &changed);
     }
 }

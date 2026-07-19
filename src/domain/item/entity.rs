@@ -186,6 +186,28 @@ pub struct ExtendedStatsData {
     pub alpha_set_list_val: Option<u8>,
 }
 
+/// Equality-neutral provenance for the parser's final pre-alignment bit count.
+#[derive(Debug, Clone, Default)]
+pub struct ParserConsumptionProvenance(Option<u64>);
+
+impl ParserConsumptionProvenance {
+    pub fn bits(&self) -> Option<u64> {
+        self.0
+    }
+
+    pub(crate) fn record(bits: u64) -> Self {
+        Self(Some(bits))
+    }
+}
+
+impl PartialEq for ParserConsumptionProvenance {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for ParserConsumptionProvenance {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Item {
     pub header: ItemHeader,
@@ -236,6 +258,7 @@ pub struct Item {
     pub segments: Vec<BitSegment>,
     pub expected_start_bit: u64,
     pub forensic_audit: ForensicAudit,
+    pub parser_consumption: ParserConsumptionProvenance,
 }
 
 impl Deref for Item {
@@ -252,6 +275,14 @@ impl DerefMut for Item {
 }
 
 impl Item {
+    pub fn parser_consumed_bits(&self) -> Option<u64> {
+        self.parser_consumption.bits()
+    }
+
+    pub(crate) fn record_parser_consumed_bits(&mut self, bits: u64) {
+        self.parser_consumption = ParserConsumptionProvenance::record(bits);
+    }
+
     pub fn code(&self) -> &str {
         &self.body.code
     }
