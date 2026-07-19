@@ -1,6 +1,7 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use rayon::prelude::*;
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -562,6 +563,33 @@ fn collect_d2s_paths(root: &Path, paths: &mut Vec<PathBuf>, errors: &mut Vec<ser
     }
 }
 
+fn section_segment_witness_fixture_report(
+    path: &Path,
+) -> Result<serde_json::Value, serde_json::Value> {
+    let fixture = path.to_string_lossy().to_string();
+    let bytes = fs::read(path).map_err(|error| {
+        json!({
+            "fixture": fixture,
+            "error": format!("Failed to read file: {}", error)
+        })
+    })?;
+    let version_raw = if bytes.len() >= 8 {
+        u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
+    } else {
+        0
+    };
+    let is_alpha = version_raw == 105 || version_raw == 6;
+    let huffman = HuffmanTree::new();
+    let items = Item::read_player_items(&bytes, &huffman, is_alpha).map_err(|error| {
+        json!({
+            "fixture": fixture,
+            "error": format!("Failed to parse player items: {}", error)
+        })
+    })?;
+
+    Ok(section_segment_witness_report(&items, &fixture))
+}
+
 fn section_segment_witness_directory_report(directory: &str) -> serde_json::Value {
     let root = Path::new(directory);
     let mut paths = Vec::new();
@@ -569,49 +597,30 @@ fn section_segment_witness_directory_report(directory: &str) -> serde_json::Valu
     collect_d2s_paths(root, &mut paths, &mut errors);
     paths.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
 
-    let huffman = HuffmanTree::new();
+    d2r_core::init_rayon_thread_pool();
+    let reports = paths
+        .par_iter()
+        .map(|path| section_segment_witness_fixture_report(path))
+        .collect::<Vec<_>>();
     let mut fixtures = Vec::new();
     let mut candidate_fixture_count = 0;
     let mut candidate_count = 0;
 
-    for path in paths {
-        let fixture = path.to_string_lossy().to_string();
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                errors.push(json!({
-                    "fixture": fixture,
-                    "error": format!("Failed to read file: {}", error)
-                }));
-                continue;
+    for result in reports {
+        match result {
+            Ok(report) => {
+                let fixture_candidate_count = report
+                    .get("candidate_count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                if fixture_candidate_count > 0 {
+                    candidate_fixture_count += 1;
+                }
+                candidate_count += fixture_candidate_count;
+                fixtures.push(report);
             }
-        };
-        let version_raw = if bytes.len() >= 8 {
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
-        } else {
-            0
-        };
-        let is_alpha = version_raw == 105 || version_raw == 6;
-        let items = match Item::read_player_items(&bytes, &huffman, is_alpha) {
-            Ok(items) => items,
-            Err(error) => {
-                errors.push(json!({
-                    "fixture": fixture,
-                    "error": format!("Failed to parse player items: {}", error)
-                }));
-                continue;
-            }
-        };
-        let report = section_segment_witness_report(&items, &fixture);
-        let fixture_candidate_count = report
-            .get("candidate_count")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        if fixture_candidate_count > 0 {
-            candidate_fixture_count += 1;
+            Err(error) => errors.push(error),
         }
-        candidate_count += fixture_candidate_count;
-        fixtures.push(report);
     }
 
     json!({
