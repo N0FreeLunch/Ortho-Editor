@@ -2171,6 +2171,7 @@ impl Item {
                         item.total_bits,
                     );
                     if raw_bits.len() as u64 == item.total_bits {
+                        let pre_capture_bits_len = item.bits.len() as u64;
                         item.bits = raw_bits
                             .iter()
                             .enumerate()
@@ -2194,6 +2195,14 @@ impl Item {
                             label: "alpha_final_raw_capture_witness".to_string(),
                             depth: 0,
                         });
+                        if pre_capture_bits_len < item.total_bits {
+                            item.segments.push(crate::domain::item::BitSegment {
+                                start: pre_capture_bits_len,
+                                end: item.total_bits,
+                                label: "alpha_final_raw_capture_pre_overwrite_gap".to_string(),
+                                depth: 0,
+                            });
+                        }
                     }
                 }
             }
