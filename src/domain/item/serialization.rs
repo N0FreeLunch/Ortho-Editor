@@ -3132,6 +3132,12 @@ impl Item {
                     if preserve_trusted_compact_tail {
                         item.body.alpha_alignment_padding.extend(residue_bits);
                     } else {
+                        item.segments.push(crate::domain::item::BitSegment {
+                            start: start_residue - start_bit,
+                            end: start_residue - start_bit + residue_bits.len() as u64,
+                            label: "OpaqueTail".to_string(),
+                            depth: 0,
+                        });
                         item.modules
                             .push(crate::domain::item::ItemModule::Opaque(residue_bits));
                     }
