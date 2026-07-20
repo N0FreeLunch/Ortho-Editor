@@ -14,12 +14,7 @@ fn test_recreate_10_scrolls_from_empty_base() {
     let mut extracted_paths = Vec::new();
     for i in 4..16 {
         let path = format!("tests/fixtures/savegames/modified/item_{}.d2i", i);
-        let status = Command::new("cargo")
-            .arg("run")
-            .arg("-q")
-            .arg("--bin")
-            .arg("d2item_extract")
-            .arg("--")
+        let status = Command::new(env!("CARGO_BIN_EXE_d2item_extract"))
             .arg(target_file)
             .arg(i.to_string())
             .arg(&path)
@@ -38,12 +33,7 @@ fn test_recreate_10_scrolls_from_empty_base() {
     let mut current_base = base_file.to_string();
     for (idx, path) in extracted_paths.iter().enumerate() {
         let next_output = format!("tests/fixtures/savegames/modified/step_{}.d2s", idx);
-        let status = Command::new("cargo")
-            .arg("run")
-            .arg("-q")
-            .arg("--bin")
-            .arg("d2save_inject")
-            .arg("--")
+        let status = Command::new(env!("CARGO_BIN_EXE_d2save_inject"))
             .arg(&current_base)
             .arg(path)
             .arg("1")
@@ -59,12 +49,7 @@ fn test_recreate_10_scrolls_from_empty_base() {
     fs::copy(&current_base, output_file).unwrap();
 
     // 3. Compare item section with the golden master
-    let output = Command::new("cargo")
-        .arg("run")
-        .arg("-q")
-        .arg("--bin")
-        .arg("d2save_item_diff")
-        .arg("--")
+    let output = Command::new(env!("CARGO_BIN_EXE_d2save_item_diff"))
         .arg(output_file)
         .arg(target_file)
         .output()
