@@ -2188,6 +2188,12 @@ impl Item {
                             ));
                             item.body.alpha_alignment_padding = raw_bits;
                         }
+                        item.segments.push(crate::domain::item::BitSegment {
+                            start: 0,
+                            end: item.total_bits,
+                            label: "alpha_final_raw_capture_witness".to_string(),
+                            depth: 0,
+                        });
                     }
                 }
             }
