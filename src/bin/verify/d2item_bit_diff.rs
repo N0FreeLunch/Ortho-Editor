@@ -155,6 +155,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "index": index2,
                 "code": item2.code.trim()
             },
+            "alignment": {
+                "item_a_raw_len_bits": bits1.len(),
+                "item_b_raw_len_bits": bits2.len(),
+                "aligned_len_bits": result.actual_aligned.len(),
+                "gap_indices": result.gap_indices
+            },
             "semantic_diffs": diffs
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
