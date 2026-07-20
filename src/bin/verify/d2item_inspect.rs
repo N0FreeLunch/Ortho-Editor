@@ -764,6 +764,12 @@ fn main() {
         Some("section-item"),
         "Select a zero-based player-item section index after read_player_items parsing",
     ));
+    parser.add_spec(ArgSpec::option(
+        "compare-file",
+        None,
+        Some("compare-file"),
+        "Compare the selected section item against a second .d2s fixture",
+    ));
     parser.add_spec(ArgSpec::flag(
         "section-context",
         None,
@@ -811,6 +817,7 @@ fn main() {
     let section_item = parsed
         .get("section-item")
         .and_then(|s| s.parse::<usize>().ok());
+    let compare_path = parsed.get("compare-file");
     let section_context = parsed.is_set("section-context");
     let section_segment_witnesses = parsed.is_set("section-segment-witnesses");
     let emit_phase_trace = parsed.is_set("emit-phase-trace");
@@ -1298,6 +1305,92 @@ fn main() {
                     emit_phase_trace,
                     coordinate_bit,
                 );
+                if let Some(compare_path) = compare_path {
+                    if !is_json {
+                        eprintln!("--compare-file requires --json with --section-context");
+                        return;
+                    }
+
+                    let compare_bytes = match fs::read(compare_path) {
+                        Ok(bytes) => bytes,
+                        Err(error) => {
+                            println!(
+                                "{}",
+                                json!({
+                                    "errors": [format!(
+                                        "Failed to read comparison file: {}",
+                                        error
+                                    )]
+                                })
+                            );
+                            return;
+                        }
+                    };
+                    let compare_version_raw = if compare_bytes.len() >= 8 {
+                        u32::from_le_bytes(compare_bytes[4..8].try_into().unwrap_or([0; 4]))
+                    } else {
+                        0
+                    };
+                    let compare_is_alpha = compare_version_raw == 105 || compare_version_raw == 6;
+                    let compare_items =
+                        match Item::read_player_items(&compare_bytes, &huffman, compare_is_alpha) {
+                        Ok(items) => items,
+                        Err(error) => {
+                            println!(
+                                "{}",
+                                json!({
+                                    "errors": [format!(
+                                        "Failed to parse comparison file: {}",
+                                        error
+                                    )]
+                                })
+                            );
+                            return;
+                        }
+                    };
+                    if section_item_index >= compare_items.len() {
+                        println!(
+                            "{}",
+                            json!({
+                                "errors": [format!(
+                                    "Requested comparison section item {} but only {} top-level items were parsed",
+                                    section_item_index,
+                                    compare_items.len()
+                                )]
+                            })
+                        );
+                        return;
+                    }
+
+                    let comparison_item = &compare_items[section_item_index];
+                    let comparison_report = section_context_report(
+                        comparison_item,
+                        section_item_index,
+                        &huffman,
+                        compare_is_alpha,
+                        emit_phase_trace,
+                        coordinate_bit,
+                    );
+                    let start_delta_bits =
+                        item.range.start as i64 - comparison_item.range.start as i64;
+                    let base_span_bits = item.range.end as i64 - item.range.start as i64;
+                    let comparison_span_bits =
+                        comparison_item.range.end as i64 - comparison_item.range.start as i64;
+                    let span_delta_bits = base_span_bits - comparison_span_bits;
+                    let end_delta_bits = item.range.end as i64 - comparison_item.range.end as i64;
+                    println!(
+                        "{}",
+                        json!({
+                            "base": report,
+                            "comparison": comparison_report,
+                            "start_delta_bits": start_delta_bits,
+                            "span_delta_bits": span_delta_bits,
+                            "end_delta_bits": end_delta_bits,
+                            "delta_identity_holds": end_delta_bits == start_delta_bits + span_delta_bits
+                        })
+                    );
+                    return;
+                }
                 if is_json {
                     println!("{}", report);
                 } else {
