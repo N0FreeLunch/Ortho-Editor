@@ -23,6 +23,8 @@ struct PrefixTraceReport {
     sections_with_divergence: usize,
     verdict: String,
     sections: Vec<SectionTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comparison: Option<ComparisonReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,6 +132,43 @@ struct PrefixDivergence {
     mismatch: BitMismatch,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct ComparisonReport {
+    base_file: String,
+    target_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_section_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_section_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shared_prefix_end_bit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    first_mismatch: Option<ComparisonMismatch>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct ComparisonMismatch {
+    kind: String,
+    bit_offset: u64,
+    byte_offset: u64,
+    section_index: usize,
+    item_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_item: Option<ItemSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_item: Option<ItemSpan>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct ItemSpan {
+    raw_start_bit: u64,
+    raw_end_bit: u64,
+    raw_len_bits: usize,
+}
+
 struct ItemEmission {
     bits: Vec<bool>,
     emitted_child_count: usize,
@@ -156,6 +195,12 @@ fn main() -> Result<()> {
         Some('v'),
         Some("verbose"),
         "Emit per-item checkpoint rows",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "compare",
+        None,
+        Some("compare"),
+        "Compare item-section context against a target save file",
     ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -185,8 +230,41 @@ fn main() -> Result<()> {
         .with_context(|| format!("Failed to map JM sections in {}", path))?;
     let jm_positions = section_map.jm_positions;
 
-    let payload =
+    let mut payload =
         build_prefix_trace_report(path, version, alpha_mode, &bytes, &jm_positions, &huffman)?;
+
+    if let Some(target_path) = parsed.get("compare") {
+        let target_bytes = fs::read(target_path)
+            .with_context(|| format!("Failed to read comparison file: {}", target_path))?;
+        if target_bytes.len() < 8 {
+            return Err(anyhow!(
+                "Comparison file too small to read version header: {}",
+                target_path
+            ));
+        }
+        let target_version =
+            u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
+        let target_alpha_mode = parsed.is_set("alpha") || target_version == 105 || target_version == 6;
+        let target_section_map = map_core_sections(&target_bytes).with_context(|| {
+            format!("Failed to map JM sections in comparison file: {}", target_path)
+        })?;
+        let target_payload = build_prefix_trace_report(
+            target_path,
+            target_version,
+            target_alpha_mode,
+            &target_bytes,
+            &target_section_map.jm_positions,
+            &huffman,
+        )?;
+        payload.comparison = Some(compare_prefix_reports(
+            path,
+            &bytes,
+            &payload,
+            target_path,
+            &target_bytes,
+            &target_payload,
+        ));
+    }
 
     let has_divergence = payload
         .sections
@@ -455,7 +533,123 @@ fn build_prefix_trace_report(
         sections_with_divergence,
         verdict,
         sections,
+        comparison: None,
     })
+}
+
+fn compare_prefix_reports(
+    base_file: &str,
+    base_bytes: &[u8],
+    base_report: &PrefixTraceReport,
+    target_file: &str,
+    target_bytes: &[u8],
+    target_report: &PrefixTraceReport,
+) -> ComparisonReport {
+    for (base_section, target_section) in base_report
+        .sections
+        .iter()
+        .zip(target_report.sections.iter())
+    {
+        if let Some((item_index, (base_item, target_item))) = base_section
+            .items
+            .iter()
+            .zip(target_section.items.iter())
+            .enumerate()
+            .find(|(_, (base_item, target_item))| {
+                base_item.raw_start_bit != target_item.raw_start_bit
+                    || base_item.raw_end_bit != target_item.raw_end_bit
+                    || base_item.raw_len_bits != target_item.raw_len_bits
+            })
+        {
+            let bit_offset = base_item.raw_start_bit.min(target_item.raw_start_bit);
+            return ComparisonReport {
+                base_file: base_file.to_string(),
+                target_file: target_file.to_string(),
+                base_section_index: Some(base_section.section_index),
+                target_section_index: Some(target_section.section_index),
+                shared_prefix_end_bit: Some(bit_offset),
+                first_mismatch: Some(ComparisonMismatch {
+                    kind: "item_span".to_string(),
+                    bit_offset,
+                    byte_offset: bit_offset / 8,
+                    section_index: base_section.section_index,
+                    item_index: Some(item_index),
+                    base_item: Some(item_span(base_item)),
+                    target_item: Some(item_span(target_item)),
+                }),
+            };
+        }
+
+        let base_bits = bits_from_range(
+            base_bytes,
+            base_section.payload_start_bit,
+            base_section.payload_end_bit,
+        );
+        let target_bits = bits_from_range(
+            target_bytes,
+            target_section.payload_start_bit,
+            target_section.payload_end_bit,
+        );
+        let common_len = base_bits.len().min(target_bits.len());
+        let mismatch_at = base_bits
+            .iter()
+            .zip(target_bits.iter())
+            .position(|(base_bit, target_bit)| base_bit != target_bit)
+            .or_else(|| (base_bits.len() != target_bits.len()).then_some(common_len));
+
+        if let Some(local_offset) = mismatch_at {
+            let bit_offset = base_section.payload_start_bit + local_offset as u64;
+            let item_index = base_section
+                .items
+                .iter()
+                .position(|item| item.raw_start_bit <= bit_offset && bit_offset < item.raw_end_bit)
+                .or_else(|| {
+                    target_section.items.iter().position(|item| {
+                        item.raw_start_bit <= bit_offset && bit_offset < item.raw_end_bit
+                    })
+                });
+            let base_item = item_index.and_then(|index| base_section.items.get(index));
+            let target_item = item_index.and_then(|index| target_section.items.get(index));
+
+            return ComparisonReport {
+                base_file: base_file.to_string(),
+                target_file: target_file.to_string(),
+                base_section_index: Some(base_section.section_index),
+                target_section_index: Some(target_section.section_index),
+                shared_prefix_end_bit: Some(bit_offset),
+                first_mismatch: Some(ComparisonMismatch {
+                    kind: if local_offset < common_len {
+                        "bit".to_string()
+                    } else {
+                        "length".to_string()
+                    },
+                    bit_offset,
+                    byte_offset: bit_offset / 8,
+                    section_index: base_section.section_index,
+                    item_index,
+                    base_item: base_item.map(item_span),
+                    target_item: target_item.map(item_span),
+                }),
+            };
+        }
+    }
+
+    ComparisonReport {
+        base_file: base_file.to_string(),
+        target_file: target_file.to_string(),
+        base_section_index: None,
+        target_section_index: None,
+        shared_prefix_end_bit: None,
+        first_mismatch: None,
+    }
+}
+
+fn item_span(item: &ItemTrace) -> ItemSpan {
+    ItemSpan {
+        raw_start_bit: item.raw_start_bit,
+        raw_end_bit: item.raw_end_bit,
+        raw_len_bits: item.raw_len_bits,
+    }
 }
 
 fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mut OutputManager) {
