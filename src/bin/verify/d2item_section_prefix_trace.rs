@@ -25,6 +25,8 @@ struct PrefixTraceReport {
     sections: Vec<SectionTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     comparison: Option<ComparisonReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    multi_comparison: Option<MultiComparisonReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -149,6 +151,15 @@ struct ComparisonReport {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+struct MultiComparisonReport {
+    base_file: String,
+    repair_authorized: bool,
+    aggregate_status: String,
+    targets: Vec<ComparisonReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 struct ComparisonMismatch {
     kind: String,
     bit_offset: u64,
@@ -202,6 +213,12 @@ fn main() -> Result<()> {
         Some("compare"),
         "Compare item-section context against a target save file",
     ));
+    parser.add_spec(ArgSpec::option(
+        "multi-compare",
+        None,
+        Some("multi-compare"),
+        "Compare item-section context against multiple comma-separated target save files",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -232,6 +249,12 @@ fn main() -> Result<()> {
 
     let mut payload =
         build_prefix_trace_report(path, version, alpha_mode, &bytes, &jm_positions, &huffman)?;
+
+    if parsed.get("compare").is_some() && parsed.get("multi-compare").is_some() {
+        return Err(anyhow!(
+            "Cannot specify both --compare and --multi-compare simultaneously"
+        ));
+    }
 
     if let Some(target_path) = parsed.get("compare") {
         let target_bytes = fs::read(target_path)
@@ -264,6 +287,55 @@ fn main() -> Result<()> {
             &target_bytes,
             &target_payload,
         ));
+    } else if let Some(multi_compare_val) = parsed.get("multi-compare") {
+        let raw_targets: Vec<&str> = multi_compare_val.split(',').map(|s| s.trim()).collect();
+        if raw_targets.len() < 2 || raw_targets.iter().any(|s| s.is_empty()) {
+            return Err(anyhow!(
+                "--multi-compare requires at least two comma-separated non-empty target save file paths"
+            ));
+        }
+
+        let mut targets = Vec::new();
+        for target_path in raw_targets {
+            let target_bytes = fs::read(target_path)
+                .with_context(|| format!("Failed to read comparison file: {}", target_path))?;
+            if target_bytes.len() < 8 {
+                return Err(anyhow!(
+                    "Comparison file too small to read version header: {}",
+                    target_path
+                ));
+            }
+            let target_version =
+                u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
+            let target_alpha_mode =
+                parsed.is_set("alpha") || target_version == 105 || target_version == 6;
+            let target_section_map = map_core_sections(&target_bytes).with_context(|| {
+                format!("Failed to map JM sections in comparison file: {}", target_path)
+            })?;
+            let target_payload = build_prefix_trace_report(
+                target_path,
+                target_version,
+                target_alpha_mode,
+                &target_bytes,
+                &target_section_map.jm_positions,
+                &huffman,
+            )?;
+            targets.push(compare_prefix_reports(
+                path,
+                &bytes,
+                &payload,
+                target_path,
+                &target_bytes,
+                &target_payload,
+            ));
+        }
+
+        payload.multi_comparison = Some(MultiComparisonReport {
+            base_file: path.to_string(),
+            repair_authorized: false,
+            aggregate_status: "all_targets_compared".to_string(),
+            targets,
+        });
     }
 
     let has_divergence = payload
@@ -534,6 +606,7 @@ fn build_prefix_trace_report(
         verdict,
         sections,
         comparison: None,
+        multi_comparison: None,
     })
 }
 
