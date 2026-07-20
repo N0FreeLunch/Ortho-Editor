@@ -294,6 +294,7 @@ fn section_context_report(
     huffman: &HuffmanTree,
     alpha_mode: bool,
     emit_phase_trace: bool,
+    coordinate_bit: Option<u64>,
 ) -> serde_json::Value {
     let mut with_padding_item = item.clone();
     with_padding_item.bits.clear();
@@ -350,9 +351,16 @@ fn section_context_report(
             }
         };
 
+    let target_local_bit = coordinate_bit
+        .and_then(|absolute| {
+            (absolute >= item.range.start && absolute < item.range.end)
+                .then(|| absolute - item.range.start)
+        })
+        .or_else(|| coordinate_bit.is_none().then_some(73));
+    let target_absolute_bit = coordinate_bit.unwrap_or(item.range.start + 73);
+
     let (strict_emission_bits, strict_emission_phases) = if emit_phase_trace {
-        match with_padding_item.to_bits_with_phase_trace(section_item_index, huffman, alpha_mode)
-        {
+        match with_padding_item.to_bits_with_phase_trace(section_item_index, huffman, alpha_mode) {
             Ok((bits, phases)) => (Some(bits), phases),
             Err(e) => {
                 return json!({
@@ -361,8 +369,8 @@ fn section_context_report(
                     "range_start": item.range.start,
                     "range_end": item.range.end,
                     "strict_bit_count": without_padding_bits.len(),
-                    "target_local_bit": 73,
-                    "target_absolute_bit": item.range.start + 73,
+                    "target_local_bit": target_local_bit,
+                    "target_absolute_bit": target_absolute_bit,
                     "strict_emission_phases": [],
                     "target_phase": serde_json::Value::Null,
                     "strict_emission_phase_observable": false,
@@ -378,19 +386,24 @@ fn section_context_report(
     };
 
     let strict_emission_phase_report = if emit_phase_trace {
-        let target_local_bit = 73u64;
-        let target_phase = strict_emission_phases
-            .iter()
-            .find(|phase| phase.start <= target_local_bit && target_local_bit < phase.end);
-        let target_phases = strict_emission_phases
-            .iter()
-            .filter(|phase| {
-                phase.start <= target_local_bit
-                    && target_local_bit < phase.end
-                    && phase.label != "summary_body_and_alignment"
-                    && phase.label != "summary_target_width_alignment"
+        let target_phase = target_local_bit.and_then(|local| {
+            strict_emission_phases
+                .iter()
+                .find(|phase| phase.start <= local && local < phase.end)
+        });
+        let target_phases = target_local_bit
+            .map(|local| {
+                strict_emission_phases
+                    .iter()
+                    .filter(|phase| {
+                        phase.start <= local
+                            && local < phase.end
+                            && phase.label != "summary_body_and_alignment"
+                            && phase.label != "summary_target_width_alignment"
+                    })
+                    .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>();
+            .unwrap_or_default();
         json!({
             "strict_emission_phases": strict_emission_phases,
             "target_phase": target_phase,
@@ -398,18 +411,31 @@ fn section_context_report(
             "strict_emission_phase_observable": target_phases.len() == 1,
             "strict_emission_phase_unobservable_reason": if target_phases.len() == 1 {
                 serde_json::Value::Null
+            } else if target_local_bit.is_none() {
+                json!(format!(
+                    "Target absolute bit {} is outside the selected item's half-open range {}..{}",
+                    target_absolute_bit, item.range.start, item.range.end
+                ))
             } else if target_phases.is_empty() {
-                json!("No recorded phase contains target local bit 73")
+                json!(format!(
+                    "No recorded phase contains target local bit {}",
+                    target_local_bit.unwrap()
+                ))
             } else {
-                json!("Multiple recorded phases contain target local bit 73")
+                json!(format!(
+                    "Multiple recorded phases contain target local bit {}",
+                    target_local_bit.unwrap()
+                ))
             },
         })
     } else {
         json!({})
     };
-    let target_phase = strict_emission_phases
-        .iter()
-        .find(|phase| phase.start <= 73 && 73 < phase.end);
+    let target_phase = target_local_bit.and_then(|local| {
+        strict_emission_phases
+            .iter()
+            .find(|phase| phase.start <= local && local < phase.end)
+    });
 
     let first_difference_offset = compare_first_difference_offset(
         &with_padding_bits,
@@ -451,8 +477,8 @@ fn section_context_report(
             .as_ref()
             .map(|bits| bits.len())
             .unwrap_or_else(|| item.range.end.saturating_sub(item.range.start) as usize),
-        "target_local_bit": 73,
-        "target_absolute_bit": item.range.start + 73,
+        "target_local_bit": target_local_bit,
+        "target_absolute_bit": target_absolute_bit,
         "strict_emission_phases": if emit_phase_trace {
             json!(strict_emission_phases)
         } else {
@@ -1270,6 +1296,7 @@ fn main() {
                     &huffman,
                     is_alpha,
                     emit_phase_trace,
+                    coordinate_bit,
                 );
                 if is_json {
                     println!("{}", report);
