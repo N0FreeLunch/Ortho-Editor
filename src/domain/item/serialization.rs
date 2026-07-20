@@ -3073,6 +3073,7 @@ impl Item {
                 &axiom,
             )?
         };
+        let padding_len = padding.len() as u64;
         item.body.alpha_alignment_padding.extend(padding);
 
         item.range.end = cursor.pos();
@@ -3097,6 +3098,15 @@ impl Item {
                 depth: s.depth,
             })
             .collect();
+
+        if padding_len > 0 {
+            item.segments.push(crate::domain::item::BitSegment {
+                start: item.total_bits.saturating_sub(padding_len),
+                end: item.total_bits,
+                label: "alpha_alignment_padding_nudge_capture".to_string(),
+                depth: 0,
+            });
+        }
 
         cursor.end_segment();
 
