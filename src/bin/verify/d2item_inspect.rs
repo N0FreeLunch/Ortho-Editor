@@ -1289,6 +1289,128 @@ fn main() {
                 return;
             }
 
+            if trace_segments {
+                let range_start = item.range.start;
+                let range_end = item.range.end;
+                let raw_len_bits = range_end.saturating_sub(range_start);
+                let code_hint = item.code.trim().to_string();
+                let forced_compact = Some(item.header.is_compact);
+
+                unsafe {
+                    env::set_var("D2R_ITEM_TRACE", "1");
+                }
+                let bounded_parse = d2r_core::domain::item::serialization::parse_item_at_with_limit(
+                    &bytes,
+                    range_start,
+                    0,
+                    &huffman,
+                    section_item_index,
+                    is_alpha,
+                    Some(raw_len_bits),
+                    forced_compact,
+                    Some(code_hint.as_str()),
+                );
+                unsafe {
+                    env::remove_var("D2R_ITEM_TRACE");
+                }
+
+                match bounded_parse {
+                    Ok((traced_item, parser_consumed_bits)) => {
+                        let coordinate = coordinate_bit.map(|absolute| {
+                            let item_local = (absolute >= range_start && absolute < range_end)
+                                .then(|| absolute - range_start);
+                            let owner_segments = item_local
+                                .map(|local| {
+                                    traced_item
+                                        .segments
+                                        .iter()
+                                        .filter(|segment| {
+                                            segment.start <= local && local < segment.end
+                                        })
+                                        .map(|segment| {
+                                            json!({
+                                                "label": segment.label,
+                                                "start": segment.start,
+                                                "end": segment.end,
+                                                "depth": segment.depth
+                                            })
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            json!({
+                                "absolute": absolute,
+                                "item_local": item_local,
+                                "owner_segments": owner_segments
+                            })
+                        });
+                        let segments = traced_item
+                            .segments
+                            .iter()
+                            .map(|segment| {
+                                json!({
+                                    "label": segment.label,
+                                    "start": segment.start,
+                                    "end": segment.end,
+                                    "depth": segment.depth
+                                })
+                            })
+                            .collect::<Vec<_>>();
+
+                        if is_json {
+                            println!(
+                                "{}",
+                                json!({
+                                    "section_item_index": section_item_index,
+                                    "code": code_hint,
+                                    "range": {"start": range_start, "end": range_end},
+                                    "raw_len_bits": raw_len_bits,
+                                    "parser_consumed_bits": parser_consumed_bits,
+                                    "coordinate": coordinate,
+                                    "segments": segments
+                                })
+                            );
+                        } else {
+                            println!(
+                                "Bounded trace for section item {} '{}' bits {}-{}",
+                                section_item_index, code_hint, range_start, range_end
+                            );
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&json!({
+                                    "raw_len_bits": raw_len_bits,
+                                    "parser_consumed_bits": parser_consumed_bits,
+                                    "coordinate": coordinate,
+                                    "segments": segments
+                                }))
+                                .unwrap_or_default()
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        if is_json {
+                            println!(
+                                "{}",
+                                json!({
+                                    "section_item_index": section_item_index,
+                                    "code": code_hint,
+                                    "range": {"start": range_start, "end": range_end},
+                                    "raw_len_bits": raw_len_bits,
+                                    "parser_consumed_bits": serde_json::Value::Null,
+                                    "errors": [error.to_string()]
+                                })
+                            );
+                        } else {
+                            eprintln!(
+                                "Failed bounded trace for section item {} at bits {}-{}: {}",
+                                section_item_index, range_start, range_end, error
+                            );
+                        }
+                    }
+                }
+                return;
+            }
+
             if is_json {
                 println!(
                     "{}",
