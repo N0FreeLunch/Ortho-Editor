@@ -29,6 +29,8 @@ struct PrefixTraceReport {
     multi_comparison: Option<MultiComparisonReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     insertion_simulation: Option<InsertionSimulationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    multi_insertion_simulation: Option<MultiInsertionSimulationReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,6 +179,15 @@ struct InsertionSimulationReport {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+struct MultiInsertionSimulationReport {
+    base_file: String,
+    repair_authorized: bool,
+    aggregate_status: String,
+    targets: Vec<InsertionSimulationReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 struct ComparisonMismatch {
     kind: String,
     bit_offset: u64,
@@ -242,6 +253,12 @@ fn main() -> Result<()> {
         Some("simulate-insertion"),
         "Simulate section payload insertion bit shifts against a target save file without mutation",
     ));
+    parser.add_spec(ArgSpec::option(
+        "multi-simulate-insertion",
+        None,
+        Some("multi-simulate-insertion"),
+        "Simulate section payload insertion bit shifts against multiple comma-separated target save files without mutation",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -277,6 +294,7 @@ fn main() -> Result<()> {
         parsed.get("compare").is_some(),
         parsed.get("multi-compare").is_some(),
         parsed.get("simulate-insertion").is_some(),
+        parsed.get("multi-simulate-insertion").is_some(),
     ]
     .iter()
     .filter(|&&b| b)
@@ -284,7 +302,7 @@ fn main() -> Result<()> {
 
     if flag_count > 1 {
         return Err(anyhow!(
-            "Cannot combine --compare, --multi-compare, or --simulate-insertion options"
+            "Cannot combine --compare, --multi-compare, --simulate-insertion, or --multi-simulate-insertion options"
         ));
     }
 
@@ -413,6 +431,83 @@ fn main() -> Result<()> {
                 repair_authorized: false,
             });
         }
+    } else if let Some(multi_sim_val) = parsed.get("multi-simulate-insertion") {
+        let raw_targets: Vec<&str> = multi_sim_val.split(',').map(|s| s.trim()).collect();
+        if raw_targets.is_empty() || raw_targets.iter().any(|s| s.is_empty()) {
+            return Err(anyhow!(
+                "--multi-simulate-insertion requires comma-separated non-empty target save file paths"
+            ));
+        }
+
+        let mut seen_paths = std::collections::HashSet::new();
+        for t in &raw_targets {
+            if !seen_paths.insert(*t) {
+                return Err(anyhow!(
+                    "Duplicate target path in --multi-simulate-insertion: {}",
+                    t
+                ));
+            }
+        }
+
+        let mut targets = Vec::new();
+        for target_path in raw_targets {
+            let target_bytes = fs::read(target_path)
+                .with_context(|| format!("Failed to read target file for simulation: {}", target_path))?;
+            if target_bytes.len() < 8 {
+                return Err(anyhow!(
+                    "Target file too small to read version header: {}",
+                    target_path
+                ));
+            }
+            let target_version =
+                u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
+            let target_alpha_mode =
+                parsed.is_set("alpha") || target_version == 105 || target_version == 6;
+            let target_section_map = map_core_sections(&target_bytes).with_context(|| {
+                format!("Failed to map JM sections in target simulation file: {}", target_path)
+            })?;
+            let target_payload = build_prefix_trace_report(
+                target_path,
+                target_version,
+                target_alpha_mode,
+                &target_bytes,
+                &target_section_map.jm_positions,
+                &huffman,
+            )?;
+
+            if let (Some(base_sec), Some(target_sec)) = (payload.sections.first(), target_payload.sections.first()) {
+                let base_payload_bits = base_sec.payload_original_len_bits;
+                let target_payload_bits = target_sec.payload_original_len_bits;
+                let projected_delta_bits = target_payload_bits as i64 - base_payload_bits as i64;
+                let base_next_jm_bit_offset = base_sec.next_jm_offset_bit;
+                let projected_next_jm_bit_offset = (base_next_jm_bit_offset as i64 + projected_delta_bits) as u64;
+
+                targets.push(InsertionSimulationReport {
+                    base_file: path.to_string(),
+                    target_file: target_path.to_string(),
+                    section_index: base_sec.section_index,
+                    simulation_status: "dry_run_success".to_string(),
+                    base_payload_bits,
+                    target_payload_bits,
+                    projected_delta_bits,
+                    base_next_jm_bit_offset,
+                    projected_next_jm_bit_offset,
+                    repair_authorized: false,
+                });
+            } else {
+                return Err(anyhow!(
+                    "Target file missing section 1 for simulation: {}",
+                    target_path
+                ));
+            }
+        }
+
+        payload.multi_insertion_simulation = Some(MultiInsertionSimulationReport {
+            base_file: path.to_string(),
+            repair_authorized: false,
+            aggregate_status: "all_targets_simulated".to_string(),
+            targets,
+        });
     }
 
     let has_divergence = payload
@@ -685,6 +780,7 @@ fn build_prefix_trace_report(
         comparison: None,
         multi_comparison: None,
         insertion_simulation: None,
+        multi_insertion_simulation: None,
     })
 }
 
@@ -845,6 +941,24 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
             "  Base next JM bit: {} | Projected next JM bit: {}",
             sim.base_next_jm_bit_offset, sim.projected_next_jm_bit_offset
         ));
+    }
+
+    if let Some(multi_sim) = &payload.multi_insertion_simulation {
+        out.summary(&format!(
+            "Multi insertion simulation: {} (targets: {})",
+            multi_sim.base_file,
+            multi_sim.targets.len()
+        ));
+        out.summary(&format!(
+            "  Aggregate status: {} | Repair authorized: {}",
+            multi_sim.aggregate_status, multi_sim.repair_authorized
+        ));
+        for sim in &multi_sim.targets {
+            out.summary(&format!(
+                "  Target: {} | Delta: {} bits | Projected next JM bit: {}",
+                sim.target_file, sim.projected_delta_bits, sim.projected_next_jm_bit_offset
+            ));
+        }
     }
 
     for section in &payload.sections {
