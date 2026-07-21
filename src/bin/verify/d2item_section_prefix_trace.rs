@@ -27,6 +27,8 @@ struct PrefixTraceReport {
     comparison: Option<ComparisonReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     multi_comparison: Option<MultiComparisonReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    insertion_simulation: Option<InsertionSimulationReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,6 +162,21 @@ struct MultiComparisonReport {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+struct InsertionSimulationReport {
+    base_file: String,
+    target_file: String,
+    section_index: usize,
+    simulation_status: String,
+    base_payload_bits: usize,
+    target_payload_bits: usize,
+    projected_delta_bits: i64,
+    base_next_jm_bit_offset: u64,
+    projected_next_jm_bit_offset: u64,
+    repair_authorized: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 struct ComparisonMismatch {
     kind: String,
     bit_offset: u64,
@@ -219,6 +236,12 @@ fn main() -> Result<()> {
         Some("multi-compare"),
         "Compare item-section context against multiple comma-separated target save files",
     ));
+    parser.add_spec(ArgSpec::option(
+        "simulate-insertion",
+        None,
+        Some("simulate-insertion"),
+        "Simulate section payload insertion bit shifts against a target save file without mutation",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -250,9 +273,18 @@ fn main() -> Result<()> {
     let mut payload =
         build_prefix_trace_report(path, version, alpha_mode, &bytes, &jm_positions, &huffman)?;
 
-    if parsed.get("compare").is_some() && parsed.get("multi-compare").is_some() {
+    let flag_count = [
+        parsed.get("compare").is_some(),
+        parsed.get("multi-compare").is_some(),
+        parsed.get("simulate-insertion").is_some(),
+    ]
+    .iter()
+    .filter(|&&b| b)
+    .count();
+
+    if flag_count > 1 {
         return Err(anyhow!(
-            "Cannot specify both --compare and --multi-compare simultaneously"
+            "Cannot combine --compare, --multi-compare, or --simulate-insertion options"
         ));
     }
 
@@ -336,6 +368,51 @@ fn main() -> Result<()> {
             aggregate_status: "all_targets_compared".to_string(),
             targets,
         });
+    } else if let Some(target_path) = parsed.get("simulate-insertion") {
+        let target_bytes = fs::read(target_path)
+            .with_context(|| format!("Failed to read target file for simulation: {}", target_path))?;
+        if target_bytes.len() < 8 {
+            return Err(anyhow!(
+                "Target file too small to read version header: {}",
+                target_path
+            ));
+        }
+        let target_version =
+            u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
+        let target_alpha_mode =
+            parsed.is_set("alpha") || target_version == 105 || target_version == 6;
+        let target_section_map = map_core_sections(&target_bytes).with_context(|| {
+            format!("Failed to map JM sections in target simulation file: {}", target_path)
+        })?;
+        let target_payload = build_prefix_trace_report(
+            target_path,
+            target_version,
+            target_alpha_mode,
+            &target_bytes,
+            &target_section_map.jm_positions,
+            &huffman,
+        )?;
+
+        if let (Some(base_sec), Some(target_sec)) = (payload.sections.first(), target_payload.sections.first()) {
+            let base_payload_bits = base_sec.payload_original_len_bits;
+            let target_payload_bits = target_sec.payload_original_len_bits;
+            let projected_delta_bits = target_payload_bits as i64 - base_payload_bits as i64;
+            let base_next_jm_bit_offset = base_sec.next_jm_offset_bit;
+            let projected_next_jm_bit_offset = (base_next_jm_bit_offset as i64 + projected_delta_bits) as u64;
+
+            payload.insertion_simulation = Some(InsertionSimulationReport {
+                base_file: path.to_string(),
+                target_file: target_path.to_string(),
+                section_index: base_sec.section_index,
+                simulation_status: "dry_run_success".to_string(),
+                base_payload_bits,
+                target_payload_bits,
+                projected_delta_bits,
+                base_next_jm_bit_offset,
+                projected_next_jm_bit_offset,
+                repair_authorized: false,
+            });
+        }
     }
 
     let has_divergence = payload
@@ -607,6 +684,7 @@ fn build_prefix_trace_report(
         sections,
         comparison: None,
         multi_comparison: None,
+        insertion_simulation: None,
     })
 }
 
@@ -749,6 +827,25 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
         payload.total_items,
         payload.sections_with_divergence
     ));
+
+    if let Some(sim) = &payload.insertion_simulation {
+        out.summary(&format!(
+            "Insertion simulation: {} -> {}",
+            sim.base_file, sim.target_file
+        ));
+        out.summary(&format!(
+            "  Section: {} | Status: {} | Repair authorized: {}",
+            sim.section_index, sim.simulation_status, sim.repair_authorized
+        ));
+        out.summary(&format!(
+            "  Base payload: {} bits | Target payload: {} bits | Delta: {} bits",
+            sim.base_payload_bits, sim.target_payload_bits, sim.projected_delta_bits
+        ));
+        out.summary(&format!(
+            "  Base next JM bit: {} | Projected next JM bit: {}",
+            sim.base_next_jm_bit_offset, sim.projected_next_jm_bit_offset
+        ));
+    }
 
     for section in &payload.sections {
         if let Some(divergence) = &section.first_divergence {
