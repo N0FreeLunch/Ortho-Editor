@@ -16,16 +16,7 @@ struct OracleReport {
     targets: Vec<OracleTargetEntry>,
 }
 
-#[derive(Debug, Deserialize)]
-struct OracleTargetEntry {
-    target_file: String,
-    simulation_status: String,
-    base_payload_bits: usize,
-    target_payload_bits: usize,
-    projected_delta_bits: isize,
-    base_next_jm_bit_offset: usize,
-    projected_next_jm_bit_offset: usize,
-}
+type OracleTargetEntry = d2r_core::save::transport::TransportOracleEntry;
 
 /// Reads the entire .d2i file as raw bytes and returns a bit vector.
 /// Item::from_reader stops at 70 bits, but the actual in-game scroll uses 72 bits,
@@ -340,10 +331,11 @@ fn run_transport_inject(
         process::exit(1);
     });
 
-    let targets: Vec<OracleTargetEntry> = serde_json::from_value(serde_json::Value::Array(targets_array.clone())).unwrap_or_else(|e| {
-        eprintln!("[ERROR] Failed to deserialize targets array: {}", e);
-        process::exit(1);
-    });
+    let targets: Vec<OracleTargetEntry> =
+        serde_json::from_value(serde_json::Value::Array(targets_array.clone())).unwrap_or_else(|e| {
+            eprintln!("[ERROR] Failed to deserialize targets array: {}", e);
+            process::exit(1);
+        });
 
     let target_filename = std::path::Path::new(target_path)
         .file_name()
@@ -366,169 +358,41 @@ fn run_transport_inject(
             process::exit(1);
         });
 
-    if entry.simulation_status != "dry_run_success" {
-        eprintln!(
-            "[ERROR] Target '{}' simulation_status is '{}', expected 'dry_run_success'",
-            target_filename, entry.simulation_status
-        );
-        process::exit(1);
-    }
-
-    if entry.projected_delta_bits <= 0 {
-        eprintln!(
-            "[ERROR] Target '{}' has projected_delta_bits {} <= 0 (zero payload or invalid); injection rejected",
-            target_filename, entry.projected_delta_bits
-        );
-        process::exit(1);
-    }
-
-    // 2. Load base save file
+    // 2. Load base save file and target save file
     let base_bytes = fs::read(base_path).unwrap_or_else(|e| {
         eprintln!("[ERROR] Cannot read base save file '{}': {}", base_path, e);
         process::exit(1);
     });
-    let base_map = d2r_core::save::map_core_sections(&base_bytes).unwrap_or_else(|e| {
-        eprintln!("[ERROR] Failed to map sections in base save file: {}", e);
-        process::exit(1);
-    });
-    if base_map.jm_positions.len() < 2 {
-        eprintln!("[ERROR] Base save file has fewer than 2 JM markers");
-        process::exit(1);
-    }
-
-    let base_jm1_byte = base_map.jm_positions[0];
-    let base_jm1_bit = base_jm1_byte * 8;
-    let base_payload_start_bit = base_jm1_bit + 32; // JM (16) + item_count (16)
-    let base_payload_end_bit = entry.base_next_jm_bit_offset;
-
-    if base_payload_end_bit < base_payload_start_bit {
-        eprintln!("[ERROR] Invalid base payload bit boundaries");
-        process::exit(1);
-    }
-    let actual_base_payload_bits = base_payload_end_bit - base_payload_start_bit;
-    if actual_base_payload_bits != entry.base_payload_bits {
-        eprintln!(
-            "[ERROR] Base payload bit count mismatch: extracted {} bits, oracle expected {} bits",
-            actual_base_payload_bits, entry.base_payload_bits
-        );
-        process::exit(1);
-    }
-
-    // 3. Load target save file
     let target_bytes = fs::read(target_path).unwrap_or_else(|e| {
         eprintln!("[ERROR] Cannot read target save file '{}': {}", target_path, e);
         process::exit(1);
     });
-    let target_map = d2r_core::save::map_core_sections(&target_bytes).unwrap_or_else(|e| {
-        eprintln!("[ERROR] Failed to map sections in target save file: {}", e);
-        process::exit(1);
-    });
-    if target_map.jm_positions.len() < 2 {
-        eprintln!("[ERROR] Target save file has fewer than 2 JM markers");
-        process::exit(1);
-    }
 
-    let target_jm1_byte = target_map.jm_positions[0];
-    let target_item_count = u16::from_le_bytes([
-        target_bytes[target_jm1_byte + 2],
-        target_bytes[target_jm1_byte + 3],
-    ]);
-
-    let target_payload_start_bit = target_jm1_byte * 8 + 32;
-    let target_payload_end_bit = target_map.jm_positions[1] * 8;
-    let actual_target_payload_bits =
-        target_payload_end_bit.saturating_sub(target_payload_start_bit);
-
-    if actual_target_payload_bits != entry.target_payload_bits {
-        eprintln!(
-            "[ERROR] Target payload bit count mismatch: extracted {} bits, oracle expected {} bits",
-            actual_target_payload_bits, entry.target_payload_bits
-        );
-        process::exit(1);
-    }
-
-    // Read exact target payload bits
-    let mut target_reader = BitReader::endian(Cursor::new(&target_bytes), LittleEndian);
-    target_reader
-        .skip(target_payload_start_bit as u32)
+    // 3. Delegate assembly to library
+    let result = d2r_core::save::transport::inject_section1(&base_bytes, &target_bytes, entry)
         .unwrap_or_else(|e| {
-            eprintln!("[ERROR] Failed to seek to target payload start bit: {}", e);
+            eprintln!("[ERROR] Transport injection failed: {}", e);
             process::exit(1);
         });
 
-    let mut target_payload_bits = Vec::with_capacity(entry.target_payload_bits);
-    for _ in 0..entry.target_payload_bits {
-        let bit = target_reader.read_bit().unwrap_or_else(|e| {
-            eprintln!("[ERROR] Failed to read target payload bit: {}", e);
-            process::exit(1);
-        });
-        target_payload_bits.push(bit);
-    }
-
-    // 4. Assemble output file
-    let mut writer = BitWriter::endian(Vec::new(), LittleEndian);
-
-    // Write base header up to JM1
-    for &b in &base_bytes[..base_jm1_byte] {
-        writer.write::<8, u8>(b).unwrap();
-    }
-
-    // Write JM1 marker + target_item_count
-    writer.write::<8, u8>(b'J').unwrap();
-    writer.write::<8, u8>(b'M').unwrap();
-    writer.write::<16, u16>(target_item_count).unwrap();
-
-    // Write target Section 1 payload bits
-    for &bit in &target_payload_bits {
-        writer.write_bit(bit).unwrap();
-    }
-
-    // Byte-align
-    writer.byte_align().unwrap();
-
-    // Verify alignment against oracle projected_next_jm_bit_offset
-    let current_bit_offset = writer.writer().unwrap().len() * 8;
-    if current_bit_offset != entry.projected_next_jm_bit_offset {
-        eprintln!(
-            "[ERROR] Projected next JM bit offset mismatch: assembled {} bits, oracle expected {} bits",
-            current_bit_offset, entry.projected_next_jm_bit_offset
-        );
-        process::exit(1);
-    }
-
-    // Write base JM2 and remainder verbatim
-    let base_jm2_byte = base_map.jm_positions[1];
-    for &b in &base_bytes[base_jm2_byte..] {
-        writer.write::<8, u8>(b).unwrap();
-    }
-
-    let mut result_bytes = writer.into_writer();
-
-    // Fix file size in header (offset 8..12)
-    let file_size = result_bytes.len() as u32;
-    result_bytes[8..12].copy_from_slice(&file_size.to_le_bytes());
-
-    // Fix checksum
-    Checksum::fix(&mut result_bytes);
-
-    // Write output
+    // 4. Write output file
     fs::create_dir_all(
         std::path::Path::new(output_path)
             .parent()
             .unwrap_or(std::path::Path::new(".")),
     )
     .ok();
-    fs::write(output_path, &result_bytes).unwrap_or_else(|e| {
+    fs::write(output_path, &result.bytes).unwrap_or_else(|e| {
         eprintln!("[ERROR] Cannot write output save file '{}': {}", output_path, e);
         process::exit(1);
     });
 
     println!(
         "[OK] Transport injection succeeded!\n  Injected target payload ({} bits, {} items)\n  Output: {} ({} bytes)",
-        entry.target_payload_bits,
-        target_item_count,
+        result.injected_bits,
+        result.target_item_count,
         output_path,
-        result_bytes.len()
+        result.bytes.len()
     );
 }
 
