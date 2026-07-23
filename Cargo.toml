@@ -92,6 +92,10 @@ name = "d2save_inject"
 path = "src/bin/verify/d2save_inject.rs"
 
 [[bin]]
+name = "d2save_transport_harness"
+path = "src/bin/verify/d2save_transport_harness.rs"
+
+[[bin]]
 name = "d2item_extract"
 path = "src/bin/verify/d2item_extract.rs"
 
