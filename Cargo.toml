@@ -465,5 +465,9 @@ path = "src/bin/verify/d2save_mercenary_audit.rs"
 name = "d2save_json_dump"
 path = "src/bin/verify/d2save_json_dump.rs"
 
+[[bin]]
+name = "d2item_dedup_oracle"
+path = "src/bin/verify/d2item_dedup_oracle.rs"
+
 [dev-dependencies]
 trybuild = "1.0"
