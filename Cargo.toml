@@ -481,6 +481,11 @@ path = "src/bin/verify/d2item_cache_benchmark.rs"
 name = "d2item_cache_parallel_benchmark"
 path = "src/bin/verify/d2item_cache_parallel_benchmark.rs"
 
+[[bin]]
+name = "d2item_opaque_census"
+path = "src/bin/verify/d2item_opaque_census.rs"
+
+
 
 [dev-dependencies]
 trybuild = "1.0"
