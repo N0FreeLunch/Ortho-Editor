@@ -2,7 +2,51 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::item::entity::{Item, ItemModule};
+use crate::domain::item::scanner::{ItemMarker, MarkerStatus};
 use crate::domain::item::serialization::{parse_item_at_with_limit, HuffmanTree};
+
+pub const BOUNDARY_CANDIDATE_RADIUS_BITS: u64 = 128;
+
+pub fn marker_status_label(status: MarkerStatus) -> &'static str {
+    match status {
+        MarkerStatus::Accepted => "accepted",
+        MarkerStatus::Rejected => "rejected",
+        MarkerStatus::Phantom => "phantom",
+    }
+}
+
+pub fn collect_boundary_candidates(
+    markers: &[ItemMarker],
+    section_bit_offset: u64,
+    retained_end: u64,
+) -> Vec<BoundaryCandidate> {
+    let window_start = retained_end.saturating_sub(BOUNDARY_CANDIDATE_RADIUS_BITS);
+    let window_end = retained_end.saturating_add(BOUNDARY_CANDIDATE_RADIUS_BITS);
+    let mut candidates = markers
+        .iter()
+        .filter_map(|marker| {
+            let absolute_bit_position = section_bit_offset.checked_add(marker.offset)?;
+            if absolute_bit_position < window_start || absolute_bit_position > window_end {
+                return None;
+            }
+            Some(BoundaryCandidate {
+                absolute_bit_position,
+                code: marker.code.trim().to_string(),
+                status: marker_status_label(marker.status).to_string(),
+                distance_from_retained_end: absolute_bit_position as i64 - retained_end as i64,
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|a, b| {
+        a.distance_from_retained_end
+            .unsigned_abs()
+            .cmp(&b.distance_from_retained_end.unsigned_abs())
+            .then_with(|| a.absolute_bit_position.cmp(&b.absolute_bit_position))
+            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| a.status.cmp(&b.status))
+    });
+    candidates
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BoundaryCandidate {
@@ -533,5 +577,35 @@ mod tests {
         assert_eq!(summary.first_non_failure_extension_bits, None);
         assert_eq!(summary.first_structured_extension_bits, None);
         assert_eq!(summary.first_structured_extension_crosses_retained_interval, None);
+    }
+
+    #[test]
+    fn boundary_candidate_reports_absolute_position_status_and_distance() {
+        let markers = vec![
+            ItemMarker {
+                offset: 1573,
+                confidence: 700,
+                code: "wyws".to_string(),
+                score: 700,
+                status: MarkerStatus::Accepted,
+            },
+            ItemMarker {
+                offset: 1565,
+                confidence: 100,
+                code: "near".to_string(),
+                score: 100,
+                status: MarkerStatus::Rejected,
+            },
+        ];
+
+        let candidates = collect_boundary_candidates(&markers, 7328, 8901);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].absolute_bit_position, 8901);
+        assert_eq!(candidates[0].code, "wyws");
+        assert_eq!(candidates[0].status, "accepted");
+        assert_eq!(candidates[0].distance_from_retained_end, 0);
+        assert_eq!(candidates[1].absolute_bit_position, 8893);
+        assert_eq!(candidates[1].status, "rejected");
+        assert_eq!(candidates[1].distance_from_retained_end, -8);
     }
 }
