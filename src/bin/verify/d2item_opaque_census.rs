@@ -7,7 +7,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use d2r_core::domain::item::opaque_probe::{
+    collect_boundary_candidates, probe_opaque_item, BoundaryCandidate, OpaqueProbeRequest,
+    ParserProbe,
+};
+use d2r_core::domain::item::scanner::scan_item_markers;
 use d2r_core::item::{HuffmanTree, Item, ItemClassProjection};
+use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser};
 use serde::Serialize;
 
@@ -39,6 +45,11 @@ struct CensusRow {
     is_semi_opaque: bool,
     is_residue: bool,
     is_opaque: bool,
+    is_top_level: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parser_probe: Option<ParserProbe>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    boundary_candidates: Option<Vec<BoundaryCandidate>>,
 }
 
 #[derive(Serialize, Debug)]
@@ -59,6 +70,8 @@ struct CollectedItemInfo<'a> {
     section: Option<String>,
     item_index: usize,
     item_path: String,
+    top_level_item_index: usize,
+    is_top_level: bool,
 }
 
 fn collect_items_recursive<'a>(
@@ -66,6 +79,8 @@ fn collect_items_recursive<'a>(
     section: Option<String>,
     parent_path: &str,
     save_item_counter: &mut usize,
+    top_level_item_index: usize,
+    is_top_level: bool,
     collected: &mut Vec<CollectedItemInfo<'a>>,
 ) {
     let item_index = *save_item_counter;
@@ -76,6 +91,8 @@ fn collect_items_recursive<'a>(
         section,
         item_index,
         item_path: parent_path.to_string(),
+        top_level_item_index,
+        is_top_level,
     });
 
     for (s_idx, socketed) in item.socketed_items.iter().enumerate() {
@@ -85,6 +102,8 @@ fn collect_items_recursive<'a>(
             collected.last().and_then(|info| info.section.clone()),
             &child_path,
             save_item_counter,
+            top_level_item_index,
+            false,
             collected,
         );
     }
@@ -104,6 +123,10 @@ fn main() -> Result<()> {
         .add_flag("json", "Emit opaque census report in JSON format to stdout")
         .short('j')
         .long("json");
+
+    parser
+        .add_flag("probe", "Probe top-level opaque items using section boundary candidates")
+        .long("probe");
 
     parser
         .add_opt("output", "Path to output JSON report file")
@@ -136,6 +159,8 @@ fn main() -> Result<()> {
         );
         process::exit(1);
     }
+
+    let enable_probe = parsed.is_set("probe");
 
     let mut save_files: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = fs::read_dir(saves_dir_path) {
@@ -182,39 +207,91 @@ fn main() -> Result<()> {
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
         let is_alpha = version == 105;
 
-        let mut save_item_counter = 0usize;
+        let jm_positions = find_jm_markers(&bytes);
+        if jm_positions.is_empty() {
+            unreadable_saves.push(UnreadableSave {
+                save_file: save_file_rel,
+                reason: "No JM section markers found".to_string(),
+            });
+            continue;
+        }
 
-        match Item::read_player_items(&bytes, &huffman, is_alpha) {
-            Ok(top_items) => {
-                for (t_idx, top_item) in top_items.iter().enumerate() {
-                    let mut collected = Vec::new();
-                    let top_path = format!("{}", t_idx);
-                    collect_items_recursive(
-                        top_item,
-                        Some("Player Items".to_string()),
-                        &top_path,
-                        &mut save_item_counter,
-                        &mut collected,
-                    );
+        let pos = jm_positions[0];
+        if bytes.len() < pos + 4 {
+            unreadable_saves.push(UnreadableSave {
+                save_file: save_file_rel,
+                reason: "Player Items JM section header truncated".to_string(),
+            });
+            continue;
+        }
 
-                    for info in collected {
-                        process_collected_item(
-                            info,
-                            &save_file_rel,
-                            &mut total_items_collected,
-                            &mut cache_ineligible_count,
-                            &mut opaque_predicate_hit_count,
-                            &mut classification_counts,
-                            &mut rows,
-                        );
-                    }
-                }
-            }
+        let item_count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        let next_pos = jm_positions.get(1).copied().unwrap_or(bytes.len());
+        let section_data = &bytes[pos..next_pos];
+        let section_bit_offset = pos as u64 * 8;
+
+        let top_items = match Item::read_section(
+            section_data,
+            section_bit_offset,
+            item_count,
+            &huffman,
+            is_alpha,
+            false,
+        ) {
+            Ok(items) => items,
             Err(e) => {
                 unreadable_saves.push(UnreadableSave {
                     save_file: save_file_rel,
-                    reason: format!("Failed to parse items from save: {}", e),
+                    reason: format!("Failed to parse Player Items section: {}", e),
                 });
+                continue;
+            }
+        };
+
+        let scanner_markers = if enable_probe {
+            Some(scan_item_markers(
+                section_data,
+                &huffman,
+                is_alpha,
+                section_bit_offset,
+                Some(item_count),
+                true,
+            ))
+        } else {
+            None
+        };
+
+        let mut save_item_counter = 0usize;
+
+        for (t_idx, top_item) in top_items.iter().enumerate() {
+            let mut collected = Vec::new();
+            let top_path = format!("{}", t_idx);
+            collect_items_recursive(
+                top_item,
+                Some("Player Items".to_string()),
+                &top_path,
+                &mut save_item_counter,
+                t_idx,
+                true,
+                &mut collected,
+            );
+
+            for info in collected {
+                process_collected_item(
+                    info,
+                    &save_file_rel,
+                    &bytes,
+                    &huffman,
+                    is_alpha,
+                    enable_probe,
+                    scanner_markers.as_deref(),
+                    section_bit_offset,
+                    &mut total_items_collected,
+                    &mut cache_ineligible_count,
+                    &mut opaque_predicate_hit_count,
+                    &mut classification_counts,
+                    &mut rows,
+                )?;
             }
         }
     }
@@ -235,7 +312,11 @@ fn main() -> Result<()> {
         .context("Failed to serialize opaque census report to JSON")?;
 
     if let Some(output_path) = parsed.get("output") {
-        fs::write(output_path, &report_json)
+        let out_path = Path::new(output_path);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(out_path, &report_json)
             .with_context(|| format!("Cannot write output report to '{}'", output_path))?;
     }
 
@@ -263,12 +344,18 @@ fn main() -> Result<()> {
 fn process_collected_item(
     info: CollectedItemInfo,
     save_file_rel: &str,
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+    enable_probe: bool,
+    scanner_markers: Option<&[d2r_core::domain::item::scanner::ItemMarker]>,
+    section_bit_offset: u64,
     total_items_collected: &mut usize,
     cache_ineligible_count: &mut usize,
     opaque_predicate_hit_count: &mut usize,
     classification_counts: &mut ClassificationCounts,
     rows: &mut Vec<CensusRow>,
-) {
+) -> Result<()> {
     *total_items_collected += 1;
 
     let item = info.item;
@@ -300,6 +387,24 @@ fn process_collected_item(
             _ => {}
         }
 
+        let (parser_probe, boundary_candidates) =
+            if enable_probe && info.is_top_level && scanner_markers.is_some() {
+                let markers = scanner_markers.unwrap();
+                let candidates =
+                    collect_boundary_candidates(markers, section_bit_offset, item.range.end);
+                let probe_res = probe_opaque_item(OpaqueProbeRequest {
+                    item,
+                    bytes,
+                    huffman,
+                    is_alpha,
+                    item_index: info.top_level_item_index,
+                    boundary_candidates: &candidates,
+                })?;
+                (Some(probe_res.parser_probe), Some(candidates))
+            } else {
+                (None, None)
+            };
+
         rows.push(CensusRow {
             save_file: save_file_rel.to_string(),
             section: info.section,
@@ -313,6 +418,11 @@ fn process_collected_item(
             is_semi_opaque,
             is_residue,
             is_opaque,
+            is_top_level: info.is_top_level,
+            parser_probe,
+            boundary_candidates,
         });
     }
+
+    Ok(())
 }
