@@ -70,6 +70,28 @@ struct CensusRow {
     parser_probe: Option<ParserProbe>,
     #[serde(skip_serializing_if = "Option::is_none")]
     boundary_candidates: Option<Vec<BoundaryCandidate>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retained_header_layout: Option<RetainedHeaderLayout>,
+}
+
+#[derive(Serialize, Debug)]
+struct RetainedHeaderLayout {
+    bit_start: u64,
+    bit_end: u64,
+    flags: u32,
+    version: u8,
+    mode: u8,
+    location: u8,
+    x: u8,
+    y: u8,
+    page: u8,
+    socket_hint: u8,
+    checksum: Option<u8>,
+    is_compact: bool,
+    alpha_header_gap_value: Option<u32>,
+    alpha_header_gap_bit_count: usize,
+    alpha_code_bit_count: usize,
+    alpha_nudge: Option<u8>,
 }
 
 #[derive(Serialize, Debug)]
@@ -158,6 +180,13 @@ fn main() -> Result<()> {
         .long("causal-taxonomy");
 
     parser
+        .add_flag(
+            "trace-header-gap",
+            "Emit retained-item header/layout snapshot for parse_failure probe rows",
+        )
+        .long("trace-header-gap");
+
+    parser
         .add_opt("output", "Path to output JSON report file")
         .short('o')
         .long("output");
@@ -177,6 +206,7 @@ fn main() -> Result<()> {
 
     let enable_probe = parsed.is_set("probe");
     let enable_causal_taxonomy = parsed.is_set("causal-taxonomy");
+    let enable_trace_header_gap = parsed.is_set("trace-header-gap");
 
     if enable_causal_taxonomy && !enable_probe {
         eprintln!("Error: --causal-taxonomy requires --probe flag.");
@@ -321,6 +351,7 @@ fn main() -> Result<()> {
                     &huffman,
                     is_alpha,
                     enable_probe,
+                    enable_trace_header_gap,
                     scanner_markers.as_deref(),
                     section_bit_offset,
                     &mut total_items_collected,
@@ -454,6 +485,7 @@ fn process_collected_item(
     huffman: &HuffmanTree,
     is_alpha: bool,
     enable_probe: bool,
+    enable_trace_header_gap: bool,
     scanner_markers: Option<&[d2r_core::domain::item::scanner::ItemMarker]>,
     section_bit_offset: u64,
     total_items_collected: &mut usize,
@@ -511,6 +543,37 @@ fn process_collected_item(
                 (None, None)
             };
 
+        let retained_header_layout = if enable_trace_header_gap {
+            if let Some(ref probe) = parser_probe {
+                if probe.outcome == "parse_failure" {
+                    Some(RetainedHeaderLayout {
+                        bit_start: item.range.start,
+                        bit_end: item.range.end,
+                        flags: item.header.flags,
+                        version: item.header.version,
+                        mode: item.header.mode,
+                        location: item.header.location,
+                        x: item.header.x,
+                        y: item.header.y,
+                        page: item.header.page,
+                        socket_hint: item.header.socket_hint,
+                        checksum: item.header.alpha_checksum,
+                        is_compact: item.header.is_compact,
+                        alpha_header_gap_value: item.body.alpha_header_gap,
+                        alpha_header_gap_bit_count: item.body.alpha_header_gap_bits.len(),
+                        alpha_code_bit_count: item.body.alpha_code_bits.len(),
+                        alpha_nudge: item.body.alpha_nudge,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         rows.push(CensusRow {
             save_file: save_file_rel.to_string(),
             section: info.section,
@@ -527,6 +590,7 @@ fn process_collected_item(
             is_top_level: info.is_top_level,
             parser_probe,
             boundary_candidates,
+            retained_header_layout,
         });
     }
 
