@@ -7,6 +7,7 @@ pub mod scanner;
 pub mod editor;
 pub mod subdomains;
 pub mod cache;
+pub mod opaque_probe;
 
 pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;
@@ -21,6 +22,10 @@ pub use scanner::scan_item_markers;
 pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata, ForensicAudit, ForensicResult};
 pub use editor::{ItemEditor, ItemEditorExt};
 pub use cache::{ConcurrentItemClassRegistry, ItemClassProjection, ItemClassRegistry};
+pub use opaque_probe::{
+    BoundaryCandidate, ExtensionSweepRecord, ExtensionSweepSummary, OpaqueProbeRequest,
+    OpaqueProbeResult, ParserProbe, probe_opaque_item,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum FailureFamily {
