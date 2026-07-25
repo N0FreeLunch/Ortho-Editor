@@ -2502,12 +2502,41 @@ impl ExtendedStatsData {
                 trimmed_code,
                 "jav" | "buc" | "ucb8" | "xrs" | "c8xr" | "rhd" | "wa2"
             );
+        trait IntoParsingError {
+            fn into_parsing_error(self) -> crate::error::ParsingError;
+        }
+        impl IntoParsingError for crate::error::ParsingFailure {
+            fn into_parsing_error(self) -> crate::error::ParsingError {
+                self.error
+            }
+        }
+        impl IntoParsingError for std::io::Error {
+            fn into_parsing_error(self) -> crate::error::ParsingError {
+                crate::error::ParsingError::Io(self.to_string())
+            }
+        }
+
         macro_rules! read_or_truncate {
-            ($expr:expr) => {{
-                match $expr {
-                    Ok(value) => value,
+            ($cursor:expr, $label:expr, direct $req_bits:expr, $expr:expr) => {{
+                let pos = $cursor.pos();
+                let rem = $cursor.remaining();
+                let lim = $cursor.limit();
+                let req_b: u32 = $req_bits as u32;
+                let ctx_label = format!(
+                    "ExtendedStats:{} [requested_width_bits={}, pos={}, remaining_bits={}, limit={:?}]",
+                    $label, req_b, pos, rem, lim
+                );
+                $cursor.push_context(&ctx_label);
+                let res = $expr;
+                match res {
+                    Ok(value) => {
+                        $cursor.pop_context();
+                        value
+                    }
                     Err(e) => {
-                        let failure = crate::error::ParsingFailure::from(e);
+                        let err_kind = e.into_parsing_error();
+                        let failure = $cursor.fail(err_kind);
+                        $cursor.pop_context();
                         if soft_truncate_on_limit
                             && matches!(
                                 &failure.error,
@@ -2517,7 +2546,42 @@ impl ExtendedStatsData {
                                         || msg.contains("end of bitstream")
                             )
                         {
-                            cursor.end_segment();
+                            $cursor.end_segment();
+                            return Ok(data);
+                        }
+                        return Err(failure);
+                    }
+                }
+            }};
+            ($cursor:expr, $label:expr, composite, $expr:expr) => {{
+                let pos = $cursor.pos();
+                let rem = $cursor.remaining();
+                let lim = $cursor.limit();
+                let ctx_label = format!(
+                    "ExtendedStats:{} [requested_width_bits=unknown, pos={}, remaining_bits={}, limit={:?}]",
+                    $label, pos, rem, lim
+                );
+                $cursor.push_context(&ctx_label);
+                let res = $expr;
+                match res {
+                    Ok(value) => {
+                        $cursor.pop_context();
+                        value
+                    }
+                    Err(e) => {
+                        let err_kind = e.into_parsing_error();
+                        let failure = $cursor.fail(err_kind);
+                        $cursor.pop_context();
+                        if soft_truncate_on_limit
+                            && matches!(
+                                &failure.error,
+                                crate::error::ParsingError::Io(msg)
+                                    if msg.contains("Bit limit exceeded")
+                                        || msg.contains("failed to fill whole buffer")
+                                        || msg.contains("end of bitstream")
+                            )
+                        {
+                            $cursor.end_segment();
                             return Ok(data);
                         }
                         return Err(failure);
@@ -2535,8 +2599,9 @@ impl ExtendedStatsData {
             }
 
             if !is_compact {
+                let q_bits = w_axiom.quality_bits(true) as u32;
                 let quality_raw =
-                    read_or_truncate!(cursor.read_bits::<u8>(w_axiom.quality_bits(true) as u32));
+                    read_or_truncate!(cursor, "alpha_quality", direct q_bits, cursor.read_bits::<u8>(q_bits));
                 let quality = ItemQuality::from(quality_raw);
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
@@ -2551,18 +2616,30 @@ impl ExtendedStatsData {
                     if is_authority_runeword {
                         data.id = Some(0);
                     } else {
-                        data.v5_runeword_extra = Some(read_or_truncate!(cursor
-                            .with_context("AlphaV5RunewordExtra", |c| c
-                                .read_bits::<u8>(w_axiom.v5_runeword_extra_bits() as u32))));
+                        let v5_bits = w_axiom.v5_runeword_extra_bits() as u32;
+                        data.v5_runeword_extra = Some(read_or_truncate!(
+                            cursor,
+                            "AlphaV5RunewordExtra",
+                            direct v5_bits,
+                            cursor.read_bits::<u8>(v5_bits)
+                        ));
                         data.id = Some(0);
                     }
                 // Mirror the emitter: alpha items only carry id/level here on v0/v2.
                 } else if !alpha_mode || version == 0 || version == 2 {
+                    let id_bits = w_axiom.item_id_bits() as u32;
                     data.id = Some(read_or_truncate!(
-                        cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)
+                        cursor,
+                        "id",
+                        direct id_bits,
+                        cursor.read_bits::<u32>(id_bits)
                     ));
+                    let lvl_bits = w_axiom.item_level_bits() as u32;
                     data.level = Some(read_or_truncate!(
-                        cursor.read_bits::<u8>(w_axiom.item_level_bits() as u32)
+                        cursor,
+                        "level",
+                        direct lvl_bits,
+                        cursor.read_bits::<u8>(lvl_bits)
                     ));
                 }
             } else {
@@ -2573,14 +2650,27 @@ impl ExtendedStatsData {
             if is_nested && is_compact {
                 data.id = Some(0);
             } else {
+                let id_bits = w_axiom.item_id_bits() as u32;
                 data.id = Some(read_or_truncate!(
-                    cursor.read_bits::<u32>(w_axiom.item_id_bits() as u32)
+                    cursor,
+                    "id",
+                    direct id_bits,
+                    cursor.read_bits::<u32>(id_bits)
                 ));
+                let lvl_bits = w_axiom.item_level_bits() as u32;
                 data.level = Some(read_or_truncate!(
-                    cursor.read_bits::<u8>(w_axiom.item_level_bits() as u32)
+                    cursor,
+                    "level",
+                    direct lvl_bits,
+                    cursor.read_bits::<u8>(lvl_bits)
                 ));
-                let quality_raw =
-                    read_or_truncate!(cursor.read_bits::<u8>(w_axiom.quality_bits(false) as u32));
+                let q_bits = w_axiom.quality_bits(false) as u32;
+                let quality_raw = read_or_truncate!(
+                    cursor,
+                    "quality",
+                    direct q_bits,
+                    cursor.read_bits::<u8>(q_bits)
+                );
                 data.quality = Some(ItemQuality::from(quality_raw));
             }
         }
@@ -2594,35 +2684,62 @@ impl ExtendedStatsData {
         data.has_class_specific_data = false;
 
         if data.has_multiple_graphics {
+            let mg_bits = w_axiom.multi_graphics_bits() as u32;
             data.multi_graphics_bits = Some(read_or_truncate!(
-                cursor.read_bits::<u8>(w_axiom.multi_graphics_bits() as u32)
+                cursor,
+                "multi_graphics_bits",
+                direct mg_bits,
+                cursor.read_bits::<u8>(mg_bits)
             ) as u8);
         }
         if data.has_class_specific_data {
+            let cs_bits = w_axiom.class_specific_bits() as u32;
             data.class_specific_bits = Some(read_or_truncate!(
-                cursor.read_bits::<u16>(w_axiom.class_specific_bits() as u32)
+                cursor,
+                "class_specific_bits",
+                direct cs_bits,
+                cursor.read_bits::<u16>(cs_bits)
             ) as u16);
         }
         let quality_val = data.quality.unwrap_or(ItemQuality::Normal);
         match quality_val {
             ItemQuality::Low | ItemQuality::High => {
+                let lh_bits = w_axiom.low_high_graphic_bits() as u32;
                 data.low_high_graphic_bits = Some(read_or_truncate!(
-                    cursor.read_bits::<u8>(w_axiom.low_high_graphic_bits() as u32)
+                    cursor,
+                    "low_high_graphic_bits",
+                    direct lh_bits,
+                    cursor.read_bits::<u8>(lh_bits)
                 ) as u8);
             }
             ItemQuality::Magic => {
-                let seg = read_or_truncate!(MagicAffixSegment::parse(cursor));
+                let seg = read_or_truncate!(
+                    cursor,
+                    "MagicAffixSegment",
+                    composite,
+                    MagicAffixSegment::parse(cursor)
+                );
                 data.magic_prefix = seg.prefix;
                 data.magic_suffix = seg.suffix;
             }
             ItemQuality::Rare | ItemQuality::Crafted => {
-                let seg = read_or_truncate!(RareAffixSegment::parse(cursor));
+                let seg = read_or_truncate!(
+                    cursor,
+                    "RareAffixSegment",
+                    composite,
+                    RareAffixSegment::parse(cursor)
+                );
                 data.rare_name_1 = seg.names[0];
                 data.rare_name_2 = seg.names[1];
                 data.rare_affixes = seg.affixes;
             }
             ItemQuality::Set | ItemQuality::Unique => {
-                let seg = read_or_truncate!(UniqueAffixSegment::parse(cursor));
+                let seg = read_or_truncate!(
+                    cursor,
+                    "UniqueAffixSegment",
+                    composite,
+                    UniqueAffixSegment::parse(cursor)
+                );
                 let uid = seg.unique_id.unwrap_or(0);
                 if alpha_mode {
                     data.alpha_unique_id_raw = Some(uid);
@@ -2633,11 +2750,19 @@ impl ExtendedStatsData {
         }
         let trace_alpha = alpha_mode && crate::item::item_trace_enabled();
         if is_runeword && !is_fragment && version != 5 {
+            let rw_id_bits = w_axiom.runeword_id_bits() as u32;
             data.runeword_id = Some(read_or_truncate!(
-                cursor.read_bits::<u16>(w_axiom.runeword_id_bits() as u32)
+                cursor,
+                "runeword_id",
+                direct rw_id_bits,
+                cursor.read_bits::<u16>(rw_id_bits)
             ) as u16);
+            let rw_lvl_bits = w_axiom.runeword_level_bits() as u32;
             data.runeword_level = Some(read_or_truncate!(
-                cursor.read_bits::<u8>(w_axiom.runeword_level_bits() as u32)
+                cursor,
+                "runeword_level",
+                direct rw_lvl_bits,
+                cursor.read_bits::<u8>(rw_lvl_bits)
             ) as u8);
             if trace_alpha && trimmed_code == "wa2" {
                 eprintln!(
@@ -2653,9 +2778,12 @@ impl ExtendedStatsData {
                 && w_axiom.needs_player_name_byte_alignment(version)
                 && AlphaV105PersonalizedAlignment::align_required()
             {
-                read_or_truncate!(cursor.byte_align());
+                read_or_truncate!(cursor, "byte_align", composite, cursor.byte_align());
             }
             data.personalized_player_name = Some(read_or_truncate!(
+                cursor,
+                "personalized_player_name",
+                composite,
                 crate::domain::item::serialization::read_player_name(
                     cursor,
                     alpha_mode && w_axiom.is_player_name_alpha_style(version)
@@ -2663,21 +2791,25 @@ impl ExtendedStatsData {
             ));
         }
         if trimmed_code == "tbk" || trimmed_code == "ibk" {
+            let tp_bits = w_axiom.teleport_bits() as u32;
             data.tbk_ibk_teleport = Some(read_or_truncate!(
-                cursor.read_bits::<u8>(w_axiom.teleport_bits() as u32)
-            ) as u8)
+                cursor,
+                "tbk_ibk_teleport",
+                direct tp_bits,
+                cursor.read_bits::<u8>(tp_bits)
+            ) as u8);
         }
 
         let is_ear = !alpha_mode && (header.flags & (1 << 24)) != 0;
         if !is_ear && !alpha_mode && header.version != 5 && header.version != 7 {
-            let has_realm_data = read_or_truncate!(cursor.read_bit());
+            let has_realm_data = read_or_truncate!(cursor, "has_realm_data", direct 1, cursor.read_bit());
             if has_realm_data {
-                let _realm_data_1 = read_or_truncate!(cursor.read_bits::<u32>(32));
-                let _realm_data_2 = read_or_truncate!(cursor.read_bits::<u32>(32));
-                let _realm_data_3 = read_or_truncate!(cursor.read_bits::<u32>(32));
+                let _realm_data_1 = read_or_truncate!(cursor, "realm_data_1", direct 32, cursor.read_bits::<u32>(32));
+                let _realm_data_2 = read_or_truncate!(cursor, "realm_data_2", direct 32, cursor.read_bits::<u32>(32));
+                let _realm_data_3 = read_or_truncate!(cursor, "realm_data_3", direct 32, cursor.read_bits::<u32>(32));
             }
         }
-        data.timestamp_flag = read_or_truncate!(cursor.read_bit());
+        data.timestamp_flag = read_or_truncate!(cursor, "timestamp_flag", direct 1, cursor.read_bit());
         if trace_alpha && trimmed_code == "wa2" {
             eprintln!(
                 "[timestamp-parse] wa2 timestamp_flag={} pos={}",
@@ -2703,32 +2835,42 @@ impl ExtendedStatsData {
             reads_durability = true;
         }
         if reads_defense && axiom.reads_defense() {
+            let def_bits = w_axiom.stat_bits(31) as u32;
             data.defense = Some(read_or_truncate!(
-                cursor.read_bits::<u32>(w_axiom.stat_bits(31) as u32)
+                cursor,
+                "defense",
+                direct def_bits,
+                cursor.read_bits::<u32>(def_bits)
             ));
         }
         if reads_durability && axiom.reads_durability() {
-            let max_bits = w_axiom.stat_bits(73);
-            let cur_bits = w_axiom.stat_bits(72);
-            let m_dur = read_or_truncate!(cursor.read_bits::<u32>(max_bits as u32));
+            let max_bits = w_axiom.stat_bits(73) as u32;
+            let cur_bits = w_axiom.stat_bits(72) as u32;
+            let m_dur = read_or_truncate!(cursor, "max_durability", direct max_bits, cursor.read_bits::<u32>(max_bits));
             data.max_durability = Some(m_dur);
             if m_dur > 0 {
                 data.current_durability =
-                    Some(read_or_truncate!(cursor.read_bits::<u32>(cur_bits as u32)));
-                let _extra = read_or_truncate!(cursor.read_bit());
+                    Some(read_or_truncate!(cursor, "current_durability", direct cur_bits, cursor.read_bits::<u32>(cur_bits)));
+                let _extra = read_or_truncate!(cursor, "durability_extra", direct 1, cursor.read_bit());
             }
         }
         if reads_quantity && axiom.reads_quantity() {
+            let q_bits = w_axiom.quantity_bits() as u32;
             data.quantity = Some(read_or_truncate!(
-                cursor.read_bits::<u32>(w_axiom.quantity_bits() as u32)
+                cursor,
+                "quantity",
+                direct q_bits,
+                cursor.read_bits::<u32>(q_bits)
             ));
         }
         if is_socketed_flag {
+            let sock_bits = w_axiom.socket_bits() as u32;
             data.sockets =
-                Some(read_or_truncate!(cursor.read_bits::<u8>(w_axiom.socket_bits() as u32)) as u8);
+                Some(read_or_truncate!(cursor, "sockets", direct sock_bits, cursor.read_bits::<u8>(sock_bits)) as u8);
         }
         if quality_val == ItemQuality::Set {
-            let val = read_or_truncate!(cursor.read_bits::<u8>(w_axiom.set_list_bits() as u32));
+            let set_bits = w_axiom.set_list_bits() as u32;
+            let val = read_or_truncate!(cursor, "set_list_val", direct set_bits, cursor.read_bits::<u8>(set_bits));
             data.alpha_set_list_val = Some(val);
             data.set_list_count = match val {
                 1 => 1,
