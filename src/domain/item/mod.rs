@@ -6,6 +6,7 @@ pub mod axiom_meta;
 pub mod scanner;
 pub mod editor;
 pub mod subdomains;
+pub mod cache;
 
 pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;
@@ -19,6 +20,7 @@ pub use serialization::{BitEmitter, HuffmanTree, verify_marker_lookahead, peek_i
 pub use scanner::scan_item_markers;
 pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata, ForensicAudit, ForensicResult};
 pub use editor::{ItemEditor, ItemEditorExt};
+pub use cache::{ItemClassProjection, ItemClassRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum FailureFamily {
