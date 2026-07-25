@@ -3,7 +3,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::item::entity::{Item, ItemModule};
 use crate::domain::item::scanner::{ItemMarker, MarkerStatus};
-use crate::domain::item::serialization::{parse_item_at_with_limit, HuffmanTree};
+use crate::domain::item::serialization::{
+    parse_item_at_with_limit, parse_item_at_with_limit_with_carrier, HuffmanTree, ParseStatus,
+    SegmentTraceCarrier,
+};
+use crate::item::BitSegment;
 
 pub const BOUNDARY_CANDIDATE_RADIUS_BITS: u64 = 128;
 
@@ -101,6 +105,10 @@ pub struct ParserProbe {
     pub failure_bit_offset_rel: Option<u64>,
     pub failure_context_relative_offset: Option<u64>,
     pub failure_hint: Option<String>,
+    pub trace_start_bit: u64,
+    pub trace_final_bit: u64,
+    pub trace_status: String,
+    pub trace_segments: Vec<BitSegment>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -368,7 +376,8 @@ pub fn probe_parser(
         candidate_start_bit.saturating_add(candidate_limit_bits),
     );
     let candidate_bytes = bits_to_bytes(&candidate_bits);
-    let live_result = parse_item_at_with_limit(
+    let mut carrier = SegmentTraceCarrier::default();
+    let live_result = parse_item_at_with_limit_with_carrier(
         &candidate_bytes,
         0,
         candidate_start_bit,
@@ -378,7 +387,12 @@ pub fn probe_parser(
         Some(candidate_limit_bits),
         None,
         code_hint.as_deref(),
+        &mut carrier,
     );
+    let trace_status = match carrier.status {
+        ParseStatus::Success => "success".to_string(),
+        ParseStatus::Failure => "failure".to_string(),
+    };
     let (
         outcome,
         module_kind,
@@ -443,6 +457,10 @@ pub fn probe_parser(
         failure_bit_offset_rel,
         failure_context_relative_offset,
         failure_hint,
+        trace_start_bit: carrier.start_bit,
+        trace_final_bit: carrier.final_bit,
+        trace_status,
+        trace_segments: carrier.segments,
     };
     apply_preserved_failure(item, &mut probe)?;
     Ok(probe)
@@ -469,6 +487,9 @@ mod tests {
         assert_eq!(probe.outcome, "parse_failure");
         assert!(probe.failure_error.is_some());
         assert!(probe.failure_bit_offset_abs.is_some());
+        assert_eq!(probe.trace_status, "failure");
+        assert_eq!(probe.trace_start_bit, probe.candidate_start_bit);
+        assert!(probe.trace_final_bit >= probe.trace_start_bit);
     }
 
     #[test]
@@ -499,6 +520,10 @@ mod tests {
             failure_bit_offset_rel: None,
             failure_context_relative_offset: None,
             failure_hint: None,
+            trace_start_bit: 7661,
+            trace_final_bit: 7661,
+            trace_status: "failure".to_string(),
+            trace_segments: Vec::new(),
         };
 
         apply_preserved_failure(&item, &mut probe).expect("valid preserved failure envelope");
