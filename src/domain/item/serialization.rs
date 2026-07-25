@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::item::BitSegment;
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
@@ -976,6 +977,112 @@ fn read_alignment_padding_bits(bytes: &[u8], start_bit: u64, bit_count: u64) -> 
     }
 
     bits
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParseStatus {
+    #[default]
+    Success,
+    Failure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SegmentTraceCarrier {
+    pub start_bit: u64,
+    pub final_bit: u64,
+    pub status: ParseStatus,
+    pub segments: Vec<BitSegment>,
+}
+
+/// Parses an item at the specified bit position while recording bitstream segment trace facts.
+/// Returns relative consumed bits matching `parse_item_at_with_limit`.
+pub fn parse_item_at_with_limit_with_carrier(
+    bytes: &[u8],
+    bit: u64,
+    base_bit_offset: u64,
+    huffman: &HuffmanTree,
+    idx: usize,
+    alpha: bool,
+    limit: Option<u64>,
+    forced_compact: Option<bool>,
+    code_hint: Option<&str>,
+    carrier: &mut SegmentTraceCarrier,
+) -> ParsingResult<(Item, u64)> {
+    let absolute_bit = base_bit_offset + bit;
+    carrier.start_bit = absolute_bit;
+    carrier.final_bit = absolute_bit;
+    carrier.status = ParseStatus::Failure;
+    carrier.segments.clear();
+
+    let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
+    let _ = reader.skip(bit as u32);
+    let mut cursor = BitCursor::new(reader);
+    cursor.set_pos(absolute_bit);
+    cursor.base_pos = base_bit_offset;
+    cursor.set_trace(true);
+    if let Some(l) = limit {
+        cursor.set_limit(absolute_bit + l);
+    }
+
+    let res = Item::from_reader_with_context(
+        &mut cursor,
+        huffman,
+        Some((bytes, bit)),
+        alpha,
+        idx,
+        forced_compact,
+        code_hint,
+    );
+
+    carrier.final_bit = cursor.pos();
+    let mut all_segments: Vec<BitSegment> = cursor
+        .segments()
+        .iter()
+        .cloned()
+        .chain(cursor.active_segments())
+        .collect();
+    all_segments.sort_by_key(|s| (s.start, s.depth));
+
+    carrier.segments = all_segments
+        .into_iter()
+        .filter(|s| s.start >= absolute_bit && s.start <= cursor.pos())
+        .map(|s| BitSegment {
+            start: s.start - absolute_bit,
+            end: s.end.min(cursor.pos()) - absolute_bit,
+            label: s.label,
+            depth: s.depth,
+        })
+        .collect();
+
+    match res {
+        Ok(mut item) => {
+            carrier.status = ParseStatus::Success;
+            if item.total_bits > item.bits.len() as u64 {
+                let missing_bits = (item.total_bits - item.bits.len() as u64) as usize;
+                let tail_start_rel = item
+                    .range
+                    .end
+                    .saturating_sub(base_bit_offset)
+                    .saturating_sub(missing_bits as u64);
+                let tail_bits = read_alignment_padding_bits(bytes, tail_start_rel, missing_bits as u64);
+                if !tail_bits.is_empty() {
+                    let tail_start_abs = item.range.end.saturating_sub(tail_bits.len() as u64);
+                    for (idx, bit) in tail_bits.iter().enumerate() {
+                        item.bits.push(crate::domain::item::RecordedBit {
+                            bit: *bit,
+                            offset: tail_start_abs + idx as u64,
+                        });
+                        item.body.alpha_alignment_padding.extend(tail_bits.clone());
+                    }
+                }
+            }
+            Ok((item, carrier.final_bit - absolute_bit))
+        }
+        Err(e) => {
+            carrier.status = ParseStatus::Failure;
+            Err(e)
+        }
+    }
 }
 
 pub fn is_likely_jm_section_header(
@@ -2321,7 +2428,7 @@ impl Item {
         code_hint: Option<&str>,
     ) -> ParsingResult<Item> {
         let is_first_item = idx == 0;
-        cursor.set_trace(crate::item::item_trace_enabled());
+        cursor.set_trace(cursor.trace_enabled || crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Root);
 
@@ -3812,5 +3919,64 @@ mod tests {
         let mut changed = item.clone();
         changed.record_parser_consumed_bits(999);
         assert_eq!(item, &changed);
+    }
+
+    #[test]
+    fn test_segment_trace_carrier_capture_success_and_failure() {
+        let huffman = HuffmanTree::new();
+
+        // 1. Success case witness with tracked fixture
+        let bytes = std::fs::read("tests/fixtures/savegames/original/amazon_empty.d2s")
+            .expect("Tracked fixture amazon_empty.d2s not found");
+        let mut carrier_ok = SegmentTraceCarrier::default();
+        // Read item section header "JM" to locate first item
+        if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
+            if let Some(first) = items.first() {
+                let bit_offset = first.range.start;
+                let res = parse_item_at_with_limit_with_carrier(
+                    &bytes,
+                    bit_offset,
+                    0,
+                    &huffman,
+                    0,
+                    true,
+                    None,
+                    None,
+                    None,
+                    &mut carrier_ok,
+                );
+                if let Ok((_item, consumed)) = res {
+                    assert_eq!(carrier_ok.status, ParseStatus::Success);
+                    assert_eq!(carrier_ok.start_bit, bit_offset);
+                    assert_eq!(carrier_ok.final_bit, bit_offset + consumed);
+                    assert!(!carrier_ok.segments.is_empty());
+                }
+            }
+        }
+
+        // 2. Failure case witness with truncated BitEmitter constructor
+        let mut emitter = BitEmitter::new();
+        emitter.write_bits(0x4D4A, 16).unwrap(); // "JM" magic header only, truncated
+        let fail_bytes = emitter.into_bytes();
+
+        let mut carrier_fail = SegmentTraceCarrier::default();
+        let res_fail = parse_item_at_with_limit_with_carrier(
+            &fail_bytes,
+            0,
+            0,
+            &huffman,
+            0,
+            true,
+            None,
+            None,
+            None,
+            &mut carrier_fail,
+        );
+
+        assert!(res_fail.is_err());
+        assert_eq!(carrier_fail.status, ParseStatus::Failure);
+        assert_eq!(carrier_fail.start_bit, 0);
+        assert!(carrier_fail.final_bit > 0);
+        assert!(!carrier_fail.segments.is_empty());
     }
 }

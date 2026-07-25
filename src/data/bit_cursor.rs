@@ -236,6 +236,20 @@ impl<R: BitRead> BitCursor<R> {
         &self.segments
     }
 
+    /// Returns all active (unclosed) context segments.
+    pub fn active_segments(&self) -> Vec<BitSegment> {
+        self.context_stack
+            .iter()
+            .enumerate()
+            .map(|(idx, (label, start, _))| BitSegment {
+                start: *start,
+                end: self.bit_pos,
+                label: label.clone(),
+                depth: idx,
+            })
+            .collect()
+    }
+
     /// Returns all recorded bits.
     pub fn recorded_bits(&self) -> &[RecordedBit] {
         &self.recorded_bits
