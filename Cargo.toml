@@ -485,6 +485,10 @@ path = "src/bin/verify/d2item_cache_parallel_benchmark.rs"
 name = "d2item_opaque_census"
 path = "src/bin/verify/d2item_opaque_census.rs"
 
+[[bin]]
+name = "d2item_rupture_oracle"
+path = "src/bin/verify/d2item_rupture_oracle.rs"
+
 
 
 [dev-dependencies]
