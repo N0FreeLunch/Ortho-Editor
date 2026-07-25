@@ -162,9 +162,55 @@ impl ItemClassRegistry {
     }
 }
 
+pub struct ConcurrentItemClassRegistry {
+    inner: std::sync::RwLock<ItemClassRegistry>,
+}
+
+impl Default for ConcurrentItemClassRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConcurrentItemClassRegistry {
+    pub fn new() -> Self {
+        Self {
+            inner: std::sync::RwLock::new(ItemClassRegistry::new()),
+        }
+    }
+
+    pub fn collision_count(&self) -> u64 {
+        self.inner.read().unwrap().collision_count()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.read().unwrap().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.read().unwrap().is_empty()
+    }
+
+    pub fn get_or_insert(&self, projection: ItemClassProjection) -> Arc<ItemClassProjection> {
+        let digest = ItemClassRegistry::compute_digest(&projection);
+        {
+            let reader = self.inner.read().unwrap();
+            if let Some(bucket) = reader.entries.get(&digest) {
+                if let Some(existing) = bucket.iter().find(|entry| entry.as_ref() == &projection) {
+                    return Arc::clone(existing);
+                }
+            }
+        }
+
+        let mut writer = self.inner.write().unwrap();
+        writer.get_or_insert(projection)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::item::entity::ItemModule;
 
     #[test]
     fn test_extraction_and_reuse() {
@@ -262,5 +308,36 @@ mod tests {
         assert_eq!(arc2.code, "def");
         assert_eq!(registry.collision_count(), 1);
         assert_eq!(registry.len(), 2);
+    }
+
+    #[test]
+    fn test_concurrent_registry_multi_thread_inserts() {
+        use std::thread;
+
+        let registry = Arc::new(ConcurrentItemClassRegistry::new());
+        let mut handles = vec![];
+
+        for i in 0..10 {
+            let reg_clone = Arc::clone(&registry);
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    let mut item = Item::empty_for_tests();
+                    let code_str = format!("c{:02} ", i % 3);
+                    item.body.code = code_str.clone();
+                    item.code = code_str;
+                    if let Some(proj) = ItemClassProjection::extract(&item) {
+                        let _arc = reg_clone.get_or_insert(proj);
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(registry.len(), 3);
+        assert_eq!(registry.collision_count(), 0);
     }
 }

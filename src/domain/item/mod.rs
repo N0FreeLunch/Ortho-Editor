@@ -20,7 +20,7 @@ pub use serialization::{BitEmitter, HuffmanTree, verify_marker_lookahead, peek_i
 pub use scanner::scan_item_markers;
 pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata, ForensicAudit, ForensicResult};
 pub use editor::{ItemEditor, ItemEditorExt};
-pub use cache::{ItemClassProjection, ItemClassRegistry};
+pub use cache::{ConcurrentItemClassRegistry, ItemClassProjection, ItemClassRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum FailureFamily {

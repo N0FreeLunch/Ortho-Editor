@@ -1,4 +1,4 @@
-pub use crate::domain::item::{Item, ItemQuality, ItemBitRange, RecordedBit, ItemModule, BitSegment, ItemBody, ItemEditor, ItemEditorExt, ItemClassProjection, ItemClassRegistry};
+pub use crate::domain::item::{Item, ItemQuality, ItemBitRange, RecordedBit, ItemModule, BitSegment, ItemBody, ItemEditor, ItemEditorExt, ItemClassProjection, ItemClassRegistry, ConcurrentItemClassRegistry};
 pub use crate::domain::header::entity::{ItemSegmentType, ItemHeader};
 pub use crate::domain::item::serialization::{find_next_item_match, peek_item_header_at, peek_item_header_at_specific_gap, is_plausible_item_header, PropertyReaderContext, verify_marker_lookahead, HuffmanTree};
 
