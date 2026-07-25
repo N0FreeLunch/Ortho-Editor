@@ -1,4 +1,4 @@
-use crate::domain::item::entity::{Item, ItemModule};
+use crate::domain::item::entity::Item;
 use crate::domain::item::quality::ItemQuality;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;

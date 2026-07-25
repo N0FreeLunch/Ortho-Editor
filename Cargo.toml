@@ -473,6 +473,10 @@ path = "src/bin/verify/d2item_dedup_oracle.rs"
 name = "d2item_semantic_dedup_oracle"
 path = "src/bin/verify/d2item_semantic_dedup_oracle.rs"
 
+[[bin]]
+name = "d2item_cache_benchmark"
+path = "src/bin/verify/d2item_cache_benchmark.rs"
+
 
 [dev-dependencies]
 trybuild = "1.0"
