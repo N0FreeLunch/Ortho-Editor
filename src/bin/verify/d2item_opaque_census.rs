@@ -7,6 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use std::collections::BTreeMap;
+
 use d2r_core::domain::item::opaque_probe::{
     collect_boundary_candidates, probe_opaque_item, BoundaryCandidate, OpaqueProbeRequest,
     ParserProbe,
@@ -16,6 +18,24 @@ use d2r_core::item::{HuffmanTree, Item, ItemClassProjection};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser};
 use serde::Serialize;
+
+#[derive(Serialize, Debug)]
+struct FailureFamily {
+    failure_error: String,
+    failure_context_stack: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nearest_boundary_delta_bits: Option<i64>,
+    count: usize,
+    representative_item_path: String,
+    representative_save_file: String,
+}
+
+#[derive(Serialize, Debug)]
+struct CausalTaxonomy {
+    included_top_level_probe_rows: usize,
+    outcome_counts: BTreeMap<String, usize>,
+    failure_families: Vec<FailureFamily>,
+}
 
 #[derive(Serialize, Debug, Default)]
 struct ClassificationCounts {
@@ -63,6 +83,8 @@ struct OpaqueCensusReport {
     classification_counts: ClassificationCounts,
     unreadable_saves: Vec<UnreadableSave>,
     rows: Vec<CensusRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    causal_taxonomy: Option<CausalTaxonomy>,
 }
 
 struct CollectedItemInfo<'a> {
@@ -129,6 +151,13 @@ fn main() -> Result<()> {
         .long("probe");
 
     parser
+        .add_flag(
+            "causal-taxonomy",
+            "Aggregate causal opaque bitstream taxonomy and failure families",
+        )
+        .long("causal-taxonomy");
+
+    parser
         .add_opt("output", "Path to output JSON report file")
         .short('o')
         .long("output");
@@ -145,6 +174,14 @@ fn main() -> Result<()> {
             process::exit(1);
         }
     };
+
+    let enable_probe = parsed.is_set("probe");
+    let enable_causal_taxonomy = parsed.is_set("causal-taxonomy");
+
+    if enable_causal_taxonomy && !enable_probe {
+        eprintln!("Error: --causal-taxonomy requires --probe flag.");
+        process::exit(1);
+    }
 
     let saves_dir_str = parsed
         .get("saves-dir")
@@ -296,6 +333,74 @@ fn main() -> Result<()> {
         }
     }
 
+    let causal_taxonomy = if enable_causal_taxonomy {
+        let mut included_count = 0usize;
+        let mut outcome_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut family_map: BTreeMap<(String, Vec<String>, Option<i64>), (usize, String, String)> =
+            BTreeMap::new();
+
+        for row in &rows {
+            if row.is_top_level {
+                if let Some(probe) = &row.parser_probe {
+                    included_count += 1;
+                    *outcome_counts.entry(probe.outcome.clone()).or_insert(0) += 1;
+
+                    if probe.outcome == "parse_failure" {
+                        let err_str = probe.failure_error.clone().unwrap_or_default();
+                        let ctx_stack = probe.failure_context_stack.clone().unwrap_or_default();
+                        let nearest_delta = if let Some(fail_offset) = probe.failure_bit_offset_abs {
+                            if let Some(candidates) = &row.boundary_candidates {
+                                candidates
+                                    .iter()
+                                    .map(|c| c.absolute_bit_position as i64 - fail_offset as i64)
+                                    .min_by_key(|d| d.abs())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        let key = (err_str, ctx_stack, nearest_delta);
+                        let entry = family_map.entry(key).or_insert((
+                            0,
+                            row.item_path.clone(),
+                            row.save_file.clone(),
+                        ));
+                        entry.0 += 1;
+                    }
+                }
+            }
+        }
+
+        let failure_families = family_map
+            .into_iter()
+            .map(
+                |(
+                    (failure_error, failure_context_stack, nearest_boundary_delta_bits),
+                    (count, representative_item_path, representative_save_file),
+                )| {
+                    FailureFamily {
+                        failure_error,
+                        failure_context_stack,
+                        nearest_boundary_delta_bits,
+                        count,
+                        representative_item_path,
+                        representative_save_file,
+                    }
+                },
+            )
+            .collect();
+
+        Some(CausalTaxonomy {
+            included_top_level_probe_rows: included_count,
+            outcome_counts,
+            failure_families,
+        })
+    } else {
+        None
+    };
+
     let report = OpaqueCensusReport {
         saves_dir: saves_dir_str,
         collection_policy: "recursive (top-level and socketed player items)".to_string(),
@@ -306,6 +411,7 @@ fn main() -> Result<()> {
         classification_counts,
         unreadable_saves,
         rows,
+        causal_taxonomy,
     };
 
     let report_json = serde_json::to_string_pretty(&report)
