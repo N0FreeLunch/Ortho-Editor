@@ -29,7 +29,7 @@ pub use opaque_probe::{
 };
 pub use geometry::{
     CoordinateConfidence, ExpectedExtendedStatsStart, ExpectedExtendedStatsStartProducer,
-    GeometryBoundaryError, HeaderGeometryFamily,
+    GeometryBoundaryError, HeaderGeometryFamily, LiveHeaderFamilyClassifier,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

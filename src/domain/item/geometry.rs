@@ -3,6 +3,8 @@
 //! This module defines pure domain types for estimating the bit boundary of the
 //! `ExtendedStats` section based on header geometry parameters.
 
+use super::Item;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum HeaderGeometryFamily {
     /// Standard witness layout verified against the Alpha v105 hp1 fixture.
@@ -85,6 +87,22 @@ impl ExpectedExtendedStatsStartProducer {
     }
 }
 
+/// Pure classifier for estimating the header geometry family of a live item.
+pub struct LiveHeaderFamilyClassifier;
+
+impl LiveHeaderFamilyClassifier {
+    /// Classifies an Item into its HeaderGeometryFamily based on header facts.
+    pub fn classify(item: &Item) -> Result<HeaderGeometryFamily, GeometryBoundaryError> {
+        if item.header.is_compact && item.header.save_is_alpha && item.code.trim() == "hp1" {
+            Ok(HeaderGeometryFamily::StandardHp1)
+        } else {
+            Err(GeometryBoundaryError::UnadmittedFamily(
+                HeaderGeometryFamily::Unadmitted,
+            ))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +137,34 @@ mod tests {
         assert_eq!(
             err,
             GeometryBoundaryError::UnadmittedFamily(HeaderGeometryFamily::Unadmitted)
+        );
+    }
+
+    #[test]
+    fn test_live_header_family_classifier_admits_standard_hp1() {
+        let mut item = Item::empty_for_tests();
+        item.code = " hp1 ".to_string();
+        item.header.is_compact = true;
+        item.header.save_is_alpha = true;
+
+        assert_eq!(
+            LiveHeaderFamilyClassifier::classify(&item),
+            Ok(HeaderGeometryFamily::StandardHp1)
+        );
+    }
+
+    #[test]
+    fn test_live_header_family_classifier_rejects_unadmitted_family() {
+        let mut item = Item::empty_for_tests();
+        item.code = "tsc".to_string();
+        item.header.is_compact = true;
+        item.header.save_is_alpha = true;
+
+        assert_eq!(
+            LiveHeaderFamilyClassifier::classify(&item),
+            Err(GeometryBoundaryError::UnadmittedFamily(
+                HeaderGeometryFamily::Unadmitted,
+            ))
         );
     }
 }
