@@ -8,6 +8,7 @@ pub mod editor;
 pub mod subdomains;
 pub mod cache;
 pub mod opaque_probe;
+pub mod geometry;
 
 pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;
@@ -25,6 +26,10 @@ pub use cache::{ConcurrentItemClassRegistry, ItemClassProjection, ItemClassRegis
 pub use opaque_probe::{
     BoundaryCandidate, ExtensionSweepRecord, ExtensionSweepSummary, OpaqueProbeRequest,
     OpaqueProbeResult, ParserProbe, probe_opaque_item,
+};
+pub use geometry::{
+    CoordinateConfidence, ExpectedExtendedStatsStart, ExpectedExtendedStatsStartProducer,
+    GeometryBoundaryError, HeaderGeometryFamily,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
