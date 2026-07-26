@@ -1,4 +1,5 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
+use d2r_core::domain::item::geometry::LiveHeaderFamilyClassifier;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use rayon::prelude::*;
@@ -659,6 +660,121 @@ fn section_segment_witness_directory_report(directory: &str) -> serde_json::Valu
     })
 }
 
+fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json::Value> {
+    let fixture = path.to_string_lossy().to_string();
+    let bytes = fs::read(path).map_err(|error| {
+        json!({
+            "fixture": fixture,
+            "error": format!("Failed to read file: {}", error)
+        })
+    })?;
+    let version_raw = if bytes.len() >= 8 {
+        u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
+    } else {
+        0
+    };
+    let is_alpha = version_raw == 105 || version_raw == 6;
+    let huffman = HuffmanTree::new();
+    let items = Item::read_player_items(&bytes, &huffman, is_alpha).map_err(|error| {
+        json!({
+            "fixture": fixture,
+            "error": format!("Failed to parse player items: {}", error)
+        })
+    })?;
+
+    let mut item_manifests = Vec::new();
+    let mut fixture_admitted = 0usize;
+    let mut fixture_unadmitted = 0usize;
+
+    for (index, item) in items.iter().enumerate() {
+        let (family_str, admitted, reason) = match LiveHeaderFamilyClassifier::classify(item) {
+            Ok(family) => (format!("{:?}", family), true, serde_json::Value::Null),
+            Err(err) => (
+                "Unadmitted".to_string(),
+                false,
+                json!(err.to_string()),
+            ),
+        };
+        if admitted {
+            fixture_admitted += 1;
+        } else {
+            fixture_unadmitted += 1;
+        }
+
+        item_manifests.push(json!({
+            "fixture": fixture,
+            "section_item_index": index,
+            "code": item.code.trim(),
+            "range": {
+                "start": item.range.start,
+                "end": item.range.end,
+            },
+            "family": family_str,
+            "admitted": admitted,
+            "classification_reason": reason,
+            "errors": Vec::<String>::new(),
+        }));
+    }
+
+    Ok(json!({
+        "fixture": fixture,
+        "item_count": items.len(),
+        "admitted_count": fixture_admitted,
+        "unadmitted_count": fixture_unadmitted,
+        "items": item_manifests,
+        "errors": Vec::<String>::new(),
+    }))
+}
+
+fn corpus_manifest_directory_report(directory: &str) -> serde_json::Value {
+    let root = Path::new(directory);
+    let mut paths = Vec::new();
+    let mut errors = Vec::new();
+    collect_d2s_paths(root, &mut paths, &mut errors);
+    paths.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
+
+    d2r_core::init_rayon_thread_pool();
+    let reports = paths
+        .par_iter()
+        .map(|path| corpus_fixture_manifest(path))
+        .collect::<Vec<_>>();
+
+    let mut fixtures = Vec::new();
+    let mut total_items = 0usize;
+    let mut total_admitted = 0usize;
+    let mut total_unadmitted = 0usize;
+
+    for result in reports {
+        match result {
+            Ok(report) => {
+                let items_cnt = report["item_count"].as_u64().unwrap_or(0) as usize;
+                let adm_cnt = report["admitted_count"].as_u64().unwrap_or(0) as usize;
+                let unadm_cnt = report["unadmitted_count"].as_u64().unwrap_or(0) as usize;
+
+                total_items += items_cnt;
+                total_admitted += adm_cnt;
+                total_unadmitted += unadm_cnt;
+
+                fixtures.push(report);
+            }
+            Err(error) => {
+                errors.push(error);
+            }
+        }
+    }
+
+    json!({
+        "directory": directory,
+        "total_fixtures": fixtures.len(),
+        "total_items": total_items,
+        "admitted_items": total_admitted,
+        "unadmitted_items": total_unadmitted,
+        "fixture_error_count": errors.len(),
+        "fixtures": fixtures,
+        "errors": errors
+    })
+}
+
 fn classify_trace_ownership(
     item: &Item,
     scanner_hint: &str,
@@ -733,7 +849,19 @@ fn classify_trace_ownership(
 fn main() {
     let mut parser = ArgParser::new("d2item_inspect")
         .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
-    parser.add_spec(ArgSpec::positional("file", "Path to .d2i or .d2s file"));
+    parser.add_arg("file", "Path to .d2i or .d2s file").optional();
+    parser.add_spec(ArgSpec::option(
+        "corpus-dir",
+        None,
+        Some("corpus-dir"),
+        "Directory containing .d2s files for batch scanning",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "dump-manifest",
+        None,
+        Some("dump-manifest"),
+        "Output path for generated item manifest JSON",
+    ));
     parser.add_spec(ArgSpec::flag(
         "json",
         None,
@@ -807,8 +935,75 @@ fn main() {
         }
     };
 
-    let path = parsed.get("file").unwrap();
+    let file_opt = parsed.get("file");
+    let corpus_dir_opt = parsed.get("corpus-dir");
+    let dump_manifest_opt = parsed.get("dump-manifest");
+
+    let is_corpus_mode = corpus_dir_opt.is_some();
+
+    if is_corpus_mode && file_opt.is_some() {
+        eprintln!(
+            "error: Cannot specify both positional file and --corpus-dir\n\n{}",
+            parser.usage()
+        );
+        std::process::exit(1);
+    }
+    if !is_corpus_mode && file_opt.is_none() {
+        eprintln!(
+            "error: Must specify either positional file or --corpus-dir\n\n{}",
+            parser.usage()
+        );
+        std::process::exit(1);
+    }
+    if dump_manifest_opt.is_some() && !is_corpus_mode {
+        eprintln!(
+            "error: Option --dump-manifest requires --corpus-dir\n\n{}",
+            parser.usage()
+        );
+        std::process::exit(1);
+    }
+
     let is_json = parsed.is_json();
+
+    if is_corpus_mode {
+        let corpus_dir = corpus_dir_opt.unwrap();
+        let manifest = corpus_manifest_directory_report(corpus_dir);
+
+        if let Some(out_path) = dump_manifest_opt {
+            if let Some(parent) = Path::new(out_path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = fs::create_dir_all(parent);
+                }
+            }
+            let pretty_json = serde_json::to_string_pretty(&manifest).unwrap_or_default();
+            if let Err(e) = fs::write(out_path, pretty_json) {
+                eprintln!("Failed to write dump manifest to {}: {}", out_path, e);
+                std::process::exit(1);
+            }
+            if !is_json {
+                println!("Successfully dumped corpus item manifest to {}", out_path);
+            }
+        }
+
+        if is_json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&manifest).unwrap_or_default()
+            );
+        } else if dump_manifest_opt.is_none() {
+            println!(
+                "Corpus scan for directory '{}': {} fixtures, {} items (admitted: {}, unadmitted: {})",
+                corpus_dir,
+                manifest["total_fixtures"].as_u64().unwrap_or(0),
+                manifest["total_items"].as_u64().unwrap_or(0),
+                manifest["admitted_items"].as_u64().unwrap_or(0),
+                manifest["unadmitted_items"].as_u64().unwrap_or(0)
+            );
+        }
+        return;
+    }
+
+    let path = file_opt.unwrap();
     let bit_offset = parsed
         .get("bit-offset")
         .and_then(|s| s.parse::<usize>().ok());
