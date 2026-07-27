@@ -687,6 +687,52 @@ fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json:
     let mut fixture_unadmitted = 0usize;
 
     for (index, item) in items.iter().enumerate() {
+        let range_start = item.range.start;
+        let raw_len_bits = item.range.end.saturating_sub(range_start);
+        let code_hint = item.code.trim().to_string();
+        let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+        let geometry_operands = match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+            &bytes,
+            range_start,
+            0,
+            &huffman,
+            index,
+            is_alpha,
+            Some(raw_len_bits),
+            Some(item.header.is_compact),
+            Some(code_hint.as_str()),
+            &mut carrier,
+        ) {
+            Ok(_) => {
+                let header_consumed_bits = carrier
+                    .segments
+                    .iter()
+                    .find(|segment| segment.label == "Header")
+                    .map(|segment| segment.end.saturating_sub(segment.start));
+                let code_consumed_bits = carrier
+                    .segments
+                    .iter()
+                    .find(|segment| segment.label == "Code")
+                    .map(|segment| segment.end.saturating_sub(segment.start));
+                let observed_extended_stats_start = carrier
+                    .segments
+                    .iter()
+                    .find(|segment| segment.label == "ExtendedStats")
+                    .map(|segment| range_start + segment.start);
+                (
+                    header_consumed_bits,
+                    code_consumed_bits,
+                    observed_extended_stats_start,
+                    Vec::new(),
+                )
+            }
+            Err(error) => (
+                None,
+                None,
+                None,
+                vec![format!("Bounded geometry reparse failed: {}", error)],
+            ),
+        };
         let (family_str, admitted, reason) = match LiveHeaderFamilyClassifier::classify(item) {
             Ok(family) => (format!("{:?}", family), true, serde_json::Value::Null),
             Err(err) => (
@@ -712,7 +758,10 @@ fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json:
             "family": family_str,
             "admitted": admitted,
             "classification_reason": reason,
-            "errors": Vec::<String>::new(),
+            "header_consumed_bits": geometry_operands.0,
+            "code_consumed_bits": geometry_operands.1,
+            "observed_extended_stats_start": geometry_operands.2,
+            "errors": geometry_operands.3,
         }));
     }
 
