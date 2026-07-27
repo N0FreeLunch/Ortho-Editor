@@ -660,11 +660,18 @@ fn section_segment_witness_directory_report(directory: &str) -> serde_json::Valu
     })
 }
 
-fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json::Value> {
+fn corpus_fixture_manifest(
+    path: &Path,
+    max_fixture_ms: Option<u64>,
+) -> Result<serde_json::Value, serde_json::Value> {
+    let start_time = std::time::Instant::now();
     let fixture = path.to_string_lossy().to_string();
     let bytes = fs::read(path).map_err(|error| {
+        let elapsed_ms = start_time.elapsed().as_millis() as u64;
         json!({
             "fixture": fixture,
+            "status": "error",
+            "elapsed_ms": elapsed_ms,
             "error": format!("Failed to read file: {}", error)
         })
     })?;
@@ -676,8 +683,11 @@ fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json:
     let is_alpha = version_raw == 105 || version_raw == 6;
     let huffman = HuffmanTree::new();
     let items = Item::read_player_items(&bytes, &huffman, is_alpha).map_err(|error| {
+        let elapsed_ms = start_time.elapsed().as_millis() as u64;
         json!({
             "fixture": fixture,
+            "status": "error",
+            "elapsed_ms": elapsed_ms,
             "error": format!("Failed to parse player items: {}", error)
         })
     })?;
@@ -765,8 +775,21 @@ fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json:
         }));
     }
 
+    let elapsed_ms = start_time.elapsed().as_millis() as u64;
+    let status = if let Some(max_ms) = max_fixture_ms {
+        if elapsed_ms > max_ms {
+            "budget_exceeded"
+        } else {
+            "completed"
+        }
+    } else {
+        "completed"
+    };
+
     Ok(json!({
         "fixture": fixture,
+        "status": status,
+        "elapsed_ms": elapsed_ms,
         "item_count": items.len(),
         "admitted_count": fixture_admitted,
         "unadmitted_count": fixture_unadmitted,
@@ -775,7 +798,12 @@ fn corpus_fixture_manifest(path: &Path) -> Result<serde_json::Value, serde_json:
     }))
 }
 
-fn corpus_manifest_directory_report(directory: &str) -> serde_json::Value {
+fn corpus_manifest_directory_report(
+    directory: &str,
+    max_fixture_ms: Option<u64>,
+    _corpus_timeout_ms: Option<u64>,
+) -> serde_json::Value {
+    let overall_start = std::time::Instant::now();
     let root = Path::new(directory);
     let mut paths = Vec::new();
     let mut errors = Vec::new();
@@ -785,17 +813,26 @@ fn corpus_manifest_directory_report(directory: &str) -> serde_json::Value {
     d2r_core::init_rayon_thread_pool();
     let reports = paths
         .par_iter()
-        .map(|path| corpus_fixture_manifest(path))
+        .map(|path| corpus_fixture_manifest(path, max_fixture_ms))
         .collect::<Vec<_>>();
 
     let mut fixtures = Vec::new();
     let mut total_items = 0usize;
     let mut total_admitted = 0usize;
     let mut total_unadmitted = 0usize;
+    let mut completed_fixtures = 0usize;
+    let mut budget_exceeded_fixtures = 0usize;
 
     for result in reports {
         match result {
             Ok(report) => {
+                let status = report["status"].as_str().unwrap_or("completed");
+                if status == "budget_exceeded" {
+                    budget_exceeded_fixtures += 1;
+                } else {
+                    completed_fixtures += 1;
+                }
+
                 let items_cnt = report["item_count"].as_u64().unwrap_or(0) as usize;
                 let adm_cnt = report["admitted_count"].as_u64().unwrap_or(0) as usize;
                 let unadm_cnt = report["unadmitted_count"].as_u64().unwrap_or(0) as usize;
@@ -812,13 +849,18 @@ fn corpus_manifest_directory_report(directory: &str) -> serde_json::Value {
         }
     }
 
+    let elapsed_ms = overall_start.elapsed().as_millis() as u64;
+
     json!({
         "directory": directory,
         "total_fixtures": fixtures.len(),
+        "completed_fixtures": completed_fixtures,
+        "budget_exceeded_fixtures": budget_exceeded_fixtures,
+        "fixture_error_count": errors.len(),
         "total_items": total_items,
         "admitted_items": total_admitted,
         "unadmitted_items": total_unadmitted,
-        "fixture_error_count": errors.len(),
+        "elapsed_ms": elapsed_ms,
         "fixtures": fixtures,
         "errors": errors
     })
@@ -971,6 +1013,18 @@ fn main() {
         Some("coordinate-bit"),
         "Crosswalk an absolute bit coordinate against the parsed item segments",
     ));
+    parser.add_spec(ArgSpec::option(
+        "max-fixture-ms",
+        None,
+        Some("max-fixture-ms"),
+        "Maximum elapsed time in ms per fixture before budget_exceeded status",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "corpus-timeout-ms",
+        None,
+        Some("corpus-timeout-ms"),
+        "Maximum overall corpus scan timeout limit in ms",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -987,6 +1041,12 @@ fn main() {
     let file_opt = parsed.get("file");
     let corpus_dir_opt = parsed.get("corpus-dir");
     let dump_manifest_opt = parsed.get("dump-manifest");
+    let max_fixture_ms = parsed
+        .get("max-fixture-ms")
+        .and_then(|s| s.parse::<u64>().ok());
+    let corpus_timeout_ms = parsed
+        .get("corpus-timeout-ms")
+        .and_then(|s| s.parse::<u64>().ok());
 
     let is_corpus_mode = corpus_dir_opt.is_some();
 
@@ -1016,7 +1076,7 @@ fn main() {
 
     if is_corpus_mode {
         let corpus_dir = corpus_dir_opt.unwrap();
-        let manifest = corpus_manifest_directory_report(corpus_dir);
+        let manifest = corpus_manifest_directory_report(corpus_dir, max_fixture_ms, corpus_timeout_ms);
 
         if let Some(out_path) = dump_manifest_opt {
             if let Some(parent) = Path::new(out_path).parent() {
