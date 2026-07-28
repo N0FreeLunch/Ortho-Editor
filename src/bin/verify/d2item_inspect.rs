@@ -984,6 +984,12 @@ fn main() {
         "Select a zero-based player-item section index after read_player_items parsing",
     ));
     parser.add_spec(ArgSpec::option(
+        "reparse-limit-bits",
+        None,
+        Some("reparse-limit-bits"),
+        "Opt-in bit limit for a selected-item bounded reparse receipt",
+    ));
+    parser.add_spec(ArgSpec::option(
         "compare-file",
         None,
         Some("compare-file"),
@@ -1128,6 +1134,32 @@ fn main() {
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
+    let reparse_limit_bits = match parsed.get("reparse-limit-bits") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(limit) => Some(limit),
+            Err(_) => {
+                if is_json {
+                    println!(
+                        "{}",
+                        json!({"errors": ["--reparse-limit-bits must be an unsigned integer"]})
+                    );
+                } else {
+                    eprintln!("error: --reparse-limit-bits must be an unsigned integer");
+                }
+                return;
+            }
+        },
+        None => None,
+    };
+    if reparse_limit_bits.is_some() && !(is_json && trace_segments && section_item.is_some()) {
+        let message = "--reparse-limit-bits requires --json, --trace-segments, and --section-item";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        return;
+    }
 
     if section_segment_witnesses && is_json && Path::new(path).is_dir() {
         println!("{}", section_segment_witness_directory_report(path));
@@ -1719,6 +1751,67 @@ fn main() {
                 let raw_len_bits = range_end.saturating_sub(range_start);
                 let code_hint = item.code.trim().to_string();
                 let forced_compact = Some(item.header.is_compact);
+
+                if let Some(requested_limit_bits) = reparse_limit_bits {
+                    let reparse_limit_bits = requested_limit_bits.min(raw_len_bits);
+                    let mut carrier =
+                        d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+                    let bounded_parse = d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+                        &bytes,
+                        range_start,
+                        0,
+                        &huffman,
+                        section_item_index,
+                        is_alpha,
+                        Some(reparse_limit_bits),
+                        forced_compact,
+                        Some(code_hint.as_str()),
+                        &mut carrier,
+                    );
+                    let (error, parser_consumed_bits) = match bounded_parse {
+                        Ok((_, consumed_bits)) => (serde_json::Value::Null, Some(consumed_bits)),
+                        Err(error) => (json!(error.to_string()), None),
+                    };
+                    let status = match carrier.status {
+                        d2r_core::domain::item::serialization::ParseStatus::Success => "success",
+                        d2r_core::domain::item::serialization::ParseStatus::Failure => "failure",
+                    };
+                    let segments = carrier
+                        .segments
+                        .iter()
+                        .map(|segment| {
+                            json!({
+                                "label": segment.label,
+                                "start": segment.start,
+                                "end": segment.end,
+                                "depth": segment.depth
+                            })
+                        })
+                        .collect::<Vec<_>>();
+
+                    println!(
+                        "{}",
+                        json!({
+                            "section_item_index": section_item_index,
+                            "code": code_hint,
+                            "selected_range": {"start": range_start, "end": range_end},
+                            "raw_len_bits": raw_len_bits,
+                            "bounded_reparse": {
+                                "provenance": "selected_item_bounded_reparse",
+                                "requested_limit_bits": requested_limit_bits,
+                                "observed_range": {
+                                    "start": carrier.start_bit,
+                                    "end": carrier.final_bit
+                                },
+                                "status": status,
+                                "error": error,
+                                "parser_consumed_bits": parser_consumed_bits,
+                                "segments": segments
+                            }
+                        })
+                    );
+                    return;
+                }
 
                 unsafe {
                     env::set_var("D2R_ITEM_TRACE", "1");
