@@ -1,5 +1,7 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
-use d2r_core::domain::item::geometry::LiveHeaderFamilyClassifier;
+use d2r_core::domain::item::geometry::{
+    ExpectedHeaderWidthProducer, HeaderChecksumBranch, LiveHeaderFamilyClassifier,
+};
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use rayon::prelude::*;
@@ -1873,6 +1875,62 @@ fn main() {
                                 })
                             })
                             .collect::<Vec<_>>();
+                        let header_width_comparison =
+                            match LiveHeaderFamilyClassifier::classify(&traced_item) {
+                                Ok(family) => {
+                                    let checksum_branch = if traced_item.header.has_checksum {
+                                        HeaderChecksumBranch::ChecksumAndVersion
+                                    } else {
+                                        HeaderChecksumBranch::VersionOnly
+                                    };
+                                    let nominal_expected_bits =
+                                        ExpectedHeaderWidthProducer::compute_expected_width(
+                                            family,
+                                            checksum_branch,
+                                        )
+                                        .ok();
+                                    let observed_header_bits = traced_item
+                                        .segments
+                                        .iter()
+                                        .find(|segment| segment.label == "Header")
+                                        .map(|segment| segment.end.saturating_sub(segment.start));
+                                    let comparison_status =
+                                        match (nominal_expected_bits, observed_header_bits) {
+                                            (Some(nominal), Some(observed))
+                                                if nominal == observed =>
+                                            {
+                                                "match"
+                                            }
+                                            (Some(_), Some(_)) => "mismatch",
+                                            _ => "unavailable",
+                                        };
+                                    json!({
+                                        "family": format!("{:?}", family),
+                                        "checksum_branch": format!("{:?}", checksum_branch),
+                                        "nominal_expected_bits": nominal_expected_bits,
+                                        "observed_header_bits": observed_header_bits,
+                                        "comparison_status": comparison_status,
+                                        "availability": "not_assessed"
+                                    })
+                                }
+                                Err(error) => json!({
+                                    "family": "Unadmitted",
+                                    "checksum_branch": if traced_item.header.has_checksum {
+                                        "ChecksumAndVersion"
+                                    } else {
+                                        "VersionOnly"
+                                    },
+                                    "nominal_expected_bits": serde_json::Value::Null,
+                                    "observed_header_bits": traced_item
+                                        .segments
+                                        .iter()
+                                        .find(|segment| segment.label == "Header")
+                                        .map(|segment| segment.end.saturating_sub(segment.start)),
+                                    "comparison_status": "unavailable",
+                                    "availability": "not_assessed",
+                                    "error": error.to_string()
+                                }),
+                            };
 
                         if is_json {
                             println!(
@@ -1884,7 +1942,8 @@ fn main() {
                                     "raw_len_bits": raw_len_bits,
                                     "parser_consumed_bits": parser_consumed_bits,
                                     "coordinate": coordinate,
-                                    "segments": segments
+                                    "segments": segments,
+                                    "header_width_comparison": header_width_comparison
                                 })
                             );
                         } else {
