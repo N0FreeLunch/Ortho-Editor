@@ -87,6 +87,49 @@ impl ExpectedExtendedStatsStartProducer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HeaderChecksumBranch {
+    ChecksumAndVersion,
+    VersionOnly,
+}
+
+/// Producer for computing the nominal Header width of an admitted geometry family.
+pub struct ExpectedHeaderWidthProducer;
+
+impl ExpectedHeaderWidthProducer {
+    /// Computes a source-derived nominal Header width in item-local bits.
+    ///
+    /// This calculation depends only on the admitted family and explicit checksum branch.
+    /// It does not read parser state or realized fixture spans.
+    pub fn compute_expected_width(
+        family: HeaderGeometryFamily,
+        checksum_branch: HeaderChecksumBranch,
+    ) -> Result<u64, GeometryBoundaryError> {
+        match family {
+            HeaderGeometryFamily::StandardHp1 => {
+                let widths = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom;
+                let branch_bits = match checksum_branch {
+                    HeaderChecksumBranch::ChecksumAndVersion => {
+                        widths.checksum_bits() + widths.version_bits(true)
+                    }
+                    HeaderChecksumBranch::VersionOnly => widths.version_bits(true),
+                };
+
+                Ok((widths.flags_bits()
+                    + branch_bits
+                    + widths.mode_bits(true)
+                    + widths.x_bits(true, 5)
+                    + widths.location_bits(true, 5)
+                    + 3
+                    + widths.summary_gap_bits("hp1")) as u64)
+            }
+            HeaderGeometryFamily::Unadmitted => {
+                Err(GeometryBoundaryError::UnadmittedFamily(family))
+            }
+        }
+    }
+}
+
 /// Pure classifier for estimating the header geometry family of a live item.
 pub struct LiveHeaderFamilyClassifier;
 
@@ -162,6 +205,41 @@ mod tests {
 
         assert_eq!(
             LiveHeaderFamilyClassifier::classify(&item),
+            Err(GeometryBoundaryError::UnadmittedFamily(
+                HeaderGeometryFamily::Unadmitted,
+            ))
+        );
+    }
+
+    #[test]
+    fn test_expected_header_width_standard_hp1_with_checksum() {
+        assert_eq!(
+            ExpectedHeaderWidthProducer::compute_expected_width(
+                HeaderGeometryFamily::StandardHp1,
+                HeaderChecksumBranch::ChecksumAndVersion,
+            ),
+            Ok(56)
+        );
+    }
+
+    #[test]
+    fn test_expected_header_width_standard_hp1_without_checksum() {
+        assert_eq!(
+            ExpectedHeaderWidthProducer::compute_expected_width(
+                HeaderGeometryFamily::StandardHp1,
+                HeaderChecksumBranch::VersionOnly,
+            ),
+            Ok(48)
+        );
+    }
+
+    #[test]
+    fn test_expected_header_width_unadmitted_family_rejection() {
+        assert_eq!(
+            ExpectedHeaderWidthProducer::compute_expected_width(
+                HeaderGeometryFamily::Unadmitted,
+                HeaderChecksumBranch::ChecksumAndVersion,
+            ),
             Err(GeometryBoundaryError::UnadmittedFamily(
                 HeaderGeometryFamily::Unadmitted,
             ))
