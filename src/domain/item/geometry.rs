@@ -136,7 +136,7 @@ pub struct LiveHeaderFamilyClassifier;
 impl LiveHeaderFamilyClassifier {
     /// Classifies an Item into its HeaderGeometryFamily based on header facts.
     pub fn classify(item: &Item) -> Result<HeaderGeometryFamily, GeometryBoundaryError> {
-        if item.header.is_compact && item.header.save_is_alpha && item.code.trim() == "hp1" {
+        if item.header.save_is_alpha && item.code.trim() == "hp1" {
             Ok(HeaderGeometryFamily::StandardHp1)
         } else {
             Err(GeometryBoundaryError::UnadmittedFamily(
@@ -188,6 +188,19 @@ mod tests {
         let mut item = Item::empty_for_tests();
         item.code = " hp1 ".to_string();
         item.header.is_compact = true;
+        item.header.save_is_alpha = true;
+
+        assert_eq!(
+            LiveHeaderFamilyClassifier::classify(&item),
+            Ok(HeaderGeometryFamily::StandardHp1)
+        );
+    }
+
+    #[test]
+    fn test_live_header_family_classifier_admits_non_compact_alpha_hp1() {
+        let mut item = Item::empty_for_tests();
+        item.code = " hp1 ".to_string();
+        item.header.is_compact = false;
         item.header.save_is_alpha = true;
 
         assert_eq!(
