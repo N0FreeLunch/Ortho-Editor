@@ -1910,7 +1910,11 @@ pub fn parse_item_header<R: BitRead>(
     cursor.begin_segment(ItemSegmentType::Header);
 
     // 1. Read Flags (32 bits).
-    let flags = cursor.read_bits::<u32>(32)?;
+    let flags_read_context = format!(
+        "Header:flags [requested_width_bits=32, pre_read_bit={}]",
+        cursor.pos()
+    );
+    let flags = cursor.with_context(&flags_read_context, |c| c.read_bits::<u32>(32))?;
     let raw_flags = flags;
     let is_nested = cursor.context_stack().iter().any(|s| s == "nested")
         || crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get());
