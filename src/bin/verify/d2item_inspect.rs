@@ -803,7 +803,7 @@ fn corpus_fixture_manifest(
 fn corpus_manifest_directory_report(
     directory: &str,
     max_fixture_ms: Option<u64>,
-    _corpus_timeout_ms: Option<u64>,
+    corpus_timeout_ms: Option<u64>,
 ) -> serde_json::Value {
     let overall_start = std::time::Instant::now();
     let root = Path::new(directory);
@@ -813,10 +813,68 @@ fn corpus_manifest_directory_report(
     paths.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
 
     d2r_core::init_rayon_thread_pool();
-    let reports = paths
-        .par_iter()
-        .map(|path| corpus_fixture_manifest(path, max_fixture_ms))
-        .collect::<Vec<_>>();
+    let reports = match corpus_timeout_ms {
+        None => paths
+            .par_iter()
+            .map(|path| corpus_fixture_manifest(path, max_fixture_ms))
+            .collect::<Vec<_>>(),
+        Some(timeout_ms) => {
+            let discovered_fixture_count = paths.len();
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            std::thread::spawn(move || {
+                let reports = paths
+                    .par_iter()
+                    .map(|path| corpus_fixture_manifest(path, max_fixture_ms))
+                    .collect::<Vec<_>>();
+                let _ = sender.send(reports);
+            });
+
+            match receiver.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(reports) => reports,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return json!({
+                        "directory": directory,
+                        "corpus_status": "timeout",
+                        "corpus_timeout_ms": timeout_ms,
+                        "discovered_fixture_count": discovered_fixture_count,
+                        "total_fixtures": 0,
+                        "completed_fixtures": 0,
+                        "budget_exceeded_fixtures": 0,
+                        "fixture_error_count": errors.len(),
+                        "total_items": 0,
+                        "admitted_items": 0,
+                        "unadmitted_items": 0,
+                        "elapsed_ms": overall_start.elapsed().as_millis() as u64,
+                        "fixtures": [],
+                        "errors": errors,
+                        "diagnostic": format!(
+                            "Corpus manifest collection exceeded the requested timeout of {} ms; no partial fixture rows were emitted.",
+                            timeout_ms
+                        )
+                    });
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return json!({
+                        "directory": directory,
+                        "corpus_status": "error",
+                        "corpus_timeout_ms": timeout_ms,
+                        "discovered_fixture_count": discovered_fixture_count,
+                        "total_fixtures": 0,
+                        "completed_fixtures": 0,
+                        "budget_exceeded_fixtures": 0,
+                        "fixture_error_count": errors.len() + 1,
+                        "total_items": 0,
+                        "admitted_items": 0,
+                        "unadmitted_items": 0,
+                        "elapsed_ms": overall_start.elapsed().as_millis() as u64,
+                        "fixtures": [],
+                        "errors": errors,
+                        "diagnostic": "Corpus manifest worker disconnected before returning a complete report."
+                    });
+                }
+            }
+        }
+    };
 
     let mut fixtures = Vec::new();
     let mut total_items = 0usize;
