@@ -703,66 +703,65 @@ fn corpus_fixture_manifest(
         let raw_len_bits = item.range.end.saturating_sub(range_start);
         let code_hint = item.code.trim().to_string();
         let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
-        let geometry_operands = match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
-            &bytes,
-            range_start,
-            0,
-            &huffman,
-            index,
-            is_alpha,
-            Some(raw_len_bits),
-            Some(item.header.is_compact),
-            Some(code_hint.as_str()),
-            &mut carrier,
-        ) {
-            Ok(_) => {
-                let header_consumed_bits = carrier
-                    .segments
-                    .iter()
-                    .find(|segment| segment.label == "Header")
-                    .map(|segment| segment.end.saturating_sub(segment.start));
-                let code_consumed_bits = carrier
-                    .segments
-                    .iter()
-                    .find(|segment| segment.label == "Code")
-                    .map(|segment| segment.end.saturating_sub(segment.start));
-                let observed_extended_stats_start = carrier
-                    .segments
-                    .iter()
-                    .find(|segment| segment.label == "ExtendedStats")
-                    .map(|segment| range_start + segment.start);
-                (
-                    header_consumed_bits,
-                    code_consumed_bits,
-                    observed_extended_stats_start,
-                    Vec::new(),
-                )
-            }
-            Err(error) => (
-                None,
-                None,
-                None,
-                vec![format!("Bounded geometry reparse failed: {}", error)],
-            ),
-        };
+        let geometry_operands =
+            match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+                &bytes,
+                range_start,
+                0,
+                &huffman,
+                index,
+                is_alpha,
+                Some(raw_len_bits),
+                Some(item.header.is_compact),
+                Some(code_hint.as_str()),
+                &mut carrier,
+            ) {
+                Ok(_) => {
+                    let header_consumed_bits = carrier
+                        .segments
+                        .iter()
+                        .find(|segment| segment.label == "Header")
+                        .map(|segment| segment.end.saturating_sub(segment.start));
+                    let code_consumed_bits = carrier
+                        .segments
+                        .iter()
+                        .find(|segment| segment.label == "Code")
+                        .map(|segment| segment.end.saturating_sub(segment.start));
+                    let observed_extended_stats_start = carrier
+                        .segments
+                        .iter()
+                        .find(|segment| segment.label == "ExtendedStats")
+                        .map(|segment| range_start + segment.start);
+                    (
+                        header_consumed_bits,
+                        code_consumed_bits,
+                        observed_extended_stats_start,
+                        Vec::new(),
+                    )
+                }
+                Err(error) => (
+                    None,
+                    None,
+                    None,
+                    vec![format!("Bounded geometry reparse failed: {}", error)],
+                ),
+            };
         let (family_str, admitted, reason) = match LiveHeaderFamilyClassifier::classify(item) {
             Ok(family) => (format!("{:?}", family), true, serde_json::Value::Null),
-            Err(err) => (
-                "Unadmitted".to_string(),
-                false,
-                json!(err.to_string()),
-            ),
+            Err(err) => ("Unadmitted".to_string(), false, json!(err.to_string())),
         };
         let checksum_branch = if item.header.has_checksum {
             HeaderChecksumBranch::ChecksumAndVersion
         } else {
             HeaderChecksumBranch::VersionOnly
         };
-        let nominal_expected_bits = LiveHeaderFamilyClassifier::classify(item)
-            .ok()
-            .and_then(|family| {
-                ExpectedHeaderWidthProducer::compute_expected_width(family, checksum_branch).ok()
-            });
+        let nominal_expected_bits =
+            LiveHeaderFamilyClassifier::classify(item)
+                .ok()
+                .and_then(|family| {
+                    ExpectedHeaderWidthProducer::compute_expected_width(family, checksum_branch)
+                        .ok()
+                });
         if admitted {
             fixture_admitted += 1;
         } else {
@@ -834,70 +833,85 @@ fn corpus_manifest_directory_report(
     let mut errors = Vec::new();
     collect_d2s_paths(root, &mut paths, &mut errors);
     paths.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
+    let discovered_fixture_count = paths.len();
 
     d2r_core::init_rayon_thread_pool();
-    let reports = match corpus_timeout_ms {
+    let mut collection_status = None;
+    let mut collection_diagnostic = None;
+    let mut received_fixture_count = None;
+    let mut reports = match corpus_timeout_ms {
         None => paths
             .par_iter()
             .map(|path| corpus_fixture_manifest(path, max_fixture_ms))
             .collect::<Vec<_>>(),
         Some(timeout_ms) => {
-            let discovered_fixture_count = paths.len();
-            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            let (sender, receiver) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
-                let reports = paths
-                    .par_iter()
-                    .map(|path| corpus_fixture_manifest(path, max_fixture_ms))
-                    .collect::<Vec<_>>();
-                let _ = sender.send(reports);
+                paths.par_iter().for_each_with(sender, |sender, path| {
+                    let _ = sender.send(corpus_fixture_manifest(path, max_fixture_ms));
+                });
             });
 
-            match receiver.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-                Ok(reports) => reports,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    return json!({
-                        "directory": directory,
-                        "corpus_status": "timeout",
-                        "corpus_timeout_ms": timeout_ms,
-                        "discovered_fixture_count": discovered_fixture_count,
-                        "total_fixtures": 0,
-                        "completed_fixtures": 0,
-                        "budget_exceeded_fixtures": 0,
-                        "fixture_error_count": errors.len(),
-                        "total_items": 0,
-                        "admitted_items": 0,
-                        "unadmitted_items": 0,
-                        "elapsed_ms": overall_start.elapsed().as_millis() as u64,
-                        "fixtures": [],
-                        "errors": errors,
-                        "diagnostic": format!(
-                            "Corpus manifest collection exceeded the requested timeout of {} ms; no partial fixture rows were emitted.",
-                            timeout_ms
-                        )
-                    });
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    return json!({
-                        "directory": directory,
-                        "corpus_status": "error",
-                        "corpus_timeout_ms": timeout_ms,
-                        "discovered_fixture_count": discovered_fixture_count,
-                        "total_fixtures": 0,
-                        "completed_fixtures": 0,
-                        "budget_exceeded_fixtures": 0,
-                        "fixture_error_count": errors.len() + 1,
-                        "total_items": 0,
-                        "admitted_items": 0,
-                        "unadmitted_items": 0,
-                        "elapsed_ms": overall_start.elapsed().as_millis() as u64,
-                        "fixtures": [],
-                        "errors": errors,
-                        "diagnostic": "Corpus manifest worker disconnected before returning a complete report."
-                    });
+            let deadline = overall_start + std::time::Duration::from_millis(timeout_ms);
+            let mut reports = Vec::with_capacity(discovered_fixture_count);
+            loop {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                match receiver.recv_timeout(remaining) {
+                    Ok(report) => {
+                        reports.push(report);
+                        if reports.len() == discovered_fixture_count {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        received_fixture_count = Some(reports.len());
+                        collection_status = Some("timeout");
+                        collection_diagnostic = Some(if reports.is_empty() {
+                            format!(
+                                "Corpus manifest collection exceeded the requested timeout of {} ms; no fixture receipt arrived before the deadline.",
+                                timeout_ms
+                            )
+                        } else {
+                            format!(
+                                "Corpus manifest collection exceeded the requested timeout of {} ms; retained {} fixture receipts delivered before the deadline.",
+                                timeout_ms,
+                                reports.len()
+                            )
+                        });
+                        break;
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        received_fixture_count = Some(reports.len());
+                        if reports.len() < discovered_fixture_count {
+                            collection_status = Some("error");
+                            collection_diagnostic = Some(format!(
+                                "Corpus manifest worker disconnected after {} fixture receipts; retained every receipt delivered before disconnect.",
+                                reports.len()
+                            ));
+                        }
+                        break;
+                    }
                 }
             }
+            reports
         }
     };
+
+    if corpus_timeout_ms.is_some() {
+        reports.sort_by(|left, right| {
+            let left_fixture = left
+                .as_ref()
+                .ok()
+                .and_then(|report| report["fixture"].as_str())
+                .unwrap_or("");
+            let right_fixture = right
+                .as_ref()
+                .ok()
+                .and_then(|report| report["fixture"].as_str())
+                .unwrap_or("");
+            left_fixture.cmp(right_fixture)
+        });
+    }
 
     let mut fixtures = Vec::new();
     let mut total_items = 0usize;
@@ -934,7 +948,7 @@ fn corpus_manifest_directory_report(
 
     let elapsed_ms = overall_start.elapsed().as_millis() as u64;
 
-    json!({
+    let mut response = json!({
         "directory": directory,
         "total_fixtures": fixtures.len(),
         "completed_fixtures": completed_fixtures,
@@ -946,7 +960,17 @@ fn corpus_manifest_directory_report(
         "elapsed_ms": elapsed_ms,
         "fixtures": fixtures,
         "errors": errors
-    })
+    });
+
+    if let Some(status) = collection_status {
+        response["corpus_status"] = json!(status);
+        response["corpus_timeout_ms"] = json!(corpus_timeout_ms);
+        response["discovered_fixture_count"] = json!(discovered_fixture_count);
+        response["received_fixture_count"] = json!(received_fixture_count.unwrap_or(0));
+        response["diagnostic"] = json!(collection_diagnostic.unwrap_or_default());
+    }
+
+    response
 }
 
 fn classify_trace_ownership(
@@ -1023,7 +1047,9 @@ fn classify_trace_ownership(
 fn main() {
     let mut parser = ArgParser::new("d2item_inspect")
         .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
-    parser.add_arg("file", "Path to .d2i or .d2s file").optional();
+    parser
+        .add_arg("file", "Path to .d2i or .d2s file")
+        .optional();
     parser.add_spec(ArgSpec::option(
         "corpus-dir",
         None,
@@ -1165,7 +1191,8 @@ fn main() {
 
     if is_corpus_mode {
         let corpus_dir = corpus_dir_opt.unwrap();
-        let manifest = corpus_manifest_directory_report(corpus_dir, max_fixture_ms, corpus_timeout_ms);
+        let manifest =
+            corpus_manifest_directory_report(corpus_dir, max_fixture_ms, corpus_timeout_ms);
 
         if let Some(out_path) = dump_manifest_opt {
             if let Some(parent) = Path::new(out_path).parent() {
@@ -1753,20 +1780,20 @@ fn main() {
                     let compare_is_alpha = compare_version_raw == 105 || compare_version_raw == 6;
                     let compare_items =
                         match Item::read_player_items(&compare_bytes, &huffman, compare_is_alpha) {
-                        Ok(items) => items,
-                        Err(error) => {
-                            println!(
-                                "{}",
-                                json!({
-                                    "errors": [format!(
-                                        "Failed to parse comparison file: {}",
-                                        error
-                                    )]
-                                })
-                            );
-                            return;
-                        }
-                    };
+                            Ok(items) => items,
+                            Err(error) => {
+                                println!(
+                                    "{}",
+                                    json!({
+                                        "errors": [format!(
+                                            "Failed to parse comparison file: {}",
+                                            error
+                                        )]
+                                    })
+                                );
+                                return;
+                            }
+                        };
                     if section_item_index >= compare_items.len() {
                         println!(
                             "{}",

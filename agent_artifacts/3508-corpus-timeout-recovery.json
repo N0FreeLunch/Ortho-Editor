@@ -1,0 +1,409 @@
+{
+  "directory": "tests/fixtures/savegames/original",
+  "total_fixtures": 5,
+  "completed_fixtures": 5,
+  "budget_exceeded_fixtures": 0,
+  "fixture_error_count": 0,
+  "total_items": 16,
+  "admitted_items": 16,
+  "unadmitted_items": 0,
+  "elapsed_ms": 30012,
+  "fixtures": [
+    {
+      "fixture": "tests/fixtures/savegames/original\\TESTAMAZON.d2s",
+      "status": "completed",
+      "elapsed_ms": 3,
+      "item_count": 0,
+      "admitted_count": 0,
+      "unadmitted_count": 0,
+      "items": [],
+      "errors": []
+    },
+    {
+      "fixture": "tests/fixtures/savegames/original\\amazon_empty.d2s",
+      "status": "completed",
+      "elapsed_ms": 332,
+      "item_count": 4,
+      "admitted_count": 4,
+      "unadmitted_count": 0,
+      "items": [
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_empty.d2s",
+          "section_item_index": 0,
+          "code": "hp1",
+          "range": {
+            "start": 7256,
+            "end": 7330
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7328,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_empty.d2s",
+          "section_item_index": 1,
+          "code": "hp1",
+          "range": {
+            "start": 7330,
+            "end": 7404
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": null,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_empty.d2s",
+          "section_item_index": 2,
+          "code": "hp1",
+          "range": {
+            "start": 7404,
+            "end": 7486
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7476,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_empty.d2s",
+          "section_item_index": 3,
+          "code": "hp1",
+          "range": {
+            "start": 7486,
+            "end": 7576
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7558,
+          "errors": []
+        }
+      ],
+      "errors": []
+    },
+    {
+      "fixture": "tests/fixtures/savegames/original\\amazon_v105_act2_start.d2s",
+      "status": "completed",
+      "elapsed_ms": 276,
+      "item_count": 4,
+      "admitted_count": 4,
+      "unadmitted_count": 0,
+      "items": [
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_act2_start.d2s",
+          "section_item_index": 0,
+          "code": "hp1",
+          "range": {
+            "start": 7296,
+            "end": 7370
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7368,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_act2_start.d2s",
+          "section_item_index": 1,
+          "code": "hp1",
+          "range": {
+            "start": 7370,
+            "end": 7444
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": null,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_act2_start.d2s",
+          "section_item_index": 2,
+          "code": "hp1",
+          "range": {
+            "start": 7444,
+            "end": 7526
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7516,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_act2_start.d2s",
+          "section_item_index": 3,
+          "code": "hp1",
+          "range": {
+            "start": 7526,
+            "end": 7616
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7598,
+          "errors": []
+        }
+      ],
+      "errors": []
+    },
+    {
+      "fixture": "tests/fixtures/savegames/original\\amazon_v105_andariel_killed_no_talk.d2s",
+      "status": "completed",
+      "elapsed_ms": 326,
+      "item_count": 4,
+      "admitted_count": 4,
+      "unadmitted_count": 0,
+      "items": [
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_andariel_killed_no_talk.d2s",
+          "section_item_index": 0,
+          "code": "hp1",
+          "range": {
+            "start": 7296,
+            "end": 7370
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7368,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_andariel_killed_no_talk.d2s",
+          "section_item_index": 1,
+          "code": "hp1",
+          "range": {
+            "start": 7370,
+            "end": 7444
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": null,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_andariel_killed_no_talk.d2s",
+          "section_item_index": 2,
+          "code": "hp1",
+          "range": {
+            "start": 7444,
+            "end": 7526
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7516,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_andariel_killed_no_talk.d2s",
+          "section_item_index": 3,
+          "code": "hp1",
+          "range": {
+            "start": 7526,
+            "end": 7616
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7598,
+          "errors": []
+        }
+      ],
+      "errors": []
+    },
+    {
+      "fixture": "tests/fixtures/savegames/original\\amazon_v105_re_probe_zigzag_all_diff.d2s",
+      "status": "completed",
+      "elapsed_ms": 336,
+      "item_count": 4,
+      "admitted_count": 4,
+      "unadmitted_count": 0,
+      "items": [
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_re_probe_zigzag_all_diff.d2s",
+          "section_item_index": 0,
+          "code": "hp1",
+          "range": {
+            "start": 7288,
+            "end": 7362
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7360,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_re_probe_zigzag_all_diff.d2s",
+          "section_item_index": 1,
+          "code": "hp1",
+          "range": {
+            "start": 7362,
+            "end": 7436
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": null,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_re_probe_zigzag_all_diff.d2s",
+          "section_item_index": 2,
+          "code": "hp1",
+          "range": {
+            "start": 7436,
+            "end": 7518
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7508,
+          "errors": []
+        },
+        {
+          "fixture": "tests/fixtures/savegames/original\\amazon_v105_re_probe_zigzag_all_diff.d2s",
+          "section_item_index": 3,
+          "code": "hp1",
+          "range": {
+            "start": 7518,
+            "end": 7608
+          },
+          "family": "StandardHp1",
+          "admitted": true,
+          "classification_reason": null,
+          "header_consumed_bits": 56,
+          "checksum_branch": "ChecksumAndVersion",
+          "nominal_expected_bits": 56,
+          "observed_header_bits": 56,
+          "comparison_status": "match",
+          "availability": "not_assessed",
+          "code_consumed_bits": 16,
+          "observed_extended_stats_start": 7590,
+          "errors": []
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "errors": [],
+  "corpus_status": "timeout",
+  "corpus_timeout_ms": 30000,
+  "discovered_fixture_count": 12,
+  "received_fixture_count": 5,
+  "diagnostic": "Corpus manifest collection exceeded the requested timeout of 30000 ms; retained 5 fixture receipts delivered before the deadline."
+}
