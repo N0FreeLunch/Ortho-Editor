@@ -753,6 +753,16 @@ fn corpus_fixture_manifest(
                 json!(err.to_string()),
             ),
         };
+        let checksum_branch = if item.header.has_checksum {
+            HeaderChecksumBranch::ChecksumAndVersion
+        } else {
+            HeaderChecksumBranch::VersionOnly
+        };
+        let nominal_expected_bits = LiveHeaderFamilyClassifier::classify(item)
+            .ok()
+            .and_then(|family| {
+                ExpectedHeaderWidthProducer::compute_expected_width(family, checksum_branch).ok()
+            });
         if admitted {
             fixture_admitted += 1;
         } else {
@@ -771,6 +781,19 @@ fn corpus_fixture_manifest(
             "admitted": admitted,
             "classification_reason": reason,
             "header_consumed_bits": geometry_operands.0,
+            "checksum_branch": format!("{:?}", checksum_branch),
+            "nominal_expected_bits": if admitted {
+                nominal_expected_bits
+            } else {
+                None::<u64>
+            },
+            "observed_header_bits": geometry_operands.0,
+            "comparison_status": match (nominal_expected_bits, geometry_operands.0) {
+                (Some(nominal), Some(observed)) if nominal == observed => "match",
+                (Some(_), Some(_)) => "mismatch",
+                _ => "unavailable",
+            },
+            "availability": "not_assessed",
             "code_consumed_bits": geometry_operands.1,
             "observed_extended_stats_start": geometry_operands.2,
             "errors": geometry_operands.3,
