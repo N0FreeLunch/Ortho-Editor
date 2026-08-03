@@ -1093,6 +1093,18 @@ fn main() {
         "Select a zero-based player-item section index after read_player_items parsing",
     ));
     parser.add_spec(ArgSpec::option(
+        "marker-section",
+        None,
+        Some("marker-section"),
+        "Select a one-based validity-filtered JM section for a receipt-only marker lookup",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "marker-ordinal",
+        None,
+        Some("marker-ordinal"),
+        "Select a zero-based accepted marker ordinal within the selected JM section",
+    ));
+    parser.add_spec(ArgSpec::option(
         "reparse-limit-bits",
         None,
         Some("reparse-limit-bits"),
@@ -1237,6 +1249,58 @@ fn main() {
     let section_item = parsed
         .get("section-item")
         .and_then(|s| s.parse::<usize>().ok());
+    let marker_section_raw = parsed.get("marker-section");
+    let marker_ordinal_raw = parsed.get("marker-ordinal");
+    let marker_selector_requested = marker_section_raw.is_some() || marker_ordinal_raw.is_some();
+    let marker_section = marker_section_raw.and_then(|s| s.parse::<usize>().ok());
+    let marker_ordinal = marker_ordinal_raw.and_then(|s| s.parse::<usize>().ok());
+    if marker_selector_requested
+        && (marker_section.is_none()
+            || marker_ordinal.is_none()
+            || marker_section_raw.is_none()
+            || marker_ordinal_raw.is_none())
+    {
+        if is_json {
+            println!(
+                "{}",
+                json!({
+                    "errors": [{
+                        "kind": "selector_pair_required",
+                        "message": "--marker-section and --marker-ordinal must be supplied as a complete numeric pair"
+                    }]
+                })
+            );
+        } else {
+            eprintln!(
+                "error: --marker-section and --marker-ordinal must be supplied as a complete numeric pair"
+            );
+        }
+        return;
+    }
+    if marker_selector_requested && (section_item.is_some() || bit_offset.is_some()) {
+        if is_json {
+            println!(
+                "{}",
+                json!({
+                    "errors": [{
+                        "kind": "selector_mutually_exclusive",
+                        "options": ["--marker-section", "--marker-ordinal"],
+                        "conflicts_with": if section_item.is_some() { "--section-item" } else { "--bit-offset" }
+                    }]
+                })
+            );
+        } else {
+            eprintln!(
+                "error: --marker-section/--marker-ordinal cannot be combined with {}",
+                if section_item.is_some() {
+                    "--section-item"
+                } else {
+                    "--bit-offset"
+                }
+            );
+        }
+        return;
+    }
     let compare_path = parsed.get("compare-file");
     let section_context = parsed.is_set("section-context");
     let section_segment_witnesses = parsed.is_set("section-segment-witnesses");
@@ -1298,6 +1362,104 @@ fn main() {
         0
     };
     let is_alpha = version_raw == 105 || version_raw == 6;
+
+    if let (Some(marker_section), Some(marker_ordinal)) = (marker_section, marker_ordinal) {
+        let valid_sections: Vec<usize> = d2r_core::save::find_jm_markers(&bytes)
+            .into_iter()
+            .filter(|&position| {
+                d2r_core::domain::item::serialization::is_likely_jm_section_header(
+                    &bytes, position, is_alpha, &huffman,
+                )
+            })
+            .collect();
+        let section_index = marker_section.checked_sub(1);
+        let Some(section_index) = section_index.filter(|&index| index < valid_sections.len())
+        else {
+            if is_json {
+                println!(
+                    "{}",
+                    json!({
+                        "errors": [{
+                            "kind": "unknown_marker_section",
+                            "marker_section": marker_section,
+                            "available_section_count": valid_sections.len()
+                        }]
+                    })
+                );
+            } else {
+                eprintln!(
+                    "error: marker section {} is unknown; available section count is {}",
+                    marker_section,
+                    valid_sections.len()
+                );
+            }
+            return;
+        };
+
+        let section_marker_byte_offset = valid_sections[section_index];
+        let section_end = valid_sections
+            .get(section_index + 1)
+            .copied()
+            .unwrap_or(bytes.len());
+        let declared_top_level_count = u16::from_le_bytes([
+            bytes[section_marker_byte_offset + 2],
+            bytes[section_marker_byte_offset + 3],
+        ]);
+        let envelope = match d2r_core::domain::item::scanner::preselect_marker_local_envelope(
+            &bytes[section_marker_byte_offset..section_end],
+            &huffman,
+            is_alpha,
+            section_marker_byte_offset as u64,
+            (section_marker_byte_offset as u64) * 8,
+            declared_top_level_count,
+            marker_ordinal,
+        ) {
+            Ok(envelope) => envelope,
+            Err(d2r_core::domain::item::scanner::MarkerPreselectionError::AcceptedMarkerOrdinalOutOfRange {
+                requested,
+                accepted_count,
+            }) => {
+                if is_json {
+                    println!(
+                        "{}",
+                        json!({
+                            "errors": [{
+                                "kind": "marker_ordinal_out_of_range",
+                                "marker_section": marker_section,
+                                "marker_ordinal": requested,
+                                "accepted_count": accepted_count
+                            }]
+                        })
+                    );
+                } else {
+                    eprintln!(
+                        "error: marker ordinal {} is out of range in section {}; accepted count is {}",
+                        requested,
+                        marker_section,
+                        accepted_count
+                    );
+                }
+                return;
+            }
+        };
+
+        if is_json {
+            println!(
+                "{}",
+                json!({
+                    "selector": {
+                        "marker_section": marker_section,
+                        "marker_ordinal": marker_ordinal
+                    },
+                    "envelope": envelope,
+                    "errors": []
+                })
+            );
+        } else {
+            println!("Receipt-only marker selection succeeded.");
+        }
+        return;
+    }
 
     if let Some(offset) = bit_offset {
         if trace_segments {
