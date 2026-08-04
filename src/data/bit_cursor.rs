@@ -142,7 +142,7 @@ impl<R: BitRead> BitCursor<R> {
         let pre_read_bit = self.bit_pos;
         let context_stack = self.context_stack();
         let operation_label = context_stack
-            .first()
+            .last()
             .filter(|label| label.starts_with("ExtendedStats:"))
             .cloned();
         let mut value = T::from(0u8);
@@ -421,6 +421,36 @@ mod tests {
         non_extended.push_context("Other:id");
         assert!(non_extended.read_bits::<u32>(1).is_ok());
         assert!(non_extended.operation_events().is_empty());
+    }
+
+    #[test]
+    fn test_nested_extended_stats_read_bits_trace_event_admission() {
+        let bytes = vec![0b00000000];
+        let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_trace(true);
+        cursor.set_limit(2);
+
+        cursor.push_context("Root");
+        cursor.push_context("ExtendedStats");
+        cursor.push_context("ExtendedStats:id");
+
+        assert_eq!(cursor.read_bits::<u32>(2).unwrap(), 0);
+        assert!(cursor.read_bits::<u32>(2).is_err());
+
+        assert_eq!(cursor.operation_events().len(), 2);
+        assert_eq!(cursor.operation_events()[0].outcome, "success");
+        assert_eq!(cursor.operation_events()[1].outcome, "failure");
+        assert_eq!(cursor.operation_events()[0].operation_label, "ExtendedStats:id");
+        assert_eq!(cursor.operation_events()[1].operation_label, "ExtendedStats:id");
+        assert_eq!(
+            cursor.operation_events()[0].context_stack,
+            vec!["Root", "ExtendedStats", "ExtendedStats:id"]
+        );
+        assert_eq!(
+            cursor.operation_events()[1].context_stack,
+            vec!["Root", "ExtendedStats", "ExtendedStats:id"]
+        );
     }
 
     #[test]
