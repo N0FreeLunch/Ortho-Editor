@@ -109,6 +109,40 @@ pub struct ParserProbe {
     pub trace_final_bit: u64,
     pub trace_status: String,
     pub trace_segments: Vec<BitSegment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_transcript: Option<Vec<ParserOperationTranscriptEvent>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ParserOperationTranscriptEvent {
+    pub operation_label: String,
+    pub pre_read_bit_abs: u64,
+    pub post_read_bit_abs: u64,
+    pub pre_read_bit_rel: u64,
+    pub post_read_bit_rel: u64,
+    pub requested_width_bits: Option<u32>,
+    pub context_stack: Vec<String>,
+    pub outcome: String,
+}
+
+fn project_operation_transcript(
+    carrier: &SegmentTraceCarrier,
+    candidate_start_bit: u64,
+) -> Vec<ParserOperationTranscriptEvent> {
+    carrier
+        .operation_events
+        .iter()
+        .map(|event| ParserOperationTranscriptEvent {
+            operation_label: event.operation_label.clone(),
+            pre_read_bit_abs: event.pre_read_bit,
+            post_read_bit_abs: event.post_read_bit,
+            pre_read_bit_rel: event.pre_read_bit.saturating_sub(candidate_start_bit),
+            post_read_bit_rel: event.post_read_bit.saturating_sub(candidate_start_bit),
+            requested_width_bits: event.requested_width_bits,
+            context_stack: event.context_stack.clone(),
+            outcome: event.outcome.clone(),
+        })
+        .collect()
 }
 
 #[derive(Deserialize, Debug)]
@@ -441,6 +475,7 @@ pub fn probe_parser(
         }
     };
 
+    let operation_transcript = Some(project_operation_transcript(&carrier, candidate_start_bit));
     let mut probe = ParserProbe {
         probe_source: "bounded_live_reparse".to_string(),
         candidate_start_bit,
@@ -461,6 +496,7 @@ pub fn probe_parser(
         trace_final_bit: carrier.final_bit,
         trace_status,
         trace_segments: carrier.segments,
+        operation_transcript,
     };
     apply_preserved_failure(item, &mut probe)?;
     Ok(probe)
@@ -469,6 +505,7 @@ pub fn probe_parser(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::bit_cursor::BitReadTraceEvent;
     use crate::domain::item::{Confidence, ForensicMetadata, Intentionality};
 
     #[test]
@@ -524,6 +561,7 @@ mod tests {
             trace_final_bit: 7661,
             trace_status: "failure".to_string(),
             trace_segments: Vec::new(),
+            operation_transcript: None,
         };
 
         apply_preserved_failure(&item, &mut probe).expect("valid preserved failure envelope");
@@ -539,6 +577,46 @@ mod tests {
             Some(["Root".to_string(), "ExtendedStats".to_string()].as_slice())
         );
         assert_eq!(probe.failure_hint.as_deref(), Some("limit"));
+    }
+
+    #[test]
+    fn operation_transcript_projection_preserves_order_and_coordinates() {
+        let carrier = SegmentTraceCarrier {
+            operation_events: vec![
+                BitReadTraceEvent {
+                    operation_label: "ExtendedStats:id".to_string(),
+                    pre_read_bit: 99,
+                    post_read_bit: 104,
+                    requested_width_bits: Some(5),
+                    context_stack: vec!["Root".to_string(), "ExtendedStats".to_string()],
+                    outcome: "success".to_string(),
+                },
+                BitReadTraceEvent {
+                    operation_label: "ExtendedStats:value".to_string(),
+                    pre_read_bit: 104,
+                    post_read_bit: 104,
+                    requested_width_bits: Some(9),
+                    context_stack: vec!["Root".to_string(), "ExtendedStats".to_string()],
+                    outcome: "failure".to_string(),
+                },
+            ],
+            ..SegmentTraceCarrier::default()
+        };
+
+        let transcript = project_operation_transcript(&carrier, 96);
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].operation_label, "ExtendedStats:id");
+        assert_eq!(transcript[0].pre_read_bit_abs, 99);
+        assert_eq!(transcript[0].post_read_bit_abs, 104);
+        assert_eq!(transcript[0].pre_read_bit_rel, 3);
+        assert_eq!(transcript[0].post_read_bit_rel, 8);
+        assert_eq!(transcript[1].operation_label, "ExtendedStats:value");
+        assert_eq!(transcript[1].pre_read_bit_rel, 8);
+        assert_eq!(transcript[1].post_read_bit_rel, 8);
+        assert_eq!(transcript[1].outcome, "failure");
+
+        let empty = SegmentTraceCarrier::default();
+        assert!(project_operation_transcript(&empty, 96).is_empty());
     }
 
     #[test]
