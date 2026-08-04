@@ -3,6 +3,17 @@ use crate::domain::item::{BitSegment, RecordedBit};
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::header::entity::ItemSegmentType;
 use crate::error::{BackingBitCursor, ParsingError, ParsingFailure, ParsingResult};
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BitReadTraceEvent {
+    pub operation_label: String,
+    pub pre_read_bit: u64,
+    pub post_read_bit: u64,
+    pub requested_width_bits: Option<u32>,
+    pub context_stack: Vec<String>,
+    pub outcome: String,
+}
 
 /// A bit-precision cursor that wraps a `BitRead` implementation and adds
 /// positioning, checkpoint/rollback, and semantic recording capabilities.
@@ -13,6 +24,7 @@ pub struct BitCursor<R: BitRead> {
     limit: Option<u64>,
     recorded_bits: Vec<RecordedBit>,
     segments: Vec<BitSegment>,
+    operation_events: Vec<BitReadTraceEvent>,
     context_stack: Vec<(String, u64, Option<u64>)>, // (label, start_bit, expected_bits)
     pub trace_enabled: bool,
     pub alpha_quality: Option<ItemQuality>,
@@ -41,6 +53,7 @@ impl<R: BitRead> BitCursor<R> {
             limit: None,
             recorded_bits: Vec::new(),
             segments: Vec::new(),
+            operation_events: Vec::new(),
             context_stack: Vec::new(),
             trace_enabled: false,
             alpha_quality: None,
@@ -126,13 +139,48 @@ impl<R: BitRead> BitCursor<R> {
 
     /// Reads multiple bits from the stream as a numeric type.
     pub fn read_bits<T: Numeric + From<u8> + std::ops::BitOrAssign + std::ops::Shl<u32, Output = T>>(&mut self, count: u32) -> ParsingResult<T> {
+        let pre_read_bit = self.bit_pos;
+        let context_stack = self.context_stack();
+        let operation_label = context_stack
+            .first()
+            .filter(|label| label.starts_with("ExtendedStats:"))
+            .cloned();
         let mut value = T::from(0u8);
         let max_bits = (std::mem::size_of::<T>() * 8) as u32;
         for i in 0..count {
-            if self.read_bit()? {
-                if i < max_bits {
-                    value |= T::from(1u8) << i;
+            match self.read_bit() {
+                Ok(bit) => {
+                    if bit && i < max_bits {
+                        value |= T::from(1u8) << i;
+                    }
                 }
+                Err(error) => {
+                    if self.trace_enabled {
+                        if let Some(operation_label) = operation_label.clone() {
+                            self.operation_events.push(BitReadTraceEvent {
+                                operation_label,
+                                pre_read_bit,
+                                post_read_bit: self.bit_pos,
+                                requested_width_bits: Some(count),
+                                context_stack: context_stack.clone(),
+                                outcome: "failure".to_string(),
+                            });
+                        }
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        if self.trace_enabled {
+            if let Some(operation_label) = operation_label {
+                self.operation_events.push(BitReadTraceEvent {
+                    operation_label,
+                    pre_read_bit,
+                    post_read_bit: self.bit_pos,
+                    requested_width_bits: Some(count),
+                    context_stack,
+                    outcome: "success".to_string(),
+                });
             }
         }
         Ok(value)
@@ -236,6 +284,10 @@ impl<R: BitRead> BitCursor<R> {
         &self.segments
     }
 
+    pub fn operation_events(&self) -> &[BitReadTraceEvent] {
+        &self.operation_events
+    }
+
     /// Returns all active (unclosed) context segments.
     pub fn active_segments(&self) -> Vec<BitSegment> {
         self.context_stack
@@ -336,6 +388,39 @@ mod tests {
         assert_eq!(cursor.segments()[0].label, "Header");
         assert_eq!(cursor.segments()[0].start, 0);
         assert_eq!(cursor.segments()[0].end, 4);
+    }
+
+    #[test]
+    fn test_extended_stats_read_bits_trace_events() {
+        let bytes = vec![0b00000000];
+        let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_trace(true);
+        cursor.set_limit(2);
+
+        cursor.push_context("ExtendedStats:id");
+        let success = cursor.read_bits::<u32>(2);
+        assert_eq!(success.unwrap(), 0);
+        let failure = cursor.read_bits::<u32>(2);
+        assert!(failure.is_err());
+        cursor.pop_context();
+
+        assert_eq!(cursor.operation_events().len(), 2);
+        assert_eq!(cursor.operation_events()[0].outcome, "success");
+        assert_eq!(cursor.operation_events()[0].pre_read_bit, 0);
+        assert_eq!(cursor.operation_events()[0].post_read_bit, 2);
+        assert_eq!(cursor.operation_events()[1].outcome, "failure");
+        assert_eq!(cursor.operation_events()[1].pre_read_bit, 2);
+        assert_eq!(cursor.operation_events()[1].post_read_bit, 2);
+        assert_eq!(cursor.operation_events()[1].context_stack, vec!["ExtendedStats:id"]);
+
+        let bytes = vec![0b00000000];
+        let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let mut non_extended = BitCursor::new(reader);
+        non_extended.set_trace(true);
+        non_extended.push_context("Other:id");
+        assert!(non_extended.read_bits::<u32>(1).is_ok());
+        assert!(non_extended.operation_events().is_empty());
     }
 
     #[test]

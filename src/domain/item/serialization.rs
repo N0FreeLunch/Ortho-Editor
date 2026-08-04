@@ -1,4 +1,4 @@
-use crate::data::bit_cursor::BitCursor;
+use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::item::BitSegment;
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
@@ -992,6 +992,7 @@ pub struct SegmentTraceCarrier {
     pub final_bit: u64,
     pub status: ParseStatus,
     pub segments: Vec<BitSegment>,
+    pub operation_events: Vec<BitReadTraceEvent>,
 }
 
 /// Parses an item at the specified bit position while recording bitstream segment trace facts.
@@ -1013,6 +1014,7 @@ pub fn parse_item_at_with_limit_with_carrier(
     carrier.final_bit = absolute_bit;
     carrier.status = ParseStatus::Failure;
     carrier.segments.clear();
+    carrier.operation_events.clear();
 
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
     let _ = reader.skip(bit as u32);
@@ -1053,6 +1055,7 @@ pub fn parse_item_at_with_limit_with_carrier(
             depth: s.depth,
         })
         .collect();
+    carrier.operation_events = cursor.operation_events().to_vec();
 
     match res {
         Ok(mut item) => {
