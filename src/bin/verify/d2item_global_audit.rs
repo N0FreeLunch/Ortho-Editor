@@ -1,5 +1,5 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{ItemDiff, SymmetryOptions, calculate_symmetry_diff};
+use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
@@ -42,12 +42,36 @@ impl FailureFamily {
 }
 
 #[derive(Serialize)]
+struct BitWindow {
+    start: usize,
+    end: usize,
+    bits: String,
+}
+
+fn bounded_bit_window(bits: Option<&String>, offset: Option<usize>) -> Option<BitWindow> {
+    let bits = bits?;
+    let offset = offset?;
+    let start = offset.saturating_sub(16).min(bits.len());
+    let end = offset.saturating_add(17).min(bits.len());
+
+    Some(BitWindow {
+        start,
+        end,
+        bits: bits[start..end].to_string(),
+    })
+}
+
+#[derive(Serialize)]
 struct MismatchRow {
     item_label: String,
     code: String,
     mismatch_type: String,
     segment: String,
     first_mismatch_offset: Option<usize>,
+    bit_source_contract: Option<String>,
+    cached_bits_preserved: Option<bool>,
+    original_bit_window: Option<BitWindow>,
+    target_bit_window: Option<BitWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     original_len: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,6 +264,16 @@ fn process_file(
                                 mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
                                 segment: it.segment.clone().unwrap_or_default(),
                                 first_mismatch_offset: it.first_mismatch_offset.map(|o| o as usize),
+                                bit_source_contract: it.bit_source_contract.clone(),
+                                cached_bits_preserved: it.cached_bits_preserved,
+                                original_bit_window: bounded_bit_window(
+                                    it.orig_bits.as_ref(),
+                                    it.first_mismatch_offset.map(|o| o as usize),
+                                ),
+                                target_bit_window: bounded_bit_window(
+                                    it.target_bits.as_ref(),
+                                    it.first_mismatch_offset.map(|o| o as usize),
+                                ),
                                 original_len: Some(it.original_len),
                                 target_len: Some(it.target_len),
                             });
