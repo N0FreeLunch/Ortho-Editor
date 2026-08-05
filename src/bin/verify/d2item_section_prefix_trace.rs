@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::forensic::registry::get_registry;
 use d2r_core::item::{HuffmanTree, Item};
@@ -94,6 +94,8 @@ struct ItemTrace {
     socketed_child_count: usize,
     emitted_child_count: usize,
     child_emission_skipped: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_bits_preserved: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     isolated_inspect: Option<IsolatedInspect>,
 }
@@ -236,6 +238,12 @@ fn main() -> Result<()> {
         "Emit per-item checkpoint rows",
     ));
     parser.add_spec(ArgSpec::option(
+        "strict-rebuild-item",
+        None,
+        Some("strict-rebuild-item"),
+        "Clear cached bits for the selected Section 1 item before serialization",
+    ));
+    parser.add_spec(ArgSpec::option(
         "compare",
         None,
         Some("compare"),
@@ -283,12 +291,27 @@ fn main() -> Result<()> {
     let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
     let alpha_mode = parsed.is_set("alpha") || version == 105 || version == 6;
     let huffman = HuffmanTree::new();
+    let strict_rebuild_item = parsed
+        .get("strict-rebuild-item")
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .with_context(|| format!("Invalid --strict-rebuild-item index: {}", value))
+        })
+        .transpose()?;
     let section_map = map_core_sections(&bytes)
         .with_context(|| format!("Failed to map JM sections in {}", path))?;
     let jm_positions = section_map.jm_positions;
 
-    let mut payload =
-        build_prefix_trace_report(path, version, alpha_mode, &bytes, &jm_positions, &huffman)?;
+    let mut payload = build_prefix_trace_report_with_strict_item(
+        path,
+        version,
+        alpha_mode,
+        &bytes,
+        &jm_positions,
+        &huffman,
+        strict_rebuild_item,
+    )?;
 
     let flag_count = [
         parsed.get("compare").is_some(),
@@ -315,11 +338,14 @@ fn main() -> Result<()> {
                 target_path
             ));
         }
-        let target_version =
-            u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
-        let target_alpha_mode = parsed.is_set("alpha") || target_version == 105 || target_version == 6;
+        let target_version = u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
+        let target_alpha_mode =
+            parsed.is_set("alpha") || target_version == 105 || target_version == 6;
         let target_section_map = map_core_sections(&target_bytes).with_context(|| {
-            format!("Failed to map JM sections in comparison file: {}", target_path)
+            format!(
+                "Failed to map JM sections in comparison file: {}",
+                target_path
+            )
         })?;
         let target_payload = build_prefix_trace_report(
             target_path,
@@ -360,7 +386,10 @@ fn main() -> Result<()> {
             let target_alpha_mode =
                 parsed.is_set("alpha") || target_version == 105 || target_version == 6;
             let target_section_map = map_core_sections(&target_bytes).with_context(|| {
-                format!("Failed to map JM sections in comparison file: {}", target_path)
+                format!(
+                    "Failed to map JM sections in comparison file: {}",
+                    target_path
+                )
             })?;
             let target_payload = build_prefix_trace_report(
                 target_path,
@@ -387,20 +416,23 @@ fn main() -> Result<()> {
             targets,
         });
     } else if let Some(target_path) = parsed.get("simulate-insertion") {
-        let target_bytes = fs::read(target_path)
-            .with_context(|| format!("Failed to read target file for simulation: {}", target_path))?;
+        let target_bytes = fs::read(target_path).with_context(|| {
+            format!("Failed to read target file for simulation: {}", target_path)
+        })?;
         if target_bytes.len() < 8 {
             return Err(anyhow!(
                 "Target file too small to read version header: {}",
                 target_path
             ));
         }
-        let target_version =
-            u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
+        let target_version = u32::from_le_bytes(target_bytes[4..8].try_into().unwrap_or([0; 4]));
         let target_alpha_mode =
             parsed.is_set("alpha") || target_version == 105 || target_version == 6;
         let target_section_map = map_core_sections(&target_bytes).with_context(|| {
-            format!("Failed to map JM sections in target simulation file: {}", target_path)
+            format!(
+                "Failed to map JM sections in target simulation file: {}",
+                target_path
+            )
         })?;
         let target_payload = build_prefix_trace_report(
             target_path,
@@ -411,12 +443,15 @@ fn main() -> Result<()> {
             &huffman,
         )?;
 
-        if let (Some(base_sec), Some(target_sec)) = (payload.sections.first(), target_payload.sections.first()) {
+        if let (Some(base_sec), Some(target_sec)) =
+            (payload.sections.first(), target_payload.sections.first())
+        {
             let base_payload_bits = base_sec.payload_original_len_bits;
             let target_payload_bits = target_sec.payload_original_len_bits;
             let projected_delta_bits = target_payload_bits as i64 - base_payload_bits as i64;
             let base_next_jm_bit_offset = base_sec.next_jm_offset_bit;
-            let projected_next_jm_bit_offset = (base_next_jm_bit_offset as i64 + projected_delta_bits) as u64;
+            let projected_next_jm_bit_offset =
+                (base_next_jm_bit_offset as i64 + projected_delta_bits) as u64;
 
             payload.insertion_simulation = Some(InsertionSimulationReport {
                 base_file: path.to_string(),
@@ -451,8 +486,9 @@ fn main() -> Result<()> {
 
         let mut targets = Vec::new();
         for target_path in raw_targets {
-            let target_bytes = fs::read(target_path)
-                .with_context(|| format!("Failed to read target file for simulation: {}", target_path))?;
+            let target_bytes = fs::read(target_path).with_context(|| {
+                format!("Failed to read target file for simulation: {}", target_path)
+            })?;
             if target_bytes.len() < 8 {
                 return Err(anyhow!(
                     "Target file too small to read version header: {}",
@@ -464,7 +500,10 @@ fn main() -> Result<()> {
             let target_alpha_mode =
                 parsed.is_set("alpha") || target_version == 105 || target_version == 6;
             let target_section_map = map_core_sections(&target_bytes).with_context(|| {
-                format!("Failed to map JM sections in target simulation file: {}", target_path)
+                format!(
+                    "Failed to map JM sections in target simulation file: {}",
+                    target_path
+                )
             })?;
             let target_payload = build_prefix_trace_report(
                 target_path,
@@ -475,12 +514,15 @@ fn main() -> Result<()> {
                 &huffman,
             )?;
 
-            if let (Some(base_sec), Some(target_sec)) = (payload.sections.first(), target_payload.sections.first()) {
+            if let (Some(base_sec), Some(target_sec)) =
+                (payload.sections.first(), target_payload.sections.first())
+            {
                 let base_payload_bits = base_sec.payload_original_len_bits;
                 let target_payload_bits = target_sec.payload_original_len_bits;
                 let projected_delta_bits = target_payload_bits as i64 - base_payload_bits as i64;
                 let base_next_jm_bit_offset = base_sec.next_jm_offset_bit;
-                let projected_next_jm_bit_offset = (base_next_jm_bit_offset as i64 + projected_delta_bits) as u64;
+                let projected_next_jm_bit_offset =
+                    (base_next_jm_bit_offset as i64 + projected_delta_bits) as u64;
 
                 targets.push(InsertionSimulationReport {
                     base_file: path.to_string(),
@@ -547,6 +589,26 @@ fn build_prefix_trace_report(
     jm_positions: &[usize],
     huffman: &HuffmanTree,
 ) -> Result<PrefixTraceReport> {
+    build_prefix_trace_report_with_strict_item(
+        file,
+        version,
+        alpha_mode,
+        bytes,
+        jm_positions,
+        huffman,
+        None,
+    )
+}
+
+fn build_prefix_trace_report_with_strict_item(
+    file: &str,
+    version: u32,
+    alpha_mode: bool,
+    bytes: &[u8],
+    jm_positions: &[usize],
+    huffman: &HuffmanTree,
+    strict_rebuild_item: Option<usize>,
+) -> Result<PrefixTraceReport> {
     let mut sections = Vec::new();
     let mut total_items = 0usize;
     let mut local_match_count = 0usize;
@@ -593,23 +655,34 @@ fn build_prefix_trace_report(
 
         for (item_index, item) in items.iter().enumerate() {
             let raw_bits = bits_from_range(bytes, item.range.start, item.range.end);
-            let serialized_local =
-                item.to_bits(item_index, huffman, alpha_mode)
-                    .with_context(|| {
-                        format!(
-                            "Failed to serialize item {} ({}) locally in section {}",
-                            item_index,
-                            item.code.trim(),
-                            section_index + 1
-                        )
-                    })?;
+            let strict_rebuild_selected = section_index == 0
+                && strict_rebuild_item
+                    .map(|selected_index| selected_index == item_index)
+                    .unwrap_or(false);
+            let trace_item = if strict_rebuild_selected {
+                let mut strict_item = item.clone();
+                strict_item.bits.clear();
+                strict_item
+            } else {
+                item.clone()
+            };
+            let serialized_local = trace_item
+                .to_bits(item_index, huffman, alpha_mode)
+                .with_context(|| {
+                    format!(
+                        "Failed to serialize item {} ({}) locally in section {}",
+                        item_index,
+                        item.code.trim(),
+                        section_index + 1
+                    )
+                })?;
 
             let local_check = compare_exact_bits(&raw_bits, &serialized_local, item.range.start);
             if local_check.matches {
                 section_local_match_count += 1;
             }
 
-            let emission = emit_item_section_bits(item, item_index, huffman, alpha_mode)
+            let emission = emit_item_section_bits(&trace_item, item_index, huffman, alpha_mode)
                 .with_context(|| {
                     format!(
                         "Failed to emit cumulative section bits for item {} ({}) in section {}",
@@ -649,10 +722,18 @@ fn build_prefix_trace_report(
             item_traces.push(ItemTrace {
                 item_index,
                 code: item.code.trim().to_string(),
-                bit_source_contract: "parsed_item_replay",
+                bit_source_contract: if strict_rebuild_selected {
+                    "strict_rebuild_after_cached_bits_clear"
+                } else {
+                    "parsed_item_replay"
+                },
                 raw_capture_available: true,
                 raw_capture_len_bits: raw_bits.len(),
-                emission_bit_source: "parsed_item_to_bits",
+                emission_bit_source: if strict_rebuild_selected {
+                    "strict_rebuild_to_bits_after_cached_bits_clear"
+                } else {
+                    "parsed_item_to_bits"
+                },
                 raw_start_bit: item.range.start,
                 raw_end_bit: item.range.end,
                 raw_len_bits: raw_bits.len(),
@@ -667,6 +748,7 @@ fn build_prefix_trace_report(
                 socketed_child_count: item.socketed_items.len(),
                 emitted_child_count: emission.emitted_child_count,
                 child_emission_skipped: emission.child_emission_skipped,
+                cached_bits_preserved: strict_rebuild_selected.then_some(false),
                 isolated_inspect,
             });
 
