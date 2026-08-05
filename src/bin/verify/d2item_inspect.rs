@@ -1105,6 +1105,12 @@ fn main() {
         "Select a zero-based accepted marker ordinal within the selected JM section",
     ));
     parser.add_spec(ArgSpec::option(
+        "marker-reparse-limit-bits",
+        None,
+        Some("marker-reparse-limit-bits"),
+        "Opt-in bit limit for a bounded reparse from the selected marker envelope",
+    ));
+    parser.add_spec(ArgSpec::option(
         "reparse-limit-bits",
         None,
         Some("reparse-limit-bits"),
@@ -1325,6 +1331,46 @@ fn main() {
         },
         None => None,
     };
+    let marker_reparse_limit_bits = match parsed.get("marker-reparse-limit-bits") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(limit) => Some(limit),
+            Err(_) => {
+                if is_json {
+                    println!(
+                        "{}",
+                        json!({"errors": ["--marker-reparse-limit-bits must be an unsigned integer"]})
+                    );
+                } else {
+                    eprintln!("error: --marker-reparse-limit-bits must be an unsigned integer");
+                }
+                return;
+            }
+        },
+        None => None,
+    };
+    if marker_reparse_limit_bits.is_some()
+        && !(is_json && marker_section.is_some() && marker_ordinal.is_some())
+    {
+        let message =
+            "--marker-reparse-limit-bits requires --json and a complete marker selector pair";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        return;
+    }
+    if marker_reparse_limit_bits.is_some()
+        && (reparse_limit_bits.is_some() || section_item.is_some() || bit_offset.is_some())
+    {
+        let message = "--marker-reparse-limit-bits cannot be combined with --reparse-limit-bits, --section-item, or --bit-offset";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        return;
+    }
     if reparse_limit_bits.is_some() && !(is_json && trace_segments && section_item.is_some()) {
         let message = "--reparse-limit-bits requires --json, --trace-segments, and --section-item";
         if is_json {
@@ -1443,7 +1489,66 @@ fn main() {
             }
         };
 
-        if is_json {
+        if let Some(requested_limit_bits) = marker_reparse_limit_bits {
+            let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+            let bounded_parse =
+                d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+                    &bytes,
+                    envelope.absolute_item_start_bit,
+                    0,
+                    &huffman,
+                    marker_ordinal,
+                    is_alpha,
+                    Some(requested_limit_bits),
+                    None,
+                    Some(envelope.trimmed_code.as_str()),
+                    &mut carrier,
+                );
+            let (error, parser_consumed_bits) = match bounded_parse {
+                Ok((_, consumed_bits)) => (serde_json::Value::Null, Some(consumed_bits)),
+                Err(error) => (json!(error.to_string()), None),
+            };
+            let status = match carrier.status {
+                d2r_core::domain::item::serialization::ParseStatus::Success => "success",
+                d2r_core::domain::item::serialization::ParseStatus::Failure => "failure",
+            };
+            let segments = carrier
+                .segments
+                .iter()
+                .map(|segment| {
+                    json!({
+                        "label": segment.label,
+                        "start": segment.start,
+                        "end": segment.end,
+                        "depth": segment.depth
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            println!(
+                "{}",
+                json!({
+                    "selector": {
+                        "marker_section": marker_section,
+                        "marker_ordinal": marker_ordinal
+                    },
+                    "envelope": envelope,
+                    "bounded_reparse": {
+                        "provenance": "marker_local_bounded_reparse",
+                        "requested_limit_bits": requested_limit_bits,
+                        "observed_range": {
+                            "start": carrier.start_bit,
+                            "end": carrier.final_bit
+                        },
+                        "status": status,
+                        "error": error,
+                        "parser_consumed_bits": parser_consumed_bits,
+                        "segments": segments
+                    },
+                    "errors": []
+                })
+            );
+        } else if is_json {
             println!(
                 "{}",
                 json!({
