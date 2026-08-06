@@ -452,6 +452,107 @@ fn section_context_report(
             item.range.start,
         );
 
+    let original_bits = item.bits.iter().map(|bit| bit.bit).collect::<Vec<_>>();
+    let strict_residual_mismatch_runs = strict_emission_phases
+        .iter()
+        .filter(|phase| {
+            !matches!(
+                phase.label.as_str(),
+                "summary_target_width_alignment" | "summary_body_and_alignment"
+            )
+        })
+        .map(|phase| {
+            let start = phase.start as usize;
+            let end = (phase.end as usize)
+                .min(original_bits.len())
+                .min(with_padding_bits.len());
+            let mut mismatch_count = 0usize;
+            let mut runs = Vec::new();
+            let mut run_start = None;
+            for offset in start..end {
+                if original_bits[offset] != with_padding_bits[offset] {
+                    mismatch_count += 1;
+                    run_start.get_or_insert(offset);
+                } else if let Some(run_start) = run_start.take() {
+                    runs.push(json!({
+                        "start": run_start,
+                        "end": offset,
+                        "bit_length": offset - run_start,
+                    }));
+                }
+            }
+            if let Some(run_start) = run_start {
+                runs.push(json!({
+                    "start": run_start,
+                    "end": end,
+                    "bit_length": end - run_start,
+                }));
+            }
+            json!({
+                "label": phase.label,
+                "start": phase.start,
+                "end": phase.end,
+                "compared_bit_count": end.saturating_sub(start),
+                "mismatch_count": mismatch_count,
+                "mismatch_runs": runs,
+            })
+        })
+        .collect::<Vec<_>>();
+    let opaque_or_residue_bits = item
+        .modules
+        .iter()
+        .flat_map(|module| match module {
+            ItemModule::Opaque(bits) | ItemModule::Residue(bits) => bits.clone(),
+            _ => Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let counterfactual_variant = |name: &str, alignment_padding: Vec<bool>| {
+        let mut candidate = item.clone();
+        candidate.bits.clear();
+        candidate.body.alpha_alignment_padding = alignment_padding;
+        match candidate.to_bits(section_item_index, huffman, alpha_mode) {
+            Ok(bits) => {
+                let compared_bit_count = original_bits.len().min(bits.len());
+                let hamming_distance = original_bits
+                    .iter()
+                    .zip(bits.iter())
+                    .take(compared_bit_count)
+                    .filter(|(original, counterfactual)| original != counterfactual)
+                    .count();
+                json!({
+                    "name": name,
+                    "first_difference_offset": compare_first_difference_offset(&original_bits, &bits, item.range.start),
+                    "hamming_distance": hamming_distance,
+                    "compared_bit_count": compared_bit_count,
+                    "original_bit_count": original_bits.len(),
+                    "counterfactual_bit_count": bits.len(),
+                    "typed_error": serde_json::Value::Null,
+                })
+            }
+            Err(error) => json!({
+                "name": name,
+                "first_difference_offset": serde_json::Value::Null,
+                "hamming_distance": serde_json::Value::Null,
+                "compared_bit_count": 0,
+                "original_bit_count": original_bits.len(),
+                "counterfactual_bit_count": serde_json::Value::Null,
+                "typed_error": error.to_string(),
+            }),
+        }
+    };
+    let mut reversed_opaque_or_residue_bits = opaque_or_residue_bits.clone();
+    reversed_opaque_or_residue_bits.reverse();
+    let counterfactual_carrier_probe = json!({
+        "counterfactual_only": true,
+        "semantic_replay_authorized": false,
+        "variants": [
+            counterfactual_variant("zero_fill", Vec::new()),
+            counterfactual_variant("retained_alignment_padding", item.body.alpha_alignment_padding.clone()),
+            counterfactual_variant("opaque_or_residue_stored_order", opaque_or_residue_bits),
+            counterfactual_variant("opaque_or_residue_reversed", reversed_opaque_or_residue_bits),
+        ],
+    });
+
     let segments = item
         .segments
         .iter()
@@ -631,6 +732,8 @@ fn section_context_report(
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_alignment_source_witness": strict_alignment_source_witness,
+        "counterfactual_carrier_probe": counterfactual_carrier_probe,
+        "strict_residual_mismatch_runs": strict_residual_mismatch_runs,
         "strict_with_padding_bit_count": with_padding_bits.len(),
         "strict_with_padding_bits": with_padding_bits,
         "strict_without_padding_bit_count": without_padding_bits.len(),
