@@ -1411,8 +1411,7 @@ impl Item {
                         || self.header.version == 1),
             )?;
         } else {
-            let is_summary = alpha_mode && w_axiom.is_summary_item(self.header.version, &self.code);
-            if is_summary && !self.body.alpha_code_bits.is_empty() {
+            if alpha_mode && !self.body.alpha_code_bits.is_empty() {
                 emitter.extend_bits(self.body.alpha_code_bits.iter().cloned())?;
             } else {
                 let code_bits = huffman.encode(&self.code)?;
