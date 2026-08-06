@@ -722,6 +722,17 @@ fn section_context_report(
         "strict_zero_fill_count": zero_fill_bits,
         "availability_only": true,
     });
+    let normalized_code = item.code.trim();
+    let trusted_compact_tail = alpha_mode && matches!(normalized_code, "jav" | "buc" | "us g");
+    let parser_decision_provenance = json!({
+        "alpha_mode": alpha_mode,
+        "normalized_code": normalized_code,
+        "trusted_compact_tail": trusted_compact_tail,
+        "residue_classification": if trusted_compact_tail { "alignment_padding_capture" } else { "opaque_tail" },
+        "rule": "alpha residue capture trusts only jav, buc, and us g compact tails",
+        "semantic_replay_authorized": false,
+        "report_only": true,
+    });
 
     json!({
         "section_item_index": section_item_index,
@@ -732,6 +743,7 @@ fn section_context_report(
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_alignment_source_witness": strict_alignment_source_witness,
+        "parser_decision_provenance": parser_decision_provenance,
         "counterfactual_carrier_probe": counterfactual_carrier_probe,
         "strict_residual_mismatch_runs": strict_residual_mismatch_runs,
         "strict_with_padding_bit_count": with_padding_bits.len(),
