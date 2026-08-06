@@ -512,6 +512,19 @@ fn section_context_report(
             _ => (opaque_len, residue_len),
         },
     );
+    let opaque_or_residue_bits_len = opaque_module_bits_len + residue_module_bits_len;
+    let mapped_opaque_or_residue_bits_len = item
+        .segments
+        .iter()
+        .filter(|segment| segment.label == "OpaqueTail")
+        .map(|segment| segment.end.saturating_sub(segment.start) as usize)
+        .sum::<usize>();
+    let mapped_alignment_padding_bits_len = item
+        .segments
+        .iter()
+        .filter(|segment| segment.label == "alpha_alignment_padding_tail_capture")
+        .map(|segment| segment.end.saturating_sub(segment.start) as usize)
+        .sum::<usize>();
     let mut physical_source_candidates = item
         .segments
         .iter()
@@ -548,34 +561,28 @@ fn section_context_report(
         "retained_material_overlap": serde_json::Value::Null,
         "retained_material_overlap_classification": "unmapped_source_or_phase_range",
     }));
-    if !item
-        .segments
-        .iter()
-        .any(|segment| segment.label == "OpaqueTail")
-        && opaque_module_bits_len + residue_module_bits_len > 0
-    {
+    let unmapped_opaque_or_residue_bits_len =
+        opaque_or_residue_bits_len.saturating_sub(mapped_opaque_or_residue_bits_len);
+    if unmapped_opaque_or_residue_bits_len > 0 {
         physical_source_candidates.push(json!({
             "source_kind": "opaque_or_residue",
             "segment_label": serde_json::Value::Null,
             "local_range": serde_json::Value::Null,
-            "bit_length": opaque_module_bits_len + residue_module_bits_len,
+            "bit_length": unmapped_opaque_or_residue_bits_len,
             "zero_fill_overlap": serde_json::Value::Null,
             "zero_fill_overlap_classification": "unmapped_source_or_phase_range",
             "retained_material_overlap": serde_json::Value::Null,
             "retained_material_overlap_classification": "unmapped_source_or_phase_range",
         }));
     }
-    if !item
-        .segments
-        .iter()
-        .any(|segment| segment.label == "alpha_alignment_padding_tail_capture")
-        && alignment_padding_len > 0
-    {
+    let unmapped_alignment_padding_bits_len =
+        alignment_padding_len.saturating_sub(mapped_alignment_padding_bits_len);
+    if unmapped_alignment_padding_bits_len > 0 {
         physical_source_candidates.push(json!({
             "source_kind": "captured_alignment_padding",
             "segment_label": serde_json::Value::Null,
             "local_range": serde_json::Value::Null,
-            "bit_length": alignment_padding_len,
+            "bit_length": unmapped_alignment_padding_bits_len,
             "zero_fill_overlap": serde_json::Value::Null,
             "zero_fill_overlap_classification": "unmapped_source_or_phase_range",
             "retained_material_overlap": serde_json::Value::Null,
