@@ -2,7 +2,7 @@ use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::item::geometry::{
     ExpectedHeaderWidthProducer, HeaderChecksumBranch, LiveHeaderFamilyClassifier,
 };
-use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::item::{HuffmanTree, Item, ItemModule};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use rayon::prelude::*;
 use serde_json::json;
@@ -465,6 +465,46 @@ fn section_context_report(
         })
         .collect::<Vec<_>>();
 
+    let alignment_width = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "summary_target_width_alignment")
+        .map(|phase| phase.end.saturating_sub(phase.start));
+    let retained_alignment_bits = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "summary_target_width_alignment_retained_material")
+        .map(|phase| phase.end.saturating_sub(phase.start));
+    let zero_fill_bits = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "summary_target_width_alignment_zero_fill")
+        .map(|phase| phase.end.saturating_sub(phase.start));
+    let recorded_bits_len = item.bits.len();
+    let alignment_padding_len = item.body.alpha_alignment_padding.len();
+    let (opaque_module_bits_len, residue_module_bits_len) = item.modules.iter().fold(
+        (0usize, 0usize),
+        |(opaque_len, residue_len), module| match module {
+            ItemModule::Opaque(bits) => (opaque_len + bits.len(), residue_len),
+            ItemModule::Residue(bits) => (opaque_len, residue_len + bits.len()),
+            _ => (opaque_len, residue_len),
+        },
+    );
+    let strict_alignment_input_inventory = json!({
+        "alignment_width": alignment_width,
+        "recorded_bits_available_before_strict_clear": recorded_bits_len > 0,
+        "recorded_bits_len_before_strict_clear": recorded_bits_len,
+        "recorded_bits_cleared_for_strict_rebuild": true,
+        "recorded_alignment_bits_available_for_strict_rebuild": false,
+        "recorded_alignment_bits_len_for_strict_rebuild": 0,
+        "alignment_padding_available": alignment_padding_len > 0,
+        "alignment_padding_len": alignment_padding_len,
+        "opaque_module_available": opaque_module_bits_len > 0,
+        "opaque_module_bits_len": opaque_module_bits_len,
+        "residue_module_available": residue_module_bits_len > 0,
+        "residue_module_bits_len": residue_module_bits_len,
+        "retained_material_count": retained_alignment_bits,
+        "strict_zero_fill_count": zero_fill_bits,
+        "availability_only": true,
+    });
+
     json!({
         "section_item_index": section_item_index,
         "code": item.code.trim(),
@@ -472,6 +512,7 @@ fn section_context_report(
         "range_end": item.range.end,
         "segments": segments,
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
+        "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_with_padding_bit_count": with_padding_bits.len(),
         "strict_with_padding_bits": with_padding_bits,
         "strict_without_padding_bit_count": without_padding_bits.len(),
