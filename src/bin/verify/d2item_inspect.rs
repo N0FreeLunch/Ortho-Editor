@@ -477,6 +477,31 @@ fn section_context_report(
         .iter()
         .find(|phase| phase.label == "summary_target_width_alignment_zero_fill")
         .map(|phase| phase.end.saturating_sub(phase.start));
+    let phase_range = |label: &str| {
+        strict_emission_phases
+            .iter()
+            .find(|phase| phase.label == label)
+            .map(|phase| (phase.start, phase.end))
+    };
+    let zero_fill_range = phase_range("summary_target_width_alignment_zero_fill");
+    let retained_material_range = phase_range("summary_target_width_alignment_retained_material");
+    let overlap_for = |source_range: Option<(u64, u64)>, phase_range: Option<(u64, u64)>| match (
+        source_range,
+        phase_range,
+    ) {
+        (Some((source_start, source_end)), Some((phase_start, phase_end))) => {
+            let overlaps = source_start < phase_end && phase_start < source_end;
+            (
+                Some(overlaps),
+                if overlaps {
+                    "physical_overlap"
+                } else {
+                    "no_overlap"
+                },
+            )
+        }
+        _ => (None, "unmapped_source_or_phase_range"),
+    };
     let recorded_bits_len = item.bits.len();
     let alignment_padding_len = item.body.alpha_alignment_padding.len();
     let (opaque_module_bits_len, residue_module_bits_len) = item.modules.iter().fold(
@@ -487,6 +512,91 @@ fn section_context_report(
             _ => (opaque_len, residue_len),
         },
     );
+    let mut physical_source_candidates = item
+        .segments
+        .iter()
+        .filter_map(|segment| {
+            let source_kind = match segment.label.as_str() {
+                "OpaqueTail" => "opaque_or_residue",
+                "alpha_alignment_padding_tail_capture" => "captured_alignment_padding",
+                _ => return None,
+            };
+            let source_range = Some((segment.start, segment.end));
+            let (zero_fill_overlap, zero_fill_classification) =
+                overlap_for(source_range, zero_fill_range);
+            let (retained_overlap, retained_classification) =
+                overlap_for(source_range, retained_material_range);
+            Some(json!({
+                "source_kind": source_kind,
+                "segment_label": segment.label,
+                "local_range": {"start": segment.start, "end": segment.end},
+                "bit_length": segment.end.saturating_sub(segment.start),
+                "zero_fill_overlap": zero_fill_overlap,
+                "zero_fill_overlap_classification": zero_fill_classification,
+                "retained_material_overlap": retained_overlap,
+                "retained_material_overlap_classification": retained_classification,
+            }))
+        })
+        .collect::<Vec<_>>();
+    physical_source_candidates.push(json!({
+        "source_kind": "recorded_bits",
+        "segment_label": serde_json::Value::Null,
+        "local_range": serde_json::Value::Null,
+        "bit_length": recorded_bits_len,
+        "zero_fill_overlap": serde_json::Value::Null,
+        "zero_fill_overlap_classification": "unmapped_source_or_phase_range",
+        "retained_material_overlap": serde_json::Value::Null,
+        "retained_material_overlap_classification": "unmapped_source_or_phase_range",
+    }));
+    if !item
+        .segments
+        .iter()
+        .any(|segment| segment.label == "OpaqueTail")
+        && opaque_module_bits_len + residue_module_bits_len > 0
+    {
+        physical_source_candidates.push(json!({
+            "source_kind": "opaque_or_residue",
+            "segment_label": serde_json::Value::Null,
+            "local_range": serde_json::Value::Null,
+            "bit_length": opaque_module_bits_len + residue_module_bits_len,
+            "zero_fill_overlap": serde_json::Value::Null,
+            "zero_fill_overlap_classification": "unmapped_source_or_phase_range",
+            "retained_material_overlap": serde_json::Value::Null,
+            "retained_material_overlap_classification": "unmapped_source_or_phase_range",
+        }));
+    }
+    if !item
+        .segments
+        .iter()
+        .any(|segment| segment.label == "alpha_alignment_padding_tail_capture")
+        && alignment_padding_len > 0
+    {
+        physical_source_candidates.push(json!({
+            "source_kind": "captured_alignment_padding",
+            "segment_label": serde_json::Value::Null,
+            "local_range": serde_json::Value::Null,
+            "bit_length": alignment_padding_len,
+            "zero_fill_overlap": serde_json::Value::Null,
+            "zero_fill_overlap_classification": "unmapped_source_or_phase_range",
+            "retained_material_overlap": serde_json::Value::Null,
+            "retained_material_overlap_classification": "unmapped_source_or_phase_range",
+        }));
+    }
+    let strict_alignment_source_witness = json!({
+        "strict_zero_fill_range": zero_fill_range.map(|(start, end)| json!({
+            "start": start,
+            "end": end,
+            "bit_length": end.saturating_sub(start),
+        })),
+        "strict_retained_material_range": retained_material_range.map(|(start, end)| json!({
+            "start": start,
+            "end": end,
+            "bit_length": end.saturating_sub(start),
+        })),
+        "physical_source_candidates": physical_source_candidates,
+        "semantic_replay_authorized": false,
+        "availability_only": true,
+    });
     let strict_alignment_input_inventory = json!({
         "alignment_width": alignment_width,
         "recorded_bits_available_before_strict_clear": recorded_bits_len > 0,
@@ -513,6 +623,7 @@ fn section_context_report(
         "segments": segments,
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
+        "strict_alignment_source_witness": strict_alignment_source_witness,
         "strict_with_padding_bit_count": with_padding_bits.len(),
         "strict_with_padding_bits": with_padding_bits,
         "strict_without_padding_bit_count": without_padding_bits.len(),
