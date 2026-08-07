@@ -3641,7 +3641,13 @@ pub fn write_property_list(
                     default_width = 8;
                 }
 
-                let effective_width = axiom.stat_bit_width(raw_id, default_width);
+                let effective_width = if code.trim() == "wa2"
+                    && (raw_id == 320 || axiom.map_alpha_id(raw_id) == 320)
+                {
+                    0
+                } else {
+                    axiom.stat_bit_width(raw_id, default_width)
+                };
                 emitter.write_bits(prop.raw_value as u32, effective_width)?;
             }
         }

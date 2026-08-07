@@ -1098,7 +1098,10 @@ where
         default_width = 8;
     }
 
-    let effective_width = axiom.stat_bit_width(stat_id, default_width);
+    let mut effective_width = axiom.stat_bit_width(stat_id, default_width);
+    if axiom.code.trim() == "wa2" && (stat_id == 320 || axiom.map_alpha_id(stat_id) == 320) {
+        effective_width = 0;
+    }
 
     let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
     let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;
