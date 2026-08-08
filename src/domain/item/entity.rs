@@ -2398,17 +2398,18 @@ pub fn parse_item_body<R: BitRead>(
         }
 
         let body_is_template = crate::domain::item::serialization::item_template(&code).is_some();
+        let compact_template_nudge = body_is_template && code.trim() != "xrs";
         let mut alpha_nudge = None;
         if alpha_mode {
             if h_axiom.is_alpha()
                 && (!header.is_compact
-                    || body_is_template
+                    || compact_template_nudge
                     || code.trim() == "wa2"
                     || code.trim() == "rhd")
                 && !w_axiom.is_summary_item(header.version, &code)
                 && !matches!(code.trim(), "us g" | "jav" | "buc")
             {
-                if body_is_template && header.is_compact && cursor.pos() > code_start {
+                if compact_template_nudge && header.is_compact && cursor.pos() > code_start {
                     cursor.rollback(cursor.pos() - 1);
                 }
                 if header.version == 5 {
