@@ -135,6 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         start_bit_offset..(start_bit_offset + 1)
     };
+    let scan_end_exclusive = is_scan.then_some(start_bit_offset + scan_range);
 
     for offset in offsets {
         let mut score = 0;
@@ -144,6 +145,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Simple bit reader for the loop
         let read_bits_fn = |pos: &mut u64, count: u32, data: &[u8]| -> Option<u32> {
+            let end = pos.checked_add(count as u64)?;
+            if scan_end_exclusive.is_some_and(|limit| end > limit) {
+                return None;
+            }
             let mut val: u32 = 0;
             for i in 0..count {
                 let abs = *pos + i as u64;
