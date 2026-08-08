@@ -1548,6 +1548,7 @@ impl Item {
                                 recovered_item.body.alpha_alignment_padding.extend(tail_bits);
                             }
                         }
+                        recovered_item.record_parser_consumed_bits(recovered_item.bits.len() as u64);
                         items.push(recovered_item);
 
                         let item_end_bit = start_offset + consumed;

@@ -39,6 +39,7 @@ struct CausalTaxonomy {
 
 #[derive(Serialize, Debug, Default)]
 struct ClassificationCounts {
+    parsed_with_raw_carrier: usize,
     semi_opaque: usize,
     residue: usize,
     opaque: usize,
@@ -504,12 +505,18 @@ fn process_collected_item(
     let is_semi_opaque = item.is_semi_opaque();
     let is_residue = item.is_residue();
     let is_opaque = item.is_opaque();
+    let fully_parsed_raw_carrier = is_opaque
+        && !is_residue
+        && !item.code.trim().is_empty()
+        && item.parser_consumed_bits() == Some(item.total_bits);
 
     // Mutually exclusive classification according to Mini-Spec precedence
     let classification = if is_semi_opaque {
         Some("semi_opaque")
     } else if is_residue {
         Some("residue")
+    } else if fully_parsed_raw_carrier {
+        Some("parsed_with_raw_carrier")
     } else if is_opaque {
         Some("opaque")
     } else {
@@ -519,6 +526,7 @@ fn process_collected_item(
     if let Some(cls) = classification {
         *opaque_predicate_hit_count += 1;
         match cls {
+            "parsed_with_raw_carrier" => classification_counts.parsed_with_raw_carrier += 1,
             "semi_opaque" => classification_counts.semi_opaque += 1,
             "residue" => classification_counts.residue += 1,
             "opaque" => classification_counts.opaque += 1,
