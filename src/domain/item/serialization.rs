@@ -2101,6 +2101,8 @@ impl Item {
                     if crate::item::item_trace_enabled() {
                         eprintln!("[outer-parse-failure] marker={} error={:?}", marker.code.trim(), _e);
                     }
+                    let rejected_top_level_candidate = alpha_mode
+                        && matches!(&_e.error, ParsingError::SpeculativeRejection { .. });
                     let failure_json = serde_json::json!({
                         "error": format!("{:?}", &_e.error),
                         "context_stack": &_e.context_stack,
@@ -2111,7 +2113,11 @@ impl Item {
                     // Fail-safe: isolate as Opaque
                     let mut opaque = Item::default();
                     opaque.expected_start_bit = start;
-                    opaque.code = "Opaque".to_string();
+                    opaque.code = if rejected_top_level_candidate {
+                        "    ".to_string()
+                    } else {
+                        "Opaque".to_string()
+                    };
                     opaque.forensic_audit.record(ForensicMetadata::new(
                         Confidence::VerifiedTruth,
                         Intentionality::Artifactual,
