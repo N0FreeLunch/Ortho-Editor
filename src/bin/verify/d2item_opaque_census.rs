@@ -553,7 +553,7 @@ fn process_collected_item(
 
         let retained_header_layout = if enable_trace_header_gap {
             if let Some(ref probe) = parser_probe {
-                if probe.outcome == "parse_failure" {
+                if probe.outcome == "parse_failure" || probe.failure_error.is_some() {
                     Some(RetainedHeaderLayout {
                         bit_start: item.range.start,
                         bit_end: item.range.end,
