@@ -73,7 +73,7 @@ pub struct V105HeaderGapAxiom;
 impl ForensicAxiom for V105HeaderGapAxiom {
     fn metadata(&self) -> ForensicMetadata {
         ForensicMetadata::new(
-            Confidence::StrongPattern,
+            Confidence::VerifiedTruth,
             Intentionality::Structural,
             "Variable gap between JM header and item body in Alpha v105",
         )
