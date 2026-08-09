@@ -79,6 +79,15 @@ struct MismatchRow {
 }
 
 #[derive(Serialize)]
+struct LowConfidenceRow {
+    item_index: usize,
+    code: String,
+    fidelity_score: f32,
+    mismatch_type: Option<String>,
+    segment: Option<String>,
+}
+
+#[derive(Serialize)]
 struct AuditResult {
     status: String,
     filename: String,
@@ -88,6 +97,8 @@ struct AuditResult {
     family: Option<FailureFamily>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     mismatch_rows: Vec<MismatchRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    low_confidence_rows: Vec<LowConfidenceRow>,
 }
 
 #[derive(Serialize)]
@@ -224,6 +235,7 @@ fn process_file(
                 hint: format!("Read error: {}", e),
                 family: Some(FailureFamily::Unknown),
                 mismatch_rows: Vec::new(),
+                low_confidence_rows: Vec::new(),
             };
         }
     };
@@ -244,6 +256,25 @@ fn process_file(
                 sum / item_count as f32
             } else {
                 100.0
+            };
+
+            let low_confidence_rows = if args.detailed {
+                report
+                    .items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item.fidelity_score < 1.0)
+                    .take(16)
+                    .map(|(item_index, item)| LowConfidenceRow {
+                        item_index,
+                        code: item.code.clone(),
+                        fidelity_score: item.fidelity_score,
+                        mismatch_type: item.mismatch_type.clone(),
+                        segment: item.segment.clone(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
             };
 
             let mut mismatch_rows = Vec::new();
@@ -304,6 +335,7 @@ fn process_file(
                 hint,
                 family: first_fail_family,
                 mismatch_rows,
+                low_confidence_rows,
             }
         }
         Err(e) => {
@@ -316,6 +348,7 @@ fn process_file(
                 hint: format!("Audit error: {}", e),
                 family: Some(FailureFamily::Unknown),
                 mismatch_rows: Vec::new(),
+                low_confidence_rows: Vec::new(),
             }
         }
     }
