@@ -2614,6 +2614,28 @@ fn main() {
                     }
                     Err(error) => {
                         if is_json {
+                            let provenance = trace_provenance.then(|| {
+                                let scanner_hint = if is_alpha {
+                                    d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+                                        &bytes,
+                                        range_start as u64,
+                                        Some(range_start as u64),
+                                        &huffman,
+                                        true,
+                                        0,
+                                    )
+                                    .map(|peek| peek.3.trim().to_string())
+                                    .unwrap_or_default()
+                                } else {
+                                    String::new()
+                                };
+                                json!({
+                                    "scanner_hint": scanner_hint,
+                                    "selected_code": code_hint,
+                                    "final_code": serde_json::Value::Null,
+                                    "availability": "bounded_parse_failed"
+                                })
+                            });
                             println!(
                                 "{}",
                                 json!({
@@ -2622,6 +2644,7 @@ fn main() {
                                     "range": {"start": range_start, "end": range_end},
                                     "raw_len_bits": raw_len_bits,
                                     "parser_consumed_bits": serde_json::Value::Null,
+                                    "provenance": provenance,
                                     "errors": [error.to_string()]
                                 })
                             );
