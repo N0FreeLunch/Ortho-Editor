@@ -2091,7 +2091,16 @@ pub fn parse_item_header<R: BitRead>(
                 alpha_header_gap_bits = gap_seg.bits;
 
                 if version == 5 && AlphaV105HeaderGapAlignment::align_required() {
-                    let _ = cursor.byte_align();
+                    // Preserve alignment bits: strict rebuilds cannot replay bits
+                    // silently consumed by byte_align().
+                    let alignment_bits = ((8 - (cursor.pos() % 8)) % 8) as usize;
+                    let actual_read = alignment_bits.min(cursor.remaining() as usize);
+                    if actual_read > 0 {
+                        let alignment_seg = cursor.with_context("AlphaHeaderGapAlignmentPadding", |c| {
+                            Ok(AlphaHeaderGap::parse(c, actual_read)?)
+                        })?;
+                        alpha_header_gap_bits.extend(alignment_seg.bits);
+                    }
                 }
 
                 let mut val = 0u32;
