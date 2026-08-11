@@ -1219,7 +1219,6 @@ impl Item {
                         + opaque_alignment_material.as_ref().map_or(0, Vec::len)
                         == padding_needed as usize;
                 let opaque_alignment_tail = self.bits.is_empty()
-                    && !has_identifier_source
                     && self.body.alpha_alignment_padding.is_empty()
                     && opaque_alignment_material
                         .as_ref()
