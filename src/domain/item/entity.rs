@@ -1194,13 +1194,10 @@ impl Item {
             if final_target > current_bits {
                 let subphase_start = emitter.written_bits();
                 let padding_needed = (final_target - current_bits) as u32;
-                // A summary item may carry a parser-isolated opaque tail at precisely the
-                // alignment seam. It is authoritative only when no identifier or captured
-                // alignment source exists and its complete width fills that seam.
-                let opaque_alignment_tail = if self.bits.is_empty()
-                    && !has_identifier_source
-                    && self.body.alpha_alignment_padding.is_empty()
-                {
+                // A summary item may carry a parser-isolated opaque tail at the alignment
+                // seam. When a captured prefix precedes that tail, both carriers are
+                // authoritative only if their physical widths exactly fill the seam.
+                let opaque_alignment_material = if self.bits.is_empty() {
                     let bits: Vec<bool> = self
                         .modules
                         .iter()
@@ -1211,10 +1208,22 @@ impl Item {
                         .flatten()
                         .copied()
                         .collect();
-                    (bits.len() == padding_needed as usize).then_some(bits)
+                    (!bits.is_empty()).then_some(bits)
                 } else {
                     None
                 };
+                let composed_alignment_material = self.bits.is_empty()
+                    && !self.body.alpha_alignment_padding.is_empty()
+                    && opaque_alignment_material.is_some()
+                    && self.body.alpha_alignment_padding.len()
+                        + opaque_alignment_material.as_ref().map_or(0, Vec::len)
+                        == padding_needed as usize;
+                let opaque_alignment_tail = self.bits.is_empty()
+                    && !has_identifier_source
+                    && self.body.alpha_alignment_padding.is_empty()
+                    && opaque_alignment_material
+                        .as_ref()
+                        .is_some_and(|bits| bits.len() == padding_needed as usize);
                 let mut padding_bits = if !self.bits.is_empty() {
                     let total_parsed = self.bits.len();
                     if total_parsed >= padding_needed as usize {
@@ -1227,6 +1236,14 @@ impl Item {
                         pbits.extend(self.bits.iter().map(|rb| rb.bit));
                         pbits
                     }
+                } else if composed_alignment_material {
+                    let mut pbits = self.body.alpha_alignment_padding.clone();
+                    pbits.extend(
+                        opaque_alignment_material
+                            .as_ref()
+                            .expect("composed material requires an opaque tail"),
+                    );
+                    pbits
                 } else if !self.body.alpha_alignment_padding.is_empty() {
                     let mut pbits = self.body.alpha_alignment_padding.clone();
                     if pbits.len() < padding_needed as usize {
@@ -1237,24 +1254,30 @@ impl Item {
                         pbits.drain(0..diff);
                     }
                     pbits
-                } else if let Some(bits) = opaque_alignment_tail.as_ref() {
-                    bits.clone()
+                } else if opaque_alignment_tail {
+                    opaque_alignment_material
+                        .as_ref()
+                        .expect("opaque tail flag requires captured material")
+                        .clone()
                 } else {
                     vec![false; padding_needed as usize]
                 };
                 let retained_material_count = if !self.bits.is_empty() {
                     self.bits.len().min(padding_needed as usize)
                 } else {
-                    self.body.alpha_alignment_padding.len().max(
-                        opaque_alignment_tail
-                            .as_ref()
-                            .map_or(0, Vec::len),
-                    )
+                    if composed_alignment_material {
+                        padding_needed as usize
+                    } else {
+                        self.body.alpha_alignment_padding.len().max(
+                            opaque_alignment_material.as_ref().map_or(0, Vec::len),
+                        )
+                    }
                     .min(padding_needed as usize)
                 };
                 let zero_fill_count = if self.bits.is_empty()
                     && (!self.body.alpha_alignment_padding.is_empty()
-                        || opaque_alignment_tail.is_some())
+                        || opaque_alignment_tail
+                        || composed_alignment_material)
                 {
                     0
                 } else {
@@ -1277,7 +1300,7 @@ impl Item {
                 .emit(emitter)?;
                 record_emission_phase(
                     &mut phases,
-                    if opaque_alignment_tail.is_some() {
+                    if opaque_alignment_tail || composed_alignment_material {
                         "summary_target_width_alignment_opaque_tail_material"
                     } else {
                         "summary_target_width_alignment_retained_material"
