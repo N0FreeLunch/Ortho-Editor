@@ -1159,11 +1159,12 @@ impl Item {
             );
 
             let mut final_target = target as u64;
-            let has_no_summary_continuation = self.body.alpha_code_bits.is_empty()
-                && self.body.alpha_alignment_padding.is_empty()
-                && self.id.is_none()
-                && !has_opaque_module;
-            if has_no_summary_continuation && self.total_bits < final_target {
+            // A strict rebuild must not synthesize target-width padding beyond a known
+            // parsed physical span. Raw-bit replay remains the earlier fast path.
+            if self.bits.is_empty()
+                && self.total_bits > 0
+                && self.total_bits < final_target
+            {
                 final_target = self.total_bits;
             }
             let opaque_tail_len: usize = self
