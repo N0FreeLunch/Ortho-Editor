@@ -1,0 +1,13 @@
+error: #[fidelity_contract] 'preservation' must be "exact", "opaque", or "partial". Self-Healing Hint: choose the declared preservation obligation, not an observed score.
+  --> tests/compile_fail/fidelity_contract_invalid.rs:3:1
+   |
+ 3 | / #[fidelity_contract(
+ 4 | |     metric_version = "item_fidelity_v1",
+ 5 | |     format_family = "alpha_v105",
+ 6 | |     section = "invalid_alignment",
+...  |
+10 | |     required_proof = "targeted_fixture"
+11 | | )]
+   | |__^
+   |
+   = note: this error originates in the attribute macro `fidelity_contract` (in Nightly builds, run with -Z macro-backtrace for more info)

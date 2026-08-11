@@ -158,6 +158,42 @@ pub struct FidelityScore {
     pub value: f32,
 }
 
+/// A declared parsing obligation that must be consumed by a runtime audit registry.
+///
+/// These fields describe static scope only; they are not observed fidelity results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct FidelityContract {
+    pub metric_version: &'static str,
+    pub format_family: &'static str,
+    pub section: &'static str,
+    pub preservation: &'static str,
+    pub semantic_coverage: &'static str,
+    pub owner: &'static str,
+    pub required_proof: &'static str,
+}
+
+impl FidelityContract {
+    pub const fn new(
+        metric_version: &'static str,
+        format_family: &'static str,
+        section: &'static str,
+        preservation: &'static str,
+        semantic_coverage: &'static str,
+        owner: &'static str,
+        required_proof: &'static str,
+    ) -> Self {
+        Self {
+            metric_version,
+            format_family,
+            section,
+            preservation,
+            semantic_coverage,
+            owner,
+            required_proof,
+        }
+    }
+}
+
 impl FidelityScore {
     /// Calculates a fidelity score from a forensic audit.
     ///

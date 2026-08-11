@@ -6,7 +6,7 @@ use crate::domain::forensic::v105::{
 use crate::domain::header::entity::{
     calculate_alpha_v105_checksum, HeaderAxiom, ItemHeader, ItemSegmentType,
 };
-use crate::domain::item::axiom_meta::ForensicAudit;
+use crate::domain::item::axiom_meta::{FidelityContract, ForensicAudit};
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::subdomains::affix::{
     AffixCombinator, MagicAffixSegment, RareAffixSegment, UniqueAffixSegment,
@@ -16,7 +16,7 @@ use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::stats::{ItemProperty, ItemStats};
 use crate::error::{ParsingError, ParsingResult};
 use bitstream_io::BitRead;
-use d2r_macros::serialization_symmetry;
+use d2r_macros::{fidelity_contract, serialization_symmetry};
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::ops::{Deref, DerefMut};
@@ -35,7 +35,29 @@ pub struct AlphaV105PostBodyAlignment;
 
 /// Category B: Alpha v105 bitstream symmetry point for post-header-gap alignment.
 #[serialization_symmetry(align = true)]
+#[fidelity_contract(
+    metric_version = "item_fidelity_v1",
+    format_family = "alpha_v105",
+    section = "header_gap_alignment",
+    preservation = "exact",
+    semantic_coverage = "none",
+    owner = "AlphaV105HeaderGapAlignment",
+    required_proof = "targeted_fixture"
+)]
 pub struct AlphaV105HeaderGapAlignment;
+
+/// Returns the explicitly registered static contracts consumed by fidelity audits.
+pub fn item_fidelity_contracts() -> [FidelityContract; 1] {
+    [FidelityContract::new(
+        AlphaV105HeaderGapAlignment::FIDELITY_METRIC_VERSION,
+        AlphaV105HeaderGapAlignment::FIDELITY_FORMAT_FAMILY,
+        AlphaV105HeaderGapAlignment::FIDELITY_SECTION,
+        AlphaV105HeaderGapAlignment::FIDELITY_PRESERVATION,
+        AlphaV105HeaderGapAlignment::FIDELITY_SEMANTIC_COVERAGE,
+        AlphaV105HeaderGapAlignment::FIDELITY_OWNER,
+        AlphaV105HeaderGapAlignment::FIDELITY_REQUIRED_PROOF,
+    )]
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BitSemantic {
@@ -863,6 +885,14 @@ impl Item {
             .iter()
             .any(|m| matches!(m, ItemModule::Opaque(_) | ItemModule::Residue(_)));
 
+        if is_placeholder_opaque
+            && self.bits.is_empty()
+            && self.body.alpha_alignment_padding.len() == self.total_bits as usize
+        {
+            emitter.extend_bits(self.body.alpha_alignment_padding.iter().copied())?;
+            return Ok(());
+        }
+
         if is_placeholder_opaque {
             for module in &self.modules {
                 match module {
@@ -887,7 +917,7 @@ impl Item {
         if alpha_mode && matches!(trimmed_code, "jav" | "buc") {
             let raw_bits = if !self.bits.is_empty() {
                 self.bits.iter().map(|rb| rb.bit).collect::<Vec<bool>>()
-            } else if !self.body.alpha_alignment_padding.is_empty() {
+            } else if self.body.alpha_alignment_padding.len() >= 16 && !has_opaque_module {
                 self.body.alpha_alignment_padding.clone()
             } else {
                 Vec::new()
@@ -1057,7 +1087,15 @@ impl Item {
                 emitter.written_bits(),
             );
             // Write Gap.
-            let gap_bits = w_axiom.summary_gap_bits(&self.code);
+            let declared_gap_bits = w_axiom.summary_gap_bits(&self.code);
+            let emitted_before_gap = emitter.written_bits() - start_bit;
+            let gap_bits = if self.body.alpha_code_bits.is_empty()
+                && self.body.alpha_alignment_padding.is_empty()
+                && self.id.is_none()
+                && !has_opaque_module
+                && self.total_bits > emitted_before_gap
+                && self.total_bits < emitted_before_gap + declared_gap_bits as u64
+            { (self.total_bits - emitted_before_gap) as u32 } else { declared_gap_bits };
             if gap_bits > 0 {
                 let subphase_start = emitter.written_bits();
                 let gap_val = self.body.alpha_header_gap.unwrap_or(0);
@@ -1079,7 +1117,7 @@ impl Item {
                     }
                 }
                 val
-            } else if !self.body.alpha_alignment_padding.is_empty() {
+            } else if self.body.alpha_alignment_padding.len() >= 16 && !has_opaque_module {
                 let mut val = 0u32;
                 for (i, &bit) in self.body.alpha_alignment_padding.iter().enumerate() {
                     if i < 32 && bit {
@@ -1097,14 +1135,19 @@ impl Item {
             } else {
                 "item_id"
             };
-            let subphase_start = emitter.written_bits();
-            emitter.write_bits(id_val, 16)?;
-            record_emission_phase(
-                &mut phases,
-                &format!("summary_identifier_from_{id_source}"),
-                subphase_start,
-                emitter.written_bits(),
-            );
+            let has_identifier_source = !self.body.alpha_code_bits.is_empty()
+                || (self.body.alpha_alignment_padding.len() >= 16 && !has_opaque_module)
+                || self.id.is_some();
+            if has_identifier_source {
+                let subphase_start = emitter.written_bits();
+                emitter.write_bits(id_val, 16)?;
+                record_emission_phase(
+                    &mut phases,
+                    &format!("summary_identifier_from_{id_source}"),
+                    subphase_start,
+                    emitter.written_bits(),
+                );
+            }
 
             // Align to target width (72 or 80 bits).
             let current_bits = emitter.written_bits() - start_bit;
@@ -1116,6 +1159,28 @@ impl Item {
             );
 
             let mut final_target = target as u64;
+            let has_no_summary_continuation = self.body.alpha_code_bits.is_empty()
+                && self.body.alpha_alignment_padding.is_empty()
+                && self.id.is_none()
+                && !has_opaque_module;
+            if has_no_summary_continuation && self.total_bits < final_target {
+                final_target = self.total_bits;
+            }
+            let opaque_tail_len: usize = self
+                .modules
+                .iter()
+                .filter_map(|module| match module {
+                    ItemModule::Opaque(bits) | ItemModule::Residue(bits) => Some(bits.len()),
+                    _ => None,
+                })
+                .sum();
+            if !has_identifier_source
+                && self.body.alpha_alignment_padding.is_empty()
+                && opaque_tail_len > 0
+                && self.total_bits == current_bits + opaque_tail_len as u64
+            {
+                final_target = self.total_bits;
+            }
             // Slice 3042: Alpha v105 hp1 (version 5) requires a 5-bit rhythm snap to align with the next item (Axiom 0344).
             // We strictly bound this expansion to the specific 'hp1' code to avoid regressing other summary families.
             if self.code.trim() == "hp1" && self.total_bits == 77 {
@@ -1128,6 +1193,27 @@ impl Item {
             if final_target > current_bits {
                 let subphase_start = emitter.written_bits();
                 let padding_needed = (final_target - current_bits) as u32;
+                // A summary item may carry a parser-isolated opaque tail at precisely the
+                // alignment seam. It is authoritative only when no identifier or captured
+                // alignment source exists and its complete width fills that seam.
+                let opaque_alignment_tail = if self.bits.is_empty()
+                    && !has_identifier_source
+                    && self.body.alpha_alignment_padding.is_empty()
+                {
+                    let bits: Vec<bool> = self
+                        .modules
+                        .iter()
+                        .filter_map(|module| match module {
+                            ItemModule::Opaque(bits) | ItemModule::Residue(bits) => Some(bits),
+                            _ => None,
+                        })
+                        .flatten()
+                        .copied()
+                        .collect();
+                    (bits.len() == padding_needed as usize).then_some(bits)
+                } else {
+                    None
+                };
                 let mut padding_bits = if !self.bits.is_empty() {
                     let total_parsed = self.bits.len();
                     if total_parsed >= padding_needed as usize {
@@ -1144,27 +1230,35 @@ impl Item {
                     let mut pbits = self.body.alpha_alignment_padding.clone();
                     if pbits.len() < padding_needed as usize {
                         let diff = padding_needed as usize - pbits.len();
-                        let mut new_padding = vec![false; diff];
-                        new_padding.extend(pbits);
-                        pbits = new_padding;
+                        pbits.extend(std::iter::repeat(false).take(diff));
                     } else if pbits.len() > padding_needed as usize {
                         let diff = pbits.len() - padding_needed as usize;
                         pbits.drain(0..diff);
                     }
                     pbits
+                } else if let Some(bits) = opaque_alignment_tail.as_ref() {
+                    bits.clone()
                 } else {
                     vec![false; padding_needed as usize]
                 };
                 let retained_material_count = if !self.bits.is_empty() {
                     self.bits.len().min(padding_needed as usize)
                 } else {
-                    self.body
-                        .alpha_alignment_padding
-                        .len()
-                        .min(padding_needed as usize)
+                    self.body.alpha_alignment_padding.len().max(
+                        opaque_alignment_tail
+                            .as_ref()
+                            .map_or(0, Vec::len),
+                    )
+                    .min(padding_needed as usize)
                 };
-                let zero_fill_count =
-                    (padding_needed as usize).saturating_sub(retained_material_count);
+                let zero_fill_count = if self.bits.is_empty()
+                    && (!self.body.alpha_alignment_padding.is_empty()
+                        || opaque_alignment_tail.is_some())
+                {
+                    0
+                } else {
+                    (padding_needed as usize).saturating_sub(retained_material_count)
+                };
                 if zero_fill_count > 0 {
                     let zero_fill_start = emitter.written_bits();
                     emitter.extend_bits(std::iter::repeat(false).take(zero_fill_count))?;
@@ -1182,7 +1276,11 @@ impl Item {
                 .emit(emitter)?;
                 record_emission_phase(
                     &mut phases,
-                    "summary_target_width_alignment_retained_material",
+                    if opaque_alignment_tail.is_some() {
+                        "summary_target_width_alignment_opaque_tail_material"
+                    } else {
+                        "summary_target_width_alignment_retained_material"
+                    },
                     retained_start,
                     emitter.written_bits(),
                 );

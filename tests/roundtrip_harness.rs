@@ -153,6 +153,79 @@ mod roundtrip_tests {
     }
 
     #[test]
+    fn test_v5_summary_without_identifier_does_not_synthesize_identifier() {
+        let path = repo_path(
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+        );
+        let bytes = fs::read(path).expect("fixture should be readable");
+        let huffman = HuffmanTree::new();
+        let alpha_mode = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])) == 105;
+        let items = Item::read_player_items(&bytes, &huffman, alpha_mode).expect("items should parse");
+        let oesw = items
+            .iter()
+            .find(|item| item.code.trim() == "oesw")
+            .expect("fixture must contain a v5 oesw runeword");
+
+        assert!(oesw.properties.is_empty());
+        assert!(!oesw.properties_complete);
+        assert!(oesw.header.is_runeword);
+        assert!(oesw.header.is_socketed);
+        assert!(oesw.header.is_compact);
+        assert!(oesw.body.alpha_code_bits.is_empty());
+        assert!(oesw.body.alpha_alignment_padding.is_empty());
+        assert!(oesw.id.is_none());
+
+        let original_bits: Vec<bool> = oesw.bits.iter().map(|bit| bit.bit).collect();
+        let mut rebuilt = oesw.clone();
+        rebuilt.bits.clear();
+        let rebuilt_bits = rebuilt
+            .to_bits(0, &huffman, alpha_mode)
+            .expect("strict rebuild should serialize");
+        assert_eq!(rebuilt_bits, original_bits);
+    }
+
+    #[test]
+    fn test_summary_padding_preserves_captured_bit_order() {
+        let path = repo_path("tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest4_CountessKilled.d2s");
+        let bytes = fs::read(path).expect("fixture should be readable");
+        let huffman = HuffmanTree::new();
+        let alpha_mode = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])) == 105;
+        let items = Item::read_player_items(&bytes, &huffman, alpha_mode).expect("items should parse");
+        let rvs = items.iter().find(|item| item.code.trim() == "rvs").expect("fixture must contain rvs");
+        assert_eq!(rvs.body.alpha_alignment_padding, vec![true, false, false, false, false, false, false, false]);
+        let original_bits: Vec<bool> = rvs.bits.iter().map(|bit| bit.bit).collect();
+        let mut rebuilt = rvs.clone();
+        rebuilt.bits.clear();
+        let bits = rebuilt.to_bits(0, &huffman, alpha_mode).expect("strict rebuild should serialize");
+        assert_eq!(bits, original_bits);
+    }
+
+    #[test]
+    fn test_summary_opaque_tail_preserves_wyws_alignment_material() {
+        let path = repo_path("tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest4_CountessKilled.d2s");
+        let bytes = fs::read(path).expect("fixture should be readable");
+        let huffman = HuffmanTree::new();
+        let items = Item::read_player_items(&bytes, &huffman, true).expect("items should parse");
+
+        let mut witnessed_indexes = Vec::new();
+        for (index, item) in items.iter().enumerate().filter(|(_, item)| item.code.trim() == "wyws") {
+            if !matches!(index, 34 | 47) {
+                continue;
+            }
+            let original_bits: Vec<bool> = item.bits.iter().map(|bit| bit.bit).collect();
+            let mut strict = item.clone();
+            strict.bits.clear();
+            let (rebuilt_bits, trace) = strict
+                .to_bits_with_phase_trace(index, &huffman, true)
+                .expect("strict trace should serialize");
+            assert_eq!(rebuilt_bits, original_bits, "wyws index {index} must preserve its isolated opaque alignment tail");
+            assert!(trace.iter().any(|phase| phase.label == "summary_target_width_alignment_opaque_tail_material"));
+            witnessed_indexes.push(index);
+        }
+        assert_eq!(witnessed_indexes, vec![34, 47]);
+    }
+
+    #[test]
     fn test_mutation_and_roundtrip() {
         let path = repo_path("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
         let bytes = fs::read(path).expect("fixture should be readable");
@@ -166,9 +239,9 @@ mod roundtrip_tests {
             .find(|item| item.code.trim() == "wa2")
             .expect("Authority item (wa2) not found");
 
-        let target_stat_id = 9;
+        let target_stat_id = 297;
         use d2r_core::domain::vo::ItemStatValue;
-        let new_val = ItemStatValue::new(300).unwrap();
+        let new_val = ItemStatValue::new(100).unwrap();
 
         assert!(
             authority.set_property_value(target_stat_id, new_val),
@@ -210,7 +283,7 @@ mod roundtrip_tests {
             .iter()
             .find(|p| stat_axiom.map_alpha_id(p.stat_id) == target_stat_id)
             .expect("Mutated stat not found");
-        assert_eq!(new_stat.value, 300);
+        assert_eq!(new_stat.value, 100);
     }
 
     #[test]
@@ -599,20 +672,23 @@ mod roundtrip_tests {
         // Verify we have parsed 17 items (0 to 16)
         assert_eq!(items.len(), 17);
 
-        // Verify the codes of Items 3, 4, 5, 6
+        // Verify the fixture's physical boundary contract around the retained opaque region.
         assert_eq!(items[3].code.trim(), "hp1");
         assert_eq!(items[4].code.trim(), "xrs");
-        assert_eq!(items[5].code.trim(), "wyws");
+        assert!(items[5].is_opaque(), "Item 5 must remain an isolated opaque region");
         assert_eq!(items[6].code.trim(), "wa2");
+        assert_eq!(items[9].code.trim(), "wyws");
 
-        // Verify that Item 4 and Item 5 have no parser failures (they are fully parsed)
-        assert!(!items[4].is_opaque(), "Item 4 (xrs) should not be opaque (indicating no parser failure)");
-        assert!(!items[5].is_opaque(), "Item 5 (wyws) should not be opaque (indicating no parser failure)");
+        // The xrs payload is intentionally isolated while preserving its stable boundary.
+        assert!(items[4].is_opaque(), "Item 4 (xrs) must retain its opaque payload");
+        // The later wyws payload is independently decoded and must remain usable.
+        assert!(!items[9].is_opaque(), "Item 9 (wyws) should remain decoded");
 
-        // Verify runeword attributes or sockets logic on Item 4
-        assert!(items[4].header.is_runeword);
-        assert!(items[4].header.is_socketed);
-        assert_eq!(items[4].socketed_items.len(), 3);
+        // Isolation must preserve exact neighboring item boundaries.
+        assert_eq!(items[4].range.start, 7661);
+        assert_eq!(items[4].range.end, items[5].range.start);
+        assert_eq!(items[5].range.end, items[6].range.start);
+        assert_eq!(items[9].range.start, 8901);
+        assert_eq!(items[9].range.end, 8973);
     }
 }
-

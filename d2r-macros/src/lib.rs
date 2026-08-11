@@ -354,3 +354,107 @@ pub fn forensic_sensor(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     TokenStream::from(item2)
 }
+
+/// Custom attribute for declared item parsing fidelity obligations.
+#[proc_macro_attribute]
+pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr2 = proc_macro2::TokenStream::from(attr);
+    let item2 = proc_macro2::TokenStream::from(item);
+
+    let input: syn::Item = match syn::parse2(item2.clone()) {
+        Ok(parsed) => parsed,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let mut metric_version = None;
+    let mut format_family = None;
+    let mut section = None;
+    let mut preservation = None;
+    let mut semantic_coverage = None;
+    let mut owner = None;
+    let mut required_proof = None;
+
+    let args_parser = syn::meta::parser(|meta| {
+        let (slot, key) = if meta.path.is_ident("metric_version") {
+            (&mut metric_version, "metric_version")
+        } else if meta.path.is_ident("format_family") {
+            (&mut format_family, "format_family")
+        } else if meta.path.is_ident("section") {
+            (&mut section, "section")
+        } else if meta.path.is_ident("preservation") {
+            (&mut preservation, "preservation")
+        } else if meta.path.is_ident("semantic_coverage") {
+            (&mut semantic_coverage, "semantic_coverage")
+        } else if meta.path.is_ident("owner") {
+            (&mut owner, "owner")
+        } else if meta.path.is_ident("required_proof") {
+            (&mut required_proof, "required_proof")
+        } else {
+            return Err(meta.error("unsupported fidelity_contract property; use only the documented contract keys"));
+        };
+
+        if slot.is_some() {
+            return Err(meta.error(format!(
+                "duplicate fidelity_contract property '{key}'; specify each required key exactly once"
+            )));
+        }
+
+        let value: syn::LitStr = meta.value()?.parse()?;
+        *slot = Some(value.value());
+        Ok(())
+    });
+
+    if let Err(err) = args_parser.parse2(attr2) {
+        return err.to_compile_error().into();
+    }
+
+    let metric_version = match metric_version {
+        Some(value) if !value.is_empty() => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] requires non-empty 'metric_version'. Self-Healing Hint: declare a stable version such as \"item_fidelity_v1\".").to_compile_error().into(),
+    };
+    let format_family = match format_family {
+        Some(value) if !value.is_empty() => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] requires non-empty 'format_family'. Self-Healing Hint: declare the bounded save format family.").to_compile_error().into(),
+    };
+    let section = match section {
+        Some(value) if !value.is_empty() => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] requires non-empty 'section'. Self-Healing Hint: name the stable parsing seam.").to_compile_error().into(),
+    };
+    let preservation = match preservation {
+        Some(value) if matches!(value.as_str(), "exact" | "opaque" | "partial") => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'preservation' must be \"exact\", \"opaque\", or \"partial\". Self-Healing Hint: choose the declared preservation obligation, not an observed score.").to_compile_error().into(),
+    };
+    let semantic_coverage = match semantic_coverage {
+        Some(value) if matches!(value.as_str(), "none" | "partial" | "expected") => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'semantic_coverage' must be \"none\", \"partial\", or \"expected\". Self-Healing Hint: declare the semantic obligation separately from preservation.").to_compile_error().into(),
+    };
+    let owner = match owner {
+        Some(value) if !value.is_empty() => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] requires non-empty 'owner'. Self-Healing Hint: name the stable parser or marker owner.").to_compile_error().into(),
+    };
+    let required_proof = match required_proof {
+        Some(value) if matches!(value.as_str(), "targeted_fixture" | "authority_fixture" | "corpus_regression") => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'required_proof' must be \"targeted_fixture\", \"authority_fixture\", or \"corpus_regression\". Self-Healing Hint: select the next required runtime proof.").to_compile_error().into(),
+    };
+
+    let name = match &input {
+        syn::Item::Struct(item_struct) => &item_struct.ident,
+        syn::Item::Enum(item_enum) => &item_enum.ident,
+        syn::Item::Union(item_union) => &item_union.ident,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "Attribute #[fidelity_contract] can only be applied to structs, enums, or unions.").to_compile_error().into(),
+    };
+
+    TokenStream::from(quote! {
+        #item2
+
+        impl #name {
+            pub const FIDELITY_METRIC_VERSION: &'static str = #metric_version;
+            pub const FIDELITY_FORMAT_FAMILY: &'static str = #format_family;
+            pub const FIDELITY_SECTION: &'static str = #section;
+            pub const FIDELITY_PRESERVATION: &'static str = #preservation;
+            pub const FIDELITY_SEMANTIC_COVERAGE: &'static str = #semantic_coverage;
+            pub const FIDELITY_OWNER: &'static str = #owner;
+            pub const FIDELITY_REQUIRED_PROOF: &'static str = #required_proof;
+        }
+    })
+}

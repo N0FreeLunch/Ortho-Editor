@@ -1,5 +1,7 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
+use d2r_core::domain::item::axiom_meta::FidelityContract;
+use d2r_core::domain::item::entity::item_fidelity_contracts;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
@@ -110,7 +112,25 @@ struct GlobalAuditReport {
     total_items: usize,
     global_avg_fidelity: f32,
     failure_breakdown: HashMap<String, usize>,
+    fidelity_contracts: FidelityContractReceipt,
     results: Vec<AuditResult>,
+}
+
+#[derive(Serialize)]
+struct FidelityContractReceipt {
+    metric_version: String,
+    declared_contract_count: usize,
+    evidence_level: &'static str,
+    legacy_gate: LegacyGate,
+    contracts: Vec<FidelityContract>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LegacyGate {
+    Pass,
+    NotRun,
+    Fail,
 }
 
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
@@ -205,12 +225,14 @@ fn generate_markdown_report(report: &GlobalAuditReport) -> String {
 
 struct Args {
     target_dir: String,
+    fixture_name: Option<String>,
     filter_family: Option<FailureFamily>,
     summary_only: bool,
     detailed: bool,
     output_json: bool,
     output_path: Option<String>,
     output_html: Option<String>,
+    legacy_gate: LegacyGate,
 }
 
 fn process_file(
@@ -689,6 +711,12 @@ fn main() {
         Some("filter"),
         "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)",
     ));
+    parser.add_spec(ArgSpec::option(
+        "fixture-name",
+        None,
+        Some("fixture-name"),
+        "Audit one exact .d2s basename discovered below target_dir",
+    ));
     parser.add_spec(ArgSpec::flag(
         "summary-only",
         None,
@@ -719,6 +747,12 @@ fn main() {
         Some("html"),
         "Save HTML dashboard report to a file",
     ));
+    parser.add_spec(ArgSpec::option(
+        "legacy-gate",
+        None,
+        Some("legacy-gate"),
+        "Legacy strict bit-preservation and green-fixture gate status: pass, not-run, or fail",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -733,12 +767,23 @@ fn main() {
         }
     };
 
+    let legacy_gate = match parsed.get("legacy-gate").map(String::as_str) {
+        Some("pass") => LegacyGate::Pass,
+        Some("fail") => LegacyGate::Fail,
+        Some("not-run") | None => LegacyGate::NotRun,
+        Some(value) => {
+            eprintln!("error: --legacy-gate must be pass, not-run, or fail; received '{value}'");
+            std::process::exit(1);
+        }
+    };
+
     let args = Args {
         target_dir: parsed
             .get("target_dir")
             .map(|s| s.as_str())
             .unwrap_or("tests/fixtures/savegames/original")
             .to_string(),
+        fixture_name: parsed.get("fixture-name").cloned(),
         filter_family: parsed
             .get("filter")
             .and_then(|s| FailureFamily::from_str(s)),
@@ -747,6 +792,7 @@ fn main() {
         output_json: parsed.is_set("json"),
         output_path: parsed.get("output").cloned(),
         output_html: parsed.get("html").cloned(),
+        legacy_gate,
     };
 
     let path = Path::new(&args.target_dir);
@@ -761,8 +807,29 @@ fn main() {
     let mut file_paths = Vec::new();
     find_d2s_files(path, &mut file_paths);
 
+    if let Some(fixture_name) = &args.fixture_name {
+        file_paths.retain(|candidate| {
+            candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == fixture_name)
+        });
+    }
+
     // Deterministic sort by filename
     file_paths.sort();
+
+    if let Some(fixture_name) = &args.fixture_name {
+        if file_paths.len() != 1 {
+            eprintln!(
+                "Error: fixture '{}' matched {} files below {}; expected exactly one.",
+                fixture_name,
+                file_paths.len(),
+                args.target_dir
+            );
+            std::process::exit(1);
+        }
+    }
 
     if file_paths.is_empty() {
         println!("No .d2s files found in {}", args.target_dir);
@@ -861,6 +928,12 @@ fn main() {
         breakdown_str.insert(format!("{:?}", f), *count);
     }
 
+    let contracts = item_fidelity_contracts();
+    let metric_version = contracts
+        .first()
+        .map(|contract| contract.metric_version.to_string())
+        .unwrap_or_else(|| "unregistered".to_string());
+
     let global_report = GlobalAuditReport {
         target_dir: args.target_dir.clone(),
         total_files,
@@ -869,6 +942,13 @@ fn main() {
         total_items,
         global_avg_fidelity,
         failure_breakdown: breakdown_str,
+        fidelity_contracts: FidelityContractReceipt {
+            metric_version,
+            declared_contract_count: contracts.len(),
+            evidence_level: "declaration-only",
+            legacy_gate: args.legacy_gate,
+            contracts: contracts.to_vec(),
+        },
         results,
     };
 
