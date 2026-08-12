@@ -1953,6 +1953,12 @@ impl Item {
 
                     let parser_consumed_bits = final_item.bits.len() as u64;
                     final_item.record_parser_consumed_bits(parser_consumed_bits);
+                    final_item.record_section_parse_input(
+                        Some(parse_code_hint),
+                        forced_compact_for_parse,
+                        parse_limit,
+                        item_count,
+                    );
 
                     // Axiom 0344: In Alpha v105, if the scanner found a valid code,
                     // ensure the parser uses it (prevents Huffman collisions).
@@ -3045,6 +3051,7 @@ impl Item {
             expected_start_bit: start_bit,
             forensic_audit: ForensicAudit::new(),
             parser_consumption: Default::default(),
+            section_parse_input: Default::default(),
         };
 
         item.id = item.header.id;

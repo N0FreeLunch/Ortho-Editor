@@ -345,6 +345,13 @@ fn section_context_report(
         "stored_alpha_header_gap_bits": item.body.alpha_header_gap_bits.len(),
         "stored_alpha_header_gap": item.body.alpha_header_gap,
     });
+    let section_parser_input_provenance = json!({
+        "provenance": "read_section_parse_item_at_with_limit",
+        "code_hint": item.section_parse_input.code_hint,
+        "forced_compact": item.section_parse_input.forced_compact,
+        "limit_bits": item.section_parse_input.limit_bits,
+        "item_index": item.section_parse_input.item_index,
+    });
     let mut with_padding_item = item.clone();
     with_padding_item.bits.clear();
     let with_padding_bits = match with_padding_item.to_bits(section_item_index, huffman, alpha_mode)
@@ -799,6 +806,7 @@ fn section_context_report(
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
         "parser_consumption_provenance": parser_consumption_provenance,
         "stored_header_gap_provenance": stored_header_gap_provenance,
+        "section_parser_input_provenance": section_parser_input_provenance,
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_alignment_source_witness": strict_alignment_source_witness,
         "parser_decision_provenance": parser_decision_provenance,

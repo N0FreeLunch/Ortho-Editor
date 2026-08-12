@@ -230,6 +230,39 @@ impl PartialEq for ParserConsumptionProvenance {
 
 impl Eq for ParserConsumptionProvenance {}
 
+/// Equality-neutral provenance for the inputs selected by the section parser.
+#[derive(Debug, Clone, Default)]
+pub struct SectionParseInputProvenance {
+    pub code_hint: Option<String>,
+    pub forced_compact: Option<bool>,
+    pub limit_bits: Option<u64>,
+    pub item_index: Option<usize>,
+}
+
+impl SectionParseInputProvenance {
+    pub(crate) fn record(
+        code_hint: Option<&str>,
+        forced_compact: Option<bool>,
+        limit_bits: Option<u64>,
+        item_index: usize,
+    ) -> Self {
+        Self {
+            code_hint: code_hint.map(str::to_owned),
+            forced_compact,
+            limit_bits,
+            item_index: Some(item_index),
+        }
+    }
+}
+
+impl PartialEq for SectionParseInputProvenance {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for SectionParseInputProvenance {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Item {
     pub header: ItemHeader,
@@ -281,6 +314,7 @@ pub struct Item {
     pub expected_start_bit: u64,
     pub forensic_audit: ForensicAudit,
     pub parser_consumption: ParserConsumptionProvenance,
+    pub section_parse_input: SectionParseInputProvenance,
 }
 
 impl Deref for Item {
@@ -303,6 +337,21 @@ impl Item {
 
     pub(crate) fn record_parser_consumed_bits(&mut self, bits: u64) {
         self.parser_consumption = ParserConsumptionProvenance::record(bits);
+    }
+
+    pub(crate) fn record_section_parse_input(
+        &mut self,
+        code_hint: Option<&str>,
+        forced_compact: Option<bool>,
+        limit_bits: Option<u64>,
+        item_index: usize,
+    ) {
+        self.section_parse_input = SectionParseInputProvenance::record(
+            code_hint,
+            forced_compact,
+            limit_bits,
+            item_index,
+        );
     }
 
     pub fn code(&self) -> &str {
