@@ -724,9 +724,19 @@ fn section_context_report(
     });
     let normalized_code = item.code.trim();
     let trusted_compact_tail = alpha_mode && matches!(normalized_code, "jav" | "buc" | "us g");
+    let width_axiom = d2r_core::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
+    let resolved_summary_gap_bits = width_axiom.summary_gap_bits(normalized_code);
+    let summary_gap_from_item_override = d2r_core::domain::forensic::registry::get_registry()
+        .item_overrides
+        .as_ref()
+        .and_then(|overrides| overrides.get(normalized_code))
+        .and_then(|override_map| override_map.get("header_gap"))
+        .is_some();
     let parser_decision_provenance = json!({
         "alpha_mode": alpha_mode,
         "normalized_code": normalized_code,
+        "resolved_summary_gap_bits": resolved_summary_gap_bits,
+        "summary_gap_from_item_override": summary_gap_from_item_override,
         "trusted_compact_tail": trusted_compact_tail,
         "residue_classification": if trusted_compact_tail { "alignment_padding_capture" } else { "opaque_tail" },
         "rule": "alpha residue capture trusts only jav, buc, and us g compact tails",
