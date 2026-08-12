@@ -292,6 +292,7 @@ fn classify_local_73_padding_influence(
 }
 
 fn section_context_report(
+    bytes: &[u8],
     item: &Item,
     section_item_index: usize,
     huffman: &HuffmanTree,
@@ -299,6 +300,46 @@ fn section_context_report(
     emit_phase_trace: bool,
     coordinate_bit: Option<u64>,
 ) -> serde_json::Value {
+    let raw_len_bits = item.range.end.saturating_sub(item.range.start);
+    let code_hint = item.code.trim().to_string();
+    let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+    let carrier_parse =
+        d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+            bytes,
+            item.range.start,
+            0,
+            huffman,
+            section_item_index,
+            alpha_mode,
+            Some(raw_len_bits),
+            Some(item.header.is_compact),
+            Some(code_hint.as_str()),
+            &mut carrier,
+        );
+    let carrier_status = match carrier.status {
+        d2r_core::domain::item::serialization::ParseStatus::Success => "success",
+        d2r_core::domain::item::serialization::ParseStatus::Failure => "failure",
+    };
+    let carrier_gap_segments = carrier
+        .segments
+        .iter()
+        .filter(|segment| segment.label == "AlphaHeaderGap")
+        .map(|segment| {
+            json!({
+                "start": segment.start,
+                "end": segment.end,
+                "bit_length": segment.end.saturating_sub(segment.start),
+                "depth": segment.depth,
+            })
+        })
+        .collect::<Vec<_>>();
+    let parser_consumption_provenance = json!({
+        "provenance": "selected_item_bounded_carrier_reparse",
+        "requested_limit_bits": raw_len_bits,
+        "status": carrier_status,
+        "parser_consumed_bits": carrier_parse.ok().map(|(_, consumed_bits)| consumed_bits),
+        "alpha_header_gap_segments": carrier_gap_segments,
+    });
     let mut with_padding_item = item.clone();
     with_padding_item.bits.clear();
     let with_padding_bits = match with_padding_item.to_bits(section_item_index, huffman, alpha_mode)
@@ -751,6 +792,7 @@ fn section_context_report(
         "range_end": item.range.end,
         "segments": segments,
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
+        "parser_consumption_provenance": parser_consumption_provenance,
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_alignment_source_witness": strict_alignment_source_witness,
         "parser_decision_provenance": parser_decision_provenance,
@@ -2295,6 +2337,7 @@ fn main() {
             let item = &items[section_item_index];
             if section_context {
                 let report = section_context_report(
+                    &bytes,
                     item,
                     section_item_index,
                     &huffman,
@@ -2361,6 +2404,7 @@ fn main() {
 
                     let comparison_item = &compare_items[section_item_index];
                     let comparison_report = section_context_report(
+                        &compare_bytes,
                         comparison_item,
                         section_item_index,
                         &huffman,
