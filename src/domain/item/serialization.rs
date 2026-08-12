@@ -1822,6 +1822,14 @@ impl Item {
             } else {
                 parse_code_hint_raw
             };
+            if alpha_mode
+                && crate::domain::forensic::v105::axioms::is_v105_summary_code(parse_code_hint)
+            {
+                let summary_header_minimum = 48u64
+                    + crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default()
+                        .summary_gap_bits(parse_code_hint) as u64;
+                dynamic_limit = dynamic_limit.max(summary_header_minimum).min(limit);
+            }
             // For jav/buc in Alpha v105, force compact parse mode so entity.rs's
             // trusted_compact_hint path can activate (it requires header.is_compact==true).
             // Without this, a non-compact peek (e.g. wbmx) at the same offset causes
