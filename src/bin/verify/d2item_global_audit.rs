@@ -1,7 +1,9 @@
-use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
+use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::save::find_jm_markers;
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
@@ -97,10 +99,37 @@ struct AuditResult {
     avg_fidelity: f32,
     hint: String,
     family: Option<FailureFamily>,
+    topology: TopologyReceipt,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     mismatch_rows: Vec<MismatchRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     low_confidence_rows: Vec<LowConfidenceRow>,
+}
+
+#[derive(Serialize)]
+struct JmSectionReceipt {
+    jm_offset_byte: usize,
+    next_jm_offset_byte: usize,
+    declared_count: Option<u16>,
+    payload_len_bytes: usize,
+}
+
+#[derive(Serialize)]
+struct ParserTopologyReceipt {
+    top_level_count: Option<usize>,
+    nested_count: Option<usize>,
+    total_tree_count: Option<usize>,
+    residue_count: Option<usize>,
+    opaque_count: Option<usize>,
+    raw_span_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parser_error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TopologyReceipt {
+    jm_sections: Vec<JmSectionReceipt>,
+    parser: ParserTopologyReceipt,
 }
 
 #[derive(Serialize)]
@@ -112,8 +141,18 @@ struct GlobalAuditReport {
     total_items: usize,
     global_avg_fidelity: f32,
     failure_breakdown: HashMap<String, usize>,
+    evaluation_context: EvaluationContextReceipt,
     fidelity_contracts: FidelityContractReceipt,
     results: Vec<AuditResult>,
+}
+
+#[derive(Serialize)]
+struct EvaluationContextReceipt {
+    metric_version: String,
+    parser_revision: String,
+    evaluator_revision: String,
+    corpus_manifest: String,
+    worktree_state: String,
 }
 
 #[derive(Serialize)]
@@ -131,6 +170,96 @@ enum LegacyGate {
     Pass,
     NotRun,
     Fail,
+}
+
+fn count_item_tree(item: &Item, counters: &mut (usize, usize, usize, usize)) {
+    counters.0 += 1;
+    if item.is_residue() {
+        counters.1 += 1;
+    }
+    if item.code.trim().is_empty() || item.code.trim() == "Opaque" || item.is_semi_opaque() {
+        counters.2 += 1;
+    }
+    if item.range.end > item.range.start {
+        counters.3 += 1;
+    }
+    for child in &item.socketed_items {
+        count_item_tree(child, counters);
+    }
+}
+
+fn build_topology_receipt(bytes: &[u8], include_parser: bool) -> TopologyReceipt {
+    let jm_positions = find_jm_markers(bytes);
+    let jm_sections = jm_positions
+        .iter()
+        .enumerate()
+        .map(|(index, &jm_offset_byte)| {
+            let next_jm_offset_byte = jm_positions.get(index + 1).copied().unwrap_or(bytes.len());
+            let declared_count = bytes
+                .get(jm_offset_byte + 2..jm_offset_byte + 4)
+                .and_then(|header| header.try_into().ok())
+                .map(u16::from_le_bytes);
+            JmSectionReceipt {
+                jm_offset_byte,
+                next_jm_offset_byte,
+                declared_count,
+                payload_len_bytes: next_jm_offset_byte.saturating_sub(jm_offset_byte + 4),
+            }
+        })
+        .collect();
+
+    if !include_parser {
+        return TopologyReceipt {
+            jm_sections,
+            parser: ParserTopologyReceipt {
+                top_level_count: None,
+                nested_count: None,
+                total_tree_count: None,
+                residue_count: None,
+                opaque_count: None,
+                raw_span_count: None,
+                parser_error: Some("skipped by --topology-only".to_string()),
+            },
+        };
+    }
+
+    let alpha_mode = bytes
+        .get(4..8)
+        .and_then(|version| version.try_into().ok())
+        .map(u32::from_le_bytes)
+        .is_some_and(|version| version == 105 || version == 6);
+    let huffman = HuffmanTree::new();
+    let parser = match Item::read_player_items(bytes, &huffman, alpha_mode) {
+        Ok(items) => {
+            let mut counters = (0usize, 0usize, 0usize, 0usize);
+            for item in &items {
+                count_item_tree(item, &mut counters);
+            }
+            ParserTopologyReceipt {
+                top_level_count: Some(items.len()),
+                nested_count: Some(counters.0.saturating_sub(items.len())),
+                total_tree_count: Some(counters.0),
+                residue_count: Some(counters.1),
+                opaque_count: Some(counters.2),
+                raw_span_count: Some(counters.3),
+                parser_error: None,
+            }
+        }
+        Err(error) => ParserTopologyReceipt {
+            top_level_count: None,
+            nested_count: None,
+            total_tree_count: None,
+            residue_count: None,
+            opaque_count: None,
+            raw_span_count: None,
+            parser_error: Some(error.to_string()),
+        },
+    };
+
+    TopologyReceipt {
+        jm_sections,
+        parser,
+    }
 }
 
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
@@ -228,11 +357,17 @@ struct Args {
     fixture_name: Option<String>,
     filter_family: Option<FailureFamily>,
     summary_only: bool,
+    topology_only: bool,
     detailed: bool,
     output_json: bool,
     output_path: Option<String>,
     output_html: Option<String>,
     legacy_gate: LegacyGate,
+    metric_version: String,
+    parser_revision: String,
+    evaluator_revision: String,
+    corpus_manifest: String,
+    worktree_state: String,
 }
 
 fn process_file(
@@ -256,11 +391,39 @@ fn process_file(
                 avg_fidelity: 0.0,
                 hint: format!("Read error: {}", e),
                 family: Some(FailureFamily::Unknown),
+                topology: TopologyReceipt {
+                    jm_sections: Vec::new(),
+                    parser: ParserTopologyReceipt {
+                        top_level_count: None,
+                        nested_count: None,
+                        total_tree_count: None,
+                        residue_count: None,
+                        opaque_count: None,
+                        raw_span_count: None,
+                        parser_error: Some("file read failed".to_string()),
+                    },
+                },
                 mismatch_rows: Vec::new(),
                 low_confidence_rows: Vec::new(),
             };
         }
     };
+
+    let topology = build_topology_receipt(&bytes, !args.topology_only);
+
+    if args.topology_only {
+        return AuditResult {
+            status: "[PASS]".to_string(),
+            filename: file_name,
+            item_count: 0,
+            avg_fidelity: 0.0,
+            hint: "Topology-only receipt; strict replay skipped".to_string(),
+            family: None,
+            topology,
+            mismatch_rows: Vec::new(),
+            low_confidence_rows: Vec::new(),
+        };
+    }
 
     let options = SymmetryOptions {
         roundtrip: true,
@@ -356,6 +519,7 @@ fn process_file(
                 avg_fidelity,
                 hint,
                 family: first_fail_family,
+                topology,
                 mismatch_rows,
                 low_confidence_rows,
             }
@@ -369,6 +533,7 @@ fn process_file(
                 avg_fidelity: 0.0,
                 hint: format!("Audit error: {}", e),
                 family: Some(FailureFamily::Unknown),
+                topology,
                 mismatch_rows: Vec::new(),
                 low_confidence_rows: Vec::new(),
             }
@@ -724,6 +889,12 @@ fn main() {
         "Show only the summary block",
     ));
     parser.add_spec(ArgSpec::flag(
+        "topology-only",
+        None,
+        Some("topology-only"),
+        "Emit raw JM and parser topology without strict replay",
+    ));
+    parser.add_spec(ArgSpec::flag(
         "detailed",
         Some('d'),
         Some("detailed"),
@@ -752,6 +923,36 @@ fn main() {
         None,
         Some("legacy-gate"),
         "Legacy strict bit-preservation and green-fixture gate status: pass, not-run, or fail",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "metric-version",
+        None,
+        Some("metric-version"),
+        "Evaluation metric definition version recorded in the output receipt",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "parser-revision",
+        None,
+        Some("parser-revision"),
+        "Parser revision identifier recorded in the output receipt",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "evaluator-revision",
+        None,
+        Some("evaluator-revision"),
+        "Evaluator revision identifier recorded in the output receipt",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "corpus-manifest",
+        None,
+        Some("corpus-manifest"),
+        "Corpus manifest identifier recorded in the output receipt",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "worktree-state",
+        None,
+        Some("worktree-state"),
+        "Worktree state identifier recorded in the output receipt",
     ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
@@ -788,11 +989,32 @@ fn main() {
             .get("filter")
             .and_then(|s| FailureFamily::from_str(s)),
         summary_only: parsed.is_set("summary-only"),
+        topology_only: parsed.is_set("topology-only"),
         detailed: parsed.is_set("detailed"),
         output_json: parsed.is_set("json"),
         output_path: parsed.get("output").cloned(),
         output_html: parsed.get("html").cloned(),
         legacy_gate,
+        metric_version: parsed
+            .get("metric-version")
+            .cloned()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        parser_revision: parsed
+            .get("parser-revision")
+            .cloned()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        evaluator_revision: parsed
+            .get("evaluator-revision")
+            .cloned()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        corpus_manifest: parsed
+            .get("corpus-manifest")
+            .cloned()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        worktree_state: parsed
+            .get("worktree-state")
+            .cloned()
+            .unwrap_or_else(|| "unrecorded".to_string()),
     };
 
     let path = Path::new(&args.target_dir);
@@ -942,6 +1164,13 @@ fn main() {
         total_items,
         global_avg_fidelity,
         failure_breakdown: breakdown_str,
+        evaluation_context: EvaluationContextReceipt {
+            metric_version: args.metric_version,
+            parser_revision: args.parser_revision,
+            evaluator_revision: args.evaluator_revision,
+            corpus_manifest: args.corpus_manifest,
+            worktree_state: args.worktree_state,
+        },
         fidelity_contracts: FidelityContractReceipt {
             metric_version,
             declared_contract_count: contracts.len(),
