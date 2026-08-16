@@ -1,6 +1,8 @@
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
-use d2r_core::domain::item::scanner::scan_item_markers;
+use d2r_core::domain::item::scanner::{
+    scan_item_markers, scan_item_markers_with_receipt, ScannerWorkCounters,
+};
 use d2r_core::domain::item::serialization::is_likely_jm_section_header;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
@@ -148,6 +150,8 @@ struct ScannerCandidateReceipt {
     scan_elapsed_ms: Option<u128>,
     #[serde(skip_serializing_if = "Option::is_none")]
     accepted_marker_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scanner_work: Option<ScannerWorkCounters>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -384,6 +388,7 @@ fn scan_candidate_for_receipt(
         scan_status: None,
         scan_elapsed_ms: None,
         accepted_marker_count: None,
+        scanner_work: None,
     };
     if header_only || !header_plausible || declared_count == Some(0) {
         if !header_only {
@@ -399,7 +404,7 @@ fn scan_candidate_for_receipt(
         format!("invalid scanner section bounds {jm_offset_byte}..{section_end_byte}")
     })?;
     let scan_started = Instant::now();
-    let markers = scan_item_markers(
+    let scan = scan_item_markers_with_receipt(
         section_bytes,
         &huffman,
         alpha_mode,
@@ -409,7 +414,8 @@ fn scan_candidate_for_receipt(
     );
     receipt.scan_status = Some("[PASS]".to_string());
     receipt.scan_elapsed_ms = Some(scan_started.elapsed().as_millis());
-    receipt.accepted_marker_count = Some(markers.len());
+    receipt.accepted_marker_count = Some(scan.markers.len());
+    receipt.scanner_work = Some(scan.work);
     Ok(receipt)
 }
 
@@ -772,6 +778,7 @@ fn process_scanner_candidates_with_timeout(
                     scan_status: Some(format!("[SKIPPED] {hint}")),
                     scan_elapsed_ms: None,
                     accepted_marker_count: None,
+                    scanner_work: None,
                 });
         candidates.push(candidate);
     }
@@ -804,6 +811,7 @@ fn process_scanner_candidates_with_timeout(
             candidate.scan_status = scan_candidate.scan_status;
             candidate.scan_elapsed_ms = scan_candidate.scan_elapsed_ms;
             candidate.accepted_marker_count = scan_candidate.accepted_marker_count;
+            candidate.scanner_work = scan_candidate.scanner_work;
         } else {
             candidate.scan_status = Some(result.status);
         }

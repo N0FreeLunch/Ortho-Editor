@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use rayon::prelude::*;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn is_alpha_v105_shadow_marker(code: &str) -> bool {
     let trimmed = code.trim();
@@ -49,6 +50,39 @@ pub struct ItemMarker {
     pub code: String,
     pub score: i32,
     pub status: MarkerStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerWorkCounters {
+    pub probes: u64,
+    pub base_header_peeks: u64,
+    pub alternate_gap_peeks: u64,
+    pub lookahead_checks: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerScanReceipt {
+    pub markers: Vec<ItemMarker>,
+    pub work: ScannerWorkCounters,
+}
+
+#[derive(Default)]
+struct ScannerWorkAccumulator {
+    probes: AtomicU64,
+    base_header_peeks: AtomicU64,
+    alternate_gap_peeks: AtomicU64,
+    lookahead_checks: AtomicU64,
+}
+
+impl ScannerWorkAccumulator {
+    fn snapshot(&self) -> ScannerWorkCounters {
+        ScannerWorkCounters {
+            probes: self.probes.load(Ordering::Relaxed),
+            base_header_peeks: self.base_header_peeks.load(Ordering::Relaxed),
+            alternate_gap_peeks: self.alternate_gap_peeks.load(Ordering::Relaxed),
+            lookahead_checks: self.lookahead_checks.load(Ordering::Relaxed),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +166,50 @@ pub fn scan_item_markers(
     expected_count: Option<u16>,
     verbose: bool,
 ) -> Vec<ItemMarker> {
+    scan_item_markers_internal(
+        bytes,
+        huffman,
+        alpha,
+        section_bit_offset,
+        expected_count,
+        verbose,
+        None,
+    )
+}
+
+pub fn scan_item_markers_with_receipt(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    alpha: bool,
+    section_bit_offset: u64,
+    expected_count: Option<u16>,
+    verbose: bool,
+) -> ScannerScanReceipt {
+    let work = ScannerWorkAccumulator::default();
+    let markers = scan_item_markers_internal(
+        bytes,
+        huffman,
+        alpha,
+        section_bit_offset,
+        expected_count,
+        verbose,
+        Some(&work),
+    );
+    ScannerScanReceipt {
+        markers,
+        work: work.snapshot(),
+    }
+}
+
+fn scan_item_markers_internal(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    alpha: bool,
+    section_bit_offset: u64,
+    expected_count: Option<u16>,
+    verbose: bool,
+    work: Option<&ScannerWorkAccumulator>,
+) -> Vec<ItemMarker> {
     if bytes.is_empty() {
         return Vec::new();
     }
@@ -186,6 +264,9 @@ pub fn scan_item_markers(
             };
 
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
+                if let Some(work) = work {
+                    work.probes.fetch_add(1, Ordering::Relaxed);
+                }
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
@@ -198,11 +279,17 @@ pub fn scan_item_markers(
                         continue;
                     }
 
+                    if let Some(work) = work {
+                        work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
+                    }
                     let mut header_candidate =
                         peek_item_header_at(bytes, scan_pos, huffman, alpha, 0);
                     if alpha {
                         let reg = crate::domain::forensic::registry::get_registry();
                         for alt_gap in [6u64, 27, 35, 46] {
+                            if let Some(work) = work {
+                                work.alternate_gap_peeks.fetch_add(1, Ordering::Relaxed);
+                            }
                             if let Some((
                                 mode,
                                 location,
@@ -303,6 +390,9 @@ pub fn scan_item_markers(
                             let mut forced_80 = false;
                             if use_v105_alignment && !is_compact && !is_forced {
                                 if is_v105_summary {
+                                    if let Some(work) = work {
+                                        work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
+                                    }
                                     if let Some(next_header) =
                                         peek_item_header_at(bytes, scan_pos + 80, huffman, alpha, 0)
                                     {
@@ -339,6 +429,9 @@ pub fn scan_item_markers(
                                 && !is_v105_summary
                                 && !override_noncompact
                             {
+                                if let Some(work) = work {
+                                    work.lookahead_checks.fetch_add(1, Ordering::Relaxed);
+                                }
                                 if !verify_marker_lookahead(
                                     bytes,
                                     scan_pos + _header_len,
@@ -420,6 +513,9 @@ pub fn scan_item_markers(
                     local_markers.push((best_offset, max_confidence, best_code.clone()));
 
                     let jump = if alpha {
+                        if let Some(work) = work {
+                            work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
+                        }
                         if let Some((_, _, _, _, f, v, _, _, _, _)) =
                             peek_item_header_at(bytes, best_offset, huffman, alpha, 0)
                         {
@@ -836,10 +932,7 @@ mod tests {
         let bytes = std::fs::read(fixture).expect("Alpha v105 fixture must be readable");
         let jm_positions = find_jm_markers(&bytes);
         let section_marker_byte_offset = jm_positions[0] as u64;
-        let next_section_marker_byte_offset = jm_positions
-            .get(1)
-            .copied()
-            .unwrap_or(bytes.len());
+        let next_section_marker_byte_offset = jm_positions.get(1).copied().unwrap_or(bytes.len());
         let section_bytes = &bytes[jm_positions[0]..next_section_marker_byte_offset];
         let section_bit_offset = section_marker_byte_offset * 8;
         let declared_top_level_count =
