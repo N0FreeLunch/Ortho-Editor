@@ -1,5 +1,4 @@
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
-use crate::item::BitSegment;
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
@@ -15,6 +14,7 @@ use crate::domain::item::subdomains::stats::StatsCombinator;
 use crate::domain::item::Item;
 use crate::domain::stats::{ItemProperty, ItemStats, StatsAxiom};
 use crate::error::{ParsingError, ParsingFailure, ParsingResult};
+use crate::item::BitSegment;
 use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
 use std::io::{self, Cursor};
 
@@ -52,8 +52,18 @@ pub fn find_next_item_match(
         let mut header_candidate = peek_item_header_at(bytes, probe, huffman, alpha, 0);
         if alpha {
             for alt_gap in [6u64, 35, 46] {
-                if let Some((mode, location, _x, code, flags, version, is_compact, header_len, _nudge, has_checksum)) =
-                    peek_item_header_at_specific_gap(bytes, probe, huffman, alpha, alt_gap)
+                if let Some((
+                    mode,
+                    location,
+                    _x,
+                    code,
+                    flags,
+                    version,
+                    is_compact,
+                    header_len,
+                    _nudge,
+                    has_checksum,
+                )) = peek_item_header_at_specific_gap(bytes, probe, huffman, alpha, alt_gap)
                 {
                     let trimmed = code.trim();
                     if matches!(trimmed, "xrs" | "c8xr" | "rhd") {
@@ -251,7 +261,6 @@ pub fn verify_marker_lookahead(
             | 194
             | 199
             | 207
-
             | 256
             | 287
             | 289
@@ -401,8 +410,11 @@ pub fn peek_item_header_at_with_base(
     let mut trial_configs = Vec::new();
     if alpha_mode && (v <= 7) {
         let _calculated = calculate_alpha_v105_checksum(flags, v);
-        let matched = (_checksum == _calculated) || (alpha_mode && flags != 0 && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4 || v == 3));
-        
+        let matched = (_checksum == _calculated)
+            || (alpha_mode
+                && flags != 0
+                && (v == 5 || v == 0 || v == 1 || v == 2 || v == 4 || v == 3));
+
         if matched {
             let m = alpha_reader.read::<3, u8>().ok();
             let l = match location_bits {
@@ -414,12 +426,19 @@ pub fn peek_item_header_at_with_base(
                 _ => alpha_reader.read::<4, u8>().ok(),
             };
             if let (Some(mode), Some(loc), Some(x_val)) = (m, l, x) {
-                trial_configs.push((v, mode, loc, x_val, 32 + version_bits + 8 + mode_bits + location_bits + x_bits, true));
+                trial_configs.push((
+                    v,
+                    mode,
+                    loc,
+                    x_val,
+                    32 + version_bits + 8 + mode_bits + location_bits + x_bits,
+                    true,
+                ));
             }
         }
     }
 
-    if retail_skip_ok {
+    if retail_skip_ok && !alpha_mode {
         let m = retail_reader.read::<3, u8>().ok();
         let l = retail_reader.read::<3, u8>().ok();
         let x = retail_reader.read::<4, u8>().ok();
@@ -522,61 +541,61 @@ pub fn peek_item_header_at_with_base(
                     if is_plausible {
                         let reg = crate::domain::forensic::registry::get_registry();
                         let is_known = reg
-                        .forced_compact_codes
-                        .as_ref()
-                        .map(|codes| codes.iter().any(|c| c == trimmed))
-                        .unwrap_or(false)
-                        || reg
-                            .forced_runeword_codes
+                            .forced_compact_codes
                             .as_ref()
                             .map(|codes| codes.iter().any(|c| c == trimmed))
                             .unwrap_or(false)
-                        || item_template(trimmed).is_some()
-                        || trimmed == "acww"
-                        || trimmed == "bcww"
-                        || trimmed == "xrs"
-                        || trimmed == "mp1";
+                            || reg
+                                .forced_runeword_codes
+                                .as_ref()
+                                .map(|codes| codes.iter().any(|c| c == trimmed))
+                                .unwrap_or(false)
+                            || item_template(trimmed).is_some()
+                            || trimmed == "acww"
+                            || trimmed == "bcww"
+                            || trimmed == "xrs"
+                            || trimmed == "mp1";
 
-                    if is_known {
-                        confidence += 400;
-                    }
-                    let mut matches_registry_gap = false;
-                    if let Some(overrides) = &reg.item_overrides {
-                        if let Some(item_map) = overrides.get(trimmed) {
-                            if let Some(&g_val) = item_map.get("header_gap") {
-                                if g_val as usize == gap {
-                                    matches_registry_gap = true;
+                        if is_known {
+                            confidence += 400;
+                        }
+                        let mut matches_registry_gap = false;
+                        if let Some(overrides) = &reg.item_overrides {
+                            if let Some(item_map) = overrides.get(trimmed) {
+                                if let Some(&g_val) = item_map.get("header_gap") {
+                                    if g_val as usize == gap {
+                                        matches_registry_gap = true;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    if matches_registry_gap {
-                        confidence += 1000;
-                    }
-
-                    if alpha_mode && (trimmed == "hp1" || trimmed == "xrs") {
-                        confidence += 500;
-                        if trimmed == "xrs" && (flags & (1 << 26)) != 0 {
+                        if matches_registry_gap {
                             confidence += 1000;
                         }
-                    }
 
-                    let mut is_compact_override = None;
-                    if let Some(overrides) = &reg.item_overrides {
-                        if let Some(item_map) = overrides.get(trimmed) {
-                            if let Some(&c_val) = item_map.get("is_compact") {
-                                is_compact_override = Some(c_val);
+                        if alpha_mode && (trimmed == "hp1" || trimmed == "xrs") {
+                            confidence += 500;
+                            if trimmed == "xrs" && (flags & (1 << 26)) != 0 {
+                                confidence += 1000;
                             }
                         }
-                    }
 
-                    if let Some(c_val) = is_compact_override {
-                        let expected_compact = c_val != 0;
-                        if is_compact != expected_compact {
-                            confidence -= 5000;
+                        let mut is_compact_override = None;
+                        if let Some(overrides) = &reg.item_overrides {
+                            if let Some(item_map) = overrides.get(trimmed) {
+                                if let Some(&c_val) = item_map.get("is_compact") {
+                                    is_compact_override = Some(c_val);
+                                }
+                            }
                         }
-                    }
+
+                        if let Some(c_val) = is_compact_override {
+                            let expected_compact = c_val != 0;
+                            if is_compact != expected_compact {
+                                confidence -= 5000;
+                            }
+                        }
                     }
 
                     if has_checksum {
@@ -595,10 +614,27 @@ pub fn peek_item_header_at_with_base(
                     }
 
                     let is_compact_trial = is_compact;
-                    let true_has_checksum = has_checksum && (
-                        _checksum == _calculated
-                        || (alpha_mode && (_checksum == 0 || (is_compact_trial && (trimmed.starts_with('r') && trimmed.len() <= 3 || matches!(trimmed.trim(), "hp1" | "mp1" | "tsc" | "isc" | "jew" | "ww" | "gcw"))) || (matches!(trimmed.trim(), "xrs" | "c8xr" | "rhd" | "wa2") && flags != 0 && (version <= 2))))
-                    );
+                    let true_has_checksum = has_checksum
+                        && (_checksum == _calculated
+                            || (alpha_mode
+                                && (_checksum == 0
+                                    || (is_compact_trial
+                                        && (trimmed.starts_with('r') && trimmed.len() <= 3
+                                            || matches!(
+                                                trimmed.trim(),
+                                                "hp1"
+                                                    | "mp1"
+                                                    | "tsc"
+                                                    | "isc"
+                                                    | "jew"
+                                                    | "ww"
+                                                    | "gcw"
+                                            )))
+                                    || (matches!(
+                                        trimmed.trim(),
+                                        "xrs" | "c8xr" | "rhd" | "wa2"
+                                    ) && flags != 0
+                                        && (version <= 2)))));
 
                     let true_geom_bits = if alpha_mode {
                         let is_summary = w_axiom.is_summary_item(version, trimmed);
@@ -615,8 +651,16 @@ pub fn peek_item_header_at_with_base(
                     } else {
                         4
                     };
-                    let true_base_header_len = 32 + version_bits + (if true_has_checksum { 8 } else { 0 }) + mode_bits + location_bits + x_bits;
-                    let corrected_gap = (trial_total_skip as i32 - true_base_header_len as i32 - true_geom_bits as i32).max(0) as i8;
+                    let true_base_header_len = 32
+                        + version_bits
+                        + (if true_has_checksum { 8 } else { 0 })
+                        + mode_bits
+                        + location_bits
+                        + x_bits;
+                    let corrected_gap = (trial_total_skip as i32
+                        - true_base_header_len as i32
+                        - true_geom_bits as i32)
+                        .max(0) as i8;
 
                     if confidence > max_confidence
                         || (confidence == max_confidence && (is_compact_trial || true_has_checksum))
@@ -671,28 +715,37 @@ pub fn peek_item_header_at_specific_gap(
     let is_compact_flag = (flags & 0x00200000) != 0;
 
     // Alpha Forensic (Axiom 0365): Some summary items use 0 as a checksum sentinel, or have corrupted checksums when stacked.
-    let (version, mode, loc, x_val, base_header_len, has_checksum) = if (v == 5 || v == 7 || v == 0 || v == 2)
-        && (calculated == checksum || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
-    {
-        let m = alpha_reader.read::<3, u8>().ok()?;
-        let l = match location_bits {
-            4 => alpha_reader.read::<4, u8>().ok()?,
-            _ => alpha_reader.read::<3, u8>().ok()?,
+    let (version, mode, loc, x_val, base_header_len, has_checksum) =
+        if (v == 5 || v == 7 || v == 0 || v == 2)
+            && (calculated == checksum
+                || (alpha_mode && (checksum == 0 || is_compact_flag || v == 0 || v == 2)))
+        {
+            let m = alpha_reader.read::<3, u8>().ok()?;
+            let l = match location_bits {
+                4 => alpha_reader.read::<4, u8>().ok()?,
+                _ => alpha_reader.read::<3, u8>().ok()?,
+            };
+            let x = match x_bits {
+                3 => alpha_reader.read::<3, u8>().ok()?,
+                _ => alpha_reader.read::<4, u8>().ok()?,
+            };
+            (
+                v,
+                m,
+                l,
+                x,
+                32 + version_bits + 8 + mode_bits + location_bits + x_bits,
+                true,
+            )
+        } else {
+            let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+            retail_reader.skip(start_bit as u32 + 32).ok()?;
+            let v = retail_reader.read::<3, u8>().ok()?;
+            let m = retail_reader.read::<3, u8>().ok()?;
+            let l = retail_reader.read::<3, u8>().ok()?;
+            let x = retail_reader.read::<4, u8>().ok()?;
+            (v, m, l, x, 32 + 3 + 3 + 3 + 4, false)
         };
-        let x = match x_bits {
-            3 => alpha_reader.read::<3, u8>().ok()?,
-            _ => alpha_reader.read::<4, u8>().ok()?,
-        };
-        (v, m, l, x, 32 + version_bits + 8 + mode_bits + location_bits + x_bits, true)
-    } else {
-        let mut retail_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
-        retail_reader.skip(start_bit as u32 + 32).ok()?;
-        let v = retail_reader.read::<3, u8>().ok()?;
-        let m = retail_reader.read::<3, u8>().ok()?;
-        let l = retail_reader.read::<3, u8>().ok()?;
-        let x = retail_reader.read::<4, u8>().ok()?;
-        (v, m, l, x, 32 + 3 + 3 + 3 + 4, false)
-    };
 
     // Alpha saves can omit checksum bytes on some items; the peek path must still
     // use Alpha rules for compactness and code decoding so version 7 equipment is not
@@ -1067,7 +1120,8 @@ pub fn parse_item_at_with_limit_with_carrier(
                     .end
                     .saturating_sub(base_bit_offset)
                     .saturating_sub(missing_bits as u64);
-                let tail_bits = read_alignment_padding_bits(bytes, tail_start_rel, missing_bits as u64);
+                let tail_bits =
+                    read_alignment_padding_bits(bytes, tail_start_rel, missing_bits as u64);
                 if !tail_bits.is_empty() {
                     let tail_start_abs = item.range.end.saturating_sub(tail_bits.len() as u64);
                     for (idx, bit) in tail_bits.iter().enumerate() {
@@ -1365,20 +1419,30 @@ impl Item {
             }
         }
         let mut start_offset = section_header_bits;
-        let mut subsumed_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut subsumed_indices: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
         let mut _next_expected_start = section_header_bits;
         let mut item_count = 0;
         let mut _consecutive_opaque = 0;
-        let mut _drift_signatures: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut _drift_signatures: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         if crate::item::item_trace_enabled() {
             use std::io::Write;
-            eprintln!("[harness-trace] Entering marker loop. count={}", markers.len());
+            eprintln!(
+                "[harness-trace] Entering marker loop. count={}",
+                markers.len()
+            );
             let _ = std::io::stderr().flush();
         }
         'marker_loop: for (i, marker) in markers.iter().enumerate() {
             if crate::item::item_trace_enabled() {
                 use std::io::Write;
-                eprintln!("[harness-trace] marker_loop i={} code={} start={}", i, marker.code.trim(), marker.offset);
+                eprintln!(
+                    "[harness-trace] marker_loop i={} code={} start={}",
+                    i,
+                    marker.code.trim(),
+                    marker.offset
+                );
                 let _ = std::io::stderr().flush();
             }
             if subsumed_indices.contains(&i) {
@@ -1398,19 +1462,27 @@ impl Item {
             while alpha_mode && start > start_offset {
                 if crate::item::item_trace_enabled() {
                     use std::io::Write;
-                    eprintln!("[harness-trace] Entering residue recovery while. start={} start_offset={}", start, start_offset);
+                    eprintln!(
+                        "[harness-trace] Entering residue recovery while. start={} start_offset={}",
+                        start, start_offset
+                    );
                     let _ = std::io::stderr().flush();
                 }
                 let mut found_item = None;
                 let max_search = start.saturating_sub(start_offset).min(64);
-                
+
                 for search_offset in 0..=max_search {
                     // Skip noise: 16 bits of all ones or zeros is never a valid Alpha summary/equipment header
                     let bits = BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
                     let mut cursor = BitCursor::new(bits);
-                    if cursor.skip(section_bit_offset + start_offset + search_offset).is_ok() {
+                    if cursor
+                        .skip(section_bit_offset + start_offset + search_offset)
+                        .is_ok()
+                    {
                         if let Ok(val) = cursor.read_bits::<u16>(16) {
-                            if val == 0 || val == 0xFFFF { continue; }
+                            if val == 0 || val == 0xFFFF {
+                                continue;
+                            }
                         }
                     }
 
@@ -1443,7 +1515,7 @@ impl Item {
                         let mut cursor = BitCursor::new(bits);
                         let _ = cursor.skip(section_bit_offset + start_offset);
                         let bits_vec = cursor.read_bits_as_vec(skip as u32).unwrap_or_default();
-                        
+
                         let is_authority_prev = if let Some(prev) = items.last() {
                             is_alpha_v105_authority_code(prev.code.as_str())
                         } else {
@@ -1451,7 +1523,10 @@ impl Item {
                         };
 
                         if let Some(prev_item) = items.last_mut().filter(|_| !is_authority_prev) {
-                            prev_item.body.alpha_alignment_padding.extend(bits_vec.clone());
+                            prev_item
+                                .body
+                                .alpha_alignment_padding
+                                .extend(bits_vec.clone());
                             for (idx, b) in bits_vec.iter().enumerate() {
                                 prev_item.bits.push(crate::domain::item::RecordedBit {
                                     bit: *b,
@@ -1467,7 +1542,9 @@ impl Item {
                             let mut residue = Item::default();
                             residue.expected_start_bit = start_offset;
                             residue.code = "    ".to_string();
-                            residue.modules.push(crate::domain::item::ItemModule::Opaque(bits_vec.clone()));
+                            residue
+                                .modules
+                                .push(crate::domain::item::ItemModule::Opaque(bits_vec.clone()));
                             for (idx, b) in bits_vec.iter().enumerate() {
                                 residue.bits.push(crate::domain::item::RecordedBit {
                                     bit: *b,
@@ -1490,15 +1567,20 @@ impl Item {
                         item_count,
                         alpha_mode,
                         Some(start - start_offset),
-                        if recovery_is_compact { Some(true) } else { None },
+                        if recovery_is_compact {
+                            Some(true)
+                        } else {
+                            None
+                        },
                         Some(recovery_code.as_str()),
                     );
                     if let Ok((mut recovered_item, recovered_consumed)) = parse_res {
                         recovered_item.code = recovery_code.clone();
                         recovered_item.expected_start_bit = start_offset;
                         recovered_item.range.start = section_bit_offset + start_offset;
-                        
-                        let remaining_gap = start.saturating_sub(start_offset.saturating_add(recovered_consumed));
+
+                        let remaining_gap =
+                            start.saturating_sub(start_offset.saturating_add(recovered_consumed));
                         let consumed = if remaining_gap < 8 && remaining_gap > 0 {
                             recovered_consumed + remaining_gap
                         } else {
@@ -1510,15 +1592,24 @@ impl Item {
                         }
 
                         if remaining_gap < 8 && remaining_gap > 0 {
-                            let mut fallback_reader = BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
-                            if fallback_reader.skip((start_offset + recovered_consumed) as u32).is_ok() {
+                            let mut fallback_reader =
+                                BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
+                            if fallback_reader
+                                .skip((start_offset + recovered_consumed) as u32)
+                                .is_ok()
+                            {
                                 for idx in 0..remaining_gap {
                                     if let Ok(b) = fallback_reader.read_bit() {
                                         recovered_item.body.alpha_alignment_padding.push(b);
-                                        recovered_item.bits.push(crate::domain::item::RecordedBit {
-                                            bit: b,
-                                            offset: section_bit_offset + start_offset + recovered_consumed + idx,
-                                        });
+                                        recovered_item.bits.push(
+                                            crate::domain::item::RecordedBit {
+                                                bit: b,
+                                                offset: section_bit_offset
+                                                    + start_offset
+                                                    + recovered_consumed
+                                                    + idx,
+                                            },
+                                        );
                                     }
                                 }
                             }
@@ -1528,8 +1619,9 @@ impl Item {
                         recovered_item.total_bits = consumed;
                         recovered_item.logical_width = Some(consumed);
                         if recovered_item.total_bits > recovered_item.bits.len() as u64 {
-                            let missing_bits =
-                                (recovered_item.total_bits - recovered_item.bits.len() as u64) as usize;
+                            let missing_bits = (recovered_item.total_bits
+                                - recovered_item.bits.len() as u64)
+                                as usize;
                             let tail_start_rel = start_offset + recovered_item.bits.len() as u64;
                             let tail_bits = read_alignment_padding_bits(
                                 section_bytes,
@@ -1537,18 +1629,21 @@ impl Item {
                                 missing_bits as u64,
                             );
                             if !tail_bits.is_empty() {
-                                let tail_start_abs =
-                                    section_bit_offset + tail_start_rel;
+                                let tail_start_abs = section_bit_offset + tail_start_rel;
                                 for (idx, bit) in tail_bits.iter().enumerate() {
                                     recovered_item.bits.push(crate::domain::item::RecordedBit {
                                         bit: *bit,
                                         offset: tail_start_abs + idx as u64,
                                     });
                                 }
-                                recovered_item.body.alpha_alignment_padding.extend(tail_bits);
+                                recovered_item
+                                    .body
+                                    .alpha_alignment_padding
+                                    .extend(tail_bits);
                             }
                         }
-                        recovered_item.record_parser_consumed_bits(recovered_item.bits.len() as u64);
+                        recovered_item
+                            .record_parser_consumed_bits(recovered_item.bits.len() as u64);
                         items.push(recovered_item);
 
                         let item_end_bit = start_offset + consumed;
@@ -1559,9 +1654,8 @@ impl Item {
                                 break;
                             }
                         }
-                        
-                        if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get())
-                        {
+
+                        if !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
                             item_count += 1;
                         }
                         start_offset += consumed;
@@ -1593,7 +1687,7 @@ impl Item {
                         }
                     }
                 }
-                
+
                 let is_authority_prev = if alpha_mode {
                     if let Some(prev) = items.last() {
                         is_alpha_v105_authority_code(prev.code.as_str())
@@ -1650,7 +1744,9 @@ impl Item {
                     residue.range.end = section_bit_offset + start;
                     residue.total_bits = residue_len;
                     items.push(residue);
-                    if !alpha_mode && !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get()) {
+                    if !alpha_mode
+                        && !crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.get())
+                    {
                         item_count += 1;
                     }
                 }
@@ -1747,12 +1843,13 @@ impl Item {
                 } else {
                     peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
                 };
-                target_width_override = crate::domain::forensic::v105::axioms::get_v105_target_width(
-                    version_peek,
-                    parse_code_hint_tmp,
-                    flags_peek,
-                    Some(item_count),
-                );
+                target_width_override =
+                    crate::domain::forensic::v105::axioms::get_v105_target_width(
+                        version_peek,
+                        parse_code_hint_tmp,
+                        flags_peek,
+                        Some(item_count),
+                    );
                 if parse_code_hint_tmp.trim() == "hla" {
                     target_width_override = 168;
                 }
@@ -1788,7 +1885,8 @@ impl Item {
             // Alpha v105 forensic: Socketed items add 8-bit alignment padding.
             // Authority items (xrs, c8xr, rhd, wa2) use a fixed 512-bit body block;
             // their socketed flag does not add extra alignment padding.
-            let is_authority_code_early = alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
+            let is_authority_code_early =
+                alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
             if !is_compact_final && (flags_peek & 0x00000008) != 0 && !is_authority_code_early {
                 dynamic_limit += 8;
             }
@@ -1806,9 +1904,10 @@ impl Item {
                 || reg
                     .forced_compact_codes
                     .as_ref()
-                .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
-                .unwrap_or(false);
-            let is_authority_marker = alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
+                    .map(|codes| codes.iter().any(|c| c == marker_code_trimmed))
+                    .unwrap_or(false);
+            let is_authority_marker =
+                alpha_mode && is_alpha_v105_authority_code(marker.code.as_str());
             let parse_code_hint_raw = if marker_is_forced_summary
                 || is_authority_marker
                 || matches!(marker_code_trimmed, "jav" | "buc")
@@ -1826,11 +1925,7 @@ impl Item {
             // trusted_compact_hint path can activate (it requires header.is_compact==true).
             // Without this, a non-compact peek (e.g. wbmx) at the same offset causes
             // AlphaShadowSkip to overflow the next-marker boundary.
-            let forced_compact_for_parse = if is_compact_final {
-                Some(true)
-            } else {
-                None
-            };
+            let forced_compact_for_parse = if is_compact_final { Some(true) } else { None };
             let parse_limit = Some(dynamic_limit);
 
             let parse_result = if reject_candidate {
@@ -1865,7 +1960,11 @@ impl Item {
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
 
-                    if alpha_mode && (marker.code.trim() == "wa2" || final_item.code.trim() == "wa2" || final_item.body.code.trim() == "wa2") {
+                    if alpha_mode
+                        && (marker.code.trim() == "wa2"
+                            || final_item.code.trim() == "wa2"
+                            || final_item.body.code.trim() == "wa2")
+                    {
                         for child in &mut final_item.socketed_items {
                             let original_code = child.code.trim().to_string();
                             if !original_code.contains('þ') {
@@ -1892,7 +1991,8 @@ impl Item {
                                     .socketed_items
                                     .insert(0, make_socket_child("r15"));
                                 final_item.socketed_items.push(make_socket_child("r13"));
-                                final_item.num_socketed_items = final_item.socketed_items.len() as u8;
+                                final_item.num_socketed_items =
+                                    final_item.socketed_items.len() as u8;
                             }
                             [first, second] if second.code.trim() == "r08" => {
                                 if first.code.trim() != "r15" {
@@ -1902,7 +2002,8 @@ impl Item {
                                 final_item
                                     .socketed_items
                                     .insert(0, make_socket_child("r15"));
-                                final_item.num_socketed_items = final_item.socketed_items.len() as u8;
+                                final_item.num_socketed_items =
+                                    final_item.socketed_items.len() as u8;
                             }
                             _ => {}
                         }
@@ -1963,11 +2064,18 @@ impl Item {
                     // Axiom 0344: In Alpha v105, if the scanner found a valid code,
                     // ensure the parser uses it (prevents Huffman collisions).
                     if alpha_mode && !marker.code.trim().is_empty() {
-                        let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&marker.code);
+                        let is_summary =
+                            crate::domain::forensic::v105::axioms::is_v105_summary_code(
+                                &marker.code,
+                            );
                         let is_authority = is_alpha_v105_authority_code(marker.code.as_str());
 
                         if is_authority {
-                            let forced_code = if marker.code.trim() == "wa2" { "wa2 " } else { "xrs " };
+                            let forced_code = if marker.code.trim() == "wa2" {
+                                "wa2 "
+                            } else {
+                                "xrs "
+                            };
                             final_item.code = forced_code.to_string();
                             final_item.body.code = forced_code.to_string();
                             final_item.header.is_runeword = true;
@@ -2006,12 +2114,11 @@ impl Item {
                             consumed_bits = target_width;
                         }
 
-                        let is_authority_final = alpha_mode && is_alpha_v105_authority_code(final_item.code.as_str());
+                        let is_authority_final =
+                            alpha_mode && is_alpha_v105_authority_code(final_item.code.as_str());
                         if is_authority_final {
                             consumed_bits = consumed_bits.min(512);
                         }
-
-
                     }
 
                     if final_item.code.trim().is_empty()
@@ -2043,11 +2150,8 @@ impl Item {
                     if final_item.code.trim().is_empty()
                         && final_item.bits.len() < actual_consumed as usize
                     {
-                        let raw_bits = read_alignment_padding_bits(
-                            section_bytes,
-                            start,
-                            actual_consumed,
-                        );
+                        let raw_bits =
+                            read_alignment_padding_bits(section_bytes, start, actual_consumed);
                         if raw_bits.len() as u64 == actual_consumed {
                             final_item.bits = raw_bits
                                 .iter()
@@ -2058,15 +2162,16 @@ impl Item {
                                 })
                                 .collect();
                             final_item.modules.clear();
-                            final_item.modules.push(crate::domain::item::ItemModule::Opaque(
-                                raw_bits.clone(),
-                            ));
+                            final_item
+                                .modules
+                                .push(crate::domain::item::ItemModule::Opaque(raw_bits.clone()));
                             final_item.body.alpha_alignment_padding = raw_bits;
                         }
                     }
 
                     if final_item.total_bits > final_item.bits.len() as u64 {
-                        let missing_bits = (final_item.total_bits - final_item.bits.len() as u64) as usize;
+                        let missing_bits =
+                            (final_item.total_bits - final_item.bits.len() as u64) as usize;
                         let tail_start_rel = start + final_item.bits.len() as u64;
                         let tail_bits = read_alignment_padding_bits(
                             section_bytes,
@@ -2106,7 +2211,11 @@ impl Item {
                 }
                 Err(_e) => {
                     if crate::item::item_trace_enabled() {
-                        eprintln!("[outer-parse-failure] marker={} error={:?}", marker.code.trim(), _e);
+                        eprintln!(
+                            "[outer-parse-failure] marker={} error={:?}",
+                            marker.code.trim(),
+                            _e
+                        );
                     }
                     let rejected_top_level_candidate = alpha_mode
                         && matches!(&_e.error, ParsingError::SpeculativeRejection { .. });
@@ -2176,7 +2285,10 @@ impl Item {
 
         if crate::item::item_trace_enabled() {
             use std::io::Write;
-            eprintln!("[harness-trace] marker_loop completed! start_offset={} section_bits={}", start_offset, section_bits);
+            eprintln!(
+                "[harness-trace] marker_loop completed! start_offset={} section_bits={}",
+                start_offset, section_bits
+            );
             let _ = std::io::stderr().flush();
         }
 
@@ -2195,7 +2307,7 @@ impl Item {
                     }
                 }
             }
-            
+
             if alpha_mode {
                 if let Some(prev_item) = items.last_mut() {
                     let parser_end = prev_item
@@ -2204,8 +2316,8 @@ impl Item {
                         .map(|segment| segment.end)
                         .max()
                         .unwrap_or(0);
-                    let claimed_end = (section_bit_offset + start_offset)
-                        .saturating_sub(prev_item.range.start);
+                    let claimed_end =
+                        (section_bit_offset + start_offset).saturating_sub(prev_item.range.start);
                     if crate::domain::forensic::v105::axioms::is_v105_summary_code(&prev_item.code)
                         && claimed_end > parser_end
                         && residue_len == 40
@@ -2288,11 +2400,8 @@ impl Item {
 
                 if needs_raw_capture {
                     let local_start = item.range.start.saturating_sub(section_bit_offset);
-                    let raw_bits = read_alignment_padding_bits(
-                        section_bytes,
-                        local_start,
-                        item.total_bits,
-                    );
+                    let raw_bits =
+                        read_alignment_padding_bits(section_bytes, local_start, item.total_bits);
                     if raw_bits.len() as u64 == item.total_bits {
                         let pre_capture_bits_len = item.bits.len() as u64;
                         item.bits = raw_bits
@@ -2307,9 +2416,8 @@ impl Item {
                             item.body.alpha_alignment_padding = raw_bits;
                         } else {
                             item.modules.clear();
-                            item.modules.push(crate::domain::item::ItemModule::Opaque(
-                                raw_bits.clone(),
-                            ));
+                            item.modules
+                                .push(crate::domain::item::ItemModule::Opaque(raw_bits.clone()));
                             item.body.alpha_alignment_padding = raw_bits;
                         }
                         item.segments.push(crate::domain::item::BitSegment {
@@ -2459,7 +2567,7 @@ impl Item {
 
         if alpha_mode && peek.is_none() {
             let saved = cursor.checkpoint();
-            
+
             // Path A: Try parsing assuming has_checksum is true
             let mut true_result = None;
             if let Ok((header, _, _)) = crate::domain::item::entity::parse_item_header(
@@ -2474,7 +2582,9 @@ impl Item {
             ) {
                 let s_axiom = crate::domain::stats::axiom::StatsAxiom::new(
                     header.version,
-                    header.quality.unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
+                    header
+                        .quality
+                        .unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
                     alpha_mode,
                 );
                 let is_ho = s_axiom.is_header_only(header.flags, "");
@@ -2483,7 +2593,11 @@ impl Item {
                     let mut decoded = String::new();
                     let mut ok = true;
                     for _ in 0..4 {
-                        if let Ok(c) = huff.decode_internal(|| cursor.read_bit().map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))) {
+                        if let Ok(c) = huff.decode_internal(|| {
+                            cursor.read_bit().map_err(|e| {
+                                io::Error::new(io::ErrorKind::Other, format!("{:?}", e))
+                            })
+                        }) {
                             decoded.push(c);
                         } else {
                             ok = false;
@@ -2507,7 +2621,13 @@ impl Item {
                             }
                         }
                         let trimmed_ascii = ascii_code.trim();
-                        if success && (trimmed_ascii == "xrs" || trimmed_ascii == "mp1" || crate::domain::forensic::v105::axioms::is_v105_summary_code(&ascii_code)) {
+                        if success
+                            && (trimmed_ascii == "xrs"
+                                || trimmed_ascii == "mp1"
+                                || crate::domain::forensic::v105::axioms::is_v105_summary_code(
+                                    &ascii_code,
+                                ))
+                        {
                             decoded = ascii_code;
                         } else {
                             cursor.rollback(saved_dec);
@@ -2515,7 +2635,8 @@ impl Item {
                     }
                     if ok {
                         let trimmed = decoded.trim().to_string();
-                        let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
+                        let is_summary =
+                            crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
                         let is_compact = header.is_compact || is_summary;
                         let consumed = cursor.pos() - start_bit;
                         true_result = Some((
@@ -2549,7 +2670,9 @@ impl Item {
             ) {
                 let s_axiom = crate::domain::stats::axiom::StatsAxiom::new(
                     header.version,
-                    header.quality.unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
+                    header
+                        .quality
+                        .unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
                     alpha_mode,
                 );
                 let is_ho = s_axiom.is_header_only(header.flags, "");
@@ -2558,7 +2681,11 @@ impl Item {
                     let mut decoded = String::new();
                     let mut ok = true;
                     for _ in 0..4 {
-                        if let Ok(c) = huff.decode_internal(|| cursor.read_bit().map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))) {
+                        if let Ok(c) = huff.decode_internal(|| {
+                            cursor.read_bit().map_err(|e| {
+                                io::Error::new(io::ErrorKind::Other, format!("{:?}", e))
+                            })
+                        }) {
                             decoded.push(c);
                         } else {
                             ok = false;
@@ -2582,7 +2709,13 @@ impl Item {
                             }
                         }
                         let trimmed_ascii = ascii_code.trim();
-                        if success && (trimmed_ascii == "xrs" || trimmed_ascii == "mp1" || crate::domain::forensic::v105::axioms::is_v105_summary_code(&ascii_code)) {
+                        if success
+                            && (trimmed_ascii == "xrs"
+                                || trimmed_ascii == "mp1"
+                                || crate::domain::forensic::v105::axioms::is_v105_summary_code(
+                                    &ascii_code,
+                                ))
+                        {
                             decoded = ascii_code;
                         } else {
                             cursor.rollback(saved_dec);
@@ -2590,7 +2723,8 @@ impl Item {
                     }
                     if ok {
                         let trimmed = decoded.trim().to_string();
-                        let is_summary = crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
+                        let is_summary =
+                            crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
                         let is_compact = header.is_compact || is_summary;
                         let consumed = cursor.pos() - start_bit;
                         false_result = Some((
@@ -2611,9 +2745,8 @@ impl Item {
             cursor.rollback(saved);
 
             // Resolve: Select the path that yields a valid summary code.
-            let is_trusted_compact_code = |code: &str| {
-                matches!(code.trim(), "jav" | "buc" | "us g")
-            };
+            let is_trusted_compact_code =
+                |code: &str| matches!(code.trim(), "jav" | "buc" | "us g");
             let true_is_summary = true_result
                 .as_ref()
                 .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3))
@@ -2803,7 +2936,11 @@ impl Item {
             }
             Err(e) => {
                 if header.save_is_alpha && crate::item::item_trace_enabled() {
-                    eprintln!("[body-parse-failure] code={} error={:?}", code_peek.unwrap_or(""), e);
+                    eprintln!(
+                        "[body-parse-failure] code={} error={:?}",
+                        code_peek.unwrap_or(""),
+                        e
+                    );
                     // Slice 4: Forensic isolation. Capture header and preserve body as SemiOpaque.
                     cursor.rollback(body_start_bit);
                     let remaining = if let Some(limit) = cursor.limit() {
@@ -2858,12 +2995,11 @@ impl Item {
                     let anchored_hint = !trimmed_hint.is_empty()
                         && (crate::domain::forensic::v105::axioms::is_v105_summary_code(
                             trimmed_hint,
-                        )
-                            || reg
-                                .forced_compact_codes
-                                .as_ref()
-                                .map(|codes| codes.iter().any(|c| c == trimmed_hint))
-                                .unwrap_or(false)
+                        ) || reg
+                            .forced_compact_codes
+                            .as_ref()
+                            .map(|codes| codes.iter().any(|c| c == trimmed_hint))
+                            .unwrap_or(false)
                             || reg
                                 .forced_runeword_codes
                                 .as_ref()
@@ -2899,7 +3035,8 @@ impl Item {
                     if let Some(eff) = reg.effective_codes.get(other) {
                         code = eff.clone();
                     }
-                    let normalized_body_code = crate::item::normalize_alpha_code_hint(&code).to_string();
+                    let normalized_body_code =
+                        crate::item::normalize_alpha_code_hint(&code).to_string();
                     if normalized_body_code != code {
                         code = normalized_body_code;
                     }
@@ -2916,7 +3053,8 @@ impl Item {
             }
         }
 
-        let body_is_template = crate::domain::item::serialization::item_template(body.code.trim()).is_some();
+        let body_is_template =
+            crate::domain::item::serialization::item_template(body.code.trim()).is_some();
         let mut header = header.clone();
         if header.save_is_alpha
             && body_is_template
@@ -2942,7 +3080,8 @@ impl Item {
             header.is_runeword && !body_is_template && hinted_template.is_none();
 
         // Slice 9: Alpha v105 runewords are shadow containers and skip standard extended stats.
-        let skip_ext_stats = header.save_is_alpha && detected_runeword && !matches!(body.code.trim(), "wa2" | "rhd");
+        let skip_ext_stats =
+            header.save_is_alpha && detected_runeword && !matches!(body.code.trim(), "wa2" | "rhd");
 
         let ext_axiom = axiom.clone();
 
@@ -3071,10 +3210,12 @@ impl Item {
                 .record(V105PropertyNudgeAxiom::default().metadata());
         }
 
-        let is_v105_summary =
-            alpha_mode && crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default().is_summary_item(item.header.version, &item.code);
+        let is_v105_summary = alpha_mode
+            && crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default()
+                .is_summary_item(item.header.version, &item.code);
         if !is_v105_summary {
-            let is_v105_shadow = !code_peek.map_or(false, |code| matches!(code.trim(), "jav" | "buc"))
+            let is_v105_shadow = !code_peek
+                .map_or(false, |code| matches!(code.trim(), "jav" | "buc"))
                 && (axiom.is_v105_shadow(item.header.flags, Some(&item.code))
                     || (alpha_mode && item.body.code.trim() == "hla"));
             let authority_runeword_hint = alpha_mode
@@ -3198,7 +3339,14 @@ impl Item {
         .with_index(idx)
         .with_personalization(item.header.is_personalized)
         .with_compact(item.header.is_compact)
-        .with_socketed(item.header.is_socketed || (alpha_mode && matches!(item.body.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")))
+        .with_socketed(
+            item.header.is_socketed
+                || (alpha_mode
+                    && matches!(
+                        item.body.code.trim(),
+                        "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw"
+                    )),
+        )
         .with_code(&item.code);
         let padding = if item.header.is_compact {
             Vec::new()
@@ -3220,7 +3368,14 @@ impl Item {
 
         let end_idx = cursor.pos().saturating_sub(start_bit) as usize;
         if crate::item::item_trace_enabled() {
-            eprintln!("[item-end-bits-check] code={} start_bit={} pos={} end_idx={} recorded_len={}", item.code.trim(), start_bit, cursor.pos(), end_idx, cursor.recorded_bits().len());
+            eprintln!(
+                "[item-end-bits-check] code={} start_bit={} pos={} end_idx={} recorded_len={}",
+                item.code.trim(),
+                start_bit,
+                cursor.pos(),
+                end_idx,
+                cursor.recorded_bits().len()
+            );
         }
         if end_idx <= cursor.recorded_bits().len() {
             item.bits = cursor.recorded_bits()[..end_idx].to_vec();
@@ -3350,8 +3505,9 @@ pub fn scan_socket_children(
                 || trimmed_code == "jew"
                 || trimmed_code == "ww"
                 || trimmed_code == "gcw";
-            let plausible = is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha)
-                || (alpha && is_socketable_rune && (mode == 6 || location == 6));
+            let plausible =
+                is_plausible_item_header(mode, location, code.as_bytes(), flags, version, alpha)
+                    || (alpha && is_socketable_rune && (mode == 6 || location == 6));
 
             if plausible {
                 if mode == 6 || location == 6 {
@@ -3359,7 +3515,10 @@ pub fn scan_socket_children(
                     let mut forced_compact = None;
                     let mut code_hint = None;
                     if alpha {
-                        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(version, &code, flags, None);
+                        let target_width =
+                            crate::domain::forensic::v105::axioms::get_v105_target_width(
+                                version, &code, flags, None,
+                            );
                         if target_width > 0 {
                             limit = Some(target_width as u64);
                         }
@@ -3380,8 +3539,12 @@ pub fn scan_socket_children(
                     }
 
                     let remaining = section_bits.saturating_sub(current_pos);
-                    let final_limit = if let Some(l) = limit { Some(l.min(remaining)) } else { Some(remaining) };
-                    
+                    let final_limit = if let Some(l) = limit {
+                        Some(l.min(remaining))
+                    } else {
+                        Some(remaining)
+                    };
+
                     if let Ok((item, consumed)) = parse_item_at_with_limit(
                         bytes,
                         current_pos,
@@ -3411,7 +3574,8 @@ pub fn scan_socket_children(
                             if target_width > 0 {
                                 consumed_bits = target_width;
                             }
-                            let is_authority_final = is_alpha_v105_authority_code(final_child.code.as_str());
+                            let is_authority_final =
+                                is_alpha_v105_authority_code(final_child.code.as_str());
                             if is_authority_final {
                                 consumed_bits = consumed_bits.min(512);
                             }
@@ -3588,7 +3752,9 @@ pub fn write_property_list(
                 let is_stat_387 = raw_id == 387 || axiom.map_alpha_id(raw_id) == 387;
 
                 if is_stat_320 || is_stat_387 {
-                    let child_bits_vec = if axiom.save_is_alpha && (!child.code.trim().is_ascii() || code.trim() == "wa2") {
+                    let child_bits_vec = if axiom.save_is_alpha
+                        && (!child.code.trim().is_ascii() || code.trim() == "wa2")
+                    {
                         child.bits.iter().map(|b| b.bit).collect::<Vec<bool>>()
                     } else {
                         child.to_bits(0, huffman, axiom.save_is_alpha)?
@@ -3610,7 +3776,9 @@ pub fn write_property_list(
                     }
                 } else {
                     // Variable budget (Stat 317)
-                    let child_bits_vec = if axiom.save_is_alpha && (!child.code.trim().is_ascii() || code.trim() == "wa2") {
+                    let child_bits_vec = if axiom.save_is_alpha
+                        && (!child.code.trim().is_ascii() || code.trim() == "wa2")
+                    {
                         child.bits.iter().map(|b| b.bit).collect::<Vec<bool>>()
                     } else {
                         child.to_bits(0, huffman, axiom.save_is_alpha)?
@@ -3628,7 +3796,8 @@ pub fn write_property_list(
             let stat_cost = crate::data::stat_costs::STAT_COSTS
                 .iter()
                 .find(|s| s.id == mapped_id);
-            let is_authority_host = axiom.save_is_alpha && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+            let is_authority_host =
+                axiom.save_is_alpha && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
             let suppress_authority_params = axiom.save_is_alpha
                 && (alpha_runeword || is_authority_host)
                 && matches!(code.trim(), "xrs" | "c8xr" | "rhd")
@@ -3651,7 +3820,11 @@ pub fn write_property_list(
 
                 // Alpha v105 Version 0 and 1 items use a 17-bit rhythm (9-bit id + 8-bit value)
                 // for standard stats, even when the stat table would otherwise suggest a wider save field.
-                if axiom.save_is_alpha && (version == 0 || version == 1) && rhythm.id_bits == 9 && default_width == 9 {
+                if axiom.save_is_alpha
+                    && (version == 0 || version == 1)
+                    && rhythm.id_bits == 9
+                    && default_width == 9
+                {
                     default_width = 8;
                 }
 
@@ -3922,7 +4095,11 @@ mod tests {
         let bytes = emitter.into_bytes();
         let items = Item::read_section(&bytes, 0, 1, &huffman, true, false).unwrap();
         assert!(!items.is_empty());
-        assert!(items.iter().any(|it| it.modules.iter().any(|m| matches!(m, crate::domain::item::ItemModule::SemiOpaque { .. } | crate::domain::item::ItemModule::Opaque(_)))));
+        assert!(items.iter().any(|it| it.modules.iter().any(|m| matches!(
+            m,
+            crate::domain::item::ItemModule::SemiOpaque { .. }
+                | crate::domain::item::ItemModule::Opaque(_)
+        ))));
     }
 
     #[test]
