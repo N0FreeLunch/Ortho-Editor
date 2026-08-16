@@ -4,13 +4,16 @@ use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 enum FailureFamily {
     Geometry,
     RWSet,
@@ -45,7 +48,7 @@ impl FailureFamily {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct BitWindow {
     start: usize,
     end: usize,
@@ -65,7 +68,7 @@ fn bounded_bit_window(bits: Option<&String>, offset: Option<usize>) -> Option<Bi
     })
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct MismatchRow {
     item_label: String,
     code: String,
@@ -82,7 +85,7 @@ struct MismatchRow {
     target_len: Option<usize>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct LowConfidenceRow {
     item_index: usize,
     code: String,
@@ -91,7 +94,7 @@ struct LowConfidenceRow {
     segment: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct AuditResult {
     status: String,
     filename: String,
@@ -100,13 +103,13 @@ struct AuditResult {
     hint: String,
     family: Option<FailureFamily>,
     topology: TopologyReceipt,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     mismatch_rows: Vec<MismatchRow>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     low_confidence_rows: Vec<LowConfidenceRow>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct JmSectionReceipt {
     jm_offset_byte: usize,
     next_jm_offset_byte: usize,
@@ -114,7 +117,7 @@ struct JmSectionReceipt {
     payload_len_bytes: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct ParserTopologyReceipt {
     top_level_count: Option<usize>,
     nested_count: Option<usize>,
@@ -126,7 +129,7 @@ struct ParserTopologyReceipt {
     parser_error: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct TopologyReceipt {
     jm_sections: Vec<JmSectionReceipt>,
     parser: ParserTopologyReceipt,
@@ -368,6 +371,179 @@ struct Args {
     evaluator_revision: String,
     corpus_manifest: String,
     worktree_state: String,
+    strict_timeout_ms: Option<u64>,
+    worker_single_fixture: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+struct WorkerReceipt {
+    result: AuditResult,
+    failure_breakdown: HashMap<FailureFamily, usize>,
+}
+
+fn bounded_failure_result(file_path: &Path, status: &str, reason: String) -> AuditResult {
+    let file_name = file_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file_path.display().to_string());
+    let mut topology = match fs::read(file_path) {
+        Ok(bytes) => build_topology_receipt(&bytes, false),
+        Err(error) => TopologyReceipt {
+            jm_sections: Vec::new(),
+            parser: ParserTopologyReceipt {
+                top_level_count: None,
+                nested_count: None,
+                total_tree_count: None,
+                residue_count: None,
+                opaque_count: None,
+                raw_span_count: None,
+                parser_error: Some(format!(
+                    "file read failed while building bounded receipt: {error}"
+                )),
+            },
+        },
+    };
+    topology.parser.parser_error = Some(reason.clone());
+
+    AuditResult {
+        status: status.to_string(),
+        filename: file_name,
+        item_count: 0,
+        avg_fidelity: 0.0,
+        hint: reason,
+        family: Some(FailureFamily::Unknown),
+        topology,
+        mismatch_rows: Vec::new(),
+        low_confidence_rows: Vec::new(),
+    }
+}
+
+fn process_file_with_timeout(
+    args: &Args,
+    file_path: &Path,
+    failure_breakdown: &mut HashMap<FailureFamily, usize>,
+) -> AuditResult {
+    let Some(timeout_ms) = args.strict_timeout_ms else {
+        return process_file(args, file_path, failure_breakdown);
+    };
+
+    let file_name = match file_path.file_name().and_then(|name| name.to_str()) {
+        Some(name) => name,
+        None => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                "unable to derive fixture basename for strict worker".to_string(),
+            );
+        }
+    };
+    let executable = match env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                format!("unable to resolve strict worker executable: {error}"),
+            );
+        }
+    };
+
+    let mut command = Command::new(executable);
+    command
+        .arg(&args.target_dir)
+        .arg("--fixture-name")
+        .arg(file_name)
+        .arg("--worker-single-fixture")
+        .arg("--json")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if args.detailed {
+        command.arg("--detailed");
+    }
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                format!("strict worker failed to spawn: {error}"),
+            );
+        }
+    };
+    let deadline = Duration::from_millis(timeout_ms);
+    let started = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+                return bounded_failure_result(
+                    file_path,
+                    "[TIMEOUT]",
+                    format!("strict worker exceeded {timeout_ms} ms"),
+                );
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+                return bounded_failure_result(
+                    file_path,
+                    "[ERROR]",
+                    format!("strict worker wait failed: {error}"),
+                );
+            }
+        }
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                format!(
+                    "strict worker exited {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            );
+        }
+        Err(error) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                format!("strict worker output collection failed: {error}"),
+            );
+        }
+    };
+
+    match serde_json::from_slice::<WorkerReceipt>(&output.stdout) {
+        Ok(worker) => {
+            for (family, count) in worker.failure_breakdown {
+                *failure_breakdown.entry(family).or_insert(0) += count;
+            }
+            worker.result
+        }
+        Err(error) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                format!("strict worker returned invalid JSON: {error}"),
+            )
+        }
+    }
 }
 
 fn process_file(
@@ -954,6 +1130,18 @@ fn main() {
         Some("worktree-state"),
         "Worktree state identifier recorded in the output receipt",
     ));
+    parser.add_spec(ArgSpec::option(
+        "strict-timeout-ms",
+        None,
+        Some("strict-timeout-ms"),
+        "Opt-in per-fixture strict replay deadline in milliseconds",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "worker-single-fixture",
+        None,
+        Some("worker-single-fixture"),
+        "Internal: emit one strict fixture receipt to stdout",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -976,6 +1164,16 @@ fn main() {
             eprintln!("error: --legacy-gate must be pass, not-run, or fail; received '{value}'");
             std::process::exit(1);
         }
+    };
+    let strict_timeout_ms = match parsed.get("strict-timeout-ms") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(timeout_ms) if timeout_ms > 0 => Some(timeout_ms),
+            _ => {
+                eprintln!("error: --strict-timeout-ms must be a positive integer");
+                std::process::exit(1);
+            }
+        },
+        None => None,
     };
 
     let args = Args {
@@ -1015,6 +1213,8 @@ fn main() {
             .get("worktree-state")
             .cloned()
             .unwrap_or_else(|| "unrecorded".to_string()),
+        strict_timeout_ms,
+        worker_single_fixture: parsed.is_set("worker-single-fixture"),
     };
 
     let path = Path::new(&args.target_dir);
@@ -1058,6 +1258,21 @@ fn main() {
         return;
     }
 
+    if args.worker_single_fixture {
+        if file_paths.len() != 1 {
+            eprintln!("error: --worker-single-fixture requires one exact fixture");
+            std::process::exit(1);
+        }
+        let mut failure_breakdown = HashMap::new();
+        let result = process_file(&args, &file_paths[0], &mut failure_breakdown);
+        let receipt = WorkerReceipt {
+            result,
+            failure_breakdown,
+        };
+        println!("{}", serde_json::to_string(&receipt).unwrap());
+        return;
+    }
+
     let mut total_files = 0;
     let mut total_pass = 0;
     let mut total_fail = 0;
@@ -1082,7 +1297,11 @@ fn main() {
 
     for path in file_paths {
         total_files += 1;
-        let res = process_file(&args, &path, &mut failure_breakdown);
+        let res = if args.strict_timeout_ms.is_some() && !args.topology_only {
+            process_file_with_timeout(&args, &path, &mut failure_breakdown)
+        } else {
+            process_file(&args, &path, &mut failure_breakdown)
+        };
         let (diff, act, class) = extract_metadata(&path);
         let act_key = if act == "Unknown" {
             "Unknown".to_string()
