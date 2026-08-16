@@ -1,5 +1,7 @@
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
+use d2r_core::domain::item::scanner::scan_item_markers;
+use d2r_core::domain::item::serialization::is_likely_jm_section_header;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -107,6 +109,8 @@ struct AuditResult {
     mismatch_rows: Vec<MismatchRow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     low_confidence_rows: Vec<LowConfidenceRow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    scanner_sections: Vec<ScannerSectionReceipt>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -115,6 +119,16 @@ struct JmSectionReceipt {
     next_jm_offset_byte: usize,
     declared_count: Option<u16>,
     payload_len_bytes: usize,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ScannerSectionReceipt {
+    jm_offset_byte: usize,
+    next_jm_offset_byte: usize,
+    declared_count: u16,
+    payload_len_bytes: usize,
+    accepted_marker_count: usize,
+    elapsed_ms: u128,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -265,6 +279,54 @@ fn build_topology_receipt(bytes: &[u8], include_parser: bool) -> TopologyReceipt
     }
 }
 
+fn scan_sections_for_receipt(bytes: &[u8]) -> Vec<ScannerSectionReceipt> {
+    let alpha_mode = bytes
+        .get(4..8)
+        .and_then(|version| version.try_into().ok())
+        .map(u32::from_le_bytes)
+        .is_some_and(|version| version == 105 || version == 6);
+    let huffman = HuffmanTree::new();
+    let mut positions = Vec::new();
+    for position in find_jm_markers(bytes) {
+        if is_likely_jm_section_header(bytes, position, alpha_mode, &huffman) {
+            positions.push(position);
+        }
+    }
+
+    positions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &jm_offset_byte)| {
+            let declared_count = u16::from_le_bytes([
+                *bytes.get(jm_offset_byte + 2)?,
+                *bytes.get(jm_offset_byte + 3)?,
+            ]);
+            if declared_count == 0 {
+                return None;
+            }
+            let next_jm_offset_byte = positions.get(index + 1).copied().unwrap_or(bytes.len());
+            let section_bytes = bytes.get(jm_offset_byte..next_jm_offset_byte)?;
+            let started = Instant::now();
+            let markers = scan_item_markers(
+                section_bytes,
+                &huffman,
+                alpha_mode,
+                (jm_offset_byte as u64) * 8,
+                Some(declared_count),
+                false,
+            );
+            Some(ScannerSectionReceipt {
+                jm_offset_byte,
+                next_jm_offset_byte,
+                declared_count,
+                payload_len_bytes: next_jm_offset_byte.saturating_sub(jm_offset_byte + 4),
+                accepted_marker_count: markers.len(),
+                elapsed_ms: started.elapsed().as_millis(),
+            })
+        })
+        .collect()
+}
+
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
     let mismatch_type = diff.mismatch_type.as_deref().unwrap_or("");
     let offset = diff.first_mismatch_offset.unwrap_or(0);
@@ -373,6 +435,7 @@ struct Args {
     worktree_state: String,
     strict_timeout_ms: Option<u64>,
     target_index: Option<usize>,
+    scanner_only: bool,
     worker_single_fixture: bool,
 }
 
@@ -416,6 +479,7 @@ fn bounded_failure_result(file_path: &Path, status: &str, reason: String) -> Aud
         topology,
         mismatch_rows: Vec::new(),
         low_confidence_rows: Vec::new(),
+        scanner_sections: Vec::new(),
     }
 }
 
@@ -465,6 +529,9 @@ fn process_file_with_timeout(
     }
     if let Some(target_index) = args.target_index {
         command.arg("--target-index").arg(target_index.to_string());
+    }
+    if args.scanner_only {
+        command.arg("--scanner-only");
     }
 
     let mut child = match command.spawn() {
@@ -585,11 +652,12 @@ fn process_file(
                 },
                 mismatch_rows: Vec::new(),
                 low_confidence_rows: Vec::new(),
+                scanner_sections: Vec::new(),
             };
         }
     };
 
-    let topology = build_topology_receipt(&bytes, !args.topology_only);
+    let topology = build_topology_receipt(&bytes, !args.topology_only && !args.scanner_only);
 
     if args.topology_only {
         return AuditResult {
@@ -602,6 +670,26 @@ fn process_file(
             topology,
             mismatch_rows: Vec::new(),
             low_confidence_rows: Vec::new(),
+            scanner_sections: Vec::new(),
+        };
+    }
+
+    if args.scanner_only {
+        let scanner_sections = scan_sections_for_receipt(&bytes);
+        return AuditResult {
+            status: "[PASS]".to_string(),
+            filename: file_name,
+            item_count: 0,
+            avg_fidelity: 0.0,
+            hint: format!(
+                "Scanner-only receipt completed for {} nonempty plausible JM sections; strict replay skipped",
+                scanner_sections.len()
+            ),
+            family: None,
+            topology,
+            mismatch_rows: Vec::new(),
+            low_confidence_rows: Vec::new(),
+            scanner_sections,
         };
     }
 
@@ -702,6 +790,7 @@ fn process_file(
                 topology,
                 mismatch_rows,
                 low_confidence_rows,
+                scanner_sections: Vec::new(),
             }
         }
         Err(e) => {
@@ -716,6 +805,7 @@ fn process_file(
                 topology,
                 mismatch_rows: Vec::new(),
                 low_confidence_rows: Vec::new(),
+                scanner_sections: Vec::new(),
             }
         }
     }
@@ -1147,6 +1237,12 @@ fn main() {
         "Select one zero-based top-level player item for strict replay",
     ));
     parser.add_spec(ArgSpec::flag(
+        "scanner-only",
+        None,
+        Some("scanner-only"),
+        "Measure existing item-marker scans without section parsing or strict replay",
+    ));
+    parser.add_spec(ArgSpec::flag(
         "worker-single-fixture",
         None,
         Some("worker-single-fixture"),
@@ -1235,6 +1331,7 @@ fn main() {
             .unwrap_or_else(|| "unrecorded".to_string()),
         strict_timeout_ms,
         target_index,
+        scanner_only: parsed.is_set("scanner-only"),
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
     };
 
