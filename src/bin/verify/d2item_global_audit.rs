@@ -111,6 +111,8 @@ struct AuditResult {
     low_confidence_rows: Vec<LowConfidenceRow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     scanner_sections: Vec<ScannerSectionReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    scanner_candidates: Vec<ScannerCandidateReceipt>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -129,6 +131,23 @@ struct ScannerSectionReceipt {
     payload_len_bytes: usize,
     accepted_marker_count: usize,
     elapsed_ms: u128,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ScannerCandidateReceipt {
+    candidate_index: usize,
+    jm_offset_byte: usize,
+    next_raw_jm_offset_byte: usize,
+    declared_count: Option<u16>,
+    header_status: String,
+    header_elapsed_ms: Option<u128>,
+    header_plausible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scan_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scan_elapsed_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted_marker_count: Option<usize>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -327,6 +346,73 @@ fn scan_sections_for_receipt(bytes: &[u8]) -> Vec<ScannerSectionReceipt> {
         .collect()
 }
 
+fn scan_candidate_for_receipt(
+    bytes: &[u8],
+    candidate_index: usize,
+    header_only: bool,
+    section_end_byte: Option<usize>,
+) -> Result<ScannerCandidateReceipt, String> {
+    let positions = find_jm_markers(bytes);
+    let jm_offset_byte = *positions
+        .get(candidate_index)
+        .ok_or_else(|| format!("raw JM candidate {candidate_index} is out of range"))?;
+    let next_raw_jm_offset_byte = positions
+        .get(candidate_index + 1)
+        .copied()
+        .unwrap_or(bytes.len());
+    let declared_count = bytes
+        .get(jm_offset_byte + 2..jm_offset_byte + 4)
+        .and_then(|header| header.try_into().ok())
+        .map(u16::from_le_bytes);
+    let alpha_mode = bytes
+        .get(4..8)
+        .and_then(|version| version.try_into().ok())
+        .map(u32::from_le_bytes)
+        .is_some_and(|version| version == 105 || version == 6);
+    let huffman = HuffmanTree::new();
+    let header_started = Instant::now();
+    let header_plausible = is_likely_jm_section_header(bytes, jm_offset_byte, alpha_mode, &huffman);
+    let header_elapsed_ms = header_started.elapsed().as_millis();
+    let mut receipt = ScannerCandidateReceipt {
+        candidate_index,
+        jm_offset_byte,
+        next_raw_jm_offset_byte,
+        declared_count,
+        header_status: "[PASS]".to_string(),
+        header_elapsed_ms: Some(header_elapsed_ms),
+        header_plausible: Some(header_plausible),
+        scan_status: None,
+        scan_elapsed_ms: None,
+        accepted_marker_count: None,
+    };
+    if header_only || !header_plausible || declared_count == Some(0) {
+        if !header_only {
+            receipt.scan_status = Some("[SKIPPED]".to_string());
+        }
+        return Ok(receipt);
+    }
+
+    let section_end_byte = section_end_byte.ok_or_else(|| {
+        format!("scanner candidate {candidate_index} needs a pre-classified section end")
+    })?;
+    let section_bytes = bytes.get(jm_offset_byte..section_end_byte).ok_or_else(|| {
+        format!("invalid scanner section bounds {jm_offset_byte}..{section_end_byte}")
+    })?;
+    let scan_started = Instant::now();
+    let markers = scan_item_markers(
+        section_bytes,
+        &huffman,
+        alpha_mode,
+        (jm_offset_byte as u64) * 8,
+        declared_count,
+        false,
+    );
+    receipt.scan_status = Some("[PASS]".to_string());
+    receipt.scan_elapsed_ms = Some(scan_started.elapsed().as_millis());
+    receipt.accepted_marker_count = Some(markers.len());
+    Ok(receipt)
+}
+
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
     let mismatch_type = diff.mismatch_type.as_deref().unwrap_or("");
     let offset = diff.first_mismatch_offset.unwrap_or(0);
@@ -417,6 +503,7 @@ fn generate_markdown_report(report: &GlobalAuditReport) -> String {
     md
 }
 
+#[derive(Clone)]
 struct Args {
     target_dir: String,
     fixture_name: Option<String>,
@@ -436,6 +523,9 @@ struct Args {
     strict_timeout_ms: Option<u64>,
     target_index: Option<usize>,
     scanner_only: bool,
+    scanner_candidate_index: Option<usize>,
+    scanner_header_only: bool,
+    scanner_section_end_byte: Option<usize>,
     worker_single_fixture: bool,
 }
 
@@ -480,6 +570,7 @@ fn bounded_failure_result(file_path: &Path, status: &str, reason: String) -> Aud
         mismatch_rows: Vec::new(),
         low_confidence_rows: Vec::new(),
         scanner_sections: Vec::new(),
+        scanner_candidates: Vec::new(),
     }
 }
 
@@ -491,6 +582,9 @@ fn process_file_with_timeout(
     let Some(timeout_ms) = args.strict_timeout_ms else {
         return process_file(args, file_path, failure_breakdown);
     };
+    if args.scanner_only && args.scanner_candidate_index.is_none() {
+        return process_scanner_candidates_with_timeout(args, file_path, failure_breakdown);
+    }
 
     let file_name = match file_path.file_name().and_then(|name| name.to_str()) {
         Some(name) => name,
@@ -532,6 +626,19 @@ fn process_file_with_timeout(
     }
     if args.scanner_only {
         command.arg("--scanner-only");
+    }
+    if let Some(candidate_index) = args.scanner_candidate_index {
+        command
+            .arg("--scanner-candidate-index")
+            .arg(candidate_index.to_string());
+    }
+    if args.scanner_header_only {
+        command.arg("--scanner-header-only");
+    }
+    if let Some(section_end_byte) = args.scanner_section_end_byte {
+        command
+            .arg("--scanner-section-end-byte")
+            .arg(section_end_byte.to_string());
     }
 
     let mut child = match command.spawn() {
@@ -617,6 +724,127 @@ fn process_file_with_timeout(
     }
 }
 
+fn process_scanner_candidates_with_timeout(
+    args: &Args,
+    file_path: &Path,
+    failure_breakdown: &mut HashMap<FailureFamily, usize>,
+) -> AuditResult {
+    let bytes = match fs::read(file_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(file_path, "[ERROR]", format!("Read error: {error}"));
+        }
+    };
+    let topology = build_topology_receipt(&bytes, false);
+    let positions = find_jm_markers(&bytes);
+    let mut candidates = Vec::new();
+
+    for (candidate_index, &jm_offset_byte) in positions.iter().enumerate() {
+        let mut child_args = args.clone();
+        child_args.scanner_candidate_index = Some(candidate_index);
+        child_args.scanner_header_only = true;
+        child_args.scanner_section_end_byte = None;
+        let result = process_file_with_timeout(&child_args, file_path, failure_breakdown);
+        let next_raw_jm_offset_byte = positions
+            .get(candidate_index + 1)
+            .copied()
+            .unwrap_or(bytes.len());
+        let declared_count = bytes
+            .get(jm_offset_byte + 2..jm_offset_byte + 4)
+            .and_then(|header| header.try_into().ok())
+            .map(u16::from_le_bytes);
+        let status = result.status.clone();
+        let hint = result.hint.clone();
+        let candidate =
+            result
+                .scanner_candidates
+                .into_iter()
+                .next()
+                .unwrap_or(ScannerCandidateReceipt {
+                    candidate_index,
+                    jm_offset_byte,
+                    next_raw_jm_offset_byte,
+                    declared_count,
+                    header_status: status,
+                    header_elapsed_ms: None,
+                    header_plausible: None,
+                    scan_status: Some(format!("[SKIPPED] {hint}")),
+                    scan_elapsed_ms: None,
+                    accepted_marker_count: None,
+                });
+        candidates.push(candidate);
+    }
+
+    let plausible_offsets: Vec<usize> = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.header_status == "[PASS]" && candidate.header_plausible == Some(true)
+        })
+        .map(|candidate| candidate.jm_offset_byte)
+        .collect();
+    for candidate in &mut candidates {
+        if candidate.header_status != "[PASS]"
+            || candidate.header_plausible != Some(true)
+            || candidate.declared_count == Some(0)
+        {
+            continue;
+        }
+        let section_end_byte = plausible_offsets
+            .iter()
+            .copied()
+            .find(|offset| *offset > candidate.jm_offset_byte)
+            .unwrap_or(bytes.len());
+        let mut child_args = args.clone();
+        child_args.scanner_candidate_index = Some(candidate.candidate_index);
+        child_args.scanner_header_only = false;
+        child_args.scanner_section_end_byte = Some(section_end_byte);
+        let result = process_file_with_timeout(&child_args, file_path, failure_breakdown);
+        if let Some(scan_candidate) = result.scanner_candidates.into_iter().next() {
+            candidate.scan_status = scan_candidate.scan_status;
+            candidate.scan_elapsed_ms = scan_candidate.scan_elapsed_ms;
+            candidate.accepted_marker_count = scan_candidate.accepted_marker_count;
+        } else {
+            candidate.scan_status = Some(result.status);
+        }
+    }
+
+    let has_timeout = candidates.iter().any(|candidate| {
+        candidate.header_status == "[TIMEOUT]"
+            || candidate.scan_status.as_deref() == Some("[TIMEOUT]")
+    });
+    let has_error = candidates.iter().any(|candidate| {
+        candidate.header_status == "[ERROR]" || candidate.scan_status.as_deref() == Some("[ERROR]")
+    });
+    let status = if has_timeout {
+        "[TIMEOUT]"
+    } else if has_error {
+        "[ERROR]"
+    } else {
+        "[PASS]"
+    };
+    AuditResult {
+        status: status.to_string(),
+        filename: file_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file_path.display().to_string()),
+        item_count: 0,
+        avg_fidelity: 0.0,
+        hint: "Per-candidate scanner receipt; strict replay skipped".to_string(),
+        family: if status == "[PASS]" {
+            None
+        } else {
+            Some(FailureFamily::Unknown)
+        },
+        topology,
+        mismatch_rows: Vec::new(),
+        low_confidence_rows: Vec::new(),
+        scanner_sections: Vec::new(),
+        scanner_candidates: candidates,
+    }
+}
+
 fn process_file(
     args: &Args,
     file_path: &Path,
@@ -653,6 +881,7 @@ fn process_file(
                 mismatch_rows: Vec::new(),
                 low_confidence_rows: Vec::new(),
                 scanner_sections: Vec::new(),
+                scanner_candidates: Vec::new(),
             };
         }
     };
@@ -671,10 +900,46 @@ fn process_file(
             mismatch_rows: Vec::new(),
             low_confidence_rows: Vec::new(),
             scanner_sections: Vec::new(),
+            scanner_candidates: Vec::new(),
         };
     }
 
     if args.scanner_only {
+        if let Some(candidate_index) = args.scanner_candidate_index {
+            return match scan_candidate_for_receipt(
+                &bytes,
+                candidate_index,
+                args.scanner_header_only,
+                args.scanner_section_end_byte,
+            ) {
+                Ok(candidate) => AuditResult {
+                    status: "[PASS]".to_string(),
+                    filename: file_name,
+                    item_count: 0,
+                    avg_fidelity: 0.0,
+                    hint: "Scanner candidate receipt completed; strict replay skipped".to_string(),
+                    family: None,
+                    topology,
+                    mismatch_rows: Vec::new(),
+                    low_confidence_rows: Vec::new(),
+                    scanner_sections: Vec::new(),
+                    scanner_candidates: vec![candidate],
+                },
+                Err(error) => AuditResult {
+                    status: "[ERROR]".to_string(),
+                    filename: file_name,
+                    item_count: 0,
+                    avg_fidelity: 0.0,
+                    hint: error,
+                    family: Some(FailureFamily::Unknown),
+                    topology,
+                    mismatch_rows: Vec::new(),
+                    low_confidence_rows: Vec::new(),
+                    scanner_sections: Vec::new(),
+                    scanner_candidates: Vec::new(),
+                },
+            };
+        }
         let scanner_sections = scan_sections_for_receipt(&bytes);
         return AuditResult {
             status: "[PASS]".to_string(),
@@ -690,6 +955,7 @@ fn process_file(
             mismatch_rows: Vec::new(),
             low_confidence_rows: Vec::new(),
             scanner_sections,
+            scanner_candidates: Vec::new(),
         };
     }
 
@@ -791,6 +1057,7 @@ fn process_file(
                 mismatch_rows,
                 low_confidence_rows,
                 scanner_sections: Vec::new(),
+                scanner_candidates: Vec::new(),
             }
         }
         Err(e) => {
@@ -806,6 +1073,7 @@ fn process_file(
                 mismatch_rows: Vec::new(),
                 low_confidence_rows: Vec::new(),
                 scanner_sections: Vec::new(),
+                scanner_candidates: Vec::new(),
             }
         }
     }
@@ -1242,6 +1510,24 @@ fn main() {
         Some("scanner-only"),
         "Measure existing item-marker scans without section parsing or strict replay",
     ));
+    parser.add_spec(ArgSpec::option(
+        "scanner-candidate-index",
+        None,
+        Some("scanner-candidate-index"),
+        "Internal: select one raw JM candidate for scanner receipt work",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "scanner-header-only",
+        None,
+        Some("scanner-header-only"),
+        "Internal: measure plausible-header classification without scanning",
+    ));
+    parser.add_spec(ArgSpec::option(
+        "scanner-section-end-byte",
+        None,
+        Some("scanner-section-end-byte"),
+        "Internal: end offset for one pre-classified scanner section",
+    ));
     parser.add_spec(ArgSpec::flag(
         "worker-single-fixture",
         None,
@@ -1291,6 +1577,26 @@ fn main() {
         },
         None => None,
     };
+    let scanner_candidate_index = match parsed.get("scanner-candidate-index") {
+        Some(value) => match value.parse::<usize>() {
+            Ok(index) => Some(index),
+            Err(_) => {
+                eprintln!("error: --scanner-candidate-index must be a non-negative integer");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+    let scanner_section_end_byte = match parsed.get("scanner-section-end-byte") {
+        Some(value) => match value.parse::<usize>() {
+            Ok(offset) => Some(offset),
+            Err(_) => {
+                eprintln!("error: --scanner-section-end-byte must be a non-negative integer");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
 
     let args = Args {
         target_dir: parsed
@@ -1332,6 +1638,9 @@ fn main() {
         strict_timeout_ms,
         target_index,
         scanner_only: parsed.is_set("scanner-only"),
+        scanner_candidate_index,
+        scanner_header_only: parsed.is_set("scanner-header-only"),
+        scanner_section_end_byte,
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
     };
 
