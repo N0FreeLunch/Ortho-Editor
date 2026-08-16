@@ -58,6 +58,9 @@ pub struct ScannerWorkCounters {
     pub base_header_peeks: u64,
     pub alternate_gap_peeks: u64,
     pub lookahead_checks: u64,
+    pub base_header_peek_micros: u64,
+    pub alternate_gap_peek_micros: u64,
+    pub lookahead_check_micros: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +76,9 @@ struct ScannerWorkAccumulator {
     base_header_peeks: AtomicU64,
     alternate_gap_peeks: AtomicU64,
     lookahead_checks: AtomicU64,
+    base_header_peek_micros: AtomicU64,
+    alternate_gap_peek_micros: AtomicU64,
+    lookahead_check_micros: AtomicU64,
 }
 
 impl ScannerWorkAccumulator {
@@ -82,6 +88,9 @@ impl ScannerWorkAccumulator {
             base_header_peeks: self.base_header_peeks.load(Ordering::Relaxed),
             alternate_gap_peeks: self.alternate_gap_peeks.load(Ordering::Relaxed),
             lookahead_checks: self.lookahead_checks.load(Ordering::Relaxed),
+            base_header_peek_micros: self.base_header_peek_micros.load(Ordering::Relaxed),
+            alternate_gap_peek_micros: self.alternate_gap_peek_micros.load(Ordering::Relaxed),
+            lookahead_check_micros: self.lookahead_check_micros.load(Ordering::Relaxed),
         }
     }
 }
@@ -317,14 +326,22 @@ fn scan_item_markers_internal(
                     if let Some(work) = work {
                         work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
                     }
+                    let base_peek_started = std::time::Instant::now();
                     let mut header_candidate =
                         peek_item_header_at(bytes, scan_pos, huffman, alpha, 0);
+                    if let Some(work) = work {
+                        work.base_header_peek_micros.fetch_add(
+                            base_peek_started.elapsed().as_micros() as u64,
+                            Ordering::Relaxed,
+                        );
+                    }
                     if alpha {
                         let reg = crate::domain::forensic::registry::get_registry();
                         for alt_gap in [6u64, 27, 35, 46] {
                             if let Some(work) = work {
                                 work.alternate_gap_peeks.fetch_add(1, Ordering::Relaxed);
                             }
+                            let alternate_peek_started = std::time::Instant::now();
                             if let Some((
                                 mode,
                                 location,
@@ -363,6 +380,12 @@ fn scan_item_markers_internal(
                                     ));
                                     break;
                                 }
+                            }
+                            if let Some(work) = work {
+                                work.alternate_gap_peek_micros.fetch_add(
+                                    alternate_peek_started.elapsed().as_micros() as u64,
+                                    Ordering::Relaxed,
+                                );
                             }
                         }
                     }
@@ -428,6 +451,7 @@ fn scan_item_markers_internal(
                                     if let Some(work) = work {
                                         work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
                                     }
+                                    let summary_peek_started = std::time::Instant::now();
                                     if let Some(next_header) =
                                         peek_item_header_at(bytes, scan_pos + 80, huffman, alpha, 0)
                                     {
@@ -443,6 +467,12 @@ fn scan_item_markers_internal(
                                         ) {
                                             forced_80 = true;
                                         }
+                                    }
+                                    if let Some(work) = work {
+                                        work.base_header_peek_micros.fetch_add(
+                                            summary_peek_started.elapsed().as_micros() as u64,
+                                            Ordering::Relaxed,
+                                        );
                                     }
                                 }
                             }
@@ -467,12 +497,20 @@ fn scan_item_markers_internal(
                                 if let Some(work) = work {
                                     work.lookahead_checks.fetch_add(1, Ordering::Relaxed);
                                 }
-                                if !verify_marker_lookahead(
+                                let lookahead_started = std::time::Instant::now();
+                                let lookahead_valid = verify_marker_lookahead(
                                     bytes,
                                     scan_pos + _header_len,
                                     huffman,
                                     alpha,
-                                ) {
+                                );
+                                if let Some(work) = work {
+                                    work.lookahead_check_micros.fetch_add(
+                                        lookahead_started.elapsed().as_micros() as u64,
+                                        Ordering::Relaxed,
+                                    );
+                                }
+                                if !lookahead_valid {
                                     continue;
                                 }
                             }
@@ -547,6 +585,7 @@ fn scan_item_markers_internal(
                 if max_confidence > 0 {
                     local_markers.push((best_offset, max_confidence, best_code.clone()));
 
+                    let jump_peek_started = alpha.then(std::time::Instant::now);
                     let jump = if alpha {
                         if let Some(work) = work {
                             work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
@@ -581,6 +620,12 @@ fn scan_item_markers_internal(
                     } else {
                         72
                     };
+                    if let (Some(work), Some(jump_peek_started)) = (work, jump_peek_started) {
+                        work.base_header_peek_micros.fetch_add(
+                            jump_peek_started.elapsed().as_micros() as u64,
+                            Ordering::Relaxed,
+                        );
+                    }
                     probe = best_offset + jump;
                 } else {
                     probe += 8;
