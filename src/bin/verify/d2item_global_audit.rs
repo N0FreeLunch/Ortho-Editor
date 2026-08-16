@@ -372,6 +372,7 @@ struct Args {
     corpus_manifest: String,
     worktree_state: String,
     strict_timeout_ms: Option<u64>,
+    target_index: Option<usize>,
     worker_single_fixture: bool,
 }
 
@@ -461,6 +462,9 @@ fn process_file_with_timeout(
         .stderr(Stdio::piped());
     if args.detailed {
         command.arg("--detailed");
+    }
+    if let Some(target_index) = args.target_index {
+        command.arg("--target-index").arg(target_index.to_string());
     }
 
     let mut child = match command.spawn() {
@@ -603,7 +607,7 @@ fn process_file(
 
     let options = SymmetryOptions {
         roundtrip: true,
-        target_index: None,
+        target_index: args.target_index,
         fail_fast: !args.detailed,
     };
 
@@ -1136,6 +1140,12 @@ fn main() {
         Some("strict-timeout-ms"),
         "Opt-in per-fixture strict replay deadline in milliseconds",
     ));
+    parser.add_spec(ArgSpec::option(
+        "target-index",
+        None,
+        Some("target-index"),
+        "Select one zero-based top-level player item for strict replay",
+    ));
     parser.add_spec(ArgSpec::flag(
         "worker-single-fixture",
         None,
@@ -1170,6 +1180,16 @@ fn main() {
             Ok(timeout_ms) if timeout_ms > 0 => Some(timeout_ms),
             _ => {
                 eprintln!("error: --strict-timeout-ms must be a positive integer");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+    let target_index = match parsed.get("target-index") {
+        Some(value) => match value.parse::<usize>() {
+            Ok(index) => Some(index),
+            Err(_) => {
+                eprintln!("error: --target-index must be a non-negative integer");
                 std::process::exit(1);
             }
         },
@@ -1214,6 +1234,7 @@ fn main() {
             .cloned()
             .unwrap_or_else(|| "unrecorded".to_string()),
         strict_timeout_ms,
+        target_index,
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
     };
 
