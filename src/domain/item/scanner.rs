@@ -64,6 +64,7 @@ pub struct ScannerWorkCounters {
 pub struct ScannerScanReceipt {
     pub markers: Vec<ItemMarker>,
     pub work: ScannerWorkCounters,
+    pub timed_out: bool,
 }
 
 #[derive(Default)]
@@ -174,6 +175,8 @@ pub fn scan_item_markers(
         expected_count,
         verbose,
         None,
+        None,
+        None,
     )
 }
 
@@ -185,7 +188,28 @@ pub fn scan_item_markers_with_receipt(
     expected_count: Option<u16>,
     verbose: bool,
 ) -> ScannerScanReceipt {
+    scan_item_markers_with_receipt_deadline(
+        bytes,
+        huffman,
+        alpha,
+        section_bit_offset,
+        expected_count,
+        verbose,
+        None,
+    )
+}
+
+pub fn scan_item_markers_with_receipt_deadline(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    alpha: bool,
+    section_bit_offset: u64,
+    expected_count: Option<u16>,
+    verbose: bool,
+    deadline: Option<std::time::Instant>,
+) -> ScannerScanReceipt {
     let work = ScannerWorkAccumulator::default();
+    let timed_out = std::sync::atomic::AtomicBool::new(false);
     let markers = scan_item_markers_internal(
         bytes,
         huffman,
@@ -194,10 +218,13 @@ pub fn scan_item_markers_with_receipt(
         expected_count,
         verbose,
         Some(&work),
+        deadline,
+        Some(&timed_out),
     );
     ScannerScanReceipt {
         markers,
         work: work.snapshot(),
+        timed_out: timed_out.load(Ordering::Relaxed),
     }
 }
 
@@ -209,6 +236,8 @@ fn scan_item_markers_internal(
     expected_count: Option<u16>,
     verbose: bool,
     work: Option<&ScannerWorkAccumulator>,
+    deadline: Option<std::time::Instant>,
+    timed_out: Option<&std::sync::atomic::AtomicBool>,
 ) -> Vec<ItemMarker> {
     if bytes.is_empty() {
         return Vec::new();
@@ -264,6 +293,12 @@ fn scan_item_markers_internal(
             };
 
             while probe < (end_byte * 8) as u64 && probe < limit_bits {
+                if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                    if let Some(timed_out) = timed_out {
+                        timed_out.store(true, Ordering::Relaxed);
+                    }
+                    break;
+                }
                 if let Some(work) = work {
                     work.probes.fetch_add(1, Ordering::Relaxed);
                 }

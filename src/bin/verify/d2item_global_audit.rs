@@ -1,7 +1,7 @@
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
 use d2r_core::domain::item::scanner::{
-    scan_item_markers, scan_item_markers_with_receipt, ScannerWorkCounters,
+    scan_item_markers, scan_item_markers_with_receipt_deadline, ScannerWorkCounters,
 };
 use d2r_core::domain::item::serialization::is_likely_jm_section_header;
 use d2r_core::item::{HuffmanTree, Item};
@@ -355,6 +355,7 @@ fn scan_candidate_for_receipt(
     candidate_index: usize,
     header_only: bool,
     section_end_byte: Option<usize>,
+    scanner_deadline_ms: Option<u64>,
 ) -> Result<ScannerCandidateReceipt, String> {
     let positions = find_jm_markers(bytes);
     let jm_offset_byte = *positions
@@ -404,15 +405,21 @@ fn scan_candidate_for_receipt(
         format!("invalid scanner section bounds {jm_offset_byte}..{section_end_byte}")
     })?;
     let scan_started = Instant::now();
-    let scan = scan_item_markers_with_receipt(
+    let scan = scan_item_markers_with_receipt_deadline(
         section_bytes,
         &huffman,
         alpha_mode,
         (jm_offset_byte as u64) * 8,
         declared_count,
         false,
+        scanner_deadline_ms
+            .map(|milliseconds| Instant::now() + Duration::from_millis(milliseconds)),
     );
-    receipt.scan_status = Some("[PASS]".to_string());
+    receipt.scan_status = Some(if scan.timed_out {
+        "[TIMEOUT]".to_string()
+    } else {
+        "[PASS]".to_string()
+    });
     receipt.scan_elapsed_ms = Some(scan_started.elapsed().as_millis());
     receipt.accepted_marker_count = Some(scan.markers.len());
     receipt.scanner_work = Some(scan.work);
@@ -532,6 +539,7 @@ struct Args {
     scanner_candidate_index: Option<usize>,
     scanner_header_only: bool,
     scanner_section_end_byte: Option<usize>,
+    scanner_deadline_ms: Option<u64>,
     worker_single_fixture: bool,
 }
 
@@ -646,6 +654,11 @@ fn process_file_with_timeout(
             .arg("--scanner-section-end-byte")
             .arg(section_end_byte.to_string());
     }
+    if let Some(scanner_deadline_ms) = args.scanner_deadline_ms {
+        command
+            .arg("--scanner-deadline-ms")
+            .arg(scanner_deadline_ms.to_string());
+    }
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -751,6 +764,7 @@ fn process_scanner_candidates_with_timeout(
         child_args.scanner_candidate_index = Some(candidate_index);
         child_args.scanner_header_only = true;
         child_args.scanner_section_end_byte = None;
+        child_args.scanner_deadline_ms = None;
         let result = process_file_with_timeout(&child_args, file_path, failure_breakdown);
         let next_raw_jm_offset_byte = positions
             .get(candidate_index + 1)
@@ -806,6 +820,9 @@ fn process_scanner_candidates_with_timeout(
         child_args.scanner_candidate_index = Some(candidate.candidate_index);
         child_args.scanner_header_only = false;
         child_args.scanner_section_end_byte = Some(section_end_byte);
+        child_args.scanner_deadline_ms = args
+            .strict_timeout_ms
+            .map(|timeout_ms| timeout_ms.saturating_sub(100).max(1));
         let result = process_file_with_timeout(&child_args, file_path, failure_breakdown);
         if let Some(scan_candidate) = result.scanner_candidates.into_iter().next() {
             candidate.scan_status = scan_candidate.scan_status;
@@ -919,6 +936,7 @@ fn process_file(
                 candidate_index,
                 args.scanner_header_only,
                 args.scanner_section_end_byte,
+                args.scanner_deadline_ms,
             ) {
                 Ok(candidate) => AuditResult {
                     status: "[PASS]".to_string(),
@@ -1536,6 +1554,12 @@ fn main() {
         Some("scanner-section-end-byte"),
         "Internal: end offset for one pre-classified scanner section",
     ));
+    parser.add_spec(ArgSpec::option(
+        "scanner-deadline-ms",
+        None,
+        Some("scanner-deadline-ms"),
+        "Internal: cooperative scanner receipt deadline in milliseconds",
+    ));
     parser.add_spec(ArgSpec::flag(
         "worker-single-fixture",
         None,
@@ -1605,6 +1629,16 @@ fn main() {
         },
         None => None,
     };
+    let scanner_deadline_ms = match parsed.get("scanner-deadline-ms") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(milliseconds) if milliseconds > 0 => Some(milliseconds),
+            _ => {
+                eprintln!("error: --scanner-deadline-ms must be a positive integer");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
 
     let args = Args {
         target_dir: parsed
@@ -1649,6 +1683,7 @@ fn main() {
         scanner_candidate_index,
         scanner_header_only: parsed.is_set("scanner-header-only"),
         scanner_section_end_byte,
+        scanner_deadline_ms,
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
     };
 
