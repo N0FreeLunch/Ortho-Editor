@@ -1053,6 +1053,8 @@ where
                     start: entry_start,
                     end: recorder.pos(),
                 },
+                is_opaque: false,
+                opaque_bits: None,
             },
             true,
             term_bit,
@@ -1208,6 +1210,7 @@ where
     recorder.push_context(&format!("Stat({})", stat_id));
     let entry_end = recorder.pos();
     recorder.pop_context();
+    let is_unknown_stat = stat_cost.is_none();
     let logical_value = if handled || effective_width > 32 {
         0
     } else {
@@ -1221,15 +1224,90 @@ where
             stat_id,
             raw_value: raw_value as i32,
             param,
-            name: String::new(),
+            name: if is_unknown_stat { "opaque_property".to_string() } else { String::new() },
             value: logical_value,
             range: ItemBitRange {
                 start: entry_start,
                 end: entry_end,
             },
+            is_opaque: is_unknown_stat,
+            opaque_bits: None,
         },
         false,
         false,
         nested_items,
     )))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitstream_io::{BitReader, LittleEndian};
+    use std::io::Cursor;
+
+    #[test]
+    fn test_unknown_stat_id_marked_as_opaque() {
+        // Construct a bitstream containing:
+        // 9-bit stat_id: 509 (unmapped arbitrary ID)
+        // 9-bit value: 42
+        // 9-bit terminator: 0x1FF (511)
+        let mut bits = Vec::new();
+        // Stat ID 509 = 0b111111101
+        for i in 0..9 {
+            bits.push((509 >> i) & 1 == 1);
+        }
+        // Value 42 = 0b000101010
+        for i in 0..9 {
+            bits.push((42 >> i) & 1 == 1);
+        }
+        // Terminator 511 = 0b111111111
+        for _ in 0..9 {
+            bits.push(true);
+        }
+
+        // Pack bits into bytes
+        let mut bytes = Vec::new();
+        for chunk in bits.chunks(8) {
+            let mut byte = 0u8;
+            for (i, &b) in chunk.iter().enumerate() {
+                if b {
+                    byte |= 1 << i;
+                }
+            }
+            bytes.push(byte);
+        }
+
+        let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let mut cursor = BitCursor::new(reader);
+        let huffman = HuffmanTree::new();
+        let axiom = StatsAxiom::new(5, ItemQuality::Normal, false);
+
+        let result = parse_single_property(
+            &mut cursor,
+            5,
+            &huffman,
+            false,
+            &axiom,
+            PropertyReaderContext {
+                bytes: &bytes,
+                item_start_bit: 0,
+            },
+            |_b, _pos, _h, _idx, _alpha| {
+                Err(crate::error::ParsingFailure {
+                    error: crate::error::ParsingError::Io("mock".to_string()),
+                    context_stack: vec![],
+                    bit_offset: 0,
+                    context_relative_offset: 0,
+                    hint: None,
+                })
+            },
+        );
+
+        let (prop, is_term, _, _) = result.expect("should parse property").expect("should have prop");
+        assert!(!is_term, "first entry should not be terminator");
+        assert_eq!(prop.stat_id, 509);
+        assert!(prop.is_opaque, "unknown stat id must be marked as opaque");
+        assert_eq!(prop.name, "opaque_property");
+    }
+}
+

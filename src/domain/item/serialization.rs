@@ -3357,6 +3357,7 @@ impl Item {
             forensic_audit: ForensicAudit::new(),
             parser_consumption: Default::default(),
             section_parse_input: Default::default(),
+            placement_status: None,
         };
 
         item.id = item.header.id;

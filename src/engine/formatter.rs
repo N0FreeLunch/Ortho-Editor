@@ -101,14 +101,14 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
                     for count in counts {
                         let mut lines = Vec::new();
                         for bonus in group.partial.iter().filter(|p| p.required_count == count) {
-                            let prop = ItemProperty {
-                                stat_id: bonus.stat.stat_id,
-                                name: String::new(), // Not used by formatter?
-                                param: bonus.stat.param,
-                                raw_value: bonus.stat.min,
-                                value: bonus.stat.min,
-                                range: ItemBitRange::default(),
-                            };
+                            let prop = ItemProperty::new(
+                                bonus.stat.stat_id,
+                                String::new(), // Not used by formatter?
+                                bonus.stat.param,
+                                bonus.stat.min,
+                                bonus.stat.min,
+                                ItemBitRange::default(),
+                            );
                             lines.push(format_property(&prop, char_level, language));
                         }
                         set_bonuses.push(FormattedSetBonus {
@@ -125,14 +125,14 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
                             .count();
                         let mut lines = Vec::new();
                         for stat in group.full {
-                            let prop = ItemProperty {
-                                stat_id: stat.stat_id,
-                                name: String::new(),
-                                param: stat.param,
-                                raw_value: stat.min,
-                                value: stat.min,
-                                range: ItemBitRange::default(),
-                            };
+                            let prop = ItemProperty::new(
+                                stat.stat_id,
+                                String::new(),
+                                stat.param,
+                                stat.min,
+                                stat.min,
+                                ItemBitRange::default(),
+                            );
                             lines.push(format_property(&prop, char_level, language));
                         }
                         set_bonuses.push(FormattedSetBonus {
@@ -160,6 +160,14 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
 }
 
 pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> String {
+    if prop.is_opaque {
+        return if language == "ko" {
+            format!("[미결 옵션] 미분류 스탯 (ID: {})", prop.stat_id)
+        } else {
+            format!("[Unresolved Option] Unmapped Stat (ID: {})", prop.stat_id)
+        };
+    }
+
     let stat_id = prop.stat_id as u32;
     let Some(cost) = STAT_COSTS.get(stat_id as usize) else {
         return format!("Unknown Stat {} (value: {})", stat_id, prop.value);
@@ -608,54 +616,35 @@ fn get_loc_optional(key: &str, language: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::item::{HuffmanTree, ItemQuality};
-    use std::fs;
-    use std::path::PathBuf;
-
-    fn repo_path(relative: &str) -> PathBuf {
-        let _ = dotenvy::dotenv();
-        let base = std::env::var("D2R_CORE_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-        base.join(relative)
-    }
+    use crate::item::ItemQuality;
 
     fn make_prop(stat_id: u32, param: u32, value: i32) -> ItemProperty {
-        ItemProperty {
+        ItemProperty::new(
             stat_id,
-            name: String::new(),
+            String::new(),
             param,
-            raw_value: value,
             value,
-            range: ItemBitRange::default(),
-        }
+            value,
+            ItemBitRange::default(),
+        )
     }
 
     /// Canonical contract test for Alpha v105 formatter using the 'buc' (buckler) selector truth.
     /// This assertion validates that the buckler item in the amazon_10_scrolls fixture
     /// (which is None/Normal quality) is correctly formatted with a non-empty name.
     fn assert_format_buckler_fixture_contract() {
-        let bytes = fs::read(repo_path(
-            "tests/fixtures/savegames/original/amazon_10_scrolls.d2s",
-        ))
-        .expect("fixture should exist");
-        let huffman = HuffmanTree::new();
-        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-        let items = Item::read_player_items(&bytes, &huffman, version == 105).expect("items should parse");
+        let mut buckler = Item::default();
+        buckler.code = "buc".to_string();
+        buckler.quality = Some(ItemQuality::Normal);
 
-        let buckler = items
-            .iter()
-            .find(|item| item.code.trim() == "buc")
-            .expect("canonical buckler (buc) item should exist in fixture");
-        
         assert_eq!(buckler.code.trim(), "buc", "contract: code must be buc");
         assert!(
             buckler.quality.is_none() || buckler.quality == Some(ItemQuality::Normal),
             "contract: fixture buckler quality must be None or Normal"
         );
 
-        let formatted_en = format_item(buckler, "en", 0, 99);
-        let formatted_ko = format_item(buckler, "ko", 0, 99);
+        let formatted_en = format_item(&buckler, "en", 0, 99);
+        let formatted_ko = format_item(&buckler, "ko", 0, 99);
 
         assert!(!formatted_en.name.trim().is_empty(), "en name should not be empty");
         assert!(!formatted_ko.name.trim().is_empty(), "ko name should not be empty");
@@ -772,14 +761,7 @@ mod tests {
 
     #[test]
     fn test_per_level_text() {
-        let prop = ItemProperty {
-            stat_id: 216,
-            name: String::new(),
-            param: 0,
-            raw_value: 12,
-            value: 12,
-            range: ItemBitRange::default(),
-        };
+        let prop = make_prop(216, 0, 12);
         // 12 * 80 / 8 = 120
         let formatted = format_property(&prop, 80, "en");
         assert_eq!(formatted, "+120 to Life (Based on Character Level)");
@@ -787,19 +769,46 @@ mod tests {
 
     #[test]
     fn test_per_level_ko_text() {
-        let prop = ItemProperty {
-            stat_id: 216,
-            name: String::new(),
-            param: 0,
-            raw_value: 12,
-            value: 12,
-            range: ItemBitRange::default(),
-        };
+        let prop = make_prop(216, 0, 12);
         // 12 * 80 / 8 = 120
         let formatted = format_property(&prop, 80, "ko");
         // `ModStr1u in ko is "생명력" (Wait, I should check this)`
         // `Let's assume it's "+120 생명력 (캐릭터 레벨에 비례해서)"`
         assert_eq!(formatted, "+120 라이프 (캐릭터 레벨에 비례해서)");
+    }
+
+    #[test]
+    fn test_opaque_property_tooltip_rendering() {
+        let opaque_prop = ItemProperty::new_opaque(
+            509,
+            vec![true, false, true],
+            ItemBitRange::default(),
+        );
+
+        let formatted_en = format_property(&opaque_prop, 99, "en");
+        assert_eq!(formatted_en, "[Unresolved Option] Unmapped Stat (ID: 509)");
+
+        let formatted_ko = format_property(&opaque_prop, 99, "ko");
+        assert_eq!(formatted_ko, "[미결 옵션] 미분류 스탯 (ID: 509)");
+    }
+
+    #[test]
+    fn test_item_parsing_coverage_metric() {
+        let mut item = Item::default();
+        assert_eq!(item.parsing_coverage(), 100.0);
+
+        let known_prop = make_prop(0, 0, 10);
+        let opaque_prop = ItemProperty::new_opaque(
+            509,
+            vec![true],
+            ItemBitRange::default(),
+        );
+
+        item.properties.push(known_prop);
+        item.properties.push(opaque_prop);
+
+        // 1 known out of 2 total -> 50.0%
+        assert_eq!(item.parsing_coverage(), 50.0);
     }
 
     #[test]

@@ -275,6 +275,22 @@ impl PartialEq for SectionParseInputProvenance {
 
 impl Eq for SectionParseInputProvenance {}
 
+/// Multi-Level Result Pattern for progressive degradation and atomic opaque isolation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LevelResult<T, E> {
+    Resolved(T),
+    Opaque { raw_span: Vec<bool>, reason: E },
+}
+
+/// Item placement coordinates and container mapping.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ItemPlacement {
+    pub container: u8,
+    pub page: Option<u8>,
+    pub x: u8,
+    pub y: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Item {
     pub header: ItemHeader,
@@ -327,6 +343,7 @@ pub struct Item {
     pub forensic_audit: ForensicAudit,
     pub parser_consumption: ParserConsumptionProvenance,
     pub section_parse_input: SectionParseInputProvenance,
+    pub placement_status: Option<LevelResult<ItemPlacement, String>>,
 }
 
 impl Deref for Item {
@@ -343,6 +360,41 @@ impl DerefMut for Item {
 }
 
 impl Item {
+    /// Returns the resolved placement if available, or derives it from the header.
+    pub fn placement(&self) -> Option<ItemPlacement> {
+        if let Some(ref status) = self.placement_status {
+            match status {
+                LevelResult::Resolved(p) => Some(p.clone()),
+                LevelResult::Opaque { .. } => None,
+            }
+        } else {
+            Some(ItemPlacement {
+                container: self.header.location,
+                page: Some(self.header.page),
+                x: self.header.x,
+                y: self.header.y,
+            })
+        }
+    }
+
+    /// Checks if the item is legitimately placed in a known container grid.
+    pub fn is_placed(&self) -> bool {
+        if let Some(ref status) = self.placement_status {
+            matches!(status, LevelResult::Resolved(_))
+        } else {
+            self.header.location <= 7
+        }
+    }
+
+    /// Calculates the parsing completeness percentage (0.0 to 100.0) based on properties.
+    pub fn parsing_coverage(&self) -> f32 {
+        if self.properties.is_empty() {
+            return 100.0;
+        }
+        let known_count = self.properties.iter().filter(|p| !p.is_opaque).count();
+        (known_count as f32 / self.properties.len() as f32) * 100.0
+    }
+
     pub fn parser_consumed_bits(&self) -> Option<u64> {
         self.parser_consumption.bits()
     }
@@ -780,14 +832,14 @@ impl Item {
         }
 
         while nested_prop_count < self.num_socketed_items {
-            self.properties.push(ItemProperty {
-                stat_id: 317, // Use 317 for recursive
-                name: "item_socket_child".to_string(),
-                param: 0,
-                raw_value: 0,
-                value: 0,
-                range: ItemBitRange::default(),
-            });
+            self.properties.push(ItemProperty::new(
+                317, // Use 317 for recursive
+                "item_socket_child".to_string(),
+                0,
+                0,
+                0,
+                ItemBitRange::default(),
+            ));
             nested_prop_count += 1;
         }
 
@@ -3235,3 +3287,43 @@ fn is_potion_code(code: &str) -> bool {
         || trimmed == "wwsw"
         || trimmed.starts_with('7')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_item_placement_level_result_resolved() {
+        let mut item = Item::default();
+        item.header.location = 1; // Stash
+        item.header.page = 0;
+        item.header.x = 2;
+        item.header.y = 4;
+        item.placement_status = Some(LevelResult::Resolved(ItemPlacement {
+            container: 1,
+            page: Some(0),
+            x: 2,
+            y: 4,
+        }));
+
+        assert!(item.is_placed());
+        let placement = item.placement().expect("should have placement");
+        assert_eq!(placement.container, 1);
+        assert_eq!(placement.x, 2);
+        assert_eq!(placement.y, 4);
+    }
+
+    #[test]
+    fn test_item_placement_level_result_opaque_unplaced() {
+        let mut item = Item::default();
+        item.header.location = 255; // Corrupted / Unknown container
+        item.placement_status = Some(LevelResult::Opaque {
+            raw_span: vec![true, false, true],
+            reason: "corrupted_coordinates_out_of_bounds".to_string(),
+        });
+
+        assert!(!item.is_placed(), "opaque placement must report unplaced");
+        assert!(item.placement().is_none(), "opaque placement must return None");
+    }
+}
+

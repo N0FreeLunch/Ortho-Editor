@@ -14,7 +14,7 @@ pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;
 pub use entity::{
     ItemBody, Item, ItemModule, CharmBagData, CursedItemData,
-    RecordedBit, ItemBitRange, BitSegment
+    RecordedBit, ItemBitRange, BitSegment, LevelResult, ItemPlacement,
 };
 pub use builder::ItemBuilder;
 // Removed redundant re-exports: ItemProperty, ItemStats moved to domain::stats
