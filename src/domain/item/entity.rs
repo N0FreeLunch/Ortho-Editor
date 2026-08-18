@@ -1245,7 +1245,7 @@ impl Item {
                 && self.body.alpha_alignment_padding.is_empty()
                 && self.id.is_none()
                 && !has_opaque_module
-                && self.total_bits > emitted_before_gap
+                && self.total_bits >= emitted_before_gap
                 && self.total_bits < emitted_before_gap + declared_gap_bits as u64
             { (self.total_bits - emitted_before_gap) as u32 } else { declared_gap_bits };
             if gap_bits > 0 {
