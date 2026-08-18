@@ -691,6 +691,9 @@ mod tests {
                 code: "wyws".to_string(),
                 score: 700,
                 status: MarkerStatus::Accepted,
+                selected_corrected_gap: None,
+                selected_trial_gap: None,
+                selected_trial_gap_is_rhythm: None,
             },
             ItemMarker {
                 offset: 1565,
@@ -698,6 +701,9 @@ mod tests {
                 code: "near".to_string(),
                 score: 100,
                 status: MarkerStatus::Rejected,
+                selected_corrected_gap: None,
+                selected_trial_gap: None,
+                selected_trial_gap_is_rhythm: None,
             },
         ];
 

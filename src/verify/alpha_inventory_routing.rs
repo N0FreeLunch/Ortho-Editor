@@ -32,30 +32,28 @@ pub fn alpha_inventory_route(item: &Item, is_alpha: bool) -> AlphaInventoryRoute
         } else {
             AlphaInventoryRoute::Equipment
         }
-    } else if item.mode == 2 {
-        if is_alpha && !is_true_pot && item.location != 2 {
-            match item.location {
-                4 => AlphaInventoryRoute::Stash,
-                7 => AlphaInventoryRoute::Cube,
-                _ => AlphaInventoryRoute::Unknown,
-            }
-        } else {
-            AlphaInventoryRoute::Belt
-        }
+    } else if item.mode == 2 || item.location == 2 || item.location == 8 {
+        AlphaInventoryRoute::Belt
+    } else if item.location == 4 {
+        AlphaInventoryRoute::Stash
+    } else if item.location == 7 {
+        AlphaInventoryRoute::Cube
     } else {
-        match item.location {
-            0 => {
-                if is_true_pot && item.x == 0 && item.y == 0 {
-                    AlphaInventoryRoute::Belt
-                } else {
-                    AlphaInventoryRoute::Unknown
-                }
+        // Location 0 or 10 or other grid-based placements
+        if item.location == 0 || item.location == 10 {
+            if is_true_pot && item.x < 4 && item.y < 4 {
+                AlphaInventoryRoute::Belt
+            } else if item.x < 10 && item.y < 4 {
+                AlphaInventoryRoute::Inventory
+            } else if item.x < 10 && item.y < 10 {
+                AlphaInventoryRoute::Stash
+            } else {
+                AlphaInventoryRoute::Unknown
             }
-            2 => AlphaInventoryRoute::Belt,
-            4 => AlphaInventoryRoute::Stash,
-            7 => AlphaInventoryRoute::Cube,
-            _ if is_alpha => AlphaInventoryRoute::Unknown,
-            _ => AlphaInventoryRoute::Inventory,
+        } else if !is_alpha {
+            AlphaInventoryRoute::Inventory
+        } else {
+            AlphaInventoryRoute::Unknown
         }
     }
 }

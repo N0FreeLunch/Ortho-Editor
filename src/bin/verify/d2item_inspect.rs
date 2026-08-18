@@ -350,7 +350,105 @@ fn section_context_report(
         "code_hint": item.section_parse_input.code_hint,
         "forced_compact": item.section_parse_input.forced_compact,
         "limit_bits": item.section_parse_input.limit_bits,
+        "scanner_limit_bits": item.section_parse_input.limit_bits,
+        "registry_target_width_override_bits": item.section_parse_input.registry_target_width_override_bits,
+        "alignment_target_width_bits": item.section_parse_input.alignment_target_width_bits,
+        "summary_limit_override_applied": item.section_parse_input.summary_limit_override_applied,
+        "final_claimed_width_bits": item.section_parse_input.final_claimed_width_bits,
         "item_index": item.section_parse_input.item_index,
+    });
+    let identity_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
+        item.header.version,
+        item.header
+            .quality
+            .unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
+        alpha_mode,
+    );
+    let identity_is_item_alpha = identity_axiom.is_alpha();
+    let header_axiom = d2r_core::domain::header::HeaderAxiom::new(item.header.version, alpha_mode);
+    let header_is_item_alpha = header_axiom.is_alpha();
+    let nudge_axiom = d2r_core::domain::forensic::v105::V105PropertyWidthAxiom::default();
+    let normalized_code = item.code.trim();
+    let parser_nudge_eligible = alpha_mode
+        && header_is_item_alpha
+        && !item.header.is_compact
+        && !nudge_axiom.is_summary_item(item.header.version, normalized_code)
+        && !matches!(normalized_code, "us g" | "jav" | "buc");
+    let parser_nudge_will_consume = parser_nudge_eligible
+        && matches!(item.header.version, 0 | 2 | 5);
+    let emitter_nudge_will_write = alpha_mode
+        && header_is_item_alpha
+        && !item.header.is_compact
+        && item.header.version != 3;
+    let nudge_width_bits = nudge_axiom.nudge_bits(item.header.version);
+    let legacy_identity_will_emit = (!identity_is_item_alpha
+        || (alpha_mode && matches!(item.header.version, 0 | 2)))
+        && !item.header.is_compact;
+    let legacy_identity_provenance = json!({
+        "provenance": "Item::to_bits non_summary_legacy_identity predicate",
+        "alpha_mode": alpha_mode,
+        "is_item_alpha": identity_is_item_alpha,
+        "header_version": item.header.version,
+        "header_flags": item.header.flags,
+        "header_is_compact": item.header.is_compact,
+        "header_id": item.header.id,
+        "header_level": item.header.level,
+        "header_quality": item.header.quality.map(|quality| format!("{:?}", quality)),
+        "legacy_identity_will_emit": legacy_identity_will_emit,
+    });
+    let nudge_symmetry_provenance = json!({
+        "provenance": "parse_item_body alpha_nudge read predicate versus Item::to_bits nudge write predicate",
+        "header_axiom_is_alpha": header_is_item_alpha,
+        "stats_axiom_is_alpha": identity_is_item_alpha,
+        "header_version": item.header.version,
+        "header_is_compact": item.header.is_compact,
+        "normalized_code": normalized_code,
+        "nudge_width_bits": nudge_width_bits,
+        "parser_nudge_eligible": parser_nudge_eligible,
+        "parser_nudge_will_consume": parser_nudge_will_consume,
+        "parser_supported_versions": [0, 2, 5],
+        "emitter_nudge_will_write": emitter_nudge_will_write,
+        "predicates_agree": parser_nudge_will_consume == emitter_nudge_will_write,
+        "report_only": true,
+    });
+    let property_records = |properties: &[d2r_core::domain::stats::ItemProperty]| {
+        properties
+            .iter()
+            .map(|property| {
+                json!({
+                    "stat_id": property.stat_id,
+                    "name": property.name,
+                    "param": property.param,
+                    "raw_value": property.raw_value,
+                    "value": property.value,
+                    "range_start": property.range.start,
+                    "range_end": property.range.end,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let property_provenance = json!({
+        "provenance": "parsed ItemProperty lists supplied to write_property_list",
+        "properties_complete": item.properties_complete,
+        "terminator_bit": item.terminator_bit,
+        "item_is_runeword": item.header.is_runeword,
+        "stats_axiom_is_alpha": identity_is_item_alpha,
+        "emitter_terminal_version_supported": matches!(item.header.version, 0 | 1 | 2 | 4 | 5 | 6),
+        "ordinary": property_records(&item.properties),
+        "set_attributes": item
+            .set_attributes
+            .iter()
+            .map(|properties| property_records(properties))
+            .collect::<Vec<_>>(),
+        "runeword": property_records(&item.runeword_attributes),
+        "report_only": true,
+    });
+    let property_body_gap_provenance = json!({
+        "provenance": "ItemBody alpha_body_gap_bits and StatsAxiom header_gap before write_property_list",
+        "stored_bits": item.body.alpha_body_gap_bits,
+        "stored_bit_count": item.body.alpha_body_gap_bits.len(),
+        "emitter_expected_bit_count": identity_axiom.header_gap(&item.code, item.header.flags),
+        "report_only": true,
     });
     let mut with_padding_item = item.clone();
     with_padding_item.bits.clear();
@@ -506,6 +604,144 @@ fn section_context_report(
         );
 
     let original_bits = item.bits.iter().map(|bit| bit.bit).collect::<Vec<_>>();
+    let property_id_bit_provenance = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "non_summary_property_body")
+        .map(|phase| {
+            let start = phase.start as usize;
+            let rhythm = identity_axiom.property_rhythm(
+                item.header.is_runeword,
+                false,
+                item.header.is_compact,
+                item.properties.first().map(|property| property.stat_id).unwrap_or(0),
+            );
+            let width = rhythm.id_bits as usize;
+            let end = start.saturating_add(width);
+            json!({
+                "provenance": "first property ID window at non_summary_property_body start",
+                "phase_start": phase.start,
+                "id_bits": rhythm.id_bits,
+                "first_parsed_stat_id": item.properties.first().map(|property| property.stat_id),
+                "original_bits": original_bits.get(start..end).unwrap_or_default(),
+                "strict_emitted_bits": with_padding_bits.get(start..end).unwrap_or_default(),
+                "report_only": true,
+            })
+        })
+        .unwrap_or_else(|| json!({
+            "status": "unavailable",
+            "reason": "strict emission trace has no property body phase",
+        }));
+    let captured_tail_offset_probe = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "non_summary_captured_tail_material")
+        .map(|phase| {
+            let captured_bits = &item.body.alpha_alignment_padding;
+            let mut candidates = Vec::new();
+            for shift in -16isize..=16isize {
+                let source_start = phase.start as isize + shift;
+                if source_start < 0 {
+                    continue;
+                }
+                let source_start = source_start as usize;
+                let compared_bit_count = captured_bits
+                    .len()
+                    .min(original_bits.len().saturating_sub(source_start));
+                if compared_bit_count == 0 {
+                    continue;
+                }
+                let hamming_distance = captured_bits[..compared_bit_count]
+                    .iter()
+                    .zip(&original_bits[source_start..source_start + compared_bit_count])
+                    .filter(|(captured, original)| captured != original)
+                    .count();
+                candidates.push(json!({
+                    "relative_offset_bits": shift,
+                    "source_start": source_start,
+                    "compared_bit_count": compared_bit_count,
+                    "hamming_distance": hamming_distance,
+                }));
+            }
+            candidates.sort_by_key(|candidate| {
+                candidate["hamming_distance"].as_u64().unwrap_or(u64::MAX)
+            });
+            json!({
+                "provenance": "stored alpha_alignment_padding compared with original item.bits",
+                "captured_tail_phase_start": phase.start,
+                "captured_bit_count": captured_bits.len(),
+                "best_candidates": candidates.into_iter().take(5).collect::<Vec<_>>(),
+                "report_only": true,
+            })
+        })
+        .unwrap_or_else(|| json!({
+            "status": "unavailable",
+            "reason": "strict emission trace has no captured tail phase",
+        }));
+    let opaque_tail_bits = item
+        .modules
+        .iter()
+        .flat_map(|module| match module {
+            ItemModule::Opaque(bits) | ItemModule::Residue(bits) => bits.clone(),
+            _ => Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let captured_tail_start = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "non_summary_captured_tail_material")
+        .map(|phase| phase.start as usize);
+    let exact_tail_bit_provenance = [227usize, 228usize, 233usize]
+        .into_iter()
+        .map(|local_bit| {
+            let captured_index = captured_tail_start
+                .and_then(|start| local_bit.checked_sub(start));
+            json!({
+                "local_bit": local_bit,
+                "original_bit": original_bits.get(local_bit),
+                "strict_emitted_bit": with_padding_bits.get(local_bit),
+                "opaque_module_bit": opaque_tail_bits.get(local_bit.saturating_sub(227)),
+                "captured_padding_bit": captured_index.and_then(|index| item.body.alpha_alignment_padding.get(index)),
+            })
+        })
+        .collect::<Vec<_>>();
+    let no_nudge_emission_counterfactual = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "non_summary_nudge")
+        .map(|phase| {
+            let start = phase.start as usize;
+            let end = phase.end as usize;
+            if end > with_padding_bits.len() || start >= end {
+                return json!({
+                    "status": "unavailable",
+                    "reason": "nudge phase range is outside strict rebuilt bits",
+                    "phase_start": phase.start,
+                    "phase_end": phase.end,
+                });
+            }
+            let mut bits = with_padding_bits.clone();
+            bits.drain(start..end);
+            let compared_bit_count = original_bits.len().min(bits.len());
+            let hamming_distance = original_bits
+                .iter()
+                .zip(bits.iter())
+                .take(compared_bit_count)
+                .filter(|(original, counterfactual)| original != counterfactual)
+                .count();
+            json!({
+                "status": "available",
+                "report_only": true,
+                "phase_start": phase.start,
+                "phase_end": phase.end,
+                "removed_bit_count": end - start,
+                "first_difference_offset": compare_first_difference_offset(&original_bits, &bits, item.range.start),
+                "hamming_distance": hamming_distance,
+                "compared_bit_count": compared_bit_count,
+                "original_bit_count": original_bits.len(),
+                "counterfactual_bit_count": bits.len(),
+            })
+        })
+        .unwrap_or_else(|| json!({
+            "status": "unavailable",
+            "reason": "strict emission trace has no non_summary_nudge phase",
+        }));
     let strict_residual_mismatch_runs = strict_emission_phases
         .iter()
         .filter(|phase| {
@@ -807,6 +1043,14 @@ fn section_context_report(
         "parser_consumption_provenance": parser_consumption_provenance,
         "stored_header_gap_provenance": stored_header_gap_provenance,
         "section_parser_input_provenance": section_parser_input_provenance,
+        "legacy_identity_provenance": legacy_identity_provenance,
+        "nudge_symmetry_provenance": nudge_symmetry_provenance,
+        "property_provenance": property_provenance,
+        "property_body_gap_provenance": property_body_gap_provenance,
+        "property_id_bit_provenance": property_id_bit_provenance,
+        "captured_tail_offset_probe": captured_tail_offset_probe,
+        "exact_tail_bit_provenance": exact_tail_bit_provenance,
+        "no_nudge_emission_counterfactual": no_nudge_emission_counterfactual,
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_alignment_source_witness": strict_alignment_source_witness,
         "parser_decision_provenance": parser_decision_provenance,
@@ -2323,6 +2567,67 @@ fn main() {
             }
             println!("{}", section_segment_witness_report(&items, path));
             return;
+        }
+
+        if section_item.is_none() {
+            if let Some(absolute) = coordinate_bit {
+                let carriers = items
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(section_item_index, item)| {
+                        (absolute >= item.range.start && absolute < item.range.end).then(|| {
+                            let item_local_bit = absolute - item.range.start;
+                            let owner_segments = item
+                                .segments
+                                .iter()
+                                .filter(|segment| {
+                                    segment.start <= item_local_bit && item_local_bit < segment.end
+                                })
+                                .map(|segment| {
+                                    json!({
+                                        "label": segment.label,
+                                        "start": segment.start,
+                                        "end": segment.end,
+                                        "depth": segment.depth
+                                    })
+                                })
+                                .collect::<Vec<_>>();
+                            json!({
+                                "section_item_index": section_item_index,
+                                "code": item.code.trim(),
+                                "range": {"start": item.range.start, "end": item.range.end},
+                                "item_local_bit": item_local_bit,
+                                "owner_segments": owner_segments
+                            })
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                if is_json {
+                    println!(
+                        "{}",
+                        json!({
+                            "coordinate_bit": absolute,
+                            "top_level_item_count": items.len(),
+                            "carrier_count": carriers.len(),
+                            "carriers": carriers
+                        })
+                    );
+                } else if carriers.is_empty() {
+                    println!(
+                        "No parsed top-level item owns absolute bit {} ({} items scanned).",
+                        absolute,
+                        items.len()
+                    );
+                } else {
+                    println!(
+                        "{} parsed top-level item(s) own absolute bit {}.",
+                        carriers.len(),
+                        absolute
+                    );
+                }
+                return;
+            }
         }
 
         if let Some(section_item_index) = section_item {

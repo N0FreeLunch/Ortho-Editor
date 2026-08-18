@@ -1,6 +1,10 @@
 use crate::item::{
-    is_plausible_item_header, peek_item_header_at, peek_item_header_at_specific_gap,
-    verify_marker_lookahead, HuffmanTree,
+    is_plausible_item_header, peek_item_header_at_specific_gap, verify_marker_lookahead,
+    HuffmanTree,
+};
+use crate::domain::item::serialization::{
+    peek_item_header_at_with_gap_profile, peek_item_header_at_with_gap_profile_and_trial_gap,
+    AlphaScannerGapProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +54,9 @@ pub struct ItemMarker {
     pub code: String,
     pub score: i32,
     pub status: MarkerStatus,
+    pub selected_corrected_gap: Option<i8>,
+    pub selected_trial_gap: Option<u64>,
+    pub selected_trial_gap_is_rhythm: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +193,7 @@ pub fn scan_item_markers(
         None,
         None,
         None,
+        AlphaScannerGapProfile::Extended,
     )
 }
 
@@ -208,7 +216,7 @@ pub fn scan_item_markers_with_receipt(
     )
 }
 
-pub fn scan_item_markers_with_receipt_deadline(
+pub fn scan_item_markers_with_receipt_deadline_profile(
     bytes: &[u8],
     huffman: &HuffmanTree,
     alpha: bool,
@@ -216,6 +224,7 @@ pub fn scan_item_markers_with_receipt_deadline(
     expected_count: Option<u16>,
     verbose: bool,
     deadline: Option<std::time::Instant>,
+    gap_profile: AlphaScannerGapProfile,
 ) -> ScannerScanReceipt {
     let work = ScannerWorkAccumulator::default();
     let timed_out = std::sync::atomic::AtomicBool::new(false);
@@ -229,12 +238,34 @@ pub fn scan_item_markers_with_receipt_deadline(
         Some(&work),
         deadline,
         Some(&timed_out),
+        gap_profile,
     );
     ScannerScanReceipt {
         markers,
         work: work.snapshot(),
         timed_out: timed_out.load(Ordering::Relaxed),
     }
+}
+
+pub fn scan_item_markers_with_receipt_deadline(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    alpha: bool,
+    section_bit_offset: u64,
+    expected_count: Option<u16>,
+    verbose: bool,
+    deadline: Option<std::time::Instant>,
+) -> ScannerScanReceipt {
+    scan_item_markers_with_receipt_deadline_profile(
+        bytes,
+        huffman,
+        alpha,
+        section_bit_offset,
+        expected_count,
+        verbose,
+        deadline,
+        AlphaScannerGapProfile::Extended,
+    )
 }
 
 fn scan_item_markers_internal(
@@ -247,6 +278,7 @@ fn scan_item_markers_internal(
     work: Option<&ScannerWorkAccumulator>,
     deadline: Option<std::time::Instant>,
     timed_out: Option<&std::sync::atomic::AtomicBool>,
+    gap_profile: AlphaScannerGapProfile,
 ) -> Vec<ItemMarker> {
     if bytes.is_empty() {
         return Vec::new();
@@ -272,7 +304,7 @@ fn scan_item_markers_internal(
     let mut has_alpha_item = false;
 
     let num_chunks = (bytes.len() + SCAN_CHUNK_SIZE - 1) / SCAN_CHUNK_SIZE;
-    let markers: Vec<(u64, u32, String)> = (0..num_chunks)
+    let markers: Vec<(u64, u32, String, i8, u64, bool)> = (0..num_chunks)
         .into_iter()
         .flat_map(|chunk_idx| {
             let start_byte = chunk_idx * SCAN_CHUNK_SIZE;
@@ -281,11 +313,11 @@ fn scan_item_markers_internal(
             let start_bit = (start_byte * 8) as u64;
             let _end_bit = ((end_byte * 8) as u64 + 256).min(limit_bits);
 
-            let mut local_markers: Vec<(u64, u32, String)> = Vec::new();
+            let mut local_markers: Vec<(u64, u32, String, i8, u64, bool)> = Vec::new();
             let section_header_bits = if alpha && chunk_idx == 0 {
                 let mut p = 32;
                 if let Some((version, _, _, _, _, _, _, _, _, _)) =
-                    peek_item_header_at(bytes, 32, huffman, alpha, 0)
+                    peek_item_header_at_with_gap_profile(bytes, 32, huffman, alpha, 0, gap_profile)
                 {
                     p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default()
                         .header_bits(version) as u64;
@@ -314,6 +346,9 @@ fn scan_item_markers_internal(
                 let mut best_offset = 0;
                 let mut max_confidence = 0;
                 let mut best_code = String::new();
+                let mut best_corrected_gap = 0;
+                let mut best_trial_gap = 0;
+                let mut best_trial_gap_is_rhythm = false;
 
                 let nudge_range = 8;
                 for offset in 0..nudge_range {
@@ -327,8 +362,9 @@ fn scan_item_markers_internal(
                         work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
                     }
                     let base_peek_started = std::time::Instant::now();
-                    let mut header_candidate =
-                        peek_item_header_at(bytes, scan_pos, huffman, alpha, 0);
+                    let mut header_candidate = peek_item_header_at_with_gap_profile_and_trial_gap(
+                        bytes, scan_pos, huffman, alpha, 0, gap_profile,
+                    );
                     if let Some(work) = work {
                         work.base_header_peek_micros.fetch_add(
                             base_peek_started.elapsed().as_micros() as u64,
@@ -367,16 +403,12 @@ fn scan_item_markers_internal(
                                 }
                                 if is_auth {
                                     header_candidate = Some((
-                                        mode,
-                                        location,
-                                        _x,
-                                        code,
-                                        flags,
-                                        version,
-                                        is_compact,
-                                        _header_len,
-                                        _nudge,
-                                        has_checksum,
+                                        (
+                                            mode, location, _x, code, flags, version, is_compact,
+                                            _header_len, _nudge, has_checksum,
+                                        ),
+                                        alt_gap,
+                                        false,
                                     ));
                                     break;
                                 }
@@ -391,6 +423,7 @@ fn scan_item_markers_internal(
                     }
 
                     if let Some((
+                        (
                         mode,
                         location,
                         _x,
@@ -399,8 +432,11 @@ fn scan_item_markers_internal(
                         version,
                         is_compact,
                         _header_len,
-                        _nudge,
+                        corrected_gap,
                         has_checksum,
+                        ),
+                        trial_gap,
+                        trial_gap_is_rhythm,
                     )) = header_candidate
                     {
                         let use_v105_alignment = alpha && version != 6;
@@ -452,8 +488,9 @@ fn scan_item_markers_internal(
                                         work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
                                     }
                                     let summary_peek_started = std::time::Instant::now();
-                                    if let Some(next_header) =
-                                        peek_item_header_at(bytes, scan_pos + 80, huffman, alpha, 0)
+                                    if let Some(next_header) = peek_item_header_at_with_gap_profile(
+                                        bytes, scan_pos + 80, huffman, alpha, 0, gap_profile,
+                                    )
                                     {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) =
                                             next_header;
@@ -577,13 +614,23 @@ fn scan_item_markers_internal(
                                 max_confidence = confidence;
                                 best_offset = scan_pos;
                                 best_code = code.clone();
+                                best_corrected_gap = corrected_gap;
+                                best_trial_gap = trial_gap;
+                                best_trial_gap_is_rhythm = trial_gap_is_rhythm;
                             }
                         }
                     }
                 }
 
                 if max_confidence > 0 {
-                    local_markers.push((best_offset, max_confidence, best_code.clone()));
+                    local_markers.push((
+                        best_offset,
+                        max_confidence,
+                        best_code.clone(),
+                        best_corrected_gap,
+                        best_trial_gap,
+                        best_trial_gap_is_rhythm,
+                    ));
 
                     let jump_peek_started = alpha.then(std::time::Instant::now);
                     let jump = if alpha {
@@ -591,7 +638,9 @@ fn scan_item_markers_internal(
                             work.base_header_peeks.fetch_add(1, Ordering::Relaxed);
                         }
                         if let Some((_, _, _, _, f, v, _, _, _, _)) =
-                            peek_item_header_at(bytes, best_offset, huffman, alpha, 0)
+                            peek_item_header_at_with_gap_profile(
+                                bytes, best_offset, huffman, alpha, 0, gap_profile,
+                            )
                         {
                             if v != 6 {
                                 let mut j =
@@ -648,7 +697,7 @@ fn scan_item_markers_internal(
     let mut since_last_auth: Option<(u64, u64)> = None;
 
     while i < final_markers.len() {
-        let (offset, confidence, code_str) = &final_markers[i];
+        let (offset, confidence, code_str, _, _, _) = &final_markers[i];
         let mut best_idx = i;
         let mut max_score = *confidence as i32;
         let use_v105_alignment = alpha && has_alpha_item;
@@ -689,7 +738,7 @@ fn scan_item_markers_internal(
         };
         let mut j = i + 1;
         while j < final_markers.len() && final_markers[j].0 < lookahead_limit {
-            let (o_offset, o_conf, o_code) = &final_markers[j];
+            let (o_offset, o_conf, o_code, _, _, _) = &final_markers[j];
             let mut score = *o_conf as i32;
             let next_use_v105_alignment = alpha && has_alpha_item;
 
@@ -769,7 +818,8 @@ fn scan_item_markers_internal(
             j += 1;
         }
 
-        let (best_offset, best_confidence, best_code_str) = &final_markers[best_idx];
+        let (best_offset, best_confidence, best_code_str, best_corrected_gap, best_trial_gap, best_trial_gap_is_rhythm) =
+            &final_markers[best_idx];
         let mut status = MarkerStatus::Accepted;
         let use_v105_alignment = alpha && has_alpha_item;
 
@@ -801,6 +851,9 @@ fn scan_item_markers_internal(
                     code: best_code_str.clone(),
                     score: max_score,
                     status: MarkerStatus::Accepted,
+                    selected_corrected_gap: Some(*best_corrected_gap),
+                    selected_trial_gap: Some(*best_trial_gap),
+                    selected_trial_gap_is_rhythm: Some(*best_trial_gap_is_rhythm),
                 });
                 last_offset = *best_offset;
                 last_code = best_code_str.clone();
@@ -820,6 +873,9 @@ fn scan_item_markers_internal(
                     code: best_code_str.clone(),
                     score: max_score,
                     status: status,
+                    selected_corrected_gap: Some(*best_corrected_gap),
+                    selected_trial_gap: Some(*best_trial_gap),
+                    selected_trial_gap_is_rhythm: Some(*best_trial_gap_is_rhythm),
                 });
             }
         } else if verbose {
@@ -829,6 +885,9 @@ fn scan_item_markers_internal(
                 code: best_code_str.clone(),
                 score: max_score,
                 status: status,
+                selected_corrected_gap: Some(*best_corrected_gap),
+                selected_trial_gap: Some(*best_trial_gap),
+                selected_trial_gap_is_rhythm: Some(*best_trial_gap_is_rhythm),
             });
         }
 
@@ -836,13 +895,16 @@ fn scan_item_markers_internal(
         i = best_idx + 1;
         while i < final_markers.len() && final_markers[i].0 < skip_until {
             if verbose && !filtered_indices.contains(&i) {
-                let (o_offset, o_conf, o_code) = &final_markers[i];
+                let (o_offset, o_conf, o_code, o_corrected_gap, o_trial_gap, o_trial_gap_is_rhythm) = &final_markers[i];
                 all_markers.push(ItemMarker {
                     offset: *o_offset,
                     confidence: *o_conf,
                     code: o_code.clone(),
                     score: *o_conf as i32,
                     status: MarkerStatus::Rejected,
+                    selected_corrected_gap: Some(*o_corrected_gap),
+                    selected_trial_gap: Some(*o_trial_gap),
+                    selected_trial_gap_is_rhythm: Some(*o_trial_gap_is_rhythm),
                 });
             }
             i += 1;

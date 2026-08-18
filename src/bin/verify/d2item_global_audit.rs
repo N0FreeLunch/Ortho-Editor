@@ -1,9 +1,12 @@
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
 use d2r_core::domain::item::scanner::{
-    scan_item_markers, scan_item_markers_with_receipt_deadline, ScannerWorkCounters,
+    scan_item_markers, scan_item_markers_with_receipt_deadline_profile, ItemMarker,
+    ScannerWorkCounters,
 };
-use d2r_core::domain::item::serialization::is_likely_jm_section_header;
+use d2r_core::domain::item::serialization::{
+    is_likely_jm_section_header, AlphaScannerGapProfile,
+};
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -79,6 +82,13 @@ struct MismatchRow {
     mismatch_type: String,
     segment: String,
     first_mismatch_offset: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recorded_bit_offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recorded_bit_value: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recorded_bit_source: Option<String>,
+    alpha_alignment_padding_len: usize,
     bit_source_contract: Option<String>,
     cached_bits_preserved: Option<bool>,
     original_bit_window: Option<BitWindow>,
@@ -132,6 +142,8 @@ struct ScannerSectionReceipt {
     declared_count: u16,
     payload_len_bytes: usize,
     accepted_marker_count: usize,
+    scanner_work: ScannerWorkCounters,
+    marker_signature: Vec<ScannerMarkerSignature>,
     elapsed_ms: u128,
 }
 
@@ -152,6 +164,38 @@ struct ScannerCandidateReceipt {
     accepted_marker_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scanner_work: Option<ScannerWorkCounters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scanner_gap_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    marker_signature: Option<Vec<ScannerMarkerSignature>>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ScannerMarkerSignature {
+    offset: u64,
+    code: String,
+    confidence: u32,
+    score: i32,
+    status: String,
+    selected_corrected_gap: Option<i8>,
+    selected_trial_gap: Option<u64>,
+    selected_trial_gap_is_rhythm: Option<bool>,
+}
+
+fn marker_signature(markers: &[ItemMarker]) -> Vec<ScannerMarkerSignature> {
+    markers
+        .iter()
+        .map(|marker| ScannerMarkerSignature {
+            offset: marker.offset,
+            code: marker.code.trim().to_string(),
+            confidence: marker.confidence,
+            score: marker.score,
+            status: format!("{:?}", marker.status),
+            selected_corrected_gap: marker.selected_corrected_gap,
+            selected_trial_gap: marker.selected_trial_gap,
+            selected_trial_gap_is_rhythm: marker.selected_trial_gap_is_rhythm,
+        })
+        .collect()
 }
 
 #[derive(Deserialize, Serialize)]
@@ -302,7 +346,10 @@ fn build_topology_receipt(bytes: &[u8], include_parser: bool) -> TopologyReceipt
     }
 }
 
-fn scan_sections_for_receipt(bytes: &[u8]) -> Vec<ScannerSectionReceipt> {
+fn scan_sections_for_receipt(
+    bytes: &[u8],
+    gap_profile: AlphaScannerGapProfile,
+) -> Vec<ScannerSectionReceipt> {
     let alpha_mode = bytes
         .get(4..8)
         .and_then(|version| version.try_into().ok())
@@ -330,20 +377,24 @@ fn scan_sections_for_receipt(bytes: &[u8]) -> Vec<ScannerSectionReceipt> {
             let next_jm_offset_byte = positions.get(index + 1).copied().unwrap_or(bytes.len());
             let section_bytes = bytes.get(jm_offset_byte..next_jm_offset_byte)?;
             let started = Instant::now();
-            let markers = scan_item_markers(
+            let scan = scan_item_markers_with_receipt_deadline_profile(
                 section_bytes,
                 &huffman,
                 alpha_mode,
                 (jm_offset_byte as u64) * 8,
                 Some(declared_count),
                 false,
+                None,
+                gap_profile,
             );
             Some(ScannerSectionReceipt {
                 jm_offset_byte,
                 next_jm_offset_byte,
                 declared_count,
                 payload_len_bytes: next_jm_offset_byte.saturating_sub(jm_offset_byte + 4),
-                accepted_marker_count: markers.len(),
+                accepted_marker_count: scan.markers.len(),
+                scanner_work: scan.work,
+                marker_signature: marker_signature(&scan.markers),
                 elapsed_ms: started.elapsed().as_millis(),
             })
         })
@@ -356,6 +407,7 @@ fn scan_candidate_for_receipt(
     header_only: bool,
     section_end_byte: Option<usize>,
     scanner_deadline_ms: Option<u64>,
+    gap_profile: AlphaScannerGapProfile,
 ) -> Result<ScannerCandidateReceipt, String> {
     let positions = find_jm_markers(bytes);
     let jm_offset_byte = *positions
@@ -390,6 +442,8 @@ fn scan_candidate_for_receipt(
         scan_elapsed_ms: None,
         accepted_marker_count: None,
         scanner_work: None,
+        scanner_gap_profile: Some(gap_profile.label()),
+        marker_signature: None,
     };
     if header_only || !header_plausible || declared_count == Some(0) {
         if !header_only {
@@ -405,7 +459,7 @@ fn scan_candidate_for_receipt(
         format!("invalid scanner section bounds {jm_offset_byte}..{section_end_byte}")
     })?;
     let scan_started = Instant::now();
-    let scan = scan_item_markers_with_receipt_deadline(
+    let scan = scan_item_markers_with_receipt_deadline_profile(
         section_bytes,
         &huffman,
         alpha_mode,
@@ -414,6 +468,7 @@ fn scan_candidate_for_receipt(
         false,
         scanner_deadline_ms
             .map(|milliseconds| Instant::now() + Duration::from_millis(milliseconds)),
+        gap_profile,
     );
     receipt.scan_status = Some(if scan.timed_out {
         "[TIMEOUT]".to_string()
@@ -422,6 +477,7 @@ fn scan_candidate_for_receipt(
     });
     receipt.scan_elapsed_ms = Some(scan_started.elapsed().as_millis());
     receipt.accepted_marker_count = Some(scan.markers.len());
+    receipt.marker_signature = Some(marker_signature(&scan.markers));
     receipt.scanner_work = Some(scan.work);
     Ok(receipt)
 }
@@ -540,6 +596,7 @@ struct Args {
     scanner_header_only: bool,
     scanner_section_end_byte: Option<usize>,
     scanner_deadline_ms: Option<u64>,
+    scanner_gap_profile: AlphaScannerGapProfile,
     worker_single_fixture: bool,
 }
 
@@ -793,6 +850,8 @@ fn process_scanner_candidates_with_timeout(
                     scan_elapsed_ms: None,
                     accepted_marker_count: None,
                     scanner_work: None,
+                    scanner_gap_profile: Some(child_args.scanner_gap_profile.label()),
+                    marker_signature: None,
                 });
         candidates.push(candidate);
     }
@@ -937,6 +996,7 @@ fn process_file(
                 args.scanner_header_only,
                 args.scanner_section_end_byte,
                 args.scanner_deadline_ms,
+                args.scanner_gap_profile,
             ) {
                 Ok(candidate) => AuditResult {
                     status: "[PASS]".to_string(),
@@ -966,7 +1026,7 @@ fn process_file(
                 },
             };
         }
-        let scanner_sections = scan_sections_for_receipt(&bytes);
+        let scanner_sections = scan_sections_for_receipt(&bytes, args.scanner_gap_profile);
         return AuditResult {
             status: "[PASS]".to_string(),
             filename: file_name,
@@ -1040,6 +1100,10 @@ fn process_file(
                                 mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
                                 segment: it.segment.clone().unwrap_or_default(),
                                 first_mismatch_offset: it.first_mismatch_offset.map(|o| o as usize),
+                                recorded_bit_offset: it.recorded_bit_offset,
+                                recorded_bit_value: it.recorded_bit_value,
+                                recorded_bit_source: it.recorded_bit_source.clone(),
+                                alpha_alignment_padding_len: it.alpha_alignment_padding_len,
                                 bit_source_contract: it.bit_source_contract.clone(),
                                 cached_bits_preserved: it.cached_bits_preserved,
                                 original_bit_window: bounded_bit_window(
@@ -1560,6 +1624,12 @@ fn main() {
         Some("scanner-deadline-ms"),
         "Internal: cooperative scanner receipt deadline in milliseconds",
     ));
+    parser.add_spec(ArgSpec::option(
+        "scanner-gap-profile",
+        None,
+        Some("scanner-gap-profile"),
+        "Opt-in scanner header-gap profile: extended, rhythm-only, witness-subset, or extended-except-mask-1..31",
+    ));
     parser.add_spec(ArgSpec::flag(
         "worker-single-fixture",
         None,
@@ -1639,6 +1709,22 @@ fn main() {
         },
         None => None,
     };
+    let scanner_gap_profile = match parsed.get("scanner-gap-profile").map(String::as_str) {
+        Some("extended") | None => AlphaScannerGapProfile::Extended,
+        Some("rhythm-only") => AlphaScannerGapProfile::RhythmOnly,
+        Some("witness-subset") => AlphaScannerGapProfile::WitnessSubset,
+        Some(value) if value.starts_with("extended-except-mask-") => match value[21..].parse::<u8>() {
+            Ok(mask) if (1..=31).contains(&mask) => AlphaScannerGapProfile::ExtendedExceptMask(mask),
+            _ => {
+                eprintln!("error: --scanner-gap-profile extended-except-mask accepts integers 1 through 31");
+                std::process::exit(1);
+            }
+        },
+        Some(value) => {
+            eprintln!("error: unsupported --scanner-gap-profile '{value}'");
+            std::process::exit(1);
+        }
+    };
 
     let args = Args {
         target_dir: parsed
@@ -1684,6 +1770,7 @@ fn main() {
         scanner_header_only: parsed.is_set("scanner-header-only"),
         scanner_section_end_byte,
         scanner_deadline_ms,
+        scanner_gap_profile,
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
     };
 

@@ -206,7 +206,18 @@ fn main() {
                     "name_en": s_name_en,
                     "name_ko": s_name_ko,
                     "quality": quality_to_str(s_item.header.quality),
+                    "properties": serialize_item_properties(&s_item.properties),
                 }));
+            }
+
+            let mut props_json = serialize_item_properties(&item.properties);
+            if props_json.is_empty() {
+                if let Some(payload) = &item.body.v105_7mgw_payload {
+                    let decoded = decode_opaque_bits_properties(payload);
+                    if !decoded.is_empty() {
+                        props_json = decoded;
+                    }
+                }
             }
 
             let item_data = json!({
@@ -222,7 +233,18 @@ fn main() {
                 "height": height,
                 "is_equipped": item.mode == 1,
                 "location": item.location,
-                "socketed_items": socket_json
+                "socketed_items": socket_json,
+                "properties": props_json,
+                "set_attributes": item.set_attributes.iter().map(|set_props| serialize_item_properties(set_props)).collect::<Vec<_>>(),
+                "runeword_attributes": serialize_item_properties(&item.runeword_attributes),
+                "opaque_info": json!({
+                    "is_opaque": item.body.v105_7mgw_payload.is_some(),
+                    "bit_count": item.body.v105_7mgw_payload.as_ref().map(|b| b.len()).unwrap_or(0)
+                }),
+                "defense": item.defense,
+                "max_durability": item.max_durability,
+                "current_durability": item.current_durability,
+                "quantity": item.quantity,
             });
 
             match alpha_inventory_route(item, is_alpha) {
@@ -420,6 +442,17 @@ fn parse_mercenary_equipped_items(
                 "slot_en": slot_en,
                 "slot_source": slot_source,
                 "candidate_kind": candidate_kind,
+                "properties": serialize_item_properties(&item.properties),
+                "set_attributes": item.set_attributes.iter().map(|set_props| serialize_item_properties(set_props)).collect::<Vec<_>>(),
+                "runeword_attributes": serialize_item_properties(&item.runeword_attributes),
+                "opaque_info": json!({
+                    "is_opaque": item.body.v105_7mgw_payload.is_some(),
+                    "bit_count": item.body.v105_7mgw_payload.as_ref().map(|b| b.len()).unwrap_or(0)
+                }),
+                "defense": item.defense,
+                "max_durability": item.max_durability,
+                "current_durability": item.current_durability,
+                "quantity": item.quantity,
             }))
         })
         .collect()
@@ -500,6 +533,31 @@ fn quality_to_str(q: Option<d2r_core::domain::item::quality::ItemQuality>) -> &'
     }
 }
 
+// Helper: serialize list of ItemProperty into serde_json::Value
+fn serialize_item_properties(props: &[d2r_core::item::ItemProperty]) -> Vec<serde_json::Value> {
+    props
+        .iter()
+        .map(|p| {
+            let stat_name = if !p.name.trim().is_empty() {
+                p.name.clone()
+            } else {
+                d2r_core::data::stat_costs::STAT_COSTS
+                    .iter()
+                    .find(|s| s.id == p.stat_id)
+                    .map(|s| s.name.to_string())
+                    .unwrap_or_else(|| format!("stat_{}", p.stat_id))
+            };
+            json!({
+                "stat_id": p.stat_id,
+                "name": stat_name,
+                "param": p.param,
+                "raw_value": p.raw_value,
+                "value": p.value,
+            })
+        })
+        .collect()
+}
+
 // Helper: search localization dictionary for item name translation
 fn get_item_localization(code: &str) -> (String, String) {
     let trimmed = code.trim().to_lowercase();
@@ -517,4 +575,52 @@ fn get_item_localization(code: &str) -> (String, String) {
             .unwrap_or(code);
         (name_en.to_string(), name_en.to_string())
     }
+}
+
+// Helper: decode properties from opaque bitstreams
+fn decode_opaque_bits_properties(bits: &[bool]) -> Vec<serde_json::Value> {
+    let mut results = Vec::new();
+    if bits.len() < 18 {
+        return results;
+    }
+
+    let mut bit_pos = 0;
+    while bit_pos + 18 <= bits.len() {
+        let mut stat_id = 0u32;
+        for i in 0..9 {
+            if bits[bit_pos + i] {
+                stat_id |= 1 << i;
+            }
+        }
+        if stat_id == 0x1FF {
+            break;
+        }
+
+        let mut raw_val = 0u32;
+        for i in 0..9 {
+            if bits[bit_pos + 9 + i] {
+                raw_val |= 1 << i;
+            }
+        }
+
+        if let Some(stat) = d2r_core::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id) {
+            results.push(json!({
+                "stat_id": stat_id,
+                "name": stat.name.to_string(),
+                "param": 0,
+                "raw_value": raw_val,
+                "value": raw_val as i32,
+            }));
+        } else if stat_id < 511 && raw_val > 0 {
+            results.push(json!({
+                "stat_id": stat_id,
+                "name": format!("stat_{}", stat_id),
+                "param": 0,
+                "raw_value": raw_val,
+                "value": raw_val as i32,
+            }));
+        }
+        bit_pos += 18;
+    }
+    results
 }

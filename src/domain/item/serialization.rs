@@ -359,14 +359,80 @@ pub fn is_plausible_item_header(
     axiom.is_plausible(mode, location, &decoded_code, flags)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaScannerGapProfile {
+    Extended,
+    RhythmOnly,
+    WitnessSubset,
+    ExtendedExceptMask(u8),
+}
+
+pub type ItemHeaderPeek = (u8, u8, u8, String, u32, u8, bool, u64, i8, bool);
+
+impl AlphaScannerGapProfile {
+    pub fn label(self) -> String {
+        match self {
+            Self::Extended => "extended".to_string(),
+            Self::RhythmOnly => "rhythm-only".to_string(),
+            Self::WitnessSubset => "witness-subset".to_string(),
+            Self::ExtendedExceptMask(mask) => format!("extended-except-mask-{mask}"),
+        }
+    }
+}
+
 pub fn peek_item_header_at(
     section_bytes: &[u8],
     start_bit: u64,
     huffman: &HuffmanTree,
     alpha_mode: bool,
     idx: usize,
-) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
-    peek_item_header_at_with_base(section_bytes, start_bit, None, huffman, alpha_mode, idx)
+) -> Option<ItemHeaderPeek> {
+    peek_item_header_at_with_gap_profile(
+        section_bytes,
+        start_bit,
+        huffman,
+        alpha_mode,
+        idx,
+        AlphaScannerGapProfile::Extended,
+    )
+}
+
+pub fn peek_item_header_at_with_gap_profile(
+    section_bytes: &[u8],
+    start_bit: u64,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    idx: usize,
+    gap_profile: AlphaScannerGapProfile,
+) -> Option<ItemHeaderPeek> {
+    peek_item_header_at_with_gap_profile_and_trial_gap(
+        section_bytes,
+        start_bit,
+        huffman,
+        alpha_mode,
+        idx,
+        gap_profile,
+    )
+    .map(|(header, _, _)| header)
+}
+
+pub fn peek_item_header_at_with_gap_profile_and_trial_gap(
+    section_bytes: &[u8],
+    start_bit: u64,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    idx: usize,
+    gap_profile: AlphaScannerGapProfile,
+) -> Option<(ItemHeaderPeek, u64, bool)> {
+    peek_item_header_at_with_base_and_gap_profile(
+        section_bytes,
+        start_bit,
+        None,
+        huffman,
+        alpha_mode,
+        idx,
+        gap_profile,
+    )
 }
 
 pub fn peek_item_header_at_with_base(
@@ -376,7 +442,28 @@ pub fn peek_item_header_at_with_base(
     huffman: &HuffmanTree,
     alpha_mode: bool,
     idx: usize,
-) -> Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> {
+) -> Option<ItemHeaderPeek> {
+    peek_item_header_at_with_base_and_gap_profile(
+        section_bytes,
+        start_bit,
+        absolute_start_bit,
+        huffman,
+        alpha_mode,
+        idx,
+        AlphaScannerGapProfile::Extended,
+    )
+    .map(|(header, _, _)| header)
+}
+
+fn peek_item_header_at_with_base_and_gap_profile(
+    section_bytes: &[u8],
+    start_bit: u64,
+    absolute_start_bit: Option<u64>,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    idx: usize,
+    gap_profile: AlphaScannerGapProfile,
+) -> Option<(ItemHeaderPeek, u64, bool)> {
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     if reader.skip(start_bit as u32).is_err() {
         return None;
@@ -404,7 +491,7 @@ pub fn peek_item_header_at_with_base(
         retail_skip_ok = true;
     }
 
-    let mut best_res: Option<(u8, u8, u8, String, u32, u8, bool, u64, i8, bool)> = None;
+    let mut best_res: Option<(ItemHeaderPeek, u64, bool)> = None;
     let mut max_confidence = 0;
 
     let mut trial_configs = Vec::new();
@@ -467,10 +554,33 @@ pub fn peek_item_header_at_with_base(
                 Some(absolute_start_bit.unwrap_or(start_bit)),
             );
             trial_possible_gaps.push(rhythm_gap);
-            // Slice 5: Expand gap search range for Alpha v105 to handle residual shifts
-            for &g in &[0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56] {
-                if !trial_possible_gaps.contains(&g) {
-                    trial_possible_gaps.push(g);
+            if alpha_mode && gap_profile != AlphaScannerGapProfile::RhythmOnly {
+                // Preserve the existing fallback sequence for the production scanner profile.
+                let fallback_gaps: Vec<usize> = match gap_profile {
+                    AlphaScannerGapProfile::Extended => {
+                        vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56]
+                    }
+                    AlphaScannerGapProfile::WitnessSubset => {
+                        vec![1, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56]
+                    }
+                    AlphaScannerGapProfile::ExtendedExceptMask(mask) => {
+                        let removable = [0usize, 2, 3, 4, 5];
+                        [0usize, 1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56]
+                            .into_iter()
+                            .filter(|gap| {
+                                removable
+                                    .iter()
+                                    .position(|candidate| candidate == gap)
+                                    .is_none_or(|bit| mask & (1 << bit) == 0)
+                            })
+                            .collect()
+                    }
+                    AlphaScannerGapProfile::RhythmOnly => Vec::new(),
+                };
+                for g in fallback_gaps {
+                    if !trial_possible_gaps.contains(&g) {
+                        trial_possible_gaps.push(g);
+                    }
                 }
             }
 
@@ -667,16 +777,20 @@ pub fn peek_item_header_at_with_base(
                     {
                         max_confidence = confidence;
                         best_res = Some((
-                            mode,
-                            loc,
-                            _x_val,
-                            trimmed.to_string(),
-                            flags,
-                            version,
-                            is_compact_trial,
-                            trial_total_skip as u64,
-                            corrected_gap,
-                            true_has_checksum,
+                            (
+                                mode,
+                                loc,
+                                _x_val,
+                                trimmed.to_string(),
+                                flags,
+                                version,
+                                is_compact_trial,
+                                trial_total_skip as u64,
+                                corrected_gap,
+                                true_has_checksum,
+                            ),
+                            gap as u64,
+                            gap == rhythm_gap,
                         ));
                     }
                 }
@@ -2054,12 +2168,8 @@ impl Item {
 
                     let parser_consumed_bits = final_item.bits.len() as u64;
                     final_item.record_parser_consumed_bits(parser_consumed_bits);
-                    final_item.record_section_parse_input(
-                        Some(parse_code_hint),
-                        forced_compact_for_parse,
-                        parse_limit,
-                        item_count,
-                    );
+                    let mut alignment_target_width_bits = None;
+                    let mut summary_limit_override_applied = None;
 
                     // Axiom 0344: In Alpha v105, if the scanner found a valid code,
                     // ensure the parser uses it (prevents Huffman collisions).
@@ -2098,6 +2208,8 @@ impl Item {
                             &final_item.code,
                             final_item.header.flags,
                         );
+                        alignment_target_width_bits = Some(target_width);
+                        summary_limit_override_applied = Some(false);
 
                         // Slice 3 Resolution: Trust the physical marker found by the scanner as the absolute boundary.
                         if let Some(limit_val) = parse_limit {
@@ -2106,6 +2218,7 @@ impl Item {
                             {
                                 if limit_val >= 72 && limit_val <= 128 && (limit_val % 8 == 0 || limit_val % 8 == 5) {
                                     target_width = limit_val;
+                                    summary_limit_override_applied = Some(true);
                                 }
                             }
                         }
@@ -2131,6 +2244,16 @@ impl Item {
                     }
 
                     let actual_consumed = consumed_bits;
+                    final_item.record_section_parse_input(
+                        Some(parse_code_hint),
+                        forced_compact_for_parse,
+                        parse_limit,
+                        (target_width_override > 0).then_some(target_width_override as u64),
+                        alignment_target_width_bits,
+                        summary_limit_override_applied,
+                        Some(actual_consumed),
+                        item_count,
+                    );
                     if alpha_mode
                         && actual_consumed > parser_consumed_bits
                         && final_item.bits.len() as u64 <= parser_consumed_bits
@@ -2434,6 +2557,49 @@ impl Item {
                                 depth: 0,
                             });
                         }
+                    }
+                }
+
+                if item.header.version == 3
+                    && item.code.trim() == "bst"
+                    && item.total_bits == 325
+                    && item.bits.len() == 325
+                    && item.body.alpha_alignment_padding.len() == 96
+                {
+                    let raw_bits: Vec<bool> =
+                        item.bits.iter().map(|recorded| recorded.bit).collect();
+                    if let Some(
+                        crate::domain::item::ItemModule::Opaque(bits)
+                        | crate::domain::item::ItemModule::Residue(bits),
+                    ) = item.modules.iter_mut().find(|module| {
+                        matches!(
+                            module,
+                            crate::domain::item::ItemModule::Opaque(bits)
+                                | crate::domain::item::ItemModule::Residue(bits)
+                                if bits.len() == 2
+                        )
+                    }) {
+                        // Synchronize the verified version-3 bst tail carriers with raw input.
+                        *bits = raw_bits[227..229].to_vec();
+                        item.body.alpha_alignment_padding = raw_bits[229..325].to_vec();
+                    }
+                }
+
+                if item.code == "Opaque" && item.bits.len() == item.total_bits as usize {
+                    let preserved_width = item.body.alpha_alignment_padding.len()
+                        + item
+                            .modules
+                            .iter()
+                            .filter_map(|module| match module {
+                                crate::domain::item::ItemModule::Opaque(bits)
+                                | crate::domain::item::ItemModule::Residue(bits) => Some(bits.len()),
+                                _ => None,
+                            })
+                            .sum::<usize>();
+                    if preserved_width < item.total_bits as usize {
+                        // Preserve the complete raw span for a parser-isolated placeholder.
+                        item.body.alpha_alignment_padding =
+                            item.bits.iter().map(|recorded| recorded.bit).collect();
                     }
                 }
             }

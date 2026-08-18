@@ -236,6 +236,10 @@ pub struct SectionParseInputProvenance {
     pub code_hint: Option<String>,
     pub forced_compact: Option<bool>,
     pub limit_bits: Option<u64>,
+    pub registry_target_width_override_bits: Option<u64>,
+    pub alignment_target_width_bits: Option<u64>,
+    pub summary_limit_override_applied: Option<bool>,
+    pub final_claimed_width_bits: Option<u64>,
     pub item_index: Option<usize>,
 }
 
@@ -244,12 +248,20 @@ impl SectionParseInputProvenance {
         code_hint: Option<&str>,
         forced_compact: Option<bool>,
         limit_bits: Option<u64>,
+        registry_target_width_override_bits: Option<u64>,
+        alignment_target_width_bits: Option<u64>,
+        summary_limit_override_applied: Option<bool>,
+        final_claimed_width_bits: Option<u64>,
         item_index: usize,
     ) -> Self {
         Self {
             code_hint: code_hint.map(str::to_owned),
             forced_compact,
             limit_bits,
+            registry_target_width_override_bits,
+            alignment_target_width_bits,
+            summary_limit_override_applied,
+            final_claimed_width_bits,
             item_index: Some(item_index),
         }
     }
@@ -344,12 +356,20 @@ impl Item {
         code_hint: Option<&str>,
         forced_compact: Option<bool>,
         limit_bits: Option<u64>,
+        registry_target_width_override_bits: Option<u64>,
+        alignment_target_width_bits: Option<u64>,
+        summary_limit_override_applied: Option<bool>,
+        final_claimed_width_bits: Option<u64>,
         item_index: usize,
     ) {
         self.section_parse_input = SectionParseInputProvenance::record(
             code_hint,
             forced_compact,
             limit_bits,
+            registry_target_width_override_bits,
+            alignment_target_width_bits,
+            summary_limit_override_applied,
+            final_claimed_width_bits,
             item_index,
         );
     }
@@ -942,11 +962,42 @@ impl Item {
             return Ok(());
         }
 
+        if alpha_mode
+            && !is_placeholder_opaque
+            && self.bits.is_empty()
+            && self.socketed_items.is_empty()
+            && self.modules.len() == 1
+            && self.body.alpha_alignment_padding.len() == self.total_bits as usize
+        {
+            let mut raw_modules = self.modules.iter().filter_map(|module| match module {
+                ItemModule::Opaque(bits) | ItemModule::Residue(bits) => Some(bits),
+                _ => None,
+            });
+            if let (Some(bits), None) = (raw_modules.next(), raw_modules.next()) {
+                if bits.len() == self.total_bits as usize {
+                    // Replay a complete parser-isolated carrier before structured emission.
+                    emitter.extend_bits(bits.iter().copied())?;
+                    return Ok(());
+                }
+            }
+        }
+
         if is_placeholder_opaque {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
                         let len = bits.len() as u64;
+                        let captured_padding = &self.body.alpha_alignment_padding;
+                        if alpha_mode
+                            && self.bits.is_empty()
+                            && !captured_padding.is_empty()
+                            && len + captured_padding.len() as u64 == self.total_bits
+                        {
+                            // Replay a complete physical opaque carrier without synthesizing its tail.
+                            emitter.extend_bits(bits.iter().cloned())?;
+                            emitter.extend_bits(captured_padding.iter().copied())?;
+                            return Ok(());
+                        }
                         emitter.extend_bits(bits.iter().cloned())?;
                         // Slice 7: Dynamic Interval Capture. Honor total_bits even for placeholder items.
                         if self.total_bits > len {
@@ -1485,6 +1536,7 @@ impl Item {
             emitter.written_bits(),
         );
         phase_start = emitter.written_bits();
+        let non_summary_body_start = phase_start;
 
         // Slice 4: Check for SemiOpaque body preservation
         for module in &self.modules {
@@ -1581,6 +1633,7 @@ impl Item {
                         || self.header.version == 1),
             )?;
         } else {
+            let code_phase_start = emitter.written_bits();
             if alpha_mode && !self.body.alpha_code_bits.is_empty() {
                 emitter.extend_bits(self.body.alpha_code_bits.iter().cloned())?;
             } else {
@@ -1594,16 +1647,38 @@ impl Item {
                     );
                 }
             }
+            if !is_v105_summary {
+                record_emission_phase(
+                    &mut phases,
+                    "non_summary_code",
+                    code_phase_start,
+                    emitter.written_bits(),
+                );
+            }
 
-            if alpha_mode && h_axiom.is_alpha() && !self.header.is_compact {
+            let nudge_phase_start = emitter.written_bits();
+            if alpha_mode
+                && h_axiom.is_alpha()
+                && !self.header.is_compact
+                && self.header.version != 3
+            {
                 // Alpha v5/body nudge must stay present even when the stored value is absent.
                 let nudge = self.body.alpha_nudge.unwrap_or(0);
                 emitter.write_bits(nudge as u32, w_axiom.nudge_bits(self.header.version) as u32)?;
+            }
+            if !is_v105_summary {
+                record_emission_phase(
+                    &mut phases,
+                    "non_summary_nudge",
+                    nudge_phase_start,
+                    emitter.written_bits(),
+                );
             }
 
             let quality_val = self.header.quality.unwrap_or(ItemQuality::Normal);
             let is_item_alpha = s_axiom.is_alpha();
 
+            let quality_phase_start = emitter.written_bits();
             if is_item_alpha && !s_axiom.is_compact {
                 let quality_to_write = if let Some(raw) = self.alpha_quality_raw {
                     raw
@@ -1633,7 +1708,16 @@ impl Item {
                     emitter.write_bits(self.body.v5_runeword_extra.unwrap_or(0) as u32, 2)?;
                 }
             }
+            if !is_v105_summary {
+                record_emission_phase(
+                    &mut phases,
+                    "non_summary_alpha_quality",
+                    quality_phase_start,
+                    emitter.written_bits(),
+                );
+            }
 
+            let identity_phase_start = emitter.written_bits();
             if (!is_item_alpha
                 || (alpha_mode && (self.header.version == 0 || self.header.version == 2)))
                 && !self.header.is_compact
@@ -1641,6 +1725,14 @@ impl Item {
                 emitter.write_bits(self.id.unwrap_or(0), 32)?;
                 emitter.write_bits(self.level.unwrap_or(0) as u32, 7)?;
                 emitter.write_bits(quality_val as u32, 4)?;
+            }
+            if !is_v105_summary {
+                record_emission_phase(
+                    &mut phases,
+                    "non_summary_legacy_identity",
+                    identity_phase_start,
+                    emitter.written_bits(),
+                );
             }
 
             if !(is_item_alpha
@@ -1813,6 +1905,15 @@ impl Item {
                         emitter.write_bits(0, 47)?;
                     }
                 }
+                if !is_v105_summary {
+                    record_emission_phase(
+                        &mut phases,
+                        "non_summary_pre_property_metadata",
+                        non_summary_body_start,
+                        emitter.written_bits(),
+                    );
+                }
+                let property_body_start = emitter.written_bits();
                 if !is_v105_summary
                     && (self.header.version != 5
                         || is_shadow
@@ -1873,6 +1974,9 @@ impl Item {
                             }
                         }
                     }
+                    if alpha_mode && self.header.version == 3 && self.code.trim() == "bst" {
+                        emitter.write_bit(false)?;
+                    }
                     crate::domain::item::serialization::write_property_list(
                         emitter,
                         &self.code,
@@ -1904,8 +2008,30 @@ impl Item {
                         )?;
                     }
                 }
+                if !is_v105_summary {
+                    record_emission_phase(
+                        &mut phases,
+                        "non_summary_property_body",
+                        property_body_start,
+                        emitter.written_bits(),
+                    );
+                }
             }
         }
+        let opaque_precedes_captured_tail = alpha_mode
+            && self.header.version == 3
+            && self.code.trim() == "bst";
+        if opaque_precedes_captured_tail && has_opaque_module && !is_placeholder_opaque {
+            for module in &self.modules {
+                match module {
+                    ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                        emitter.extend_bits(bits.iter().cloned())?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let captured_tail_start = emitter.written_bits();
         if alpha_mode && !is_v105_summary {
             let current_bits = emitter.written_bits() - start_bit;
             let start_idx = current_bits as usize;
@@ -1944,8 +2070,17 @@ impl Item {
                 pad_seg.emit(emitter)?;
             }
         }
+        if !is_v105_summary {
+            record_emission_phase(
+                &mut phases,
+                "non_summary_captured_tail_material",
+                captured_tail_start,
+                emitter.written_bits(),
+            );
+        }
 
-        if has_opaque_module && !is_placeholder_opaque {
+        let opaque_tail_start = emitter.written_bits();
+        if !opaque_precedes_captured_tail && has_opaque_module && !is_placeholder_opaque {
             for module in &self.modules {
                 match module {
                     ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
@@ -1954,6 +2089,14 @@ impl Item {
                     _ => {}
                 }
             }
+        }
+        if !is_v105_summary {
+            record_emission_phase(
+                &mut phases,
+                "non_summary_opaque_tail",
+                opaque_tail_start,
+                emitter.written_bits(),
+            );
         }
 
         if !alpha_mode && self.header.version != 5 && self.header.version != 7 {
@@ -1969,6 +2112,14 @@ impl Item {
         let current_bits = emitter.written_bits();
         let mut final_bits =
             s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
+
+        if alpha_mode
+            && self.header.version == 3
+            && self.code.trim() == "bst"
+            && self.total_bits >= current_bits - start_bit
+        {
+            final_bits = self.total_bits;
+        }
 
         if preserve_raw_authority_bits && self.total_bits > final_bits {
             final_bits = self.total_bits;
