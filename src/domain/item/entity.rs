@@ -1388,12 +1388,11 @@ impl Item {
                         pbits
                     }
                 } else if composed_alignment_material {
-                    let mut pbits = self.body.alpha_alignment_padding.clone();
-                    pbits.extend(
-                        opaque_alignment_material
-                            .as_ref()
-                            .expect("composed material requires an opaque tail"),
-                    );
+                    let mut pbits = opaque_alignment_material
+                        .as_ref()
+                        .expect("composed material requires an opaque tail")
+                        .clone();
+                    pbits.extend(self.body.alpha_alignment_padding.iter().copied());
                     pbits
                 } else if !self.body.alpha_alignment_padding.is_empty() {
                     let mut pbits = self.body.alpha_alignment_padding.clone();
@@ -1615,6 +1614,17 @@ impl Item {
                         || self.header.version == 2
                         || self.header.version == 5)))
         {
+            if has_opaque_module && !is_placeholder_opaque {
+                for module in &self.modules {
+                    match module {
+                        ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
+                            emitter.extend_bits(bits.iter().cloned())?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
             let current_bits = emitter.written_bits();
             let mut final_bits = s_axiom.calculate_alignment(
                 current_bits - start_bit,
@@ -1653,16 +1663,6 @@ impl Item {
                 }
                 let pad_seg = AlphaHeaderGap { bits: align_bits };
                 pad_seg.emit(emitter)?;
-            }
-            if has_opaque_module && !is_placeholder_opaque {
-                for module in &self.modules {
-                    match module {
-                        ItemModule::Opaque(bits) | ItemModule::Residue(bits) => {
-                            emitter.extend_bits(bits.iter().cloned())?;
-                        }
-                        _ => {}
-                    }
-                }
             }
             record_emission_phase(
                 &mut phases,
@@ -2070,9 +2070,7 @@ impl Item {
                 }
             }
         }
-        let opaque_precedes_captured_tail = alpha_mode
-            && self.header.version == 3
-            && self.code.trim() == "bst";
+        let opaque_precedes_captured_tail = alpha_mode;
         if opaque_precedes_captured_tail && has_opaque_module && !is_placeholder_opaque {
             for module in &self.modules {
                 match module {
@@ -2084,7 +2082,7 @@ impl Item {
             }
         }
         let captured_tail_start = emitter.written_bits();
-        if alpha_mode && !is_v105_summary {
+        if alpha_mode {
             let current_bits = emitter.written_bits() - start_bit;
             let start_idx = current_bits as usize;
             let recorded_total = self.bits.len();
