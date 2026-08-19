@@ -379,7 +379,7 @@ fn section_context_report(
     let emitter_nudge_will_write = alpha_mode
         && header_is_item_alpha
         && !item.header.is_compact
-        && item.header.version != 3;
+        && matches!(item.header.version, 0 | 2 | 5);
     let nudge_width_bits = nudge_axiom.nudge_bits(item.header.version);
     let legacy_identity_will_emit = (!identity_is_item_alpha
         || (alpha_mode && matches!(item.header.version, 0 | 2)))

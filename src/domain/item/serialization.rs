@@ -4016,7 +4016,8 @@ pub fn write_property_list(
             || version == 1
             || version == 2
             || version == 4
-            || version == 6)
+            || version == 6
+            || version == 7)
         && !is_rw
         && !is_compact
     {

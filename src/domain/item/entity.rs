@@ -1712,7 +1712,7 @@ impl Item {
             if alpha_mode
                 && h_axiom.is_alpha()
                 && !self.header.is_compact
-                && self.header.version != 3
+                && matches!(self.header.version, 0 | 2 | 5)
             {
                 // Alpha v5/body nudge must stay present even when the stored value is absent.
                 let nudge = self.body.alpha_nudge.unwrap_or(0);

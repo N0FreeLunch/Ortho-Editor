@@ -152,7 +152,8 @@ impl StatsAxiom {
                 || self.version == 2
                 || self.version == 0
                 || self.version == 4
-                || self.version == 6)
+                || self.version == 6
+                || self.version == 7)
     }
 
     /// Whitelist for Alpha stat mapping (includes version 7).
