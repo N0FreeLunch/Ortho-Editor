@@ -824,14 +824,14 @@ mod tests {
         item.quality = Some(crate::item::ItemQuality::High);
         
         // 15% Enhanced Defense
-        item.properties.push(crate::item::ItemProperty {
-            stat_id: 16,
-            name: "item_armor_percent".to_string(),
-            value: 15,
-            param: 0,
-            raw_value: 0, // dummy
-            range: ItemBitRange::default(),
-        });
+        item.properties.push(crate::item::ItemProperty::new(
+            16,
+            "item_armor_percent".to_string(),
+            0,
+            0,
+            15,
+            ItemBitRange::default(),
+        ));
         
         // Expected: floor((524+1) * 1.5) * 1.15 = floor(787.5) * 1.15 = 787 * 1.15 = 905.05 -> 905?
         // Actually: floor(floor(525 * 1.5) * 1.15) = floor(787 * 1.15) = floor(905.05) = 905.

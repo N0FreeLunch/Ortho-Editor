@@ -101,14 +101,14 @@ fn test_staffmod_legitimacy_violation() {
     item.quality = Some(ItemQuality::Normal);
 
     // fireresist (39) with value 25 matches Tier 3 (Level 28) for itype "armo" in legitimacy.rs
-    item.properties.push(ItemProperty {
-        stat_id: 39,
-        name: "fireresist".to_string(),
-        param: 0,
-        raw_value: 25,
-        value: 25,
-        range: ItemBitRange::default(),
-    });
+    item.properties.push(ItemProperty::new(
+        39,
+        "fireresist".to_string(),
+        0,
+        25,
+        25,
+        ItemBitRange::default(),
+    ));
 
     let warnings = check_staffmod_legitimacy(&item);
     assert!(
@@ -129,14 +129,14 @@ fn test_staffmod_legitimacy_valid() {
     item.level = Some(40); // ilvl 40
     item.quality = Some(ItemQuality::Normal);
 
-    item.properties.push(ItemProperty {
-        stat_id: 39,
-        name: "fireresist".to_string(),
-        param: 0,
-        raw_value: 25,
-        value: 25,
-        range: ItemBitRange::default(),
-    });
+    item.properties.push(ItemProperty::new(
+        39,
+        "fireresist".to_string(),
+        0,
+        25,
+        25,
+        ItemBitRange::default(),
+    ));
 
     let warnings = check_staffmod_legitimacy(&item);
     assert!(
@@ -253,14 +253,14 @@ fn test_ethereal_defense_violation() {
     // Add 100% ED. Expected Base = 524 + 1 = 525.
     // Eth_Base = floor(525 * 1.5) = 787
     // Expected_Def = floor(787 * 2.0) = 1574
-    item.properties.push(ItemProperty {
-        stat_id: 16,
-        name: "item_armor_percent".to_string(),
-        param: 0,
-        raw_value: 100,
-        value: 100,
-        range: ItemBitRange::default(),
-    });
+    item.properties.push(ItemProperty::new(
+        16,
+        "item_armor_percent".to_string(),
+        0,
+        100,
+        100,
+        ItemBitRange::default(),
+    ));
 
     item.defense = Some(1000); // Way too low for ethereal + 100% ED
 

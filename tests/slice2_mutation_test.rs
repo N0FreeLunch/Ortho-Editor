@@ -9,19 +9,20 @@ mod tests {
     fn test_alpha_v105_stat_mutation() {
         let mut item = Item::empty_for_tests();
         item.header.version = 5;
+        item.header.save_is_alpha = true;
         item.header.quality = Some(ItemQuality::Normal);
         item.header.flags = 0x00000800; // Runeword bit (is_runeword)
         
         // Add a property that needs mapping in Alpha
         // Raw ID 289 -> Effective ID 9 (maxmana)
-        let prop = ItemProperty {
-            stat_id: 289,
-            name: "maxmana".to_string(),
-            param: 0,
-            raw_value: 100,
-            value: 100,
-            range: ItemBitRange { start: 0, end: 0 },
-        };
+        let prop = ItemProperty::new(
+            289,
+            "maxmana".to_string(),
+            0,
+            100,
+            100,
+            ItemBitRange { start: 0, end: 0 },
+        );
         item.properties.push(prop);
         item.stats.properties = item.properties.clone();
         

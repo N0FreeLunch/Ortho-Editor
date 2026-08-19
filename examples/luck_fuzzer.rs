@@ -117,14 +117,14 @@ fn main() {
                 item.flags |= 1 << 10; // Set magic bit
 
                 item.properties.retain(|p| p.stat_id != stat_id);
-                item.properties.push(ItemProperty {
+                item.properties.push(ItemProperty::new(
                     stat_id,
-                    name: format!("Fuzzed_{}", stat_id),
-                    param: 0,
-                    raw_value: value as i32,
-                    value: value as i32,
-                    range: ItemBitRange::default(),
-                });
+                    format!("Fuzzed_{}", stat_id),
+                    0,
+                    value as i32,
+                    value as i32,
+                    ItemBitRange::default(),
+                ));
                 item.properties_complete = true;
                 item.bits.clear(); // FORCE RE-ENCODE
                 println!(

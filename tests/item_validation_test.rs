@@ -11,14 +11,14 @@ fn base_item() -> Item {
 }
 
 fn prop(stat_id: u32, param: u32, value: i32) -> ItemProperty {
-    ItemProperty {
+    ItemProperty::new(
         stat_id,
-        name: format!("stat_{stat_id}"),
+        format!("stat_{stat_id}"),
         param,
-        raw_value: value,
         value,
-        range: ItemBitRange::default(),
-    }
+        value,
+        ItemBitRange::default(),
+    )
 }
 
 #[test]
