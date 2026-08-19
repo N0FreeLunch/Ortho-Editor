@@ -329,7 +329,8 @@ impl StatsAxiom {
                 || self.version == 1
                 || self.version == 2
                 || self.version == 4
-                || self.version == 6)
+                || self.version == 6
+                || self.version == 7)
         {
             CompactLayoutPolicy::AlphaV105
         } else {

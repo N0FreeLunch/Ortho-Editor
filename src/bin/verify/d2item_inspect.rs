@@ -433,7 +433,7 @@ fn section_context_report(
         "terminator_bit": item.terminator_bit,
         "item_is_runeword": item.header.is_runeword,
         "stats_axiom_is_alpha": identity_is_item_alpha,
-        "emitter_terminal_version_supported": matches!(item.header.version, 0 | 1 | 2 | 4 | 5 | 6),
+        "emitter_terminal_version_supported": matches!(item.header.version, 0 | 1 | 2 | 4 | 5 | 6 | 7),
         "ordinary": property_records(&item.properties),
         "set_attributes": item
             .set_attributes

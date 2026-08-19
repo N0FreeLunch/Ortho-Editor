@@ -4024,7 +4024,7 @@ pub fn write_property_list(
         emitter.write_bits(terminator, id_bits)?;
     }
     let preserve_trailing_align = axiom.is_alpha()
-        && (version == 0 || version == 1 || version == 2 || version == 4 || version == 6);
+        && (version == 0 || version == 1 || version == 2 || version == 4 || version == 6 || version == 7);
     if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit {
