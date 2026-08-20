@@ -1,6 +1,7 @@
 pub mod args;
 pub mod alpha_inventory_routing;
 pub mod bit_diff;
+pub mod dedup_pool;
 pub mod desync;
 pub mod forensics;
 pub mod mutation;
@@ -10,6 +11,8 @@ pub mod symmetry;
 pub mod symmetry_analyzer;
 pub mod v2;
 pub mod delta;
+
+pub use dedup_pool::{CachedVerificationReceipt, ItemMemoizationPool, ItemSignature, PoolStats};
 
 
 pub trait Verifier {

@@ -1,8 +1,7 @@
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
 use d2r_core::domain::item::scanner::{
-    scan_item_markers, scan_item_markers_with_receipt_deadline_profile, ItemMarker,
-    ScannerWorkCounters,
+    scan_item_markers_with_receipt_deadline_profile, ItemMarker, ScannerWorkCounters,
 };
 use d2r_core::domain::item::serialization::{
     is_likely_jm_section_header, AlphaScannerGapProfile,
@@ -10,7 +9,12 @@ use d2r_core::domain::item::serialization::{
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
-use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
+use d2r_core::verify::dedup_pool::{
+    CachedVerificationReceipt, ItemMemoizationPool, ItemSignature, PoolStats,
+};
+use d2r_core::verify::symmetry::{
+    calculate_symmetry_diff, compare_single_item_diff, ItemDiff, SymmetryOptions,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,6 +22,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -228,6 +233,8 @@ struct GlobalAuditReport {
     failure_breakdown: HashMap<String, usize>,
     evaluation_context: EvaluationContextReceipt,
     fidelity_contracts: FidelityContractReceipt,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dedup_pool_stats: Option<PoolStats>,
     results: Vec<AuditResult>,
 }
 
@@ -599,6 +606,9 @@ struct Args {
     scanner_deadline_ms: Option<u64>,
     scanner_gap_profile: AlphaScannerGapProfile,
     worker_single_fixture: bool,
+    fail_fast: bool,
+    no_cache: bool,
+    pool: Option<Arc<ItemMemoizationPool>>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1050,6 +1060,7 @@ fn process_file(
         roundtrip: true,
         target_index: args.target_index,
         fail_fast: !args.detailed,
+        pool: args.pool.clone(),
     };
 
     match calculate_symmetry_diff(&bytes, None, options) {
@@ -1495,6 +1506,64 @@ fn find_d2s_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
     }
 }
 
+fn is_alpha_bytes(bytes: &[u8]) -> bool {
+    if bytes.len() < 8 {
+        return false;
+    }
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    version == 105 || version == 6
+}
+
+/// Builds an immutable receipt table using 2-Phase Staged Map-Reduce (Discussion 3797).
+/// Phase 1: Parallel Map extracts all unique item signatures across the corpus.
+/// Phase 2: Parallel Reduce & Build verifies each unique signature exactly once and seals an ImmutableReceiptTable.
+fn build_staged_receipt_table(file_paths: &[std::path::PathBuf]) -> Arc<ItemMemoizationPool> {
+    let unique_items: HashMap<ItemSignature, (Item, bool, Vec<u8>)> = file_paths
+        .par_iter()
+        .filter_map(|path| {
+            let bytes = fs::read(path).ok()?;
+            let is_alpha = is_alpha_bytes(&bytes);
+            let huffman = HuffmanTree::new();
+            let items = Item::read_player_items(&bytes, &huffman, is_alpha).ok()?;
+            let mut list = Vec::new();
+            for item in items {
+                let sig = ItemSignature::from_item(&item, is_alpha);
+                list.push((sig, item, is_alpha, bytes.clone()));
+            }
+            Some(list)
+        })
+        .flatten()
+        .fold(HashMap::new, |mut acc, (sig, item, is_alpha, bytes)| {
+            acc.entry(sig).or_insert((item, is_alpha, bytes));
+            acc
+        })
+        .reduce(HashMap::new, |mut acc1, acc2| {
+            for (k, v) in acc2 {
+                acc1.entry(k).or_insert(v);
+            }
+            acc1
+        });
+
+    let receipts: HashMap<ItemSignature, CachedVerificationReceipt> = unique_items
+        .into_par_iter()
+        .map(|(sig, (item, is_alpha, bytes))| {
+            let huffman = HuffmanTree::new();
+            let diff = compare_single_item_diff(
+                0,
+                &item,
+                &huffman,
+                is_alpha,
+                "Cached Unique Item".to_string(),
+                &bytes,
+            );
+            let receipt = CachedVerificationReceipt::from_diff(&diff);
+            (sig, receipt)
+        })
+        .collect();
+
+    Arc::new(ItemMemoizationPool::from_map(receipts))
+}
+
 fn main() {
     let mut parser = ArgParser::new("d2item_global_audit");
     parser
@@ -1516,6 +1585,12 @@ fn main() {
         None,
         Some("summary-only"),
         "Show only the summary block",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "no-cache",
+        None,
+        Some("no-cache"),
+        "Disable memory deduplication pool for pure physical 1:1 audit",
     ));
     parser.add_spec(ArgSpec::flag(
         "topology-only",
@@ -1637,6 +1712,18 @@ fn main() {
         Some("worker-single-fixture"),
         "Internal: emit one strict fixture receipt to stdout",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "continue-on-fail",
+        None,
+        Some("continue-on-fail"),
+        "Continue auditing all files even if an error occurs (default is fail-fast)",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "keep-going",
+        None,
+        Some("keep-going"),
+        "Alias for --continue-on-fail",
+    ));
 
     let parsed = match parser.parse(env::args_os().skip(1).collect()) {
         Ok(p) => p,
@@ -1727,7 +1814,11 @@ fn main() {
         }
     };
 
-    let args = Args {
+    let no_cache = parsed.is_set("no-cache");
+    let continue_on_fail = parsed.is_set("continue-on-fail") || parsed.is_set("keep-going");
+    let fail_fast = !continue_on_fail;
+
+    let mut args = Args {
         target_dir: parsed
             .get("target_dir")
             .map(|s| s.as_str())
@@ -1773,6 +1864,9 @@ fn main() {
         scanner_deadline_ms,
         scanner_gap_profile,
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
+        fail_fast,
+        no_cache,
+        pool: None,
     };
 
     let path = Path::new(&args.target_dir);
@@ -1816,6 +1910,11 @@ fn main() {
         return;
     }
 
+    // 2-Phase Staged Map-Reduce: Build immutable receipt table for zero-lock parallel verification
+    if !args.no_cache && !args.topology_only && !args.scanner_only {
+        args.pool = Some(build_staged_receipt_table(&file_paths));
+    }
+
     if args.worker_single_fixture {
         if file_paths.len() != 1 {
             eprintln!("error: --worker-single-fixture requires one exact fixture");
@@ -1853,18 +1952,36 @@ fn main() {
         println!("{:-<100}", "");
     }
 
-    let file_results: Vec<(std::path::PathBuf, AuditResult, HashMap<FailureFamily, usize>)> = file_paths
-        .into_par_iter()
-        .map(|path| {
+    let file_results: Vec<(std::path::PathBuf, AuditResult, HashMap<FailureFamily, usize>)> = if args.fail_fast {
+        let mut seq_results = Vec::new();
+        for path in file_paths {
             let mut local_breakdown = HashMap::new();
             let res = if args.strict_timeout_ms.is_some() && !args.topology_only {
                 process_file_with_timeout(&args, &path, &mut local_breakdown)
             } else {
                 process_file(&args, &path, &mut local_breakdown)
             };
-            (path, res, local_breakdown)
-        })
-        .collect();
+            let is_fail = res.status != "[PASS]";
+            seq_results.push((path, res, local_breakdown));
+            if is_fail {
+                break;
+            }
+        }
+        seq_results
+    } else {
+        file_paths
+            .into_par_iter()
+            .map(|path| {
+                let mut local_breakdown = HashMap::new();
+                let res = if args.strict_timeout_ms.is_some() && !args.topology_only {
+                    process_file_with_timeout(&args, &path, &mut local_breakdown)
+                } else {
+                    process_file(&args, &path, &mut local_breakdown)
+                };
+                (path, res, local_breakdown)
+            })
+            .collect()
+    };
 
     for (path, res, local_breakdown) in file_results {
         total_files += 1;
@@ -1924,6 +2041,24 @@ fn main() {
                 res.status, res.filename, res.item_count, res.avg_fidelity, res.hint
             );
         }
+
+        // If fail-fast is enabled and this file failed, print rupture point and exit immediately
+        if args.fail_fast && res.status != "[PASS]" {
+            eprintln!("\n[FAIL-FAST RUPTURE POINT]");
+            eprintln!("  File:     {}", res.filename);
+            eprintln!("  Status:   {}", res.status);
+            eprintln!("  Hint:     {}", res.hint);
+            if let Some(row) = res.mismatch_rows.first() {
+                eprintln!("  Item:     {} (Code: {})", row.item_label, row.code);
+                eprintln!("  Mismatch: {} @ segment: {}", row.mismatch_type, row.segment);
+                if let Some(offset) = row.first_mismatch_offset {
+                    eprintln!("  Bit Offset: {}", offset);
+                }
+            }
+            eprintln!("Execution stopped at first failure. Use --continue-on-fail to audit all files.");
+            std::process::exit(1);
+        }
+
         results.push(res);
     }
 
@@ -1966,6 +2101,7 @@ fn main() {
             legacy_gate: args.legacy_gate,
             contracts: contracts.to_vec(),
         },
+        dedup_pool_stats: args.pool.as_ref().map(|p| p.stats()),
         results,
     };
 
@@ -2004,6 +2140,15 @@ fn main() {
         println!("  Total Fail:        {}", total_fail);
         println!("  Total Items:       {}", total_items);
         println!("  Global Fidelity:   {:.2}%", global_avg_fidelity);
+
+        if let Some(ref pool) = args.pool {
+            let stats = pool.stats();
+            println!("\nDEDUPLICATION POOL STATS:");
+            println!("  Total Item Queries: {}", stats.total_queries());
+            println!("  Cache Hits:         {} ({:.2}%)", stats.hits, stats.hit_ratio * 100.0);
+            println!("  Cache Misses:       {}", stats.misses);
+            println!("  Unique Identities:  {}", stats.unique_entries);
+        }
 
         if !failure_breakdown.is_empty() {
             println!("\nFAILURE BREAKDOWN:");

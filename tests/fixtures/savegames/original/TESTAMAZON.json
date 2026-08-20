@@ -1,0 +1,120 @@
+{
+  "character": {
+    "name": "TESTAMAZON",
+    "class": "Amazon",
+    "level": 1,
+    "experience": 0,
+    "stats": {
+      "strength": 20,
+      "energy": 15,
+      "dexterity": 25,
+      "vitality": 20,
+      "stat_points_left": 0,
+      "skill_points_left": 0,
+      "life": 50,
+      "max_life": 50,
+      "mana": 15,
+      "max_mana": 15,
+      "stamina": 84,
+      "max_stamina": 84
+    },
+    "gold": {
+      "inventory": 0,
+      "stash": 0
+    }
+  },
+  "all_attributes": [
+    {
+      "stat_id": 0,
+      "name": "strength",
+      "raw_value": 20,
+      "actual_value": 20
+    },
+    {
+      "stat_id": 1,
+      "name": "energy",
+      "raw_value": 15,
+      "actual_value": 15
+    },
+    {
+      "stat_id": 2,
+      "name": "dexterity",
+      "raw_value": 25,
+      "actual_value": 25
+    },
+    {
+      "stat_id": 3,
+      "name": "vitality",
+      "raw_value": 20,
+      "actual_value": 20
+    },
+    {
+      "stat_id": 6,
+      "name": "hitpoints",
+      "raw_value": 12800,
+      "actual_value": 12800
+    },
+    {
+      "stat_id": 7,
+      "name": "maxhp",
+      "raw_value": 12800,
+      "actual_value": 12800
+    },
+    {
+      "stat_id": 8,
+      "name": "mana",
+      "raw_value": 3840,
+      "actual_value": 3840
+    },
+    {
+      "stat_id": 9,
+      "name": "maxmana",
+      "raw_value": 3840,
+      "actual_value": 3840
+    },
+    {
+      "stat_id": 10,
+      "name": "stamina",
+      "raw_value": 21504,
+      "actual_value": 21504
+    },
+    {
+      "stat_id": 11,
+      "name": "maxstamina",
+      "raw_value": 21504,
+      "actual_value": 21504
+    },
+    {
+      "stat_id": 12,
+      "name": "level",
+      "raw_value": 1,
+      "actual_value": 1
+    }
+  ],
+  "skills": [],
+  "waypoints": {
+    "normal": [
+      0
+    ],
+    "nightmare": [],
+    "hell": []
+  },
+  "quests": {
+    "normal": [],
+    "nightmare": [],
+    "hell": []
+  },
+  "equipment": [],
+  "inventory": [],
+  "unknown": [],
+  "belt": [],
+  "stash": [],
+  "cube": [],
+  "mercenary": {
+    "class_name": "Rogue (Act 1)",
+    "hireling_id": 0,
+    "subtype_id": 0,
+    "experience": 0,
+    "equipped_items": []
+  }
+}

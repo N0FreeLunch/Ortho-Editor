@@ -193,6 +193,7 @@ fn main() -> anyhow::Result<()> {
                 roundtrip: true,
                 target_index: Some(target_idx),
                 fail_fast: false,
+                ..Default::default()
             };
 
             if let Ok(report) = calculate_symmetry_diff(&mutated, None, options) {

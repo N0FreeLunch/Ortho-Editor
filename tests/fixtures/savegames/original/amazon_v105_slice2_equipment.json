@@ -1,0 +1,710 @@
+{
+  "character": {
+    "name": "TESTAMAZON",
+    "class": "Amazon",
+    "level": 2,
+    "experience": 1170,
+    "stats": {
+      "strength": 20,
+      "energy": 15,
+      "dexterity": 25,
+      "vitality": 25,
+      "stat_points_left": 0,
+      "skill_points_left": 0,
+      "life": 67,
+      "max_life": 67,
+      "mana": 16,
+      "max_mana": 16,
+      "stamina": 90,
+      "max_stamina": 90
+    },
+    "gold": {
+      "inventory": 10,
+      "stash": 8061
+    }
+  },
+  "all_attributes": [
+    {
+      "stat_id": 0,
+      "name": "strength",
+      "raw_value": 20,
+      "actual_value": 20
+    },
+    {
+      "stat_id": 1,
+      "name": "energy",
+      "raw_value": 15,
+      "actual_value": 15
+    },
+    {
+      "stat_id": 2,
+      "name": "dexterity",
+      "raw_value": 25,
+      "actual_value": 25
+    },
+    {
+      "stat_id": 3,
+      "name": "vitality",
+      "raw_value": 25,
+      "actual_value": 25
+    },
+    {
+      "stat_id": 6,
+      "name": "hitpoints",
+      "raw_value": 17152,
+      "actual_value": 17152
+    },
+    {
+      "stat_id": 7,
+      "name": "maxhp",
+      "raw_value": 17152,
+      "actual_value": 17152
+    },
+    {
+      "stat_id": 8,
+      "name": "mana",
+      "raw_value": 4224,
+      "actual_value": 4224
+    },
+    {
+      "stat_id": 9,
+      "name": "maxmana",
+      "raw_value": 4224,
+      "actual_value": 4224
+    },
+    {
+      "stat_id": 10,
+      "name": "stamina",
+      "raw_value": 23040,
+      "actual_value": 23040
+    },
+    {
+      "stat_id": 11,
+      "name": "maxstamina",
+      "raw_value": 23040,
+      "actual_value": 23040
+    },
+    {
+      "stat_id": 12,
+      "name": "level",
+      "raw_value": 2,
+      "actual_value": 2
+    },
+    {
+      "stat_id": 13,
+      "name": "experience",
+      "raw_value": 1170,
+      "actual_value": 1170
+    },
+    {
+      "stat_id": 14,
+      "name": "gold",
+      "raw_value": 10,
+      "actual_value": 10
+    },
+    {
+      "stat_id": 15,
+      "name": "goldbank",
+      "raw_value": 8061,
+      "actual_value": 8061
+    }
+  ],
+  "skills": [
+    {
+      "id": 9,
+      "name": "skillname9",
+      "level": 1
+    }
+  ],
+  "waypoints": {
+    "normal": [
+      0
+    ],
+    "nightmare": [],
+    "hell": []
+  },
+  "quests": {
+    "normal": [],
+    "nightmare": [],
+    "hell": []
+  },
+  "equipment": [
+    {
+      "index": 17,
+      "code": "buc",
+      "name_en": "Buckler",
+      "name_ko": "버클러",
+      "type": "Shield",
+      "quality": "None",
+      "x": 5,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "is_equipped": true,
+      "location": 10,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null,
+      "slot_en": "Weapon2"
+    }
+  ],
+  "inventory": [
+    {
+      "index": 1,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "type": "Healing Potion",
+      "quality": "None",
+      "x": 4,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 3,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "type": "Healing Potion",
+      "quality": "None",
+      "x": 4,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 10,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 4,
+      "code": "xrs",
+      "name_en": "Cuirass",
+      "name_ko": "퀴래스",
+      "type": "Misc/Unknown",
+      "quality": "None",
+      "x": 2,
+      "y": 0,
+      "width": 2,
+      "height": 3,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [
+        "소켓 아이템"
+      ],
+      "formatted_base_en": [
+        "Socketed (%i)"
+      ],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 7,
+      "code": "wa2",
+      "name_en": "Tome",
+      "name_ko": "Tome",
+      "type": "Misc/Unknown",
+      "quality": "Runeword",
+      "x": 0,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "is_equipped": false,
+      "location": 10,
+      "socketed_items": [
+        {
+          "index": 0,
+          "code": "gcgþ",
+          "name_en": "gcgþ",
+          "name_ko": "gcgþ",
+          "quality": "None",
+          "properties": [],
+          "formatted_lines_ko": [],
+          "formatted_lines_en": []
+        },
+        {
+          "index": 1,
+          "code": "r15þ",
+          "name_en": "r15þ",
+          "name_ko": "r15þ",
+          "quality": "None",
+          "properties": [],
+          "formatted_lines_ko": [],
+          "formatted_lines_en": []
+        }
+      ],
+      "properties": [
+        {
+          "stat_id": 198,
+          "name": "item_skillonhit",
+          "param": 7695,
+          "raw_value": 10,
+          "value": 10
+        },
+        {
+          "stat_id": 201,
+          "name": "item_skillongethit",
+          "param": 8010,
+          "raw_value": 2,
+          "value": 2
+        },
+        {
+          "stat_id": 127,
+          "name": "item_allskills",
+          "param": 0,
+          "raw_value": 2,
+          "value": 2
+        },
+        {
+          "stat_id": 99,
+          "name": "item_fastergethitrate",
+          "param": 0,
+          "raw_value": 20,
+          "value": 20
+        },
+        {
+          "stat_id": 17,
+          "name": "item_maxdamage_percent",
+          "param": 0,
+          "raw_value": 50,
+          "value": 50
+        },
+        {
+          "stat_id": 91,
+          "name": "item_req_percent",
+          "param": 0,
+          "raw_value": 15,
+          "value": -15
+        },
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "param": 0,
+          "raw_value": 30,
+          "value": 30
+        }
+      ],
+      "formatted_lines_ko": [
+        "10% 기회로 레벨 15 메디테이션 시전 (타격시)",
+        "2% 기회로 레벨 10 셀베이션 시전 (반격시)",
+        "+2 모든 스킬 상승",
+        "+20 매우 빠른 회복속도 증가",
+        "+50 최대 데미지 상승",
+        "-15 착용 가능 요구치",
+        "+30 파이어 저항력"
+      ],
+      "formatted_lines_en": [
+        "10% Chance to cast level 15 Meditation on striking",
+        "2% Chance to cast level 10 Salvation when struck",
+        "+2 to All Skills",
+        "+20% Faster Hit Recovery",
+        "+50% Enhanced Maximum Damage",
+        "Requirements -15%",
+        "Fire Resist +30%"
+      ],
+      "formatted_base_ko": [
+        "내구력:  8204 / 1488"
+      ],
+      "formatted_base_en": [
+        "Durability: 8204 / 1488 of "
+      ],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": 1488,
+      "current_durability": 8204,
+      "quantity": null
+    },
+    {
+      "index": 9,
+      "code": "Opaque",
+      "name_en": "Opaque",
+      "name_ko": "Opaque",
+      "type": "Misc/Unknown",
+      "quality": "None",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 11,
+      "code": "Opaque",
+      "name_en": "Opaque",
+      "name_ko": "Opaque",
+      "type": "Misc/Unknown",
+      "quality": "None",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 12,
+      "code": "Opaque",
+      "name_en": "Opaque",
+      "name_ko": "Opaque",
+      "type": "Misc/Unknown",
+      "quality": "None",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    }
+  ],
+  "unknown": [
+    {
+      "index": 10,
+      "code": "wyws",
+      "name_en": "wyws",
+      "name_ko": "wyws",
+      "type": "Misc/Unknown",
+      "quality": "None",
+      "x": 6,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 1,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [
+        "Ethereal (Cannot be Repaired)"
+      ],
+      "formatted_base_en": [
+        "Ethereal (Cannot be Repaired)"
+      ],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 14,
+      "code": "wa2",
+      "name_en": "Tome",
+      "name_ko": "Tome",
+      "type": "Misc/Unknown",
+      "quality": "Runeword",
+      "x": 4,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "is_equipped": false,
+      "location": 12,
+      "socketed_items": [],
+      "properties": [
+        {
+          "stat_id": 198,
+          "name": "item_skillonhit",
+          "param": 7695,
+          "raw_value": 10,
+          "value": 10
+        },
+        {
+          "stat_id": 201,
+          "name": "item_skillongethit",
+          "param": 8010,
+          "raw_value": 2,
+          "value": 2
+        },
+        {
+          "stat_id": 127,
+          "name": "item_allskills",
+          "param": 0,
+          "raw_value": 2,
+          "value": 2
+        },
+        {
+          "stat_id": 99,
+          "name": "item_fastergethitrate",
+          "param": 0,
+          "raw_value": 20,
+          "value": 20
+        },
+        {
+          "stat_id": 17,
+          "name": "item_maxdamage_percent",
+          "param": 0,
+          "raw_value": 50,
+          "value": 50
+        },
+        {
+          "stat_id": 91,
+          "name": "item_req_percent",
+          "param": 0,
+          "raw_value": 15,
+          "value": -15
+        },
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "param": 0,
+          "raw_value": 30,
+          "value": 30
+        }
+      ],
+      "formatted_lines_ko": [
+        "10% 기회로 레벨 15 메디테이션 시전 (타격시)",
+        "2% 기회로 레벨 10 셀베이션 시전 (반격시)",
+        "+2 모든 스킬 상승",
+        "+20 매우 빠른 회복속도 증가",
+        "+50 최대 데미지 상승",
+        "-15 착용 가능 요구치",
+        "+30 파이어 저항력"
+      ],
+      "formatted_lines_en": [
+        "10% Chance to cast level 15 Meditation on striking",
+        "2% Chance to cast level 10 Salvation when struck",
+        "+2 to All Skills",
+        "+20% Faster Hit Recovery",
+        "+50% Enhanced Maximum Damage",
+        "Requirements -15%",
+        "Fire Resist +30%"
+      ],
+      "formatted_base_ko": [
+        "내구력:  4428 / 7803",
+        "소켓 아이템"
+      ],
+      "formatted_base_en": [
+        "Durability: 4428 / 7803 of ",
+        "Socketed (%i)"
+      ],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": 7803,
+      "current_durability": 4428,
+      "quantity": null
+    }
+  ],
+  "belt": [
+    {
+      "index": 0,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "type": "Healing Potion",
+      "quality": "None",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 2,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "type": "Healing Potion",
+      "quality": "None",
+      "x": 5,
+      "y": 4,
+      "width": 1,
+      "height": 1,
+      "is_equipped": false,
+      "location": 0,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    },
+    {
+      "index": 16,
+      "code": "wsp",
+      "name_en": "War Scepter",
+      "name_ko": "워셉터",
+      "type": "Misc/Unknown",
+      "quality": "None",
+      "x": 0,
+      "y": 0,
+      "width": 2,
+      "height": 3,
+      "is_equipped": false,
+      "location": 8,
+      "socketed_items": [],
+      "properties": [],
+      "formatted_lines_ko": [],
+      "formatted_lines_en": [],
+      "formatted_base_ko": [],
+      "formatted_base_en": [],
+      "set_attributes": [],
+      "runeword_attributes": [],
+      "opaque_info": {
+        "is_opaque": false,
+        "bit_count": 0
+      },
+      "defense": null,
+      "max_durability": null,
+      "current_durability": null,
+      "quantity": null
+    }
+  ],
+  "stash": [],
+  "cube": [],
+  "mercenary": {
+    "class_name": "Rogue (Act 1)",
+    "hireling_id": 0,
+    "subtype_id": 0,
+    "experience": 0,
+    "equipped_items": []
+  }
+}

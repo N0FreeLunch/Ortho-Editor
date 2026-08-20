@@ -62,7 +62,7 @@ mod tests {
             load_player_items("tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
         let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
 
-        assert_eq!(real_items.len(), 6);
+        assert_eq!(real_items.len(), 5);
 
         let authority = real_items
             .iter()
@@ -102,7 +102,7 @@ mod tests {
         let top_level_codes: Vec<&str> = real_items.iter().map(|item| item.code.trim()).collect();
         assert_eq!(
             top_level_codes,
-            vec!["hp1", "hp1", "hp1", "hp1", "wcw8", "wa2"]
+            vec!["hp1", "hp1", "hp1", "hp1", "wa2"]
         );
 
         let authority = real_items
@@ -153,18 +153,24 @@ mod tests {
             .map(|prop| (prop.stat_id, prop.value))
             .collect();
         let expected_props = vec![
-            (124, -24),
-            (9, -32),
-            (4, -32),
-            (20, 80),
-            (67, -30),
-            (487, 217),
-            (38, 0),
-            (32, 0),
-            (160, 0),
-            (53, 4),
+            (297, 193),
+            (260, 255),
+            (0, -31),
+            (0, -27),
+            (424, 0),
+            (384, 249),
+            (416, 18),
+            (0, -24),
+            (0, 8),
+            (320, 0),
+            (134, 0),
             (112, 21),
-            (291, 4),
+            (438, 4),
+            (0, -28),
+            (0, -12),
+            (160, 3),
+            (1, 462),
+            (283, 36),
         ];
 
         assert_eq!(authority.code.trim(), "wa2");

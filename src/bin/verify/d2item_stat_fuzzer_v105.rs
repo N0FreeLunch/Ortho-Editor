@@ -174,6 +174,7 @@ fn main() -> anyhow::Result<()> {
             roundtrip: true,
             target_index: Some(target_idx),
             fail_fast: false,
+            ..Default::default()
         };
         if let Ok(report) = d2r_core::verify::symmetry::calculate_symmetry_diff(&bytes, None, options) {
             if let Some(item_diff) = report.items.iter().find(|it| {

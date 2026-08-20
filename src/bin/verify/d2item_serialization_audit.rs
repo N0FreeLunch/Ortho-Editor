@@ -64,6 +64,7 @@ fn main() {
         roundtrip: true,
         target_index: target_idx,
         fail_fast,
+        ..Default::default()
     };
 
     match calculate_symmetry_diff(&bytes, None, options) {

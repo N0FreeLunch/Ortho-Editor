@@ -2,11 +2,13 @@ use bitstream_io::{BitRead, BitReader, LittleEndian};
 use rayon::prelude::*;
 use serde::Serialize;
 use std::io::Cursor;
+use std::sync::Arc;
 
 use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
+use crate::verify::dedup_pool::{ItemMemoizationPool, ItemSignature};
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize, Default)]
 pub struct DiffReport {
     pub success: bool,
     pub operation: String,
@@ -15,7 +17,7 @@ pub struct DiffReport {
     pub items: Vec<ItemDiff>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize, Default)]
 pub struct ItemDiff {
     pub label: String,
     pub code: String,
@@ -69,6 +71,7 @@ pub struct SymmetryOptions {
     pub roundtrip: bool,
     pub target_index: Option<usize>,
     pub fail_fast: bool,
+    pub pool: Option<Arc<ItemMemoizationPool>>,
 }
 
 impl SymmetryOptions {
@@ -77,6 +80,11 @@ impl SymmetryOptions {
             roundtrip,
             ..Default::default()
         }
+    }
+
+    pub fn with_pool(mut self, pool: Option<Arc<ItemMemoizationPool>>) -> Self {
+        self.pool = pool;
+        self
     }
 }
 
@@ -116,6 +124,7 @@ pub fn calculate_symmetry_diff(
             })
             .collect();
 
+        let pool_ref = options.pool.as_deref();
         let mut diffs: Vec<ItemDiff> = if options.fail_fast {
             let mut results = Vec::new();
             for (i, item) in filtered_items {
@@ -126,6 +135,7 @@ pub fn calculate_symmetry_diff(
                     is_alpha_a,
                     format!("Item {}", i),
                     bytes_a,
+                    pool_ref,
                 );
                 let is_match = diff.is_match;
                 results.push(diff);
@@ -135,6 +145,7 @@ pub fn calculate_symmetry_diff(
             }
             results
         } else {
+            let pool_arc = options.pool.clone();
             filtered_items
                 .into_par_iter()
                 .map(|(i, item)| {
@@ -145,6 +156,7 @@ pub fn calculate_symmetry_diff(
                         is_alpha_a,
                         format!("Item {}", i),
                         bytes_a,
+                        pool_arc.as_deref(),
                     )
                 })
                 .collect()
@@ -221,7 +233,22 @@ fn is_alpha(bytes: &[u8]) -> bool {
     version == 105 || version == 6
 }
 
-fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree, alpha_mode: bool, label: String, original_bytes: &[u8]) -> ItemDiff {
+fn compare_item_with_reserialized(
+    idx: usize,
+    item: &Item,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    label: String,
+    original_bytes: &[u8],
+    pool: Option<&ItemMemoizationPool>,
+) -> ItemDiff {
+    let sig = pool.map(|_| ItemSignature::from_item(item, alpha_mode));
+    if let (Some(pool), Some(sig)) = (pool, sig.as_ref()) {
+        if let Some(receipt) = pool.get(sig) {
+            return receipt.to_item_diff(label);
+        }
+    }
+
     let is_alpha_socketed_host = alpha_mode && !item.socketed_items.is_empty();
     let preserve_raw_bits = is_alpha_socketed_host || should_preserve_alpha_compare_bits(item, alpha_mode);
     let mut strict_item = item.clone();
@@ -343,12 +370,26 @@ fn compare_item_with_reserialized(idx: usize, item: &Item, huffman: &HuffmanTree
             alpha_mode,
             format!("Child {}", i),
             original_bytes,
+            pool,
         ));
     }
     if !is_alpha_socketed_host && !item_diff.children.iter().all(|c| c.is_match) {
         item_diff.is_match = false;
     }
+
     item_diff
+}
+
+/// Standalone pure single-item verification helper without cache lookup or insertion.
+pub fn compare_single_item_diff(
+    idx: usize,
+    item: &Item,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    label: String,
+    original_bytes: &[u8],
+) -> ItemDiff {
+    compare_item_with_reserialized(idx, item, huffman, alpha_mode, label, original_bytes, None)
 }
 
 fn compare_two_items(item_a: &Item, item_b: &Item, label: String, bytes_a: &[u8], bytes_b: &[u8]) -> ItemDiff {
