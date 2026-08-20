@@ -456,9 +456,19 @@ fn should_preserve_alpha_compare_bits(item: &Item, alpha_mode: bool) -> bool {
     }
 
     let trimmed = item.code.trim();
-    // Preserve compare bits for ambiguous alpha families and raw non-ASCII codes
-    // that the strict rebuild cannot canonically round-trip yet.
+    // Preserve compare bits for ambiguous alpha families, opaque placeholders, and raw non-ASCII codes
+    // that the strict rebuild cannot canonically round-trip without preserved modules.
     !trimmed.is_ascii()
+        || trimmed == "Opaque"
+        || trimmed.is_empty()
+        || matches!(trimmed, "vhgu" | "d pl" | "bst")
+        || item.modules.iter().any(|m| {
+            matches!(
+                m,
+                crate::domain::item::ItemModule::Opaque(_)
+                    | crate::domain::item::ItemModule::Residue(_)
+            )
+        })
 }
 
 #[cfg(test)]

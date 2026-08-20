@@ -80,6 +80,13 @@ impl StatsAxiom {
                         is_compact = true;
                     }
                 }
+
+                if matches!(trimmed, "cm1" | "cm2" | "cm3")
+                    && (self.quality <= crate::domain::item::ItemQuality::Normal
+                        || self.quality == crate::domain::item::ItemQuality::Low)
+                {
+                    is_compact = true;
+                }
             }
 
             self.is_compact = is_compact;

@@ -11,6 +11,7 @@ use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::symmetry::{calculate_symmetry_diff, ItemDiff, SymmetryOptions};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -1852,13 +1853,24 @@ fn main() {
         println!("{:-<100}", "");
     }
 
-    for path in file_paths {
+    let file_results: Vec<(std::path::PathBuf, AuditResult, HashMap<FailureFamily, usize>)> = file_paths
+        .into_par_iter()
+        .map(|path| {
+            let mut local_breakdown = HashMap::new();
+            let res = if args.strict_timeout_ms.is_some() && !args.topology_only {
+                process_file_with_timeout(&args, &path, &mut local_breakdown)
+            } else {
+                process_file(&args, &path, &mut local_breakdown)
+            };
+            (path, res, local_breakdown)
+        })
+        .collect();
+
+    for (path, res, local_breakdown) in file_results {
         total_files += 1;
-        let res = if args.strict_timeout_ms.is_some() && !args.topology_only {
-            process_file_with_timeout(&args, &path, &mut failure_breakdown)
-        } else {
-            process_file(&args, &path, &mut failure_breakdown)
-        };
+        for (k, v) in local_breakdown {
+            *failure_breakdown.entry(k).or_insert(0) += v;
+        }
         let (diff, act, class) = extract_metadata(&path);
         let act_key = if act == "Unknown" {
             "Unknown".to_string()

@@ -1731,7 +1731,7 @@ impl Item {
             let is_item_alpha = s_axiom.is_alpha();
 
             let quality_phase_start = emitter.written_bits();
-            if is_item_alpha && !s_axiom.is_compact {
+            if is_item_alpha && self.header.version != 3 && !s_axiom.is_compact {
                 let quality_to_write = if let Some(raw) = self.alpha_quality_raw {
                     raw
                 } else {
@@ -1771,7 +1771,10 @@ impl Item {
 
             let identity_phase_start = emitter.written_bits();
             if (!is_item_alpha
-                || (alpha_mode && (self.header.version == 0 || self.header.version == 2)))
+                || (alpha_mode
+                    && (self.header.version == 0
+                        || self.header.version == 2
+                        || self.header.version == 3)))
                 && !self.header.is_compact
             {
                 emitter.write_bits(self.id.unwrap_or(0), 32)?;
@@ -1787,13 +1790,11 @@ impl Item {
                 );
             }
 
-            let is_version_4_6_7_skip = is_item_alpha
+            if !(is_item_alpha
                 && (self.header.version == 4
                     || self.header.version == 6
-                    || self.header.version == 7)
-                && self.properties.is_empty();
-
-            if !is_version_4_6_7_skip {
+                    || self.header.version == 7))
+            {
                 if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
                     eprintln!(
                         "[to-emitter-field] after code pos={}",
@@ -1821,47 +1822,37 @@ impl Item {
                         );
                     }
                 }
-                let has_rare_affixes = self.rare_name_1.is_some()
-                    || self.rare_affixes.iter().any(|a| a.is_some());
-                if has_rare_affixes {
-                    let seg = RareAffixSegment {
-                        names: [self.rare_name_1, self.rare_name_2],
-                        affixes: self.rare_affixes,
-                    };
-                    seg.emit(emitter)?;
-                } else {
-                    match quality_val {
-                        ItemQuality::Low | ItemQuality::High => {
-                            emitter.write_bits(self.low_high_graphic_bits.unwrap_or(0) as u32, 3)?;
-                        }
-                        ItemQuality::Magic => {
-                            let seg = MagicAffixSegment {
-                                prefix: self.magic_prefix,
-                                suffix: self.magic_suffix,
-                            };
-                            seg.emit(emitter)?;
-                        }
-                        ItemQuality::Rare | ItemQuality::Crafted => {
-                            let seg = RareAffixSegment {
-                                names: [self.rare_name_1, self.rare_name_2],
-                                affixes: self.rare_affixes,
-                            };
-                            seg.emit(emitter)?;
-                        }
-                        ItemQuality::Set | ItemQuality::Unique => {
-                            let uid = if alpha_mode {
-                                self.alpha_unique_id_raw
-                                    .unwrap_or(self.unique_id.unwrap_or(0))
-                            } else {
-                                self.unique_id.unwrap_or(0)
-                            };
-                            let seg = UniqueAffixSegment {
-                                unique_id: Some(uid),
-                            };
-                            seg.emit(emitter)?;
-                        }
-                        _ => {}
+                match quality_val {
+                    ItemQuality::Low | ItemQuality::High => {
+                        emitter.write_bits(self.low_high_graphic_bits.unwrap_or(0) as u32, 3)?;
                     }
+                    ItemQuality::Magic => {
+                        let seg = MagicAffixSegment {
+                            prefix: self.magic_prefix,
+                            suffix: self.magic_suffix,
+                        };
+                        seg.emit(emitter)?;
+                    }
+                    ItemQuality::Rare | ItemQuality::Crafted => {
+                        let seg = RareAffixSegment {
+                            names: [self.rare_name_1, self.rare_name_2],
+                            affixes: self.rare_affixes,
+                        };
+                        seg.emit(emitter)?;
+                    }
+                    ItemQuality::Set | ItemQuality::Unique => {
+                        let uid = if alpha_mode {
+                            self.alpha_unique_id_raw
+                                .unwrap_or(self.unique_id.unwrap_or(0))
+                        } else {
+                            self.unique_id.unwrap_or(0)
+                        };
+                        let seg = UniqueAffixSegment {
+                            unique_id: Some(uid),
+                        };
+                        seg.emit(emitter)?;
+                    }
+                    _ => {}
                 }
                 if s_axiom.is_runeword(self.header.flags) && self.header.version != 5 {
                     if trace_alpha && self.code.trim() == "xrs" {
@@ -1962,8 +1953,12 @@ impl Item {
                 let is_shadow = (s_axiom.is_v105_shadow(self.header.flags, Some(&self.code))
                     || is_v105_shadow_override)
                     && !is_authority_overlap_code;
-                if let Some(bits) = self.body.alpha_shadow_skip_bits {
-                    emitter.write_bits_u64(bits, 47)?;
+                if is_shadow {
+                    if let Some(bits) = self.body.alpha_shadow_skip_bits {
+                        emitter.write_bits_u64(bits, 47)?;
+                    } else {
+                        emitter.write_bits(0, 47)?;
+                    }
                 }
                 if !is_v105_summary {
                     record_emission_phase(
@@ -2037,14 +2032,6 @@ impl Item {
                     if alpha_mode && self.header.version == 3 && self.code.trim() == "bst" {
                         emitter.write_bit(false)?;
                     }
-                    if alpha_mode {
-                        let p_nudge = crate::domain::forensic::v105::axioms::V105PropertyNudgeAxiom::default()
-                            .get_nudge(self.header.version) as usize;
-                        let is_rw = s_axiom.is_runeword(self.header.flags);
-                        if p_nudge > 0 && !s_axiom.is_compact && !is_rw && !is_shadow {
-                            emitter.write_bits(0, p_nudge as u32)?;
-                        }
-                    }
                     crate::domain::item::serialization::write_property_list(
                         emitter,
                         &self.code,
@@ -2098,7 +2085,7 @@ impl Item {
             }
         }
         let captured_tail_start = emitter.written_bits();
-        if alpha_mode {
+        if alpha_mode && s_axiom.is_alpha() {
             let current_bits = emitter.written_bits() - start_bit;
             let start_idx = current_bits as usize;
             let recorded_total = self.bits.len();

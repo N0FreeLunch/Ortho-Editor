@@ -889,7 +889,7 @@ mod tests {
         assert_eq!(shadow.metadata().confidence, Confidence::StrongPattern);
 
         let gap = V105HeaderGapAxiom;
-        assert_eq!(gap.metadata().confidence, Confidence::StrongPattern);
+        assert_eq!(gap.metadata().confidence, Confidence::VerifiedTruth);
 
         let rhythm = V105PropertyNudgeAxiom;
         assert_eq!(rhythm.metadata().confidence, Confidence::VerifiedTruth);
