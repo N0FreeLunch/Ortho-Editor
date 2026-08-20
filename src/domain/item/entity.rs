@@ -1787,11 +1787,13 @@ impl Item {
                 );
             }
 
-            if !(is_item_alpha
+            let is_version_4_6_7_skip = is_item_alpha
                 && (self.header.version == 4
                     || self.header.version == 6
-                    || self.header.version == 7))
-            {
+                    || self.header.version == 7)
+                && self.properties.is_empty();
+
+            if !is_version_4_6_7_skip {
                 if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
                     eprintln!(
                         "[to-emitter-field] after code pos={}",
@@ -1950,12 +1952,8 @@ impl Item {
                 let is_shadow = (s_axiom.is_v105_shadow(self.header.flags, Some(&self.code))
                     || is_v105_shadow_override)
                     && !is_authority_overlap_code;
-                if is_shadow {
-                    if let Some(bits) = self.body.alpha_shadow_skip_bits {
-                        emitter.write_bits_u64(bits, 47)?;
-                    } else {
-                        emitter.write_bits(0, 47)?;
-                    }
+                if let Some(bits) = self.body.alpha_shadow_skip_bits {
+                    emitter.write_bits_u64(bits, 47)?;
                 }
                 if !is_v105_summary {
                     record_emission_phase(

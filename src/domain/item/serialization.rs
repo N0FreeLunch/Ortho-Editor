@@ -4017,7 +4017,7 @@ pub fn write_property_list(
             || version == 2
             || version == 4
             || version == 6
-            || version == 7)
+            || (version == 7 && terminator_bit))
         && !is_rw
         && !is_compact
     {
