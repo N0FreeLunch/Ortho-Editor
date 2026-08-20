@@ -1821,37 +1821,47 @@ impl Item {
                         );
                     }
                 }
-                match quality_val {
-                    ItemQuality::Low | ItemQuality::High => {
-                        emitter.write_bits(self.low_high_graphic_bits.unwrap_or(0) as u32, 3)?;
+                let has_rare_affixes = self.rare_name_1.is_some()
+                    || self.rare_affixes.iter().any(|a| a.is_some());
+                if has_rare_affixes {
+                    let seg = RareAffixSegment {
+                        names: [self.rare_name_1, self.rare_name_2],
+                        affixes: self.rare_affixes,
+                    };
+                    seg.emit(emitter)?;
+                } else {
+                    match quality_val {
+                        ItemQuality::Low | ItemQuality::High => {
+                            emitter.write_bits(self.low_high_graphic_bits.unwrap_or(0) as u32, 3)?;
+                        }
+                        ItemQuality::Magic => {
+                            let seg = MagicAffixSegment {
+                                prefix: self.magic_prefix,
+                                suffix: self.magic_suffix,
+                            };
+                            seg.emit(emitter)?;
+                        }
+                        ItemQuality::Rare | ItemQuality::Crafted => {
+                            let seg = RareAffixSegment {
+                                names: [self.rare_name_1, self.rare_name_2],
+                                affixes: self.rare_affixes,
+                            };
+                            seg.emit(emitter)?;
+                        }
+                        ItemQuality::Set | ItemQuality::Unique => {
+                            let uid = if alpha_mode {
+                                self.alpha_unique_id_raw
+                                    .unwrap_or(self.unique_id.unwrap_or(0))
+                            } else {
+                                self.unique_id.unwrap_or(0)
+                            };
+                            let seg = UniqueAffixSegment {
+                                unique_id: Some(uid),
+                            };
+                            seg.emit(emitter)?;
+                        }
+                        _ => {}
                     }
-                    ItemQuality::Magic => {
-                        let seg = MagicAffixSegment {
-                            prefix: self.magic_prefix,
-                            suffix: self.magic_suffix,
-                        };
-                        seg.emit(emitter)?;
-                    }
-                    ItemQuality::Rare | ItemQuality::Crafted => {
-                        let seg = RareAffixSegment {
-                            names: [self.rare_name_1, self.rare_name_2],
-                            affixes: self.rare_affixes,
-                        };
-                        seg.emit(emitter)?;
-                    }
-                    ItemQuality::Set | ItemQuality::Unique => {
-                        let uid = if alpha_mode {
-                            self.alpha_unique_id_raw
-                                .unwrap_or(self.unique_id.unwrap_or(0))
-                        } else {
-                            self.unique_id.unwrap_or(0)
-                        };
-                        let seg = UniqueAffixSegment {
-                            unique_id: Some(uid),
-                        };
-                        seg.emit(emitter)?;
-                    }
-                    _ => {}
                 }
                 if s_axiom.is_runeword(self.header.flags) && self.header.version != 5 {
                     if trace_alpha && self.code.trim() == "xrs" {
@@ -2026,6 +2036,14 @@ impl Item {
                     }
                     if alpha_mode && self.header.version == 3 && self.code.trim() == "bst" {
                         emitter.write_bit(false)?;
+                    }
+                    if alpha_mode {
+                        let p_nudge = crate::domain::forensic::v105::axioms::V105PropertyNudgeAxiom::default()
+                            .get_nudge(self.header.version) as usize;
+                        let is_rw = s_axiom.is_runeword(self.header.flags);
+                        if p_nudge > 0 && !s_axiom.is_compact && !is_rw && !is_shadow {
+                            emitter.write_bits(0, p_nudge as u32)?;
+                        }
                     }
                     crate::domain::item::serialization::write_property_list(
                         emitter,
