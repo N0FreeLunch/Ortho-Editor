@@ -1224,7 +1224,11 @@ where
             stat_id,
             raw_value: raw_value as i32,
             param,
-            name: if is_unknown_stat { "opaque_property".to_string() } else { String::new() },
+            name: if is_unknown_stat {
+                "opaque_property".to_string()
+            } else {
+                stat_cost.map(|s| s.name.to_string()).unwrap_or_default()
+            },
             value: logical_value,
             range: ItemBitRange {
                 start: entry_start,
