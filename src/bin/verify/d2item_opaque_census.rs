@@ -232,14 +232,19 @@ fn main() -> Result<()> {
     let enable_probe = parsed.is_set("probe");
 
     let mut save_files: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(saves_dir_path) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("d2s") {
-                save_files.push(path);
+    fn collect_d2s_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_d2s_recursive(&path, files);
+                } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("d2s") {
+                    files.push(path);
+                }
             }
         }
     }
+    collect_d2s_recursive(saves_dir_path, &mut save_files);
     save_files.sort();
 
     let total_saves_scanned = save_files.len();

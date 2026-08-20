@@ -10,15 +10,61 @@ use d2r_core::verify::alpha_inventory_routing::{AlphaInventoryRoute, alpha_inven
 use serde_json::json;
 use std::env;
 use std::fs;
+use std::path::Path;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        println!("Usage: d2save_json_dump <file.d2s> <output.json>");
+    if args.len() < 2 || args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("D2R Save Game JSON Dump Tool");
+        println!("Usage: d2save_json_dump <file.d2s> [-o <output.json> | <output.json>]");
+        println!();
+        println!("Options:");
+        println!("  -o, --output <PATH>  Output path for the generated JSON dump");
+        println!("  -h, --help           Show this help message");
         return;
     }
 
-    let bytes = fs::read(&args[1]).expect("Failed to read d2s file");
+    let mut input_file: Option<String> = None;
+    let mut output_file: Option<String> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--output" => {
+                if i + 1 < args.len() {
+                    output_file = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: -o/--output requires a path argument");
+                    return;
+                }
+            }
+            arg if !arg.starts_with('-') => {
+                if input_file.is_none() {
+                    input_file = Some(arg.to_string());
+                } else if output_file.is_none() {
+                    output_file = Some(arg.to_string());
+                }
+                i += 1;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    let Some(input_path) = input_file else {
+        eprintln!("Error: Missing input .d2s file path");
+        return;
+    };
+
+    let output_path = output_file.unwrap_or_else(|| {
+        let p = Path::new(&input_path);
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("dump");
+        format!("{}.json", stem)
+    });
+
+    let bytes = fs::read(&input_path).expect("Failed to read d2s file");
     let save = Save::from_bytes(&bytes).expect("Failed to parse save header");
     let map = map_core_sections(&bytes).expect("Failed to map sections");
 
@@ -407,8 +453,13 @@ fn main() {
     });
 
     let out_str = serde_json::to_string_pretty(&payload).expect("Failed to serialize JSON");
-    fs::write(&args[2], out_str).expect("Failed to write output JSON");
-    println!("Successfully dumped save game JSON to {}", args[2]);
+    if let Some(parent) = Path::new(&output_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).ok();
+        }
+    }
+    fs::write(&output_path, out_str).expect("Failed to write output JSON");
+    println!("Successfully dumped save game JSON to {}", output_path);
 }
 
 fn parse_mercenary_equipped_items(
