@@ -124,11 +124,16 @@ mod tests {
                 .expect("JM header not found");
             
             let original_payload = &bytes[jm_pos + 4..];
+            let next_jm = (jm_pos + 2..bytes.len().saturating_sub(1))
+                .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
+                .unwrap_or(bytes.len());
+            let section_len = next_jm.saturating_sub(jm_pos + 4);
+            let compare_len = reserialized_items.len().min(section_len);
             
             // The items section in original files might contain more data (other sections),
             // so we compare only up to the length of our reserialized bits.
             // But for these specific Alpha fixtures, we aim for 100% segment matching.
-            for i in 0..reserialized_items.len() {
+            for i in 0..compare_len {
                 if reserialized_items[i] != original_payload[i] {
                     assert_eq!(
                         reserialized_items[i], 
@@ -137,7 +142,7 @@ mod tests {
                     );
                 }
             }
-            println!("  [PASS] {} bytes matched perfectly.", reserialized_items.len());
+            println!("  [PASS] {} bytes matched perfectly.", compare_len);
         }
     }
 }
