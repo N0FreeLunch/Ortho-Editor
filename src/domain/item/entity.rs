@@ -59,6 +59,16 @@ pub fn item_fidelity_contracts() -> [FidelityContract; 1] {
     )]
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptionFidelityReport {
+    pub total_properties: usize,
+    pub decoded_properties: usize,
+    pub valid_properties: usize,
+    pub coverage_percent: f32,
+    pub validity_percent: f32,
+    pub composite_fidelity_score: f32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BitSemantic {
     pub label: String,
@@ -393,6 +403,42 @@ impl Item {
         }
         let known_count = self.properties.iter().filter(|p| !p.is_opaque).count();
         (known_count as f32 / self.properties.len() as f32) * 100.0
+    }
+
+    /// Calculates the detailed option semantic fidelity report including coverage, validity, and composite score.
+    pub fn detailed_option_fidelity(&self) -> OptionFidelityReport {
+        let total = self.properties.len();
+        if total == 0 {
+            return OptionFidelityReport {
+                total_properties: 0,
+                decoded_properties: 0,
+                valid_properties: 0,
+                coverage_percent: 100.0,
+                validity_percent: 100.0,
+                composite_fidelity_score: 1.0,
+            };
+        }
+
+        let decoded = self.properties.iter().filter(|p| !p.is_opaque).count();
+        let valid = self.properties.iter().filter(|p| p.is_valid_stat_range()).count();
+
+        let coverage_percent = (decoded as f32 / total as f32) * 100.0;
+        let validity_percent = if decoded > 0 {
+            (valid as f32 / decoded as f32) * 100.0
+        } else {
+            0.0
+        };
+
+        let composite_fidelity_score = (coverage_percent / 100.0) * (validity_percent / 100.0);
+
+        OptionFidelityReport {
+            total_properties: total,
+            decoded_properties: decoded,
+            valid_properties: valid,
+            coverage_percent,
+            validity_percent,
+            composite_fidelity_score,
+        }
     }
 
     pub fn parser_consumed_bits(&self) -> Option<u64> {

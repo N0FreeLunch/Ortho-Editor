@@ -5,6 +5,7 @@ use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
 use d2r_core::data::stat_costs::STAT_COSTS;
 use d2r_core::domain::stats::{lookup_alpha_map_by_raw, stat_save_bits};
 use d2r_core::init_rayon_thread_pool;
+use d2r_core::item::{Item, ItemProperty, OptionFidelityReport};
 use rayon::prelude::*;
 use std::io::Cursor;
 
@@ -818,5 +819,67 @@ fn test_harness_war_traveler_micro_snippet() {
         assert_eq!(actual.value, expected.2);
     }
 }
+
+#[test]
+fn test_harness_detailed_option_semantic_fidelity_across_all_archetypes() {
+    let archetypes = [
+        // HOTO
+        vec![(127, 0, 3), (105, 0, 40), (121, 0, 75), (122, 0, 100), (60, 0, 7), (2, 0, 10), (74, 0, 20), (77, 0, 15), (39, 0, 40), (41, 0, 40), (43, 0, 40), (45, 0, 40)],
+        // Fortitude
+        vec![(201, 60, 20), (105, 0, 25), (17, 0, 300), (16, 0, 200), (31, 0, 15), (216, 0, 120), (39, 0, 30), (41, 0, 30), (43, 0, 30), (45, 0, 30), (78, 0, 12), (74, 0, 7)],
+        // Spirit
+        vec![(127, 0, 2), (105, 0, 35), (99, 0, 55), (33, 0, 250), (3, 0, 22), (9, 0, 112), (148, 0, 8), (43, 0, 35), (41, 0, 35), (45, 0, 35), (79, 0, 14)],
+        // Mara
+        vec![(127, 0, 2), (0, 0, 5), (1, 0, 5), (2, 0, 5), (3, 0, 5), (39, 0, 30), (41, 0, 30), (43, 0, 30), (45, 0, 30)],
+        // Arachnid Mesh
+        vec![(127, 0, 1), (105, 0, 20), (150, 0, 10), (16, 0, 120), (77, 0, 5), (204, 50, 3)],
+        // War Traveler
+        vec![(96, 0, 25), (21, 0, 15), (22, 0, 25), (16, 0, 190), (0, 0, 10), (3, 0, 10), (76, 0, 40), (79, 0, 10), (80, 0, 50)],
+    ];
+
+    for (idx, stats) in archetypes.iter().enumerate() {
+        let encoded = encode_standard_stat_snippet(stats);
+        let decoded = parse_standard_stat_snippet(&encoded);
+
+        let mut item = Item::default();
+        item.properties = decoded
+            .into_iter()
+            .map(|s| ItemProperty::new(s.stat_id, s.name, s.param, s.raw_value, s.value, Default::default()))
+            .collect();
+
+        let report = item.detailed_option_fidelity();
+        assert_eq!(
+            report.coverage_percent, 100.0,
+            "Archetype index {} failed coverage check", idx
+        );
+        assert_eq!(
+            report.validity_percent, 100.0,
+            "Archetype index {} failed validity check", idx
+        );
+        assert_eq!(
+            report.composite_fidelity_score, 1.0,
+            "Archetype index {} failed composite DOSFI check", idx
+        );
+    }
+}
+
+#[test]
+fn test_harness_opaque_property_demotes_option_fidelity() {
+    let mut item = Item::default();
+    let prop1 = ItemProperty::new(0, "strength".to_string(), 0, 10, 10, Default::default());
+    let prop_opaque = ItemProperty::new_opaque(509, vec![true, false], Default::default());
+
+    item.properties.push(prop1);
+    item.properties.push(prop_opaque);
+
+    let report = item.detailed_option_fidelity();
+    assert_eq!(report.total_properties, 2);
+    assert_eq!(report.decoded_properties, 1);
+    assert_eq!(report.valid_properties, 1);
+    assert_eq!(report.coverage_percent, 50.0);
+    assert_eq!(report.validity_percent, 100.0);
+    assert_eq!(report.composite_fidelity_score, 0.5);
+}
+
 
 

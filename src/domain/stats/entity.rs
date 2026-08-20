@@ -59,7 +59,42 @@ impl ItemProperty {
             opaque_bits: Some(raw_bits),
         }
     }
+
+    /// Validates if this property corresponds to a known stat definition and falls within valid value/param ranges.
+    pub fn is_valid_stat_range(&self) -> bool {
+        if self.is_opaque {
+            return false;
+        }
+        if let Some(cost) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == self.stat_id) {
+            let max_raw_val = if cost.save_bits > 0 && cost.save_bits <= 31 {
+                (1i64 << cost.save_bits) - 1
+            } else {
+                i64::MAX
+            };
+            let raw = self.raw_value as i64;
+            if raw < 0 || raw > max_raw_val {
+                return false;
+            }
+
+            let max_param_val = if cost.save_param_bits > 0 && cost.save_param_bits <= 31 {
+                (1i64 << cost.save_param_bits) - 1
+            } else if cost.save_param_bits == 0 {
+                0
+            } else {
+                i64::MAX
+            };
+            let param = self.param as i64;
+            if cost.save_param_bits > 0 && (param < 0 || param > max_param_val) {
+                return false;
+            }
+
+            true
+        } else {
+            false
+        }
+    }
 }
+
 
 
 

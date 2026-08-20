@@ -319,6 +319,11 @@ fn main() {
                     "is_opaque": item.body.v105_7mgw_payload.is_some(),
                     "bit_count": item.body.v105_7mgw_payload.as_ref().map(|b| b.len()).unwrap_or(0)
                 }),
+                "option_fidelity": json!({
+                    "coverage_percent": item_clone.detailed_option_fidelity().coverage_percent,
+                    "validity_percent": item_clone.detailed_option_fidelity().validity_percent,
+                    "composite_score": item_clone.detailed_option_fidelity().composite_fidelity_score,
+                }),
                 "defense": item.defense,
                 "max_durability": item.max_durability,
                 "current_durability": item.current_durability,

@@ -131,6 +131,11 @@
         "is_opaque": false,
         "bit_count": 0
       },
+      "option_fidelity": {
+        "coverage_percent": 100.0,
+        "validity_percent": 100.0,
+        "composite_score": 1.0
+      },
       "defense": null,
       "max_durability": null,
       "current_durability": null,
@@ -160,6 +165,11 @@
       "opaque_info": {
         "is_opaque": false,
         "bit_count": 0
+      },
+      "option_fidelity": {
+        "coverage_percent": 100.0,
+        "validity_percent": 100.0,
+        "composite_score": 1.0
       },
       "defense": null,
       "max_durability": null,
@@ -265,6 +275,11 @@
         "is_opaque": false,
         "bit_count": 0
       },
+      "option_fidelity": {
+        "coverage_percent": 100.0,
+        "validity_percent": 100.0,
+        "composite_score": 1.0
+      },
       "defense": null,
       "max_durability": 7803,
       "current_durability": 4428,
@@ -297,6 +312,11 @@
         "is_opaque": false,
         "bit_count": 0
       },
+      "option_fidelity": {
+        "coverage_percent": 100.0,
+        "validity_percent": 100.0,
+        "composite_score": 1.0
+      },
       "defense": null,
       "max_durability": null,
       "current_durability": null,
@@ -326,6 +346,11 @@
       "opaque_info": {
         "is_opaque": false,
         "bit_count": 0
+      },
+      "option_fidelity": {
+        "coverage_percent": 100.0,
+        "validity_percent": 100.0,
+        "composite_score": 1.0
       },
       "defense": null,
       "max_durability": null,
