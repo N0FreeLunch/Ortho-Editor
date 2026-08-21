@@ -34,7 +34,7 @@ pub fn alpha_inventory_route(item: &Item, is_alpha: bool) -> AlphaInventoryRoute
         }
     } else if item.mode == 2 || item.location == 2 || item.location == 8 {
         AlphaInventoryRoute::Belt
-    } else if item.location == 4 {
+    } else if item.location == 4 || (is_alpha && item.location == 12) {
         AlphaInventoryRoute::Stash
     } else if item.location == 7 {
         AlphaInventoryRoute::Cube
