@@ -684,7 +684,12 @@ impl V105PropertyWidthAxiom {
         
         // Alpha v105 Summary Items: Potions, Scrolls, and small consumables (Slice 3040).
         // These items follow strict 72/80 bit slotted boundaries and use 16-bit IDs.
-        let is_potion = trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed == "rvs" || trimmed == "rvl";
+        let is_potion = trimmed.starts_with("hp")
+            || trimmed.starts_with("mp")
+            || trimmed.starts_with("gp")
+            || trimmed.starts_with("op")
+            || trimmed == "rvs"
+            || trimmed == "rvl";
         let is_scroll = trimmed == "tsc" || trimmed == "isc";
         let is_misc_summary = trimmed == "vps" || trimmed == "yps" || trimmed == "wms" || trimmed == "wuw8";
         

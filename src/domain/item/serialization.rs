@@ -2517,7 +2517,8 @@ impl Item {
 
         if alpha_mode {
             for item in &mut items {
-                let preserve_trusted_compact_tail = matches!(item.code.trim(), "jav" | "buc");
+                let preserve_trusted_compact_tail = matches!(item.code.trim(), "jav" | "buc")
+                    || (item.header.save_is_alpha && (item.header.is_compact || is_v105_summary_code(&item.code)));
                 let needs_raw_capture =
                     preserve_trusted_compact_tail || item.bits.len() < item.total_bits as usize;
 
