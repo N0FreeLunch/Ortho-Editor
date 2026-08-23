@@ -2162,8 +2162,11 @@ impl Item {
                 };
                 if !fallback_padding.is_empty() {
                     fallback_padding
-                } else {
+                } else if self.body.alpha_alignment_padding.len() < start_idx {
                     self.body.alpha_alignment_padding.clone()
+                } else {
+                    // A full-item capture is not an independently owned tail.
+                    Vec::new()
                 }
             };
 
