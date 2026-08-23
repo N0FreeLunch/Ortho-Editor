@@ -700,6 +700,9 @@ fn process_file_with_timeout(
         .arg("--json")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if args.no_cache {
+        command.arg("--no-cache");
+    }
     if args.detailed {
         command.arg("--detailed");
     }
