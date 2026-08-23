@@ -109,6 +109,7 @@ fn record_emission_phase(
     }
 }
 
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BitSegment {
     pub start: u64,
@@ -1334,7 +1335,9 @@ impl Item {
                 "item_id"
             };
             let has_identifier_source = !self.body.alpha_code_bits.is_empty()
-                || (self.body.alpha_alignment_padding.len() >= 16 && !has_opaque_module)
+                || (self.body.alpha_alignment_padding.len() >= 16
+                    && self.body.alpha_alignment_padding.len() < self.total_bits as usize
+                    && !has_opaque_module)
                 || self.id.is_some();
             if has_identifier_source {
                 let subphase_start = emitter.written_bits();
@@ -3373,4 +3376,3 @@ mod tests {
         assert!(item.placement().is_none(), "opaque placement must return None");
     }
 }
-
