@@ -1,6 +1,7 @@
 use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::progression::Progression;
+use d2r_core::data::item_specs::get_base_item_spec;
 use d2r_core::engine::formatter::format_item;
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
 use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
@@ -270,7 +271,20 @@ fn item_json(index: usize, item: &Item, level: u8) -> Value {
         let (child_name_en, child_name_ko) = item_localization(&child.code);
         json!({"index":child_index,"code":child.code.trim(),"name_en":child_name_en,"name_ko":child_name_ko,"quality":quality(child.header.quality),"properties":properties(&child.properties),"formatted_lines_ko":child_ko.properties,"formatted_lines_en":child_en.properties})
     }).collect::<Vec<_>>();
-    json!({"index":index,"code":item.code.trim(),"name_en":name_en,"name_ko":name_ko,"type":d2r_core::inventory::get_item_category(&item.code),"quality":if item.header.is_runeword { "Runeword" } else { quality(item.header.quality) },"x":item.x,"y":item.y,"width":d2r_core::inventory::get_item_size(&item.code).0,"height":d2r_core::inventory::get_item_size(&item.code).1,"is_equipped":item.mode==1,"location":item.location,"properties":properties(&item.properties),"formatted_lines_ko":ko.properties,"formatted_lines_en":en.properties,"formatted_base_ko":ko.base_attributes,"formatted_base_en":en.base_attributes,"set_attributes":item.set_attributes.iter().map(|set| properties(set)).collect::<Vec<_>>(),"runeword_attributes":properties(&item.runeword_attributes),"socketed_items":socketed_items,"defense":item.defense,"max_durability":item.max_durability,"current_durability":item.current_durability,"quantity":item.quantity,"opaque_info":{"is_opaque":item.body.v105_7mgw_payload.is_some(),"bit_count":item.body.v105_7mgw_payload.as_ref().map(|bits|bits.len()).unwrap_or(0)}})
+    json!({"index":index,"code":item.code.trim(),"name_en":name_en,"name_ko":name_ko,"type":d2r_core::inventory::get_item_category(&item.code),"quality":if item.header.is_runeword { "Runeword" } else { quality(item.header.quality) },"x":item.x,"y":item.y,"width":d2r_core::inventory::get_item_size(&item.code).0,"height":d2r_core::inventory::get_item_size(&item.code).1,"is_equipped":item.mode==1,"location":item.location,"properties":properties(&item.properties),"formatted_lines_ko":ko.properties,"formatted_lines_en":en.properties,"formatted_base_ko":ko.base_attributes,"formatted_base_en":en.base_attributes,"set_attributes":item.set_attributes.iter().map(|set| properties(set)).collect::<Vec<_>>(),"runeword_attributes":properties(&item.runeword_attributes),"socketed_items":socketed_items,"base_damage":base_damage(&item.code),"defense":item.defense,"max_durability":item.max_durability,"current_durability":item.current_durability,"quantity":item.quantity,"opaque_info":{"is_opaque":item.body.v105_7mgw_payload.is_some(),"bit_count":item.body.v105_7mgw_payload.as_ref().map(|bits|bits.len()).unwrap_or(0)}})
+}
+
+fn base_damage(code: &str) -> Value {
+    let Some(spec) = get_base_item_spec(code.trim()) else {
+        return Value::Null;
+    };
+    let one_hand = (spec.max_dmg > 0).then(|| json!({"min": spec.min_dmg, "max": spec.max_dmg}));
+    let two_hand = (spec.max_dmg2h > 0).then(|| json!({"min": spec.min_dmg2h, "max": spec.max_dmg2h}));
+    if one_hand.is_none() && two_hand.is_none() {
+        Value::Null
+    } else {
+        json!({"one_hand": one_hand, "two_hand": two_hand})
+    }
 }
 
 fn properties(items: &[ItemProperty]) -> Vec<Value> {

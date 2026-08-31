@@ -36,6 +36,14 @@ pulldown-cmark = "0.12"
 colored = "2.1"
 
 [[bin]]
+name = "d2stat_probe_oracle"
+path = "src/bin/verify/d2stat_probe_oracle.rs"
+
+[[bin]]
+name = "d2stat_fidelity_radar"
+path = "src/bin/verify/d2stat_fidelity_radar.rs"
+
+[[bin]]
 name = "d2item_bit_visualizer"
 path = "src/bin/inspect/d2item_bit_visualizer.rs"
 

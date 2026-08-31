@@ -5,12 +5,14 @@ pub mod bit_cursor;
 pub mod repository;
 pub mod alignment_oracle;
 pub mod mercenary;
+pub mod stat_schema;
 
 #[cfg(test)]
 mod alignment_oracle_test;
 
 pub use bit_cursor::BitCursor;
 pub use repository::DataRepository;
+pub use stat_schema::{StatRule, VersionStatSchema, StatSchemaRegistry};
 
 pub use generated::{
     affixes, item_codes, item_specs, item_types, localization, monsters, property_map,

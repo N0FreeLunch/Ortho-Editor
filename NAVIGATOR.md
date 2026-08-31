@@ -38,7 +38,7 @@ If rules conflict, keep `AGENTS.md` safety constraints (`No Automatic Push`, dat
 | Domain | Specification (Truth) | Primary Implementation | Verification Tool |
 | :--- | :--- | :--- | :--- |
 | **Bitstream / Save Header** | `../d2r-spec/NAVIGATOR.md` -> Bitstream / Save Header domain (private overlay, if present) | `src/save.rs` | `src/bin/verify/d2save_map.rs`, `src/bin/verify/d2save_verify.rs` |
-| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs` | `src/bin/verify/d2item_inspect.rs` |
+| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs`, `src/domain/stats/` | `src/bin/verify/d2item_inspect.rs`, `src/bin/verify/d2stat_fidelity_radar.rs`, `src/bin/verify/d2stat_probe_oracle.rs` |
 | **Inventory / Grid** | `../d2r-spec/NAVIGATOR.md` -> Inventory / Grid domain (private overlay, if present) | `src/inventory.rs` | `src/bin/verify/d2save_inventory_check.rs` |
 | **Status (Attrs/Skills)** | `../d2r-spec/NAVIGATOR.md` -> Status (Attrs/Skills) domain (private overlay, if present) | `src/save.rs` | `src/bin/d2save_status_inspect.rs` |
 | **Save Verification** | `../d2r-spec/NAVIGATOR.md` -> Save Verification domain (private overlay, if present) | - | `src/bin/verify/d2save_verify.rs` |

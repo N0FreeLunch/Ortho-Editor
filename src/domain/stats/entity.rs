@@ -95,6 +95,205 @@ impl ItemProperty {
     }
 }
 
+use bitstream_io::{BitRead, BitWrite};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct ItemStatList {
+    pub stats: Vec<ItemProperty>,
+}
+
+impl ItemStatList {
+    pub fn new() -> Self {
+        Self { stats: Vec::new() }
+    }
+
+    fn read_bits_raw<R: BitRead>(reader: &mut R, count: usize) -> Result<u32, std::io::Error> {
+        let mut value = 0u32;
+        for i in 0..count {
+            if reader.read_bit()? {
+                value |= 1 << i;
+            }
+        }
+        Ok(value)
+    }
+
+    fn write_bits_raw<W: BitWrite>(writer: &mut W, count: usize, value: u32) -> Result<(), std::io::Error> {
+        for i in 0..count {
+            writer.write_bit((value >> i) & 1 != 0)?;
+        }
+        Ok(())
+    }
+
+    pub fn read_versioned<R: BitRead>(
+        reader: &mut R,
+        schema: &crate::data::VersionStatSchema,
+    ) -> Result<Self, std::io::Error> {
+        let mut stats = Vec::new();
+        loop {
+            let id = match Self::read_bits_raw(reader, 9) {
+                Ok(id) => id as u16,
+                Err(_) => break,
+            };
+            if id == 0x1FF {
+                break;
+            }
+            if let Some(rule) = schema.get_rule(id) {
+                let stat = Self::read_stat_entry(reader, rule)?;
+                stats.push(stat);
+
+                // Handle chained stats (e.g. firemindam -> firemaxdam)
+                for chained_id in &rule.chain_next {
+                    if let Some(chained_rule) = schema.get_rule(*chained_id) {
+                        let chained_stat = Self::read_stat_entry(reader, chained_rule)?;
+                        stats.push(chained_stat);
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(ItemStatList { stats })
+    }
+
+    fn read_stat_entry<R: BitRead>(
+        reader: &mut R,
+        rule: &crate::data::StatRule,
+    ) -> Result<ItemProperty, std::io::Error> {
+        let param = if rule.save_param_bits > 0 {
+            Self::read_bits_raw(reader, rule.save_param_bits)?
+        } else {
+            0
+        };
+
+        let raw_value = if rule.save_bits > 0 {
+            Self::read_bits_raw(reader, rule.save_bits)? as i32
+        } else {
+            0
+        };
+
+        let value = raw_value - rule.save_add;
+
+        Ok(ItemProperty::new(
+            rule.id as u32,
+            rule.name.clone(),
+            param,
+            raw_value,
+            value,
+            ItemBitRange::default(),
+        ))
+    }
+
+    pub fn write_versioned<W: BitWrite>(
+        &self,
+        writer: &mut W,
+        schema: &crate::data::VersionStatSchema,
+    ) -> Result<(), std::io::Error> {
+        let mut i = 0;
+        while i < self.stats.len() {
+            let stat = &self.stats[i];
+            let id = stat.stat_id as u16;
+
+            // Write 9-bit stat ID
+            Self::write_bits_raw(writer, 9, id as u32)?;
+
+            if let Some(rule) = schema.get_rule(id) {
+                Self::write_stat_entry(writer, stat, rule)?;
+
+                // Write chained stats without 9-bit ID
+                for &chained_id in &rule.chain_next {
+                    i += 1;
+                    if i < self.stats.len() {
+                        let chained_stat = &self.stats[i];
+                        if let Some(chained_rule) = schema.get_rule(chained_id) {
+                            Self::write_stat_entry(writer, chained_stat, chained_rule)?;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        // Write 9-bit terminator (0x1FF = 511)
+        Self::write_bits_raw(writer, 9, 0x1FF)?;
+        Ok(())
+    }
+
+    fn write_stat_entry<W: BitWrite>(
+        writer: &mut W,
+        stat: &ItemProperty,
+        rule: &crate::data::StatRule,
+    ) -> Result<(), std::io::Error> {
+        if rule.save_param_bits > 0 {
+            Self::write_bits_raw(writer, rule.save_param_bits, stat.param)?;
+        }
+        if rule.save_bits > 0 {
+            let raw_value = (stat.value + rule.save_add) as u32;
+            Self::write_bits_raw(writer, rule.save_bits, raw_value)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitstream_io::{BitReader, BitWriter, LittleEndian};
+    use std::io::Cursor;
+
+    #[test]
+    fn test_chained_damage_stat_roundtrip() {
+        let schema = crate::data::StatSchemaRegistry::default_v99();
+
+        let mut list = ItemStatList::new();
+        // Strength: id 0, value 15
+        list.stats.push(ItemProperty::new(
+            0,
+            "strength".to_string(),
+            0,
+            47,
+            15,
+            ItemBitRange::default(),
+        ));
+        // Fire Min Dam: id 48, value 10
+        list.stats.push(ItemProperty::new(
+            48,
+            "firemindam".to_string(),
+            0,
+            10,
+            10,
+            ItemBitRange::default(),
+        ));
+        // Fire Max Dam: id 49 (chained), value 25
+        list.stats.push(ItemProperty::new(
+            49,
+            "firemaxdam".to_string(),
+            0,
+            25,
+            25,
+            ItemBitRange::default(),
+        ));
+
+        // Write to buffer
+        let mut buffer = Vec::new();
+        {
+            let mut writer = BitWriter::endian(&mut buffer, LittleEndian);
+            list.write_versioned(&mut writer, schema).expect("write should succeed");
+            writer.byte_align().expect("align should succeed");
+        }
+
+        // Read back
+        let mut reader = BitReader::endian(Cursor::new(&buffer), LittleEndian);
+        let parsed = ItemStatList::read_versioned(&mut reader, schema).expect("read should succeed");
+
+        assert_eq!(parsed.stats.len(), 3);
+        assert_eq!(parsed.stats[0].stat_id, 0);
+        assert_eq!(parsed.stats[0].value, 15);
+        assert_eq!(parsed.stats[1].stat_id, 48);
+        assert_eq!(parsed.stats[1].value, 10);
+        assert_eq!(parsed.stats[2].stat_id, 49);
+        assert_eq!(parsed.stats[2].value, 25);
+    }
+}
+
 
 
 
