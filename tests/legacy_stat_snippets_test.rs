@@ -2,8 +2,8 @@
 // Provides ultra-fast in-memory parsing and verification for standard 1.10+ and Alpha v105 stat bitstreams.
 
 use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
-use d2r_core::data::stat_costs::STAT_COSTS;
-use d2r_core::domain::stats::{lookup_alpha_map_by_raw, stat_save_bits};
+use d2r_core::data::{stat_costs::STAT_COSTS, StatSchemaRegistry};
+use d2r_core::domain::stats::{lookup_alpha_map_by_raw, stat_save_bits, ItemStatList};
 use d2r_core::init_rayon_thread_pool;
 use d2r_core::item::{Item, ItemProperty, OptionFidelityReport};
 use rayon::prelude::*;
@@ -451,7 +451,8 @@ fn test_harness_call_to_arms_micro_snippet() {
 
 #[test]
 fn test_harness_authority_micro_snippet() {
-    // Authority `권위` Alpha v105 runeword snippet (Ground Truth):
+    // Controlled semantic oracle for the v99-compatible stat layout.
+    // This is not a raw Alpha v105 fixture and must not be used as one.
     // 10% Chance to cast Level 15 Chain of Poison on striking (198),
     // 2% Chance to cast Level 10 Mind Barrier when struck (201),
     // +2 to Class/All Skills (127),
@@ -477,6 +478,40 @@ fn test_harness_authority_micro_snippet() {
         assert_eq!(actual.stat_id, expected.0);
         assert_eq!(actual.param, expected.1);
         assert_eq!(actual.value, expected.2);
+    }
+}
+
+#[test]
+fn test_versioned_v96_and_v99_authority_micro_snippet() {
+    let authority_stats = vec![
+        make_proc_skill_entry(198, 120, 15, 10),
+        make_proc_skill_entry(201, 125, 10, 2),
+        (127, 0, 2),
+        (99, 0, 20),
+        (17, 0, 50),
+        (91, 0, 15),
+        (39, 0, 30),
+    ];
+
+    for schema_version in ["v96", "v99"] {
+        let encoded = encode_standard_stat_snippet(&authority_stats);
+        let mut reader = BitReader::endian(Cursor::new(encoded), LittleEndian);
+        let schema = StatSchemaRegistry::global()
+            .get(schema_version)
+            .expect("embedded versioned schema should exist");
+        let decoded = ItemStatList::read_versioned(&mut reader, schema)
+            .expect("versioned decoder should read the complete authority snippet");
+
+        assert_eq!(
+            decoded.stats.len(),
+            authority_stats.len(),
+            "{schema_version}"
+        );
+        for (actual, expected) in decoded.stats.iter().zip(authority_stats.iter()) {
+            assert_eq!(actual.stat_id, expected.0, "{schema_version}");
+            assert_eq!(actual.param, expected.1, "{schema_version}");
+            assert_eq!(actual.value, expected.2, "{schema_version}");
+        }
     }
 }
 
@@ -880,6 +915,3 @@ fn test_harness_opaque_property_demotes_option_fidelity() {
     assert_eq!(report.validity_percent, 100.0);
     assert_eq!(report.composite_fidelity_score, 0.5);
 }
-
-
-

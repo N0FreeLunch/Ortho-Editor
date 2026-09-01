@@ -591,7 +591,7 @@ fn section_context_report(
             .find(|phase| phase.start <= local && local < phase.end)
     });
 
-    let first_difference_offset = compare_first_difference_offset(
+    let retained_alignment_effect_first_difference_offset = compare_first_difference_offset(
         &with_padding_bits,
         &without_padding_bits,
         item.range.start,
@@ -604,6 +604,11 @@ fn section_context_report(
         );
 
     let original_bits = item.bits.iter().map(|bit| bit.bit).collect::<Vec<_>>();
+    let first_difference_offset = compare_first_difference_offset(
+        &original_bits,
+        &with_padding_bits,
+        item.range.start,
+    );
     let property_id_bit_provenance = strict_emission_phases
         .iter()
         .find(|phase| phase.label == "non_summary_property_body")
@@ -1040,6 +1045,11 @@ fn section_context_report(
         "range_end": item.range.end,
         "segments": segments,
         "alpha_alignment_padding_len": item.body.alpha_alignment_padding.len(),
+        "alpha_alignment_padding_tail_bits": item.body.alpha_alignment_padding
+            .iter()
+            .skip(item.body.alpha_alignment_padding.len().saturating_sub(16))
+            .copied()
+            .collect::<Vec<_>>(),
         "parser_consumption_provenance": parser_consumption_provenance,
         "stored_header_gap_provenance": stored_header_gap_provenance,
         "section_parser_input_provenance": section_parser_input_provenance,
@@ -1078,6 +1088,7 @@ fn section_context_report(
         },
         "strict_emission_phase_observable": emit_phase_trace && target_phase.is_some(),
         "first_difference_offset": first_difference_offset,
+        "retained_alignment_effect_first_difference_offset": retained_alignment_effect_first_difference_offset,
         "local_73_padding_influence": local_73_padding_influence,
         "local_73_padding_influence_reason": local_73_padding_influence_reason,
         "strict_emission_phase_provenance": strict_emission_phase_report,

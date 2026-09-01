@@ -104,6 +104,8 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2save_item_diff`**| Save | **Crucial**: Compares only the item bitstream, masking header noise. |
 | **`d2item_bit_visualizer`** | Item | **Semantic Visualizer**: Hierarchical bitstream mapping with desync context. |
 | **`d2item_inspect`** | Item | Decomposes a `.d2i` or `.d2s` item into its bit-fields and props. |
+| **`d2stat_fidelity_radar`** | Item | **Fidelity Radar**: Fast parallel multi-fixture bit replay and property completeness scanner with atomic JSON receipts. |
+| **`d2stat_template_oracle`**| Item | **Deterministic Option Oracle**: Cross-references parsed item properties against static `d2r-data` Unique/Set/Runeword templates. |
 | **`d2item_section_prefix_trace`** | Item | **Prefix Parity Auditor**: Compares local item parity and cumulative section-prefix traces, including isolated provenance inspect comparisons. |
 | **`d2item_extract`** | Item | Extracts a raw item bit-payload from a save into a `.d2i` file. |
 | **`d2save_inject`** | Item | Injects a raw `.d2i` item into a specific save file. |

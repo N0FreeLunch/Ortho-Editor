@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use clap_stub::parse_args;
-use d2r_core::data::StatSchemaRegistry;
-use d2r_core::domain::stats::{BitSpaceTilingSolver, StatFusionMapper};
 use serde::Serialize;
 
 mod clap_stub {
@@ -10,6 +8,7 @@ mod clap_stub {
         pub corpus_dir: Option<String>,
         pub items_dir: Option<String>,
         pub token_efficient: bool,
+        pub help: bool,
     }
 
     pub fn parse_args() -> Args {
@@ -17,6 +16,7 @@ mod clap_stub {
         let mut corpus_dir = None;
         let mut items_dir = None;
         let mut token_efficient = false;
+        let mut help = false;
 
         let mut i = 1;
         while i < args.len() {
@@ -33,8 +33,11 @@ mod clap_stub {
                         i += 1;
                     }
                 }
-                "--token-efficient" => {
+                "--token-efficient" | "--json" => {
                     token_efficient = true;
+                }
+                "--help" | "-h" => {
+                    help = true;
                 }
                 _ => {}
             }
@@ -45,6 +48,7 @@ mod clap_stub {
             corpus_dir,
             items_dir,
             token_efficient,
+            help,
         }
     }
 }
@@ -53,8 +57,9 @@ mod clap_stub {
 struct ProbeOracleReport {
     total_saves_scanned: usize,
     total_items_evaluated: usize,
-    avg_space_coverage_percent: f64,
-    fusion_lossless_rate: f64,
+    live_semantic_option_coverage_percent: Option<f64>,
+    live_semantic_option_coverage_reason: String,
+    controlled_witness_status: String,
     anomalies: Vec<String>,
 }
 
@@ -75,30 +80,46 @@ fn scan_directory(dir: &Path, ext: &str) -> Vec<PathBuf> {
 
 fn main() {
     let args = parse_args();
-    let schema = StatSchemaRegistry::default_v99();
     let mut report = ProbeOracleReport::default();
+
+    if args.help {
+        println!(
+            "d2stat_probe_oracle --corpus-dir <DIR> [--items-dir <DIR>] [--json|--token-efficient]\n\n\
+             Reports whether this CLI has an independent live semantic-option oracle.\n\
+             It never substitutes file readability or raw-bit replay for option coverage."
+        );
+        return;
+    }
 
     if let Some(corpus_dir) = args.corpus_dir {
         let saves = scan_directory(Path::new(&corpus_dir), "d2s");
         report.total_saves_scanned = saves.len();
-
-        let mut total_coverage_sum = 0.0;
-        let mut fusion_success_count = 0;
-
-        for path in &saves {
-            if let Ok(_bytes) = fs::read(path) {
-                report.total_items_evaluated += 1;
-                // Evaluate bit space tiling solver on savegame data
-                total_coverage_sum += 100.0;
-                fusion_success_count += 1;
-            }
+        let unreadable = saves.iter().filter(|path| fs::read(path).is_err()).count();
+        if unreadable > 0 {
+            report.anomalies.push(format!(
+                "{unreadable} save files could not be read while enumerating the corpus"
+            ));
         }
-
-        if report.total_items_evaluated > 0 {
-            report.avg_space_coverage_percent = total_coverage_sum / report.total_items_evaluated as f64;
-            report.fusion_lossless_rate = (fusion_success_count as f64 / report.total_items_evaluated as f64) * 100.0;
-        }
+    } else {
+        report
+            .anomalies
+            .push("no corpus directory was supplied".to_string());
     }
+
+    if args.items_dir.is_some() {
+        report.anomalies.push(
+            "--items-dir is not evaluated: this probe has no independent expected-option oracle"
+                .to_string(),
+        );
+    }
+
+    report.live_semantic_option_coverage_percent = None;
+    report.live_semantic_option_coverage_reason =
+        "unavailable: this CLI has no independent expected-option oracle for live save items"
+            .to_string();
+    report.controlled_witness_status =
+        "v96/v99 controlled semantic witness is verified by legacy_stat_snippets_test; it is not live coverage"
+            .to_string();
 
     if args.token_efficient {
         println!("{}", serde_json::to_string(&report).unwrap());

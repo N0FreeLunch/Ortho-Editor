@@ -105,6 +105,11 @@ pub fn read_item_stats<R: BitRead>(
         || (version == 5 && (trimmed_code.starts_with('7') || trimmed_code == "wwsw"))
         || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
 
+    let is_identified = (flags & (1 << 4)) != 0;
+    if !is_identified && !is_runeword && !is_shadow_container && !is_authority_host {
+        return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
+    }
+
     if is_alpha && trimmed_code.is_empty() {
         return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
@@ -490,7 +495,7 @@ where
         axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
     let is_actual_runeword =
         (alpha_runeword || code.trim() == "Þ." || is_authority_host) && axiom.is_socketed;
-    if axiom.is_alpha() && is_actual_runeword {
+    if axiom.is_alpha() && is_actual_runeword && old_limit.is_none() {
         recorder.set_limit(u64::MAX);
     }
 
@@ -937,7 +942,8 @@ where
     }
 
     if axiom.is_alpha() && is_actual_runeword {
-        recorder.set_limit(recorder.pos() + 512);
+        let recovery_limit = recorder.pos().saturating_add(512);
+        recorder.set_limit(old_limit.map_or(recovery_limit, |limit| limit.min(recovery_limit)));
     } else if let Some(l) = old_limit {
         recorder.set_limit(l);
     }
@@ -1250,6 +1256,77 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
+    fn test_amazon_wa2_runeword_property_alignment() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s"
+        );
+        let bytes = std::fs::read(fixture).expect("save must exist");
+        let huffman = HuffmanTree::new();
+        let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true).expect("items must parse");
+        let wa2 = items.iter().find(|it| it.code.trim() == "wa2").expect("wa2 item must exist");
+        println!("[WA2-DIAG] header.flags=0x{:08X} (binary: {:032b})", wa2.header.flags, wa2.header.flags);
+        println!("[WA2-DIAG] header.version={} mode={} loc={} x={} y={} page={}", wa2.header.version, wa2.header.mode, wa2.header.location, wa2.header.x, wa2.header.y, wa2.header.page);
+        println!("[WA2-DIAG] header.is_compact={} is_socketed={} is_runeword={} is_identified={}", wa2.header.is_compact, wa2.header.is_socketed, wa2.header.is_runeword, wa2.header.is_identified);
+        println!("[WA2-DIAG] header.runeword_id={:?} runeword_level={:?}", wa2.runeword_id, wa2.runeword_level);
+        println!("[WA2-DIAG] body.quality={:?} alpha_quality_raw={:?}", wa2.header.quality, wa2.header.alpha_quality_raw);
+        println!("[WA2-DIAG] body.defense={:?} max_durability={:?} current_durability={:?}", wa2.body.defense, wa2.body.max_durability, wa2.body.current_durability);
+        println!("[WA2-DIAG] properties count={}", wa2.properties.len());
+        for (i, p) in wa2.properties.iter().enumerate() {
+            println!("[WA2-DIAG] prop[{i}]: stat_id={} (mapped={}) val={} raw={} param={} name='{}' range={:?}", 
+                p.stat_id, StatsAxiom::new(wa2.header.version, ItemQuality::Normal, true).map_alpha_id(p.stat_id),
+                p.value, p.raw_value, p.param, p.name, p.range);
+        }
+        let item_bits: Vec<bool> = wa2.bits.iter().map(|b| b.bit).collect();
+        let bit_str: String = item_bits.iter().map(|&b| if b { '1' } else { '0' }).collect();
+        println!("[WA2-DIAG] wa2 raw bits (len={}): {}", item_bits.len(), bit_str);
+
+        // Expected stats: 334, 115, 111, 146, 204, 198 (and 511 terminator)
+        for offset in 0..item_bits.len().saturating_sub(9) {
+            let mut val = 0u32;
+            for j in 0..9 {
+                if item_bits[offset + j] { val |= 1 << j; }
+            }
+            if matches!(val, 334 | 115 | 111 | 146 | 204 | 198 | 511) {
+                println!("[WA2-DIAG] Found candidate stat_id={} at relative offset {}", val, offset);
+            }
+        }
+    }
+
+    #[test]
+    fn test_druid_bst_cathan_rule_property_alignment() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_PostWarriv_Act1.d2s"
+        );
+        let bytes = std::fs::read(fixture).expect("save must exist");
+        let huffman = HuffmanTree::new();
+        let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true).expect("items must parse");
+        let bst = items.iter().find(|it| it.code.trim() == "bst").expect("bst item must exist");
+        println!("[BST-DIAG] header.flags=0x{:08X} (binary: {:032b})", bst.header.flags, bst.header.flags);
+        println!("[BST-DIAG] header.version={} mode={} loc={} x={} y={} page={}", bst.header.version, bst.header.mode, bst.header.location, bst.header.x, bst.header.y, bst.header.page);
+        println!("[BST-DIAG] header.is_compact={} is_socketed={} is_runeword={} is_identified={}", bst.header.is_compact, bst.header.is_socketed, bst.header.is_runeword, bst.header.is_identified);
+        println!("[BST-DIAG] body.quality={:?} alpha_quality_raw={:?}", bst.header.quality, bst.header.alpha_quality_raw);
+        println!("[BST-DIAG] body.defense={:?} max_durability={:?} current_durability={:?}", bst.body.defense, bst.body.max_durability, bst.body.current_durability);
+        println!("[BST-DIAG] body.alpha_set_list_val={:?}", bst.body.alpha_set_list_val);
+        println!("[BST-DIAG] body.alpha_alignment_padding len={}", bst.body.alpha_alignment_padding.len());
+        let item_bits: Vec<bool> = bst.bits.iter().map(|b| b.bit).collect();
+        let bit_str: String = item_bits.iter().map(|&b| if b { '1' } else { '0' }).collect();
+        println!("[BST-DIAG] bst raw bits (len={}): {}", item_bits.len(), bit_str);
+        
+        // Print 9-bit windows around property start (9434 - 9332 = 102)
+        for offset in (80..item_bits.len().saturating_sub(9)).step_by(1) {
+            let mut val = 0u32;
+            for j in 0..9 {
+                if item_bits[offset + j] { val |= 1 << j; }
+            }
+            if val == 126 || val == 49 || val == 511 {
+                println!("[BST-DIAG] Found interesting 9-bit val={} at relative offset {}", val, offset);
+            }
+        }
+    }
+
+    #[test]
     fn test_unknown_stat_id_marked_as_opaque() {
         // Construct a bitstream containing:
         // 9-bit stat_id: 509 (unmapped arbitrary ID)
@@ -1313,5 +1390,48 @@ mod tests {
         assert!(prop.is_opaque, "unknown stat id must be marked as opaque");
         assert_eq!(prop.name, "opaque_property");
     }
-}
 
+    #[test]
+    fn test_alpha_authority_runeword_keeps_caller_limit() {
+        // The terminator and its Alpha alignment padding fit within this caller bound.
+        let bytes = vec![0xFF, 0x01];
+        let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_limit(18);
+
+        let huffman = HuffmanTree::new();
+        let axiom = StatsAxiom::new(5, ItemQuality::Normal, true)
+            .with_code("wa2")
+            .with_socketed(true)
+            .with_compact(false);
+
+        let result = read_property_list(
+            &mut cursor,
+            "wa2",
+            5,
+            PropertyReaderContext {
+                bytes: &bytes,
+                item_start_bit: 0,
+            },
+            &huffman,
+            false,
+            false,
+            &axiom,
+            None,
+            None,
+            |_b, _pos, _h, _idx, _alpha| {
+                Err(crate::error::ParsingFailure {
+                    error: crate::error::ParsingError::Io("mock".to_string()),
+                    context_stack: vec![],
+                    bit_offset: 0,
+                    context_relative_offset: 0,
+                    hint: None,
+                })
+            },
+        );
+
+        assert!(result.is_ok(), "bounded runeword property list should parse");
+        assert!(cursor.pos() <= 18, "property list must not cross the caller limit");
+        assert_eq!(cursor.limit(), Some(18));
+    }
+}

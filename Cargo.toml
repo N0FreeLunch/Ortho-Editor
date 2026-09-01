@@ -40,6 +40,10 @@ name = "d2stat_probe_oracle"
 path = "src/bin/verify/d2stat_probe_oracle.rs"
 
 [[bin]]
+name = "d2stat_template_oracle"
+path = "src/bin/verify/d2stat_template_oracle.rs"
+
+[[bin]]
 name = "d2stat_fidelity_radar"
 path = "src/bin/verify/d2stat_fidelity_radar.rs"
 

@@ -1108,13 +1108,13 @@ mod tests {
             section_marker_byte_offset,
             section_bit_offset,
             declared_top_level_count,
-            19,
+            20,
         );
         assert_eq!(
             out_of_range,
             Err(MarkerPreselectionError::AcceptedMarkerOrdinalOutOfRange {
-                requested: 19,
-                accepted_count: 19,
+                requested: 20,
+                accepted_count: 20,
             })
         );
     }
