@@ -38,7 +38,7 @@ If rules conflict, keep `AGENTS.md` safety constraints (`No Automatic Push`, dat
 | Domain | Specification (Truth) | Primary Implementation | Verification Tool |
 | :--- | :--- | :--- | :--- |
 | **Bitstream / Save Header** | `../d2r-spec/NAVIGATOR.md` -> Bitstream / Save Header domain (private overlay, if present) | `src/save.rs` | `src/bin/verify/d2save_map.rs`, `src/bin/verify/d2save_verify.rs` |
-| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs`, `src/domain/stats/` | `src/bin/verify/d2item_inspect.rs`, `src/bin/verify/d2stat_fidelity_radar.rs`, `src/bin/verify/d2stat_probe_oracle.rs` |
+| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs`, `src/domain/stats/` | `src/bin/verify/d2item_inspect.rs`, `src/bin/verify/d2stat_fidelity_radar.rs`, `src/bin/verify/d2stat_probe_oracle.rs`, `src/bin/verify/d2stat_tiling_prober.rs` |
 | **Inventory / Grid** | `../d2r-spec/NAVIGATOR.md` -> Inventory / Grid domain (private overlay, if present) | `src/inventory.rs` | `src/bin/verify/d2save_inventory_check.rs` |
 | **Status (Attrs/Skills)** | `../d2r-spec/NAVIGATOR.md` -> Status (Attrs/Skills) domain (private overlay, if present) | `src/save.rs` | `src/bin/d2save_status_inspect.rs` |
 | **Save Verification** | `../d2r-spec/NAVIGATOR.md` -> Save Verification domain (private overlay, if present) | - | `src/bin/verify/d2save_verify.rs` |
@@ -106,6 +106,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2item_inspect`** | Item | Decomposes a `.d2i` or `.d2s` item into its bit-fields and props. |
 | **`d2stat_fidelity_radar`** | Item | **Fidelity Radar**: Fast parallel multi-fixture bit replay and property completeness scanner with atomic JSON receipts. |
 | **`d2stat_template_oracle`**| Item | **Deterministic Option Oracle**: Cross-references parsed item properties against static `d2r-data` Unique/Set/Runeword templates. |
+| **`d2stat_tiling_prober`**  | Item | **Deterministic CSP Prober**: Solves unique reachability path to `0x1FF` terminator via constraint satisfaction backtracking. |
 | **`d2item_section_prefix_trace`** | Item | **Prefix Parity Auditor**: Compares local item parity and cumulative section-prefix traces, including isolated provenance inspect comparisons. |
 | **`d2item_extract`** | Item | Extracts a raw item bit-payload from a save into a `.d2i` file. |
 | **`d2save_inject`** | Item | Injects a raw `.d2i` item into a specific save file. |
