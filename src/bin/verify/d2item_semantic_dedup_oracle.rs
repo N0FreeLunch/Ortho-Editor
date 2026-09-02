@@ -17,6 +17,9 @@ struct ScannedItemRecord {
     save_file: String,
     item_code: String,
     item_index: u32,
+    quality: String,
+    unique_id: Option<u16>,
+    alpha_unique_id_raw: Option<u16>,
     physical_digest: String,
     is_ineligible: bool,
     ineligible_reasons: Vec<String>,
@@ -71,6 +74,9 @@ struct IneligibleItemInfo {
     save_file: String,
     item_code: String,
     item_index: u32,
+    quality: String,
+    unique_id: Option<u16>,
+    alpha_unique_id_raw: Option<u16>,
     reason: String,
 }
 
@@ -87,6 +93,8 @@ struct SemanticCandidateGroupInfo {
     semantic_key_digest: String,
     item_code: String,
     quality: String,
+    unique_id: Option<u16>,
+    alpha_unique_id_raw: Option<u16>,
     physical_witness_count: u32,
     items: Vec<SemanticCandidateLocation>,
 }
@@ -242,6 +250,13 @@ fn collect_items_recursive(
         save_file: save_filename.to_string(),
         item_code: item.body.code.trim().to_string(),
         item_index: current_index,
+        quality: item
+            .header
+            .quality
+            .map(|quality| format!("{:?}", quality))
+            .unwrap_or_else(|| "Normal".to_string()),
+        unique_id: item.unique_id,
+        alpha_unique_id_raw: item.header.alpha_unique_id_raw,
         physical_digest: phys_digest,
         is_ineligible,
         ineligible_reasons: reasons,
@@ -257,6 +272,21 @@ fn collect_items_recursive(
             records,
             raw_bits_and_total,
         );
+    }
+}
+
+fn collect_save_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_save_files(&path, files);
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("d2s") {
+            files.push(path);
+        }
     }
 }
 
@@ -308,14 +338,7 @@ fn main() {
     }
 
     let mut save_files: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(saves_dir_path) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("d2s") {
-                save_files.push(path);
-            }
-        }
-    }
+    collect_save_files(saves_dir_path, &mut save_files);
     save_files.sort();
 
     let huffman = HuffmanTree::new();
@@ -418,6 +441,9 @@ fn main() {
                 save_file: rec.save_file,
                 item_code: rec.item_code,
                 item_index: rec.item_index,
+                quality: rec.quality,
+                unique_id: rec.unique_id,
+                alpha_unique_id_raw: rec.alpha_unique_id_raw,
                 reason: rec.ineligible_reasons.join(", "),
             });
         } else if let Some(key) = rec.semantic_key {
@@ -450,6 +476,8 @@ fn main() {
             semantic_key_digest: digest,
             item_code: key.code,
             quality: key.quality,
+            unique_id: key.unique_id,
+            alpha_unique_id_raw: None,
             physical_witness_count: items.len() as u32,
             items,
         });
