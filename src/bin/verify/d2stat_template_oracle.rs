@@ -179,6 +179,11 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
 
     // 2. Check Set template
     if item.header.quality == Some(ItemQuality::Set) {
+        if let Some(uid) = item.unique_id {
+            if let Some(s) = SET_ITEMS.iter().find(|s| s.id == uid as u32) {
+                return Some(MatchedTemplate::Set(s));
+            }
+        }
         if let Some(s) = SET_ITEMS.iter().find(|s| s.code == trimmed) {
             return Some(MatchedTemplate::Set(s));
         }
