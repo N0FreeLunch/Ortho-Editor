@@ -700,7 +700,7 @@ fn process_file_with_timeout(
         .arg("--json")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if args.no_cache {
+    if args.no_cache || args.strict_timeout_ms.is_some() {
         command.arg("--no-cache");
     }
     if args.detailed {
@@ -1914,7 +1914,12 @@ fn main() {
     }
 
     // 2-Phase Staged Map-Reduce: Build immutable receipt table for zero-lock parallel verification
-    if !args.no_cache && !args.topology_only && !args.scanner_only {
+    if !args.no_cache
+        && args.strict_timeout_ms.is_none()
+        && !args.worker_single_fixture
+        && !args.topology_only
+        && !args.scanner_only
+    {
         args.pool = Some(build_staged_receipt_table(&file_paths));
     }
 
