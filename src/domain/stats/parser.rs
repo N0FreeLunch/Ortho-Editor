@@ -1265,32 +1265,13 @@ mod tests {
         let huffman = HuffmanTree::new();
         let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true).expect("items must parse");
         let wa2 = items.iter().find(|it| it.code.trim() == "wa2").expect("wa2 item must exist");
-        println!("[WA2-DIAG] header.flags=0x{:08X} (binary: {:032b})", wa2.header.flags, wa2.header.flags);
-        println!("[WA2-DIAG] header.version={} mode={} loc={} x={} y={} page={}", wa2.header.version, wa2.header.mode, wa2.header.location, wa2.header.x, wa2.header.y, wa2.header.page);
-        println!("[WA2-DIAG] header.is_compact={} is_socketed={} is_runeword={} is_identified={}", wa2.header.is_compact, wa2.header.is_socketed, wa2.header.is_runeword, wa2.header.is_identified);
-        println!("[WA2-DIAG] header.runeword_id={:?} runeword_level={:?}", wa2.runeword_id, wa2.runeword_level);
-        println!("[WA2-DIAG] body.quality={:?} alpha_quality_raw={:?}", wa2.header.quality, wa2.header.alpha_quality_raw);
-        println!("[WA2-DIAG] body.defense={:?} max_durability={:?} current_durability={:?}", wa2.body.defense, wa2.body.max_durability, wa2.body.current_durability);
-        println!("[WA2-DIAG] properties count={}", wa2.properties.len());
-        for (i, p) in wa2.properties.iter().enumerate() {
-            println!("[WA2-DIAG] prop[{i}]: stat_id={} (mapped={}) val={} raw={} param={} name='{}' range={:?}", 
-                p.stat_id, StatsAxiom::new(wa2.header.version, ItemQuality::Normal, true).map_alpha_id(p.stat_id),
-                p.value, p.raw_value, p.param, p.name, p.range);
-        }
-        let item_bits: Vec<bool> = wa2.bits.iter().map(|b| b.bit).collect();
-        let bit_str: String = item_bits.iter().map(|&b| if b { '1' } else { '0' }).collect();
-        println!("[WA2-DIAG] wa2 raw bits (len={}): {}", item_bits.len(), bit_str);
-
-        // Expected stats: 334, 115, 111, 146, 204, 198 (and 511 terminator)
-        for offset in 0..item_bits.len().saturating_sub(9) {
-            let mut val = 0u32;
-            for j in 0..9 {
-                if item_bits[offset + j] { val |= 1 << j; }
-            }
-            if matches!(val, 334 | 115 | 111 | 146 | 204 | 198 | 511) {
-                println!("[WA2-DIAG] Found candidate stat_id={} at relative offset {}", val, offset);
-            }
-        }
+        assert_eq!(wa2.header.version, 2);
+        assert_eq!(wa2.code.trim(), "wa2");
+        assert!(wa2.header.is_runeword);
+        assert_eq!(wa2.range.start, 8030);
+        assert_eq!(wa2.range.end, 8542);
+        assert_eq!(wa2.total_bits, 512);
+        assert_eq!(wa2.properties.len(), 19);
     }
 
     #[test]
@@ -1303,27 +1284,9 @@ mod tests {
         let huffman = HuffmanTree::new();
         let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true).expect("items must parse");
         let bst = items.iter().find(|it| it.code.trim() == "bst").expect("bst item must exist");
-        println!("[BST-DIAG] header.flags=0x{:08X} (binary: {:032b})", bst.header.flags, bst.header.flags);
-        println!("[BST-DIAG] header.version={} mode={} loc={} x={} y={} page={}", bst.header.version, bst.header.mode, bst.header.location, bst.header.x, bst.header.y, bst.header.page);
-        println!("[BST-DIAG] header.is_compact={} is_socketed={} is_runeword={} is_identified={}", bst.header.is_compact, bst.header.is_socketed, bst.header.is_runeword, bst.header.is_identified);
-        println!("[BST-DIAG] body.quality={:?} alpha_quality_raw={:?}", bst.header.quality, bst.header.alpha_quality_raw);
-        println!("[BST-DIAG] body.defense={:?} max_durability={:?} current_durability={:?}", bst.body.defense, bst.body.max_durability, bst.body.current_durability);
-        println!("[BST-DIAG] body.alpha_set_list_val={:?}", bst.body.alpha_set_list_val);
-        println!("[BST-DIAG] body.alpha_alignment_padding len={}", bst.body.alpha_alignment_padding.len());
-        let item_bits: Vec<bool> = bst.bits.iter().map(|b| b.bit).collect();
-        let bit_str: String = item_bits.iter().map(|&b| if b { '1' } else { '0' }).collect();
-        println!("[BST-DIAG] bst raw bits (len={}): {}", item_bits.len(), bit_str);
-        
-        // Print 9-bit windows around property start (9434 - 9332 = 102)
-        for offset in (80..item_bits.len().saturating_sub(9)).step_by(1) {
-            let mut val = 0u32;
-            for j in 0..9 {
-                if item_bits[offset + j] { val |= 1 << j; }
-            }
-            if val == 126 || val == 49 || val == 511 {
-                println!("[BST-DIAG] Found interesting 9-bit val={} at relative offset {}", val, offset);
-            }
-        }
+        assert_eq!(bst.header.version, 7);
+        assert_eq!(bst.code.trim(), "bst");
+        assert!(!bst.header.is_identified);
     }
 
     #[test]

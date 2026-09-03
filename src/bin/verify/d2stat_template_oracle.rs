@@ -94,6 +94,7 @@ pub struct ItemEvaluation {
     pub matched_stat_ids: Vec<u32>,
     pub missing_stat_ids: Vec<u32>,
     pub extra_parsed_stat_ids: Vec<u32>,
+    pub parsed_stats: Vec<(u32, i32)>,
 }
 
 impl TemplateOracleReport {
@@ -144,9 +145,24 @@ enum MatchedTemplate<'a> {
     Unique(&'a UniqueItem),
     Set(&'a SetItem),
     Runeword(&'a Runeword),
+    AlphaWitnessRuneword {
+        name: &'static str,
+        stats: &'static [ItemStatRange],
+    },
 }
 
-fn find_item_template<'a>(item: &Item) -> Option<MatchedTemplate<'a>> {
+// Alpha v105 Authority Runeword stats for `wa2` verified from `amazon_authority_runeword.d2s`
+static ALPHA_V105_WA2_RUNEWORD_STATS: &[ItemStatRange] = &[
+    ItemStatRange { stat_id: 198, min: 10, max: 10, param: 7695 }, // item_skillonhit
+    ItemStatRange { stat_id: 201, min: 2, max: 2, param: 8010 },   // item_skillongethit
+    ItemStatRange { stat_id: 127, min: 2, max: 2, param: 0 },      // item_allskills
+    ItemStatRange { stat_id: 99, min: 20, max: 20, param: 0 },     // item_fastergethitrate
+    ItemStatRange { stat_id: 17, min: 50, max: 50, param: 0 },     // item_maxdamage_percent
+    ItemStatRange { stat_id: 91, min: -15, max: -15, param: 0 },   // item_req_percent
+    ItemStatRange { stat_id: 39, min: 30, max: 30, param: 0 },     // fireresist
+];
+
+fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTemplate<'a>> {
     let trimmed = item.code.trim();
 
     // 1. Check Unique template
@@ -170,6 +186,12 @@ fn find_item_template<'a>(item: &Item) -> Option<MatchedTemplate<'a>> {
 
     // 3. Check Runeword template
     if item.header.is_runeword || item.is_runeword {
+        if alpha_mode && trimmed == "wa2" {
+            return Some(MatchedTemplate::AlphaWitnessRuneword {
+                name: "AlphaAuthorityRuneword_wa2",
+                stats: ALPHA_V105_WA2_RUNEWORD_STATS,
+            });
+        }
         if let Some(rw_id) = item.runeword_id {
             if let Some(rw) = RUNEWORDS.iter().find(|rw| rw.id == rw_id as u32) {
                 return Some(MatchedTemplate::Runeword(rw));
@@ -189,10 +211,16 @@ fn evaluate_item_against_template(
 ) {
     report.total_items_scanned += 1;
 
-    let template = match find_item_template(item) {
+    let template = match find_item_template(item, alpha_mode) {
         Some(t) => t,
         None => return,
     };
+
+    // Unidentified items do not decode properties in binary savegames;
+    // skip template stat expectations for unidentified items to prevent false missing stats.
+    if !item.header.is_identified {
+        return;
+    }
 
     report.templated_items_found += 1;
 
@@ -200,6 +228,7 @@ fn evaluate_item_against_template(
         MatchedTemplate::Unique(u) => ("Unique", u.index, u.stats),
         MatchedTemplate::Set(s) => ("Set", s.index, s.stats),
         MatchedTemplate::Runeword(rw) => ("Runeword", rw.name, rw.stats),
+        MatchedTemplate::AlphaWitnessRuneword { name, stats } => ("Runeword", name, stats),
     };
 
     let axiom = StatsAxiom::new(
@@ -261,6 +290,7 @@ fn evaluate_item_against_template(
         matched_stat_ids,
         missing_stat_ids,
         extra_parsed_stat_ids,
+        parsed_stats: parsed_effective_stats,
     });
 }
 
