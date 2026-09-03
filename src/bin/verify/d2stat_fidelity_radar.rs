@@ -13,6 +13,7 @@ mod clap_stub {
         pub output_file: Option<String>,
         pub token_efficient: bool,
         pub sequential: bool,
+        pub strict_rebuild: bool,
     }
 
     pub fn parse_args() -> Args {
@@ -23,6 +24,7 @@ mod clap_stub {
         let mut output_file = None;
         let mut token_efficient = false;
         let mut sequential = false;
+        let mut strict_rebuild = false;
 
         let mut i = 1;
         while i < args.len() {
@@ -57,6 +59,9 @@ mod clap_stub {
                 "--sequential" => {
                     sequential = true;
                 }
+                "--strict-rebuild" => {
+                    strict_rebuild = true;
+                }
                 _ => {}
             }
             i += 1;
@@ -69,6 +74,7 @@ mod clap_stub {
             output_file,
             token_efficient,
             sequential,
+            strict_rebuild,
         }
     }
 }
@@ -77,6 +83,9 @@ mod clap_stub {
 struct RadarReport {
     total_files_scanned: usize,
     total_items_scanned: usize,
+    standard_items_count: usize,
+    forensic_items_count: usize,
+    total_semantic_properties_decoded: usize,
     property_lists_examined: usize,
     property_lists_complete: usize,
     property_list_completion_rate: f64,
@@ -85,6 +94,9 @@ struct RadarReport {
     bit_replay_items: usize,
     f_bit_lossless: usize,
     f_bit_rate: f64,
+    strict_rebuild_examined: usize,
+    strict_rebuild_lossless: usize,
+    strict_rebuild_rate: f64,
     mismatches: Vec<RadarMismatch>,
 }
 
@@ -101,10 +113,15 @@ impl RadarReport {
     fn merge(&mut self, mut other: Self) {
         self.total_files_scanned += other.total_files_scanned;
         self.total_items_scanned += other.total_items_scanned;
+        self.standard_items_count += other.standard_items_count;
+        self.forensic_items_count += other.forensic_items_count;
+        self.total_semantic_properties_decoded += other.total_semantic_properties_decoded;
         self.property_lists_examined += other.property_lists_examined;
         self.property_lists_complete += other.property_lists_complete;
         self.bit_replay_items += other.bit_replay_items;
         self.f_bit_lossless += other.f_bit_lossless;
+        self.strict_rebuild_examined += other.strict_rebuild_examined;
+        self.strict_rebuild_lossless += other.strict_rebuild_lossless;
         self.mismatches.append(&mut other.mismatches);
     }
 }
@@ -146,14 +163,39 @@ fn record_item_metrics(
     item: &Item,
     huffman: &HuffmanTree,
     alpha_mode: bool,
+    strict_rebuild: bool,
 ) {
     report.total_items_scanned += 1;
+
+    let trimmed = item.code.trim();
+    let is_forensic = trimmed.is_empty()
+        || item.is_opaque()
+        || item.is_residue()
+        || item.is_semi_opaque()
+        || item.body.v105_7mgw_payload.is_some()
+        || matches!(trimmed, "xrs" | "wa2" | "c8xr" | "rhd" | "ks d" | "b7ts" | "oesw")
+        || item.modules.iter().any(|m| {
+            matches!(
+                m,
+                d2r_core::domain::item::ItemModule::Opaque(_)
+                    | d2r_core::domain::item::ItemModule::Residue(_)
+                    | d2r_core::domain::item::ItemModule::SemiOpaque { .. }
+            )
+        });
+
+    if is_forensic {
+        report.forensic_items_count += 1;
+    } else {
+        report.standard_items_count += 1;
+    }
 
     if !item.properties.is_empty() {
         report.property_lists_examined += 1;
         if item.properties_complete {
             report.property_lists_complete += 1;
         }
+        report.total_semantic_properties_decoded +=
+            item.properties.iter().filter(|p| !p.is_opaque).count();
     }
 
     if item.bits.is_empty() {
@@ -202,9 +244,19 @@ fn record_item_metrics(
             ),
         }),
     }
+
+    if strict_rebuild {
+        report.strict_rebuild_examined += 1;
+        let mut rebuilt = item.clone();
+        rebuilt.bits.clear();
+        match rebuilt.to_bits(item_index, huffman, alpha_mode) {
+            Ok(emitted) if emitted == recorded => report.strict_rebuild_lossless += 1,
+            _ => {}
+        }
+    }
 }
 
-fn analyze_save(path: &Path) -> RadarReport {
+fn analyze_save(path: &Path, strict_rebuild: bool) -> RadarReport {
     eprintln!("[RADAR] Analyzing: {}", path.display());
     let mut report = RadarReport {
         total_files_scanned: 1,
@@ -225,6 +277,7 @@ fn analyze_save(path: &Path) -> RadarReport {
                             item,
                             &huffman,
                             alpha_mode,
+                            strict_rebuild,
                         );
                     }
                 }
@@ -267,11 +320,11 @@ fn main() {
 
     if !save_files.is_empty() {
         let partial_reports: Vec<_> = if args.sequential {
-            save_files.iter().map(|path| analyze_save(path)).collect()
+            save_files.iter().map(|path| analyze_save(path, args.strict_rebuild)).collect()
         } else {
             save_files
                 .par_iter()
-                .map(|path| analyze_save(path))
+                .map(|path| analyze_save(path, args.strict_rebuild))
                 .collect()
         };
         for partial in partial_reports {
@@ -285,6 +338,10 @@ fn main() {
     }
     if report.bit_replay_items > 0 {
         report.f_bit_rate = (report.f_bit_lossless as f64 / report.bit_replay_items as f64) * 100.0;
+    }
+    if report.strict_rebuild_examined > 0 {
+        report.strict_rebuild_rate =
+            (report.strict_rebuild_lossless as f64 / report.strict_rebuild_examined as f64) * 100.0;
     }
 
     if let Some(items_dir) = args.items_dir {
