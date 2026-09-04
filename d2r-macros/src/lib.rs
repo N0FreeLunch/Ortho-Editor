@@ -458,3 +458,80 @@ pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     })
 }
+
+/// Custom test attribute for Hard Invariant tests (ADR-0021, Thinking 3911).
+/// Guarantees bit-level roundtrip integrity ($F_{bit} = 100.0\%$) and header invariants.
+/// Failure protocol: Immediate Regression.
+#[proc_macro_attribute]
+pub fn invariant_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input: syn::ItemFn = match syn::parse(item) {
+        Ok(f) => f,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let attrs = &input.attrs;
+    let vis = &input.vis;
+    let sig = &input.sig;
+    let body = &input.block;
+
+    TokenStream::from(quote! {
+        #[test]
+        #(#attrs)*
+        #vis #sig {
+            // Invariant Test Boundary: Zero-tolerance for bit regression (ADR-0021)
+            #body
+        }
+    })
+}
+
+/// Custom test attribute for Hypothesis Snapshot tests (ADR-0021, Thinking 3911).
+/// Captures observation snapshots (e.g. item count, decoded values) subject to evolution.
+/// Failure protocol: Delta Analysis ("Why did it change? Did fragments consolidate?").
+#[proc_macro_attribute]
+pub fn hypothesis_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input: syn::ItemFn = match syn::parse(item) {
+        Ok(f) => f,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let attrs = &input.attrs;
+    let vis = &input.vis;
+    let sig = &input.sig;
+    let body = &input.block;
+
+    TokenStream::from(quote! {
+        #[test]
+        #(#attrs)*
+        #vis #sig {
+            // Hypothesis Snapshot Boundary: Subject to Delta Analysis upon change (ADR-0021)
+            #body
+        }
+    })
+}
+
+/// Custom test attribute for Deep Diagnostic Radar tests (ADR-0021, Thinking 3800, 3911).
+/// High-cost corpus-wide audits (87~143 saves). Automatically ignored by default in regular test runs.
+/// Runnable on-demand via `cargo test -- --ignored <test_name>`.
+#[proc_macro_attribute]
+pub fn radar_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input: syn::ItemFn = match syn::parse(item) {
+        Ok(f) => f,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let attrs = &input.attrs;
+    let vis = &input.vis;
+    let sig = &input.sig;
+    let body = &input.block;
+
+    TokenStream::from(quote! {
+        #[test]
+        #[ignore = "On-demand deep diagnostic radar test (run with -- --ignored)"]
+        #(#attrs)*
+        #vis #sig {
+            // Deep Diagnostic Radar Boundary: High-cost corpus audit (ADR-0021)
+            #body
+        }
+    })
+}
+
