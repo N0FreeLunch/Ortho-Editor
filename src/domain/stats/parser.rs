@@ -1243,11 +1243,7 @@ where
             },
             is_opaque: is_unknown_stat,
             opaque_bits: None,
-            maturity: if is_unknown_stat {
-                crate::domain::stats::StatMaturityTier::Speculative
-            } else {
-                crate::domain::stats::StatMaturityTier::Verified
-            },
+            maturity: axiom.stat_maturity(stat_id, !is_unknown_stat),
         },
         false,
         false,

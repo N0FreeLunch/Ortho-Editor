@@ -535,6 +535,39 @@ impl StatsAxiom {
         }
         default_width
     }
+
+    /// Resolves the stat maturity tier for a given raw stat ID.
+    /// Priority:
+    /// 1. Registry explicit maturity if defined.
+    /// 2. If alpha save and mapped or in stats registry -> Verified.
+    /// 3. If standard retail stat (in STAT_COSTS) -> Verified.
+    /// 4. Fallback -> Inferred if spec exists, else Speculative.
+    pub fn stat_maturity(&self, raw_id: u32, is_known_stat: bool) -> crate::domain::stats::StatMaturityTier {
+        if !is_known_stat {
+            return crate::domain::stats::StatMaturityTier::Speculative;
+        }
+
+        if self.is_alpha() {
+            let reg = get_registry();
+            if let Some(mapping) = reg.mappings.get(&raw_id.to_string()) {
+                if let Some(mat) = mapping.maturity {
+                    return mat;
+                }
+                return crate::domain::stats::StatMaturityTier::Verified;
+            }
+            if let Some(info) = reg.stats.get(&raw_id.to_string()) {
+                if let Some(mat) = info.maturity {
+                    return mat;
+                }
+                return crate::domain::stats::StatMaturityTier::Verified;
+            }
+            // In alpha save, unmapped standard stat ID decoded via spec inference is Inferred
+            return crate::domain::stats::StatMaturityTier::Inferred;
+        }
+
+        // Retail standard stats default to Verified
+        crate::domain::stats::StatMaturityTier::Verified
+    }
 }
 
 #[cfg(test)]
@@ -550,5 +583,37 @@ mod tests {
         assert_eq!(axiom.map_alpha_id(380), 194);
         assert_eq!(axiom.map_alpha_id(256), 127);
         assert_eq!(axiom.map_alpha_id(496), 99);
+    }
+
+    #[test]
+    fn test_stat_maturity_tier() {
+        let alpha_axiom = StatsAxiom::new(5, ItemQuality::Unique, true);
+        // Verified mapping in registry: 26 -> 31
+        assert_eq!(
+            alpha_axiom.stat_maturity(26, true),
+            crate::domain::stats::StatMaturityTier::Verified
+        );
+        // Unmapped in alpha registry but valid stat cost -> Inferred
+        assert_eq!(
+            alpha_axiom.stat_maturity(12345, true),
+            crate::domain::stats::StatMaturityTier::Inferred
+        );
+        // Unknown stat -> Speculative
+        assert_eq!(
+            alpha_axiom.stat_maturity(99999, false),
+            crate::domain::stats::StatMaturityTier::Speculative
+        );
+
+        let retail_axiom = StatsAxiom::new(96, ItemQuality::Unique, false);
+        // Retail known stat -> Verified
+        assert_eq!(
+            retail_axiom.stat_maturity(31, true),
+            crate::domain::stats::StatMaturityTier::Verified
+        );
+        // Retail unknown stat -> Speculative
+        assert_eq!(
+            retail_axiom.stat_maturity(99999, false),
+            crate::domain::stats::StatMaturityTier::Speculative
+        );
     }
 }
