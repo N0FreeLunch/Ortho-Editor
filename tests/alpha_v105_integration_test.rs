@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use d2r_core::item::{Item, HuffmanTree};
-    use d2r_core::save::Save;
+    use d2r_macros::{hypothesis_test, invariant_test, radar_test};
     use std::fs;
 
     fn read_alpha_items_from_first_jm(fixture_path: &str) -> (Vec<Item>, u16) {
@@ -94,7 +94,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[invariant_test]
     fn test_all_alpha_v105_fixtures_bit_perfect() {
         d2r_core::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(false));
         let fixtures = [
@@ -147,7 +147,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[hypothesis_test]
     fn test_rogue_bowarmor_item_31_deconstruction() {
         let fixture_path = "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_BowArmor.d2s";
         let bytes = fs::read(fixture_path).expect("Fixture not found");
@@ -159,7 +159,7 @@ mod tests {
         assert!(!reserialized_items.is_empty(), "Reserialized items section should not be empty");
     }
 
-    #[test]
+    #[radar_test]
     fn test_audit_all_87_gameplay_saves() {
         let huffman = HuffmanTree::new();
         let base_dir = "tests/fixtures/savegames/gameplay/normal";
@@ -234,7 +234,7 @@ mod tests {
         let _ = fs::write(out_dir.join("batch-audit-report.json"), serde_json::to_string_pretty(&report).unwrap());
     }
 
-    #[test]
+    #[radar_test]
     fn test_triage_opaque_families() {
         let huffman = HuffmanTree::new();
         let base_dir = "tests/fixtures/savegames/gameplay/normal";
@@ -296,7 +296,7 @@ mod tests {
         let _ = fs::write(out_dir.join("opaque_families_taxonomy.json"), serde_json::to_string_pretty(&sorted_families).unwrap());
     }
 
-    #[test]
+    #[hypothesis_test]
     fn test_gpl_throwing_potion_deconstruction() {
         let huffman = HuffmanTree::new();
         let path = "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s";
