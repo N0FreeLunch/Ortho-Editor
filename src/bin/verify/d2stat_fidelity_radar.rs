@@ -97,6 +97,12 @@ struct RadarReport {
     strict_rebuild_examined: usize,
     strict_rebuild_lossless: usize,
     strict_rebuild_rate: f64,
+    standard_strict_rebuild_examined: usize,
+    standard_strict_rebuild_lossless: usize,
+    standard_strict_rebuild_rate: f64,
+    forensic_strict_rebuild_examined: usize,
+    forensic_strict_rebuild_lossless: usize,
+    forensic_strict_rebuild_rate: f64,
     mismatches: Vec<RadarMismatch>,
 }
 
@@ -122,6 +128,10 @@ impl RadarReport {
         self.f_bit_lossless += other.f_bit_lossless;
         self.strict_rebuild_examined += other.strict_rebuild_examined;
         self.strict_rebuild_lossless += other.strict_rebuild_lossless;
+        self.standard_strict_rebuild_examined += other.standard_strict_rebuild_examined;
+        self.standard_strict_rebuild_lossless += other.standard_strict_rebuild_lossless;
+        self.forensic_strict_rebuild_examined += other.forensic_strict_rebuild_examined;
+        self.forensic_strict_rebuild_lossless += other.forensic_strict_rebuild_lossless;
         self.mismatches.append(&mut other.mismatches);
     }
 }
@@ -247,10 +257,23 @@ fn record_item_metrics(
 
     if strict_rebuild {
         report.strict_rebuild_examined += 1;
+        if is_forensic {
+            report.forensic_strict_rebuild_examined += 1;
+        } else {
+            report.standard_strict_rebuild_examined += 1;
+        }
+
         let mut rebuilt = item.clone();
         rebuilt.bits.clear();
         match rebuilt.to_bits(item_index, huffman, alpha_mode) {
-            Ok(emitted) if emitted == recorded => report.strict_rebuild_lossless += 1,
+            Ok(emitted) if emitted == recorded => {
+                report.strict_rebuild_lossless += 1;
+                if is_forensic {
+                    report.forensic_strict_rebuild_lossless += 1;
+                } else {
+                    report.standard_strict_rebuild_lossless += 1;
+                }
+            }
             _ => {}
         }
     }
@@ -342,6 +365,14 @@ fn main() {
     if report.strict_rebuild_examined > 0 {
         report.strict_rebuild_rate =
             (report.strict_rebuild_lossless as f64 / report.strict_rebuild_examined as f64) * 100.0;
+    }
+    if report.standard_strict_rebuild_examined > 0 {
+        report.standard_strict_rebuild_rate =
+            (report.standard_strict_rebuild_lossless as f64 / report.standard_strict_rebuild_examined as f64) * 100.0;
+    }
+    if report.forensic_strict_rebuild_examined > 0 {
+        report.forensic_strict_rebuild_rate =
+            (report.forensic_strict_rebuild_lossless as f64 / report.forensic_strict_rebuild_examined as f64) * 100.0;
     }
 
     if let Some(items_dir) = args.items_dir {
