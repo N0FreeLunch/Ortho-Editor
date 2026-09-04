@@ -6,7 +6,7 @@ pub mod attribute;
 pub mod tiling_solver;
 pub mod fusion_mapper;
 
-pub use entity::{ItemProperty, ItemStats, ItemStatList};
+pub use entity::{ItemProperty, ItemStats, ItemStatList, StatMaturityTier};
 pub use attribute::{AttributeSection, AttributeEntry};
 pub use axiom::StatsAxiom;
 pub use parser::{read_property_list, parse_single_property};

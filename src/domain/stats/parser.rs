@@ -1061,6 +1061,7 @@ where
                 },
                 is_opaque: false,
                 opaque_bits: None,
+                maturity: crate::domain::stats::StatMaturityTier::Verified,
             },
             true,
             term_bit,
@@ -1242,6 +1243,11 @@ where
             },
             is_opaque: is_unknown_stat,
             opaque_bits: None,
+            maturity: if is_unknown_stat {
+                crate::domain::stats::StatMaturityTier::Speculative
+            } else {
+                crate::domain::stats::StatMaturityTier::Verified
+            },
         },
         false,
         false,

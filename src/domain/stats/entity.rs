@@ -1,5 +1,14 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use crate::domain::item::entity::ItemBitRange;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StatMaturityTier {
+    #[default]
+    Verified,   // Tier 1: Fixture-verified, full Read/Write/Mutate
+    Inferred,   // Tier 2: Spec-derived, Read-Only render, bit-preserved
+    Speculative, // Tier 3: Diagnostic draft
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct ItemStats {
@@ -20,6 +29,8 @@ pub struct ItemProperty {
     pub is_opaque: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opaque_bits: Option<Vec<bool>>,
+    #[serde(default)]
+    pub maturity: StatMaturityTier,
 }
 
 impl ItemProperty {
@@ -40,6 +51,29 @@ impl ItemProperty {
             range,
             is_opaque: false,
             opaque_bits: None,
+            maturity: StatMaturityTier::Verified,
+        }
+    }
+
+    pub fn new_with_maturity(
+        stat_id: u32,
+        name: String,
+        param: u32,
+        raw_value: i32,
+        value: i32,
+        range: ItemBitRange,
+        maturity: StatMaturityTier,
+    ) -> Self {
+        Self {
+            stat_id,
+            name,
+            param,
+            raw_value,
+            value,
+            range,
+            is_opaque: false,
+            opaque_bits: None,
+            maturity,
         }
     }
 
@@ -57,7 +91,20 @@ impl ItemProperty {
             range,
             is_opaque: true,
             opaque_bits: Some(raw_bits),
+            maturity: StatMaturityTier::Speculative,
         }
+    }
+
+    pub fn is_verified(&self) -> bool {
+        self.maturity == StatMaturityTier::Verified
+    }
+
+    pub fn is_inferred(&self) -> bool {
+        self.maturity == StatMaturityTier::Inferred
+    }
+
+    pub fn is_editable(&self) -> bool {
+        !self.is_opaque && self.is_verified()
     }
 
     /// Validates if this property corresponds to a known stat definition and falls within valid value/param ranges.

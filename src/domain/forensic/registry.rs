@@ -36,6 +36,8 @@ pub struct MappingInfo {
     pub description: Option<String>,
     #[serde(default)]
     pub fidelity_hint: Option<String>,
+    #[serde(default)]
+    pub maturity: Option<crate::domain::stats::StatMaturityTier>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -46,6 +48,8 @@ pub struct StatInfo {
     pub description: Option<String>,
     #[serde(default)]
     pub fidelity_hint: Option<String>,
+    #[serde(default)]
+    pub maturity: Option<crate::domain::stats::StatMaturityTier>,
 }
 
 static REGISTRY: OnceLock<AlphaForensics> = OnceLock::new();
