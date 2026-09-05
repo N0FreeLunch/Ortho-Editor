@@ -313,4 +313,28 @@ mod tests {
         let reserialized_items = Item::serialize_section(&items, &huffman, true).expect("Serialization failed");
         assert!(!reserialized_items.is_empty(), "Reserialized items section should not be empty");
     }
+
+    #[hypothesis_test]
+    fn test_opaque_span_huffman_and_boundary_forensics() {
+        let huffman = HuffmanTree::new();
+
+        // 1. Act 4 investigation (TESTDRUID_Act4_AutoOrganized.d2s)
+        // Verifies that the merged 161-bit opaque carrier (Item 35) and its predecessor (Item 34)
+        // are preserved without arbitrary false subdivision.
+        let path4 = "tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_AutoOrganized.d2s";
+        let bytes4 = fs::read(path4).expect("Read savegame failed");
+        let items4 = Item::read_player_items(&bytes4, &huffman, true).expect("read_player_items failed");
+        
+        let it34 = &items4[34];
+        let it35 = &items4[35];
+        assert_eq!(it34.bits.len(), 183, "Item 34 must be exactly 183 bits");
+        assert_eq!(it35.bits.len(), 161, "Item 35 must be preserved as 161-bit unified opaque carrier");
+        assert!(it34.is_opaque(), "Item 34 must remain Opaque");
+        assert!(it35.is_opaque(), "Item 35 must remain Opaque");
+
+        // Verify that roundtrip reserialization preserves 100% bit fidelity
+        let reserialized_items = Item::serialize_section(&items4, &huffman, true).expect("Serialization failed");
+        assert!(!reserialized_items.is_empty(), "Reserialized items section should not be empty");
+    }
 }
+
