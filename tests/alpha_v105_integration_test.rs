@@ -332,9 +332,14 @@ mod tests {
 
 
         for (idx, it) in items4.iter().enumerate().skip(30).take(10) {
-            println!("Items4[{}]: code='{}', range={}..{} (len {}), is_compact={}",
-                idx, it.code, it.range.start, it.range.end, it.bits.len(), it.is_compact);
+            println!("Items4[{}]: code='{}', mode={}, loc={}, page={}, x={}, y={}, is_compact={}, bits={}",
+                idx, it.code, it.header.mode, it.header.location, it.header.page, it.header.x, it.header.y, it.is_compact, it.bits.len());
         }
+
+        // Verify item 31 is the Horadric Cube container (box)
+        let it_cube = &items4[31];
+        assert_eq!(it_cube.code.trim(), "box");
+        assert!(it_cube.is_cube_container());
 
         // Verify item 32 is msk and cleanly parsed (not compact, not opaque)
         let it_msk = &items4[32];
@@ -345,6 +350,56 @@ mod tests {
         // Verify that roundtrip reserialization preserves 100% bit fidelity
         let reserialized_items = Item::serialize_section(&items4, &huffman, true).expect("Serialization failed");
         assert!(!reserialized_items.is_empty(), "Reserialized items section should not be empty");
+    }
+
+    #[radar_test]
+    fn test_survey_horadric_cube_containment_across_all_fixtures() {
+        let huffman = HuffmanTree::new();
+        let base_dir = "tests/fixtures/savegames/gameplay/normal";
+        let mut save_paths = Vec::new();
+
+        fn collect_d2s(dir: &std::path::Path, list: &mut Vec<std::path::PathBuf>) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        collect_d2s(&path, list);
+                    } else if path.extension().and_then(|s| s.to_str()) == Some("d2s") {
+                        list.push(path);
+                    }
+                }
+            }
+        }
+
+        collect_d2s(std::path::Path::new(base_dir), &mut save_paths);
+        save_paths.sort();
+
+        let mut cube_saves = Vec::new();
+        println!("=== SURVEYING HORADRIC CUBE (box) ACROSS 87 SAVES ===");
+
+        for (i, path) in save_paths.iter().enumerate() {
+            let bytes = fs::read(path).expect("Read savegame failed");
+            if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
+                if let Some((cube_idx, cube_it)) = items.iter().enumerate().find(|(_, it)| it.code.trim() == "box") {
+                    let mut contained_items = Vec::new();
+                    // Examine following items to understand containment and header patterns
+                    for (follow_idx, follow_it) in items.iter().enumerate().skip(cube_idx + 1).take(5) {
+                        contained_items.push((follow_idx, follow_it.code.trim().to_string(), follow_it.bits.len(), follow_it.header.mode, follow_it.header.location, follow_it.header.page, follow_it.header.x, follow_it.header.y, follow_it.is_compact));
+                    }
+                    println!(
+                        "[{:2}/87] File: {}, Cube at idx: {}, bits: {}, mode: {}, loc: {}, page: {}, x: {}, y: {}",
+                        i + 1, path.file_name().unwrap().to_string_lossy(), cube_idx, cube_it.bits.len(), cube_it.header.mode, cube_it.header.location, cube_it.header.page, cube_it.header.x, cube_it.header.y
+                    );
+                    for (c_idx, c_code, c_bits, c_mode, c_loc, c_page, c_x, c_y, c_comp) in &contained_items {
+                        println!("     -> Next[{:2}]: code='{}', bits={}, mode={}, loc={}, page={}, x={}, y={}, compact={}", c_idx, c_code, c_bits, c_mode, c_loc, c_page, c_x, c_y, c_comp);
+                    }
+                    cube_saves.push((path.display().to_string(), cube_idx, cube_it.bits.len(), contained_items));
+                }
+            }
+        }
+
+        println!("Total saves with Horadric Cube: {}", cube_saves.len());
+        assert!(!cube_saves.is_empty(), "Expected at least one save with Horadric Cube");
     }
 }
 

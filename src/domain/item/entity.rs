@@ -673,6 +673,18 @@ impl Item {
         self.sync_owner_bucket_fields(page, location, mode);
     }
 
+    /// Returns true if this item is the Horadric Cube container (`box`).
+    pub fn is_cube_container(&self) -> bool {
+        self.code.trim() == "box"
+    }
+
+    /// Returns true if this item is stored inside the Horadric Cube.
+    /// In D2 / D2R, items placed in the cube have page == 3.
+    pub fn is_in_cube(&self) -> bool {
+        self.header.page == crate::domain::vo::ContainerLocation::CUBE_PAGE
+            || self.body.page == crate::domain::vo::ContainerLocation::CUBE_PAGE
+    }
+
     fn preferred_alpha_raw_stat_id(
         effective_id: u32,
         current_raw_id: u32,

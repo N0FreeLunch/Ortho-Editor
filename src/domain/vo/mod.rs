@@ -123,6 +123,49 @@ impl InventoryPlacement {
     }
 }
 
+/// Container identifier for item placement.
+/// Covers character inventory, Horadric Cube, and Stash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContainerLocation {
+    /// Placed on ground (mode 0)
+    Ground,
+    /// Equipped on character (mode 1)
+    Equipped(u8),
+    /// Belt column and row (mode 2)
+    Belt,
+    /// Inventory grid (mode 0/4, page 0)
+    Inventory,
+    /// Horadric Cube container grid (page 3 or alpha v105 3x4 sub-grid)
+    HoradricCube,
+    /// Character private stash (page 1)
+    Stash,
+}
+
+impl ContainerLocation {
+    /// In D2 / D2R item headers, page 3 represents the Horadric Cube container.
+    pub const CUBE_PAGE: u8 = 3;
+    /// Maximum dimensions of the Horadric Cube interior (3 columns x 4 rows).
+    pub const CUBE_MAX_X: u8 = 3;
+    pub const CUBE_MAX_Y: u8 = 4;
+
+    /// Determines container location from header page, mode, and location.
+    pub fn from_header(page: u8, mode: u8, location: u8) -> Self {
+        if page == Self::CUBE_PAGE {
+            ContainerLocation::HoradricCube
+        } else if page == 1 {
+            ContainerLocation::Stash
+        } else if mode == 1 {
+            ContainerLocation::Equipped(location)
+        } else if mode == 2 {
+            ContainerLocation::Belt
+        } else if mode == 0 {
+            ContainerLocation::Ground
+        } else {
+            ContainerLocation::Inventory
+        }
+    }
+}
+
 /// Aligns a bit position to the next byte boundary.
 /// 0 remains 0, 1-8 becomes 8, 9-16 becomes 16.
 pub fn align_to_byte(bit_pos: u64) -> u64 {
