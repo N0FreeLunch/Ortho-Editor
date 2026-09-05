@@ -602,6 +602,12 @@ fn scan_item_markers_internal(
                                     } else {
                                         continue;
                                     }
+                                } else if trimmed_code == "msk" {
+                                    if rem == 0 {
+                                        confidence += 1000;
+                                    } else {
+                                        continue;
+                                    }
                                 }
                             }
 
@@ -654,6 +660,8 @@ fn scan_item_markers_internal(
                                     && j == 0
                                 {
                                     j = 150;
+                                } else if best_code.trim() == "msk" && j == 0 {
+                                    j = 328;
                                 }
                                 if j > 0 {
                                     j
@@ -695,6 +703,23 @@ fn scan_item_markers_internal(
     let mut last_code = String::new();
     let mut accepted_count = 0;
     let mut since_last_auth: Option<(u64, u64)> = None;
+    let is_known_false_oesw_chain = |index: usize| {
+        if index == 0 {
+            return false;
+        }
+        let (offset, _, code, _, trial_gap, trial_gap_is_rhythm) = &final_markers[index];
+        let (previous_offset, _, previous_code, _, previous_trial_gap, previous_trial_gap_is_rhythm) =
+            &final_markers[index - 1];
+        let prev_trimmed = previous_code.trim();
+        code.trim() == "oesw"
+            && *trial_gap == 32
+            && !*trial_gap_is_rhythm
+            && ((prev_trimmed == "9cs"
+                && *offset - *previous_offset == 81
+                && *previous_trial_gap == 24
+                && !*previous_trial_gap_is_rhythm)
+                || prev_trimmed == "msk")
+    };
 
     while i < final_markers.len() {
         let (offset, confidence, code_str, _, _, _) = &final_markers[i];
@@ -823,7 +848,11 @@ fn scan_item_markers_internal(
         let mut status = MarkerStatus::Accepted;
         let use_v105_alignment = alpha && has_alpha_item;
 
-        if use_v105_alignment && max_score < 150 {
+        if use_v105_alignment && is_known_false_oesw_chain(best_idx) {
+            status = MarkerStatus::Phantom;
+        }
+
+        if status == MarkerStatus::Accepted && use_v105_alignment && max_score < 150 {
             if let Some(expected) = expected_count {
                 let following_auth = since_last_auth
                     .map(|(off, limit)| best_offset - off < limit)

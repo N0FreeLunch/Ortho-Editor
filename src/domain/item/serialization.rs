@@ -1514,6 +1514,29 @@ impl Item {
                             }
                         }
                     }
+                } else if trimmed == "msk" {
+                    if marker.offset % 8 == 0 && marker.offset < section_bytes.len() as u64 * 8 {
+                        // Check candidate offsets (same offset or shifted by 16 or 24)
+                        for candidate_offset in [marker.offset, marker.offset + 16, marker.offset + 24] {
+                            if candidate_offset < section_bytes.len() as u64 * 8 {
+                                if let Some((_, _, _, peek_code, _, _, _, _, _, _)) =
+                                    peek_item_header_at_with_base(
+                                        section_bytes,
+                                        candidate_offset,
+                                        Some(section_bit_offset + candidate_offset),
+                                        huffman,
+                                        alpha_mode,
+                                        0,
+                                    )
+                                {
+                                    if peek_code.trim() == trimmed {
+                                        marker.offset = candidate_offset;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1562,7 +1585,7 @@ impl Item {
             if subsumed_indices.contains(&i) {
                 continue;
             }
-            let start = marker.offset; // marker.offset is relative to section_bytes
+            let mut start = marker.offset; // marker.offset is relative to section_bytes
 
             let non_residue_count = items.iter().filter(|it| !it.is_residue()).count();
             if non_residue_count >= top_level_count as usize {
@@ -1913,6 +1936,14 @@ impl Item {
                 if matches!(code.trim(), "jav" | "buc" | "us g") {
                     is_compact_final = true;
                 }
+                let reg_check = crate::domain::forensic::registry::get_registry();
+                if let Some(overrides) = &reg_check.item_overrides {
+                    if let Some(item_map) = overrides.get(code.trim()) {
+                        if let Some(&c_val) = item_map.get("is_compact") {
+                            is_compact_final = c_val != 0;
+                        }
+                    }
+                }
                 version_peek = version;
                 flags_peek = flags;
                 // Slice 6/9: Axiom 0344 inference for blank items and summary codes missing the compact flag
@@ -2054,7 +2085,7 @@ impl Item {
                     hint: Some("Candidate rejected due to low confidence score in noisy Alpha v105 segment.".to_string()),
                 })
             } else {
-                parse_item_at_with_limit(
+                let initial_parse = parse_item_at_with_limit(
                     section_bytes,
                     start,
                     section_bit_offset,
@@ -2064,7 +2095,68 @@ impl Item {
                     parse_limit,
                     forced_compact_for_parse,
                     Some(parse_code_hint),
-                )
+                );
+                // Alpha v105 container/equipment alignment recovery:
+                // If initial parse fails at start, but a byte-aligned offset (start + 8 or 16)
+                // succeeds, absorb the alignment padding into previous item and shift start.
+                if initial_parse.is_err() && alpha_mode && !is_compact_final {
+                    let mut retry_res = None;
+                    for shift in [8u64, 16u64] {
+                        let candidate_start = start + shift;
+                        if candidate_start < section_bits {
+                            let adjusted_limit = parse_limit.map(|l| l.saturating_sub(shift));
+                            let candidate_code_hint = peek_item_header_at_with_base(
+                                section_bytes,
+                                candidate_start,
+                                Some(section_bit_offset + candidate_start),
+                                huffman,
+                                alpha_mode,
+                                item_count,
+                            )
+                            .map(|(_, _, _, c, _, _, _, _, _, _)| c);
+                            let retry_hint = candidate_code_hint.as_deref().or(Some(parse_code_hint));
+                            if let Ok((retry_item, consumed)) = parse_item_at_with_limit(
+                                section_bytes,
+                                candidate_start,
+                                section_bit_offset,
+                                huffman,
+                                item_count,
+                                alpha_mode,
+                                adjusted_limit,
+                                forced_compact_for_parse,
+                                retry_hint,
+                            ) {
+                                retry_res = Some((shift, candidate_start, retry_item, consumed));
+                                break;
+                            }
+                        }
+                    }
+                    if let Some((shift, candidate_start, retry_item, consumed)) = retry_res {
+                        // Absorb the shift bits into the predecessor item if available
+                        let shift_bits = read_alignment_padding_bits(section_bytes, start, shift);
+                        if let Some(prev_item) = items.last_mut() {
+                            prev_item.body.alpha_alignment_padding.extend(shift_bits.clone());
+                            for (idx, b) in shift_bits.iter().enumerate() {
+                                prev_item.bits.push(crate::domain::item::RecordedBit {
+                                    bit: *b,
+                                    offset: section_bit_offset + start + idx as u64,
+                                });
+                            }
+                            prev_item.range.end = section_bit_offset + candidate_start;
+                            prev_item.total_bits += shift;
+                            if let Some(w) = prev_item.logical_width {
+                                prev_item.logical_width = Some(w + shift);
+                            }
+                        }
+                        start = candidate_start;
+                        start_offset = candidate_start;
+                        Ok((retry_item, consumed))
+                    } else {
+                        initial_parse
+                    }
+                } else {
+                    initial_parse
+                }
                 .map_err(|e| e) // Compatibility
             };
 
