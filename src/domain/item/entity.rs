@@ -673,6 +673,13 @@ impl Item {
         self.sync_owner_bucket_fields(page, location, mode);
     }
 
+    /// Sets the item's placement inside the Horadric Cube container.
+    /// Synchronizes page to CUBE_PAGE (3) and sets the x, y coordinates within the 3x4 grid.
+    pub fn set_cube_placement(&mut self, placement: crate::domain::vo::CubePlacement) {
+        self.sync_coordinate_fields(placement.x(), placement.y());
+        self.set_owner_bucket(crate::domain::vo::ContainerLocation::CUBE_PAGE, 0, 0);
+    }
+
     /// Returns true if this item is the Horadric Cube container (`box`).
     pub fn is_cube_container(&self) -> bool {
         self.code.trim() == "box"

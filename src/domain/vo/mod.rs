@@ -121,6 +121,101 @@ impl InventoryPlacement {
     pub fn size(&self) -> ItemSize {
         self.size
     }
+
+    /// Left-most column coordinate (inclusive).
+    pub fn left(&self) -> u8 {
+        self.coordinate.x()
+    }
+
+    /// Right-most column coordinate (exclusive, left + width).
+    pub fn right(&self) -> u8 {
+        self.coordinate.x() + self.size.width()
+    }
+
+    /// Top-most row coordinate (inclusive).
+    pub fn top(&self) -> u8 {
+        self.coordinate.y()
+    }
+
+    /// Bottom-most row coordinate (exclusive, top + height).
+    pub fn bottom(&self) -> u8 {
+        self.coordinate.y() + self.size.height()
+    }
+
+    /// Checks if this item placement intersects or overlaps with another item placement.
+    /// Two items overlap if their bounding boxes on the grid share any cells.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.left() < other.right()
+            && self.right() > other.left()
+            && self.top() < other.bottom()
+            && self.bottom() > other.top()
+    }
+}
+
+/// Represents a validated placement of an item inside the Horadric Cube container.
+/// Guarantees that the item fits strictly inside the 3 columns x 4 rows container grid
+/// without exceeding boundaries (x + width <= 3, y + height <= 4) or overlapping other items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CubePlacement {
+    x: u8,
+    y: u8,
+    size: ItemSize,
+}
+
+impl CubePlacement {
+    pub const CUBE_WIDTH: u8 = 3;
+    pub const CUBE_HEIGHT: u8 = 4;
+
+    /// Validates that an item with the given coordinate and size fits entirely
+    /// inside the Horadric Cube grid boundaries (3x4).
+    pub fn new(x: u8, y: u8, size: ItemSize) -> Result<Self, &'static str> {
+        if (x as u16 + size.width() as u16) > Self::CUBE_WIDTH as u16
+            || (y as u16 + size.height() as u16) > Self::CUBE_HEIGHT as u16
+        {
+            return Err("Item placement exceeds Horadric Cube boundaries (3x4)");
+        }
+        Ok(Self { x, y, size })
+    }
+
+    pub fn x(&self) -> u8 {
+        self.x
+    }
+
+    pub fn y(&self) -> u8 {
+        self.y
+    }
+
+    pub fn size(&self) -> ItemSize {
+        self.size
+    }
+
+    /// Left-most column coordinate inside the cube (inclusive, 0..=2).
+    pub fn left(&self) -> u8 {
+        self.x
+    }
+
+    /// Right-most column coordinate inside the cube (exclusive, left + width, 1..=3).
+    pub fn right(&self) -> u8 {
+        self.x + self.size.width()
+    }
+
+    /// Top-most row coordinate inside the cube (inclusive, 0..=3).
+    pub fn top(&self) -> u8 {
+        self.y
+    }
+
+    /// Bottom-most row coordinate inside the cube (exclusive, top + height, 1..=4).
+    pub fn bottom(&self) -> u8 {
+        self.y + self.size.height()
+    }
+
+    /// Checks if this placement intersects or overlaps with another cube item placement.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.left() < other.right()
+            && self.right() > other.left()
+            && self.top() < other.bottom()
+            && self.bottom() > other.top()
+    }
 }
 
 /// Container identifier for item placement.
@@ -170,6 +265,55 @@ impl ContainerLocation {
 /// 0 remains 0, 1-8 becomes 8, 9-16 becomes 16.
 pub fn align_to_byte(bit_pos: u64) -> u64 {
     (bit_pos + 7) & !7
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cube_placement_boundary_validation() {
+        let size_2x2 = ItemSize::new(2, 2).expect("Valid 2x2 size");
+        // Within 3x4 cube: (0, 0) + (2, 2) -> (2, 2) <= (3, 4): valid
+        assert!(CubePlacement::new(0, 0, size_2x2).is_ok());
+        // (1, 2) + (2, 2) -> (3, 4) <= (3, 4): valid (fits snugly at bottom-right)
+        assert!(CubePlacement::new(1, 2, size_2x2).is_ok());
+        // (2, 0) + (2, 2) -> (4, 2) > 3 width: out of bounds
+        assert!(CubePlacement::new(2, 0, size_2x2).is_err());
+        // (0, 3) + (2, 2) -> (2, 5) > 4 height: out of bounds
+        assert!(CubePlacement::new(0, 3, size_2x2).is_err());
+    }
+
+    #[test]
+    fn test_cube_placement_overlaps_validation() {
+        let size_2x2 = ItemSize::new(2, 2).expect("Valid 2x2 size");
+        let size_1x1 = ItemSize::new(1, 1).expect("Valid 1x1 size");
+
+        let p1 = CubePlacement::new(0, 0, size_2x2).expect("Valid placement");
+        assert_eq!(p1.left(), 0);
+        assert_eq!(p1.right(), 2);
+        assert_eq!(p1.top(), 0);
+        assert_eq!(p1.bottom(), 2);
+
+        // Overlapping at (1, 1) with size 1x1
+        let p_overlap = CubePlacement::new(1, 1, size_1x1).expect("Valid placement");
+        assert_eq!(p_overlap.left(), 1);
+        assert_eq!(p_overlap.right(), 2);
+        assert_eq!(p_overlap.top(), 1);
+        assert_eq!(p_overlap.bottom(), 2);
+        assert!(p1.overlaps(&p_overlap));
+        assert!(p_overlap.overlaps(&p1));
+
+        // Non-overlapping adjacent at (2, 0) with size 1x1
+        let p_adjacent_x = CubePlacement::new(2, 0, size_1x1).expect("Valid placement");
+        assert!(!p1.overlaps(&p_adjacent_x));
+        assert!(!p_adjacent_x.overlaps(&p1));
+
+        // Non-overlapping adjacent at (0, 2) with size 1x1
+        let p_adjacent_y = CubePlacement::new(0, 2, size_1x1).expect("Valid placement");
+        assert!(!p1.overlaps(&p_adjacent_y));
+        assert!(!p_adjacent_y.overlaps(&p1));
+    }
 }
 
 
