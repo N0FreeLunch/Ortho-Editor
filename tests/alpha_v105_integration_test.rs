@@ -401,5 +401,61 @@ mod tests {
         println!("Total saves with Horadric Cube: {}", cube_saves.len());
         assert!(!cube_saves.is_empty(), "Expected at least one save with Horadric Cube");
     }
+
+    #[radar_test]
+    fn test_verify_cube_harness_across_all_fixtures() {
+        use d2r_core::domain::inventory::InventoryGrid;
+
+        let huffman = HuffmanTree::new();
+        let base_dir = "tests/fixtures/savegames/gameplay/normal";
+        let mut save_paths = Vec::new();
+
+        fn collect_d2s(dir: &std::path::Path, list: &mut Vec<std::path::PathBuf>) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        collect_d2s(&path, list);
+                    } else if path.extension().and_then(|s| s.to_str()) == Some("d2s") {
+                        list.push(path);
+                    }
+                }
+            }
+        }
+
+        collect_d2s(std::path::Path::new(base_dir), &mut save_paths);
+        save_paths.sort();
+
+        let mut checked_saves = 0;
+        let mut cube_saves_count = 0;
+
+        for path in &save_paths {
+            let bytes = fs::read(path).expect("Read savegame failed");
+            if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
+                checked_saves += 1;
+                let has_cube = items.iter().any(|it| it.is_cube_container());
+                if has_cube {
+                    cube_saves_count += 1;
+                }
+
+                // Execute the 4-invariants cube harness check
+                let cube_validation = InventoryGrid::validate_cube_integrity(&items);
+                assert!(
+                    cube_validation.is_ok(),
+                    "Cube harness validation failed for {}: {:?}",
+                    path.display(),
+                    cube_validation.err()
+                );
+            }
+        }
+
+        println!(
+            "Cube Harness Verified Across {} saves ({} had Horadric Cube)",
+            checked_saves, cube_saves_count
+        );
+        assert_eq!(checked_saves, 87, "Expected all 87 saves to be checked");
+        assert_eq!(cube_saves_count, 23, "Expected exactly 23 saves to have Horadric Cube");
+    }
 }
+
 

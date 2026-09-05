@@ -1,6 +1,29 @@
 use crate::item::Item;
 use std::fmt;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CubeIntegrityError {
+    /// Cube items exist, but the player has no Horadric Cube container (`box`).
+    CubeNotFoundWithContainedItems,
+    /// Player possesses more than one Horadric Cube container.
+    MultipleCubesDetected(usize),
+    /// An item inside the cube exceeds the 3x4 grid boundaries.
+    OutOfBounds {
+        item_code: String,
+        x: u8,
+        y: u8,
+        w: u8,
+        h: u8,
+    },
+    /// Two items inside the cube collide/overlap in one or more grid cells.
+    Collision {
+        item_a: String,
+        item_b: String,
+        x: u8,
+        y: u8,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub enum InventoryError {
     OutOfBounds {
@@ -22,6 +45,7 @@ pub enum InventoryError {
         item_code: String,
         reason: String,
     },
+    CubeIntegrity(CubeIntegrityError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +216,28 @@ impl fmt::Display for InventoryError {
             Self::LogicalMismatch { item_code, reason } => {
                 write!(f, "[LOGICAL_MISMATCH] Item '{}': {}", item_code, reason)
             }
+            Self::CubeIntegrity(err) => {
+                write!(f, "[CUBE_INTEGRITY] {}", err)
+            }
+        }
+    }
+}
+
+impl fmt::Display for CubeIntegrityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CubeNotFoundWithContainedItems => {
+                write!(f, "Cube items exist but character has no Horadric Cube ('box')")
+            }
+            Self::MultipleCubesDetected(count) => {
+                write!(f, "Multiple Horadric Cubes detected ({count} found, max 1 allowed)")
+            }
+            Self::OutOfBounds { item_code, x, y, w, h } => {
+                write!(f, "Item '{item_code}' at ({x},{y}) size {w}x{h} exceeds 3x4 Cube grid")
+            }
+            Self::Collision { item_a, item_b, x, y } => {
+                write!(f, "Items '{item_a}' and '{item_b}' collide in Cube at ({x},{y})")
+            }
         }
     }
 }
@@ -219,6 +265,11 @@ impl InventoryGrid {
     /// Default 10x10 stash grid
     pub fn new_stash() -> Self {
         Self::new(10, 10)
+    }
+
+    /// Default 3x4 Horadric Cube container grid
+    pub fn new_cube() -> Self {
+        Self::new(3, 4)
     }
 
     pub fn pattern(&self) -> GridPattern {
@@ -449,7 +500,82 @@ impl InventoryGrid {
         // Also add collision check
         errors.extend(Self::validate_items(items, width, height));
 
+        // Enforce Horadric Cube 4-invariants integrity harness
+        if let Err(cube_err) = Self::validate_cube_integrity(items) {
+            errors.push(InventoryError::CubeIntegrity(cube_err));
+        }
+
         errors
+    }
+
+    /// Enforces the 4 Horadric Cube physical and logical invariants across an item collection:
+    /// 1. Container Existence Dependency: Cube items cannot exist if player has no cube container (`box`).
+    /// 2. Container Uniqueness: Player cannot possess multiple Horadric Cubes simultaneously.
+    /// 3. 3x4 Grid Containment: All items inside cube must fit inside 3 columns x 4 rows.
+    /// 4. 2D Mutual Exclusivity: No two items inside cube may overlap/collide in any grid cell.
+    pub fn validate_cube_integrity(items: &[Item]) -> Result<(), CubeIntegrityError> {
+        let cubes: Vec<&Item> = items.iter().filter(|it| it.is_cube_container()).collect();
+        let cube_items: Vec<&Item> = items.iter().filter(|it| it.is_in_cube()).collect();
+
+        // Invariant 0: Container Existence Dependency
+        if cubes.is_empty() {
+            if !cube_items.is_empty() {
+                return Err(CubeIntegrityError::CubeNotFoundWithContainedItems);
+            }
+            return Ok(());
+        }
+
+        // Invariant 1: Container Uniqueness
+        if cubes.len() > 1 {
+            return Err(CubeIntegrityError::MultipleCubesDetected(cubes.len()));
+        }
+
+        // Invariants 2 & 3: 3x4 Grid Containment and Non-overlapping
+        let mut cube_grid = Self::new_cube();
+        // Track which item occupied which cell to report descriptive collisions: (x, y) -> item_code
+        let mut cell_occupant: [Option<String>; 12] = Default::default();
+
+        for it in cube_items {
+            let (w, h) = get_item_size(&it.code);
+            let it_code = it.code.trim().to_string();
+
+            // Out-of-bounds check (x + w <= 3, y + h <= 4)
+            if it.x + w > cube_grid.width || it.y + h > cube_grid.height {
+                return Err(CubeIntegrityError::OutOfBounds {
+                    item_code: it_code,
+                    x: it.x,
+                    y: it.y,
+                    w,
+                    h,
+                });
+            }
+
+            // Check collision against occupied cells
+            for r in it.y..(it.y + h) {
+                for c in it.x..(it.x + w) {
+                    let cell_idx = (r as usize) * (cube_grid.width as usize) + (c as usize);
+                    if let Some(existing_code) = &cell_occupant[cell_idx] {
+                        return Err(CubeIntegrityError::Collision {
+                            item_a: existing_code.clone(),
+                            item_b: it_code,
+                            x: c,
+                            y: r,
+                        });
+                    }
+                }
+            }
+
+            // Mark cells as occupied
+            for r in it.y..(it.y + h) {
+                for c in it.x..(it.x + w) {
+                    let cell_idx = (r as usize) * (cube_grid.width as usize) + (c as usize);
+                    cube_grid.grid[cell_idx] = true;
+                    cell_occupant[cell_idx] = Some(it_code.clone());
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -773,5 +899,83 @@ mod tests {
         let belt = GridPattern::belt(5);
         assert_eq!(belt.bit_index(3, 4), Some(19));
         assert_eq!(belt.mask_width(), GridMaskWidth::U64);
+    }
+
+    #[test]
+    fn test_cube_integrity_invariants_harness() {
+        use crate::domain::header::entity::ItemHeader;
+        use crate::domain::item::entity::ItemBody;
+        use crate::domain::vo::ContainerLocation;
+
+        fn make_mock_item(code: &str, page: u8, x: u8, y: u8) -> Item {
+            let mut header = ItemHeader::default();
+            header.page = page;
+            header.x = x;
+            header.y = y;
+            Item {
+                bits: Vec::new(),
+                code: code.to_string(),
+                header,
+                body: ItemBody {
+                    code: code.to_string(),
+                    page,
+                    x,
+                    y,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        }
+
+        // 1. Invariant 0: Cube items exist but no cube container
+        let item_in_cube = make_mock_item("tsc", ContainerLocation::CUBE_PAGE, 0, 0); // 1x1 scroll
+        let res_no_cube = InventoryGrid::validate_cube_integrity(&[item_in_cube.clone()]);
+        assert_eq!(
+            res_no_cube,
+            Err(CubeIntegrityError::CubeNotFoundWithContainedItems)
+        );
+
+        // 2. Invariant 1: Multiple cubes detected
+        let cube1 = make_mock_item("box", 0, 0, 0);
+        let cube2 = make_mock_item("box", 0, 2, 2);
+        let res_multi_cubes = InventoryGrid::validate_cube_integrity(&[cube1.clone(), cube2]);
+        assert_eq!(
+            res_multi_cubes,
+            Err(CubeIntegrityError::MultipleCubesDetected(2))
+        );
+
+        // 3. Valid cube with valid items
+        let item1 = make_mock_item("tsc", ContainerLocation::CUBE_PAGE, 0, 0); // 1x1 at (0,0)
+        let item2 = make_mock_item("tbk", ContainerLocation::CUBE_PAGE, 1, 0); // 1x2 at (1,0)
+        let res_valid = InventoryGrid::validate_cube_integrity(&[cube1.clone(), item1, item2]);
+        assert_eq!(res_valid, Ok(()));
+
+        // 4. Invariant 2: Out of bounds (e.g. 2x2 item at x=2 in 3x4 cube exceeds width 3)
+        let oob_item = make_mock_item("buc", ContainerLocation::CUBE_PAGE, 2, 0); // 2x2 buckler at (2,0) -> x+w = 4 > 3
+        let res_oob = InventoryGrid::validate_cube_integrity(&[cube1.clone(), oob_item]);
+        assert_eq!(
+            res_oob,
+            Err(CubeIntegrityError::OutOfBounds {
+                item_code: "buc".to_string(),
+                x: 2,
+                y: 0,
+                w: 2,
+                h: 2,
+            })
+        );
+
+        // 5. Invariant 3: Collision / Overlap between items inside cube
+        let item_a = make_mock_item("buc", ContainerLocation::CUBE_PAGE, 0, 0); // 2x2 at (0,0) occupies (0,0),(1,0),(0,1),(1,1)
+        let item_b = make_mock_item("tsc", ContainerLocation::CUBE_PAGE, 1, 1); // 1x1 at (1,1) collides with buc
+        let res_collision = InventoryGrid::validate_cube_integrity(&[cube1, item_a, item_b]);
+        assert_eq!(
+            res_collision,
+            Err(CubeIntegrityError::Collision {
+                item_a: "buc".to_string(),
+                item_b: "tsc".to_string(),
+                x: 1,
+                y: 1,
+            })
+        );
     }
 }
