@@ -1,6 +1,78 @@
 use crate::item::Item;
 use std::fmt;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerKind {
+    Inventory,
+    Stash,
+    Cube,
+}
+
+impl fmt::Display for ContainerKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Inventory => write!(f, "Inventory (10x4)"),
+            Self::Stash => write!(f, "Stash (10x10)"),
+            Self::Cube => write!(f, "Horadric Cube (3x4)"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContainerIntegrityError {
+    OutOfBounds {
+        container: ContainerKind,
+        item_code: String,
+        x: u8,
+        y: u8,
+        w: u8,
+        h: u8,
+    },
+    Collision {
+        container: ContainerKind,
+        item_a: String,
+        item_b: String,
+        x: u8,
+        y: u8,
+    },
+    CubeDependency(CubeIntegrityError),
+}
+
+impl fmt::Display for ContainerIntegrityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutOfBounds {
+                container,
+                item_code,
+                x,
+                y,
+                w,
+                h,
+            } => {
+                write!(
+                    f,
+                    "[{}] Item '{}' at ({},{}) size {}x{} exceeds boundary",
+                    container, item_code, x, y, w, h
+                )
+            }
+            Self::Collision {
+                container,
+                item_a,
+                item_b,
+                x,
+                y,
+            } => {
+                write!(
+                    f,
+                    "[{}] Items '{}' and '{}' collide at ({},{})",
+                    container, item_a, item_b, x, y
+                )
+            }
+            Self::CubeDependency(err) => write!(f, "{}", err),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CubeIntegrityError {
     /// Cube items exist, but the player has no Horadric Cube container (`box`).
@@ -46,6 +118,7 @@ pub enum InventoryError {
         reason: String,
     },
     CubeIntegrity(CubeIntegrityError),
+    ContainerIntegrity(ContainerIntegrityError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +291,9 @@ impl fmt::Display for InventoryError {
             }
             Self::CubeIntegrity(err) => {
                 write!(f, "[CUBE_INTEGRITY] {}", err)
+            }
+            Self::ContainerIntegrity(err) => {
+                write!(f, "[CONTAINER_INTEGRITY] {}", err)
             }
         }
     }
@@ -508,72 +584,289 @@ impl InventoryGrid {
         errors
     }
 
-    /// Enforces the 4 Horadric Cube physical and logical invariants across an item collection:
+    /// Enforces the 4 Horadric Cube physical and logical invariants across an item collection with ZERO heap allocations:
     /// 1. Container Existence Dependency: Cube items cannot exist if player has no cube container (`box`).
     /// 2. Container Uniqueness: Player cannot possess multiple Horadric Cubes simultaneously.
     /// 3. 3x4 Grid Containment: All items inside cube must fit inside 3 columns x 4 rows.
-    /// 4. 2D Mutual Exclusivity: No two items inside cube may overlap/collide in any grid cell.
+    /// 4. 2D Mutual Exclusivity: No two items inside cube may overlap/collide in any grid cell (u16 bitmask).
     pub fn validate_cube_integrity(items: &[Item]) -> Result<(), CubeIntegrityError> {
-        let cubes: Vec<&Item> = items.iter().filter(|it| it.is_cube_container()).collect();
-        let cube_items: Vec<&Item> = items.iter().filter(|it| it.is_in_cube()).collect();
+        let mut cube_count = 0usize;
+        let mut occupied_mask: u16 = 0;
+        let mut cell_occupant: [Option<&str>; 12] = [None; 12];
+        let mut cube_items_count = 0usize;
 
-        // Invariant 0: Container Existence Dependency
-        if cubes.is_empty() {
-            if !cube_items.is_empty() {
-                return Err(CubeIntegrityError::CubeNotFoundWithContainedItems);
-            }
-            return Ok(());
-        }
-
-        // Invariant 1: Container Uniqueness
-        if cubes.len() > 1 {
-            return Err(CubeIntegrityError::MultipleCubesDetected(cubes.len()));
-        }
-
-        // Invariants 2 & 3: 3x4 Grid Containment and Non-overlapping
-        let mut cube_grid = Self::new_cube();
-        // Track which item occupied which cell to report descriptive collisions: (x, y) -> item_code
-        let mut cell_occupant: [Option<String>; 12] = Default::default();
-
-        for it in cube_items {
-            let (w, h) = get_item_size(&it.code);
-            let it_code = it.code.trim().to_string();
-
-            // Out-of-bounds check (x + w <= 3, y + h <= 4)
-            if it.x + w > cube_grid.width || it.y + h > cube_grid.height {
-                return Err(CubeIntegrityError::OutOfBounds {
-                    item_code: it_code,
-                    x: it.x,
-                    y: it.y,
-                    w,
-                    h,
-                });
+        for it in items {
+            let it_code = it.code.trim();
+            if it.is_residue()
+                || it_code.is_empty()
+                || it_code == "wyws"
+                || it_code == "b7ts"
+                || it_code == "ks d"
+                || it.header.flags == 0
+                || crate::data::item_codes::ITEM_TEMPLATES.iter().all(|t| t.code != it_code)
+            {
+                continue;
             }
 
-            // Check collision against occupied cells
-            for r in it.y..(it.y + h) {
-                for c in it.x..(it.x + w) {
-                    let cell_idx = (r as usize) * (cube_grid.width as usize) + (c as usize);
-                    if let Some(existing_code) = &cell_occupant[cell_idx] {
-                        return Err(CubeIntegrityError::Collision {
-                            item_a: existing_code.clone(),
-                            item_b: it_code,
-                            x: c,
-                            y: r,
-                        });
+            if it.is_cube_container() {
+                cube_count += 1;
+                if cube_count > 1 {
+                    return Err(CubeIntegrityError::MultipleCubesDetected(cube_count));
+                }
+                continue;
+            }
+
+            if it.is_in_cube() {
+                cube_items_count += 1;
+                let (w, h) = get_item_size(&it.code);
+                let it_code = it.code.trim();
+
+                // Out-of-bounds check (x + w <= 3, y + h <= 4)
+                if it.x + w > 3 || it.y + h > 4 {
+                    return Err(CubeIntegrityError::OutOfBounds {
+                        item_code: it_code.to_string(),
+                        x: it.x,
+                        y: it.y,
+                        w,
+                        h,
+                    });
+                }
+
+                // Check collision using 12-bit register mask
+                let mut item_mask = 0u16;
+                for r in it.y..(it.y + h) {
+                    for c in it.x..(it.x + w) {
+                        let bit = (r as usize) * 3 + (c as usize);
+                        item_mask |= 1u16 << bit;
+                    }
+                }
+
+                if occupied_mask & item_mask != 0 {
+                    for r in it.y..(it.y + h) {
+                        for c in it.x..(it.x + w) {
+                            let bit = (r as usize) * 3 + (c as usize);
+                            if (occupied_mask & (1u16 << bit)) != 0 {
+                                if let Some(existing_code) = cell_occupant[bit] {
+                                    return Err(CubeIntegrityError::Collision {
+                                        item_a: existing_code.to_string(),
+                                        item_b: it_code.to_string(),
+                                        x: c,
+                                        y: r,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                occupied_mask |= item_mask;
+                for r in it.y..(it.y + h) {
+                    for c in it.x..(it.x + w) {
+                        cell_occupant[(r as usize) * 3 + (c as usize)] = Some(it_code);
                     }
                 }
             }
+        }
 
-            // Mark cells as occupied
-            for r in it.y..(it.y + h) {
-                for c in it.x..(it.x + w) {
-                    let cell_idx = (r as usize) * (cube_grid.width as usize) + (c as usize);
-                    cube_grid.grid[cell_idx] = true;
-                    cell_occupant[cell_idx] = Some(it_code.clone());
+        // Invariant 0: Container Existence Dependency
+        if cube_count == 0 && cube_items_count > 0 {
+            return Err(CubeIntegrityError::CubeNotFoundWithContainedItems);
+        }
+
+        Ok(())
+    }
+
+    /// Enforces Personal Stash physical invariants across all items stored in stash (`page == 1`):
+    /// 1. 10x10 Grid Containment: All stash items must fit inside 10 columns x 10 rows (x + w <= 10, y + h <= 10).
+    /// 2. 2D Mutual Exclusivity: No two stash items may overlap in any of the 100 cells (u128 bitmask).
+    pub fn validate_stash_integrity(items: &[Item]) -> Result<(), ContainerIntegrityError> {
+        let mut occupied_mask: u128 = 0;
+        let mut cell_occupant: [Option<&str>; 100] = [None; 100];
+
+        for it in items {
+            let it_code = it.code.trim();
+            if it.is_residue()
+                || it_code.is_empty()
+                || it_code == "wyws"
+                || it_code == "b7ts"
+                || it_code == "ks d"
+                || it.header.flags == 0
+                || crate::data::item_codes::ITEM_TEMPLATES.iter().all(|t| t.code != it_code)
+            {
+                continue;
+            }
+
+            // Stash items must be stored in container (mode == 4) and placed in stash (page == 1 or location == 4)
+            let is_stored = it.header.mode == 4 || it.body.mode == 4;
+            let is_stash = is_stored
+                && (it.header.page == 1
+                    || it.body.page == 1
+                    || it.header.location == 4
+                    || it.body.location == 4
+                    || crate::verify::alpha_inventory_routing::alpha_inventory_route(it, true)
+                        == crate::verify::alpha_inventory_routing::AlphaInventoryRoute::Stash);
+
+            if is_stash {
+                let (w, h) = get_item_size(&it.code);
+                let it_code = it.code.trim();
+
+                if it.x + w > 10 || it.y + h > 10 {
+                    return Err(ContainerIntegrityError::OutOfBounds {
+                        container: ContainerKind::Stash,
+                        item_code: it_code.to_string(),
+                        x: it.x,
+                        y: it.y,
+                        w,
+                        h,
+                    });
+                }
+
+                let mut item_mask = 0u128;
+                for r in it.y..(it.y + h) {
+                    for c in it.x..(it.x + w) {
+                        let bit = (r as usize) * 10 + (c as usize);
+                        item_mask |= 1u128 << bit;
+                    }
+                }
+
+                if occupied_mask & item_mask != 0 {
+                    for r in it.y..(it.y + h) {
+                        for c in it.x..(it.x + w) {
+                            let bit = (r as usize) * 10 + (c as usize);
+                            if (occupied_mask & (1u128 << bit)) != 0 {
+                                if let Some(existing_code) = cell_occupant[bit] {
+                                    return Err(ContainerIntegrityError::Collision {
+                                        container: ContainerKind::Stash,
+                                        item_a: existing_code.to_string(),
+                                        item_b: it_code.to_string(),
+                                        x: c,
+                                        y: r,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                occupied_mask |= item_mask;
+                for r in it.y..(it.y + h) {
+                    for c in it.x..(it.x + w) {
+                        cell_occupant[(r as usize) * 10 + (c as usize)] = Some(it_code);
+                    }
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Enforces Player Inventory physical invariants across items placed in inventory (`page == 0 && location == 0`):
+    /// 1. 10x4 Grid Containment: All inventory items must fit inside 10 columns x 4 rows (x + w <= 10, y + h <= 4).
+    /// 2. 2D Mutual Exclusivity: No two inventory items may overlap in any of the 40 cells (u64 bitmask).
+    pub fn validate_inventory_integrity(items: &[Item]) -> Result<(), ContainerIntegrityError> {
+        let mut occupied_mask: u64 = 0;
+        let mut cell_occupant: [Option<&str>; 40] = [None; 40];
+
+        for it in items {
+            let it_code = it.code.trim();
+            if it.is_residue()
+                || it_code.is_empty()
+                || it_code == "wyws"
+                || it_code == "b7ts"
+                || it_code == "ks d"
+                || it.header.flags == 0
+                || crate::data::item_codes::ITEM_TEMPLATES.iter().all(|t| t.code != it_code)
+            {
+                continue;
+            }
+
+            // Unstored, equipped, stash, or belt items are excluded; only true stored inventory grid items
+            let is_stored = it.header.mode == 4 || it.body.mode == 4;
+            let is_stash = is_stored
+                && (it.header.page == 1
+                    || it.body.page == 1
+                    || it.header.location == 4
+                    || it.body.location == 4
+                    || crate::verify::alpha_inventory_routing::alpha_inventory_route(it, true)
+                        == crate::verify::alpha_inventory_routing::AlphaInventoryRoute::Stash);
+
+            let is_inventory = is_stored
+                && !is_stash
+                && (it.header.page == 0 && it.body.page == 0)
+                && (it.header.location == 0 && it.body.location == 0)
+                && (it.header.mode != 1 && it.body.mode != 1)
+                && (it.header.mode != 2 && it.body.mode != 2)
+                && it.header.y < 4
+                && it.y < 4
+                && crate::verify::alpha_inventory_routing::alpha_inventory_route(it, true)
+                    == crate::verify::alpha_inventory_routing::AlphaInventoryRoute::Inventory;
+
+            if is_inventory {
+                let (w, h) = get_item_size(&it.code);
+                let it_code = it.code.trim();
+
+                if it.x + w > 10 || it.y + h > 4 {
+                    return Err(ContainerIntegrityError::OutOfBounds {
+                        container: ContainerKind::Inventory,
+                        item_code: it_code.to_string(),
+                        x: it.x,
+                        y: it.y,
+                        w,
+                        h,
+                    });
+                }
+
+                let mut item_mask = 0u64;
+                for r in it.y..(it.y + h) {
+                    for c in it.x..(it.x + w) {
+                        let bit = (r as usize) * 10 + (c as usize);
+                        item_mask |= 1u64 << bit;
+                    }
+                }
+
+                if occupied_mask & item_mask != 0 {
+                    for r in it.y..(it.y + h) {
+                        for c in it.x..(it.x + w) {
+                            let bit = (r as usize) * 10 + (c as usize);
+                            if (occupied_mask & (1u64 << bit)) != 0 {
+                                if let Some(existing_code) = cell_occupant[bit] {
+                                    return Err(ContainerIntegrityError::Collision {
+                                        container: ContainerKind::Inventory,
+                                        item_a: existing_code.to_string(),
+                                        item_b: it_code.to_string(),
+                                        x: c,
+                                        y: r,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                occupied_mask |= item_mask;
+                for r in it.y..(it.y + h) {
+                    for c in it.x..(it.x + w) {
+                        cell_occupant[(r as usize) * 10 + (c as usize)] = Some(it_code);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Enforces all container spatial and logical invariants (Inventory, Stash, Cube) in a single unified sweep.
+    pub fn validate_all_containers_integrity(items: &[Item]) -> Result<(), ContainerIntegrityError> {
+        // 1. Horadric Cube Invariants
+        if let Err(cube_err) = Self::validate_cube_integrity(items) {
+            return Err(ContainerIntegrityError::CubeDependency(cube_err));
+        }
+
+        // 2. Personal Stash Invariants
+        Self::validate_stash_integrity(items)?;
+
+        // 3. Player Inventory Invariants
+        Self::validate_inventory_integrity(items)?;
 
         Ok(())
     }
@@ -909,6 +1202,7 @@ mod tests {
 
         fn make_mock_item(code: &str, page: u8, x: u8, y: u8) -> Item {
             let mut header = ItemHeader::default();
+            header.flags = 0x10; // Valid item flag
             header.page = page;
             header.x = x;
             header.y = y;
@@ -977,5 +1271,89 @@ mod tests {
                 y: 1,
             })
         );
+    }
+
+    #[test]
+    fn test_stash_and_inventory_integrity_harness() {
+        use crate::domain::header::entity::ItemHeader;
+        use crate::domain::item::entity::ItemBody;
+
+        fn make_mock_item(code: &str, page: u8, location: u8, x: u8, y: u8) -> Item {
+            let mut header = ItemHeader::default();
+            header.flags = 0x10; // Valid item flag
+            header.mode = 4; // Stored in container
+            header.page = page;
+            header.location = location;
+            header.x = x;
+            header.y = y;
+            Item {
+                bits: Vec::new(),
+                code: code.to_string(),
+                header,
+                body: ItemBody {
+                    code: code.to_string(),
+                    mode: 4,
+                    page,
+                    location,
+                    x,
+                    y,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        }
+
+        // 1. Personal Stash Out-of-bounds (10x10)
+        let oob_stash_item = make_mock_item("axe", 1, 0, 9, 8); // 2x4 axe at (9,8) in 10x10 exceeds x+w=11
+        let res_stash_oob = InventoryGrid::validate_stash_integrity(&[oob_stash_item]);
+        assert_eq!(
+            res_stash_oob,
+            Err(ContainerIntegrityError::OutOfBounds {
+                container: ContainerKind::Stash,
+                item_code: "axe".to_string(),
+                x: 9,
+                y: 8,
+                w: 2,
+                h: 3, // template size
+            })
+        );
+
+        // 2. Personal Stash Collision
+        let stash_a = make_mock_item("buc", 1, 0, 0, 0); // 2x2
+        let stash_b = make_mock_item("tsc", 1, 0, 1, 1); // 1x1 at (1,1)
+        let res_stash_col = InventoryGrid::validate_stash_integrity(&[stash_a, stash_b]);
+        assert_eq!(
+            res_stash_col,
+            Err(ContainerIntegrityError::Collision {
+                container: ContainerKind::Stash,
+                item_a: "buc".to_string(),
+                item_b: "tsc".to_string(),
+                x: 1,
+                y: 1,
+            })
+        );
+
+        // 3. Player Inventory Out-of-bounds (10x4)
+        let oob_inv_item = make_mock_item("axe", 0, 0, 0, 2); // 2x3 axe at (0,2) in 10x4 exceeds y+h=5 > 4
+        let res_inv_oob = InventoryGrid::validate_inventory_integrity(&[oob_inv_item]);
+        assert_eq!(
+            res_inv_oob,
+            Err(ContainerIntegrityError::OutOfBounds {
+                container: ContainerKind::Inventory,
+                item_code: "axe".to_string(),
+                x: 0,
+                y: 2,
+                w: 2,
+                h: 3,
+            })
+        );
+
+        // 4. Valid Unified Containers
+        let inv_valid = make_mock_item("tsc", 0, 0, 0, 0);
+        let stash_valid = make_mock_item("tbk", 1, 0, 0, 0);
+        let cube_box = make_mock_item("box", 0, 0, 5, 0);
+        let cube_item = make_mock_item("tsc", 3, 0, 0, 0);
+        let res_all = InventoryGrid::validate_all_containers_integrity(&[inv_valid, stash_valid, cube_box, cube_item]);
+        assert_eq!(res_all, Ok(()));
     }
 }

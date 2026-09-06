@@ -218,6 +218,72 @@ impl CubePlacement {
     }
 }
 
+/// Represents a validated placement of an item inside the Personal Stash container.
+/// Guarantees that the item fits strictly inside the 10 columns x 10 rows stash grid
+/// without exceeding boundaries (x + width <= 10, y + height <= 10) or overlapping other items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StashPlacement {
+    x: u8,
+    y: u8,
+    size: ItemSize,
+}
+
+impl StashPlacement {
+    pub const STASH_WIDTH: u8 = 10;
+    pub const STASH_HEIGHT: u8 = 10;
+
+    /// Validates that an item with the given coordinate and size fits entirely
+    /// inside the Personal Stash grid boundaries (10x10).
+    pub fn new(x: u8, y: u8, size: ItemSize) -> Result<Self, &'static str> {
+        if (x as u16 + size.width() as u16) > Self::STASH_WIDTH as u16
+            || (y as u16 + size.height() as u16) > Self::STASH_HEIGHT as u16
+        {
+            return Err("Item placement exceeds Personal Stash boundaries (10x10)");
+        }
+        Ok(Self { x, y, size })
+    }
+
+    pub fn x(&self) -> u8 {
+        self.x
+    }
+
+    pub fn y(&self) -> u8 {
+        self.y
+    }
+
+    pub fn size(&self) -> ItemSize {
+        self.size
+    }
+
+    /// Left-most column coordinate inside the stash (inclusive, 0..=9).
+    pub fn left(&self) -> u8 {
+        self.x
+    }
+
+    /// Right-most column coordinate inside the stash (exclusive, left + width, 1..=10).
+    pub fn right(&self) -> u8 {
+        self.x + self.size.width()
+    }
+
+    /// Top-most row coordinate inside the stash (inclusive, 0..=9).
+    pub fn top(&self) -> u8 {
+        self.y
+    }
+
+    /// Bottom-most row coordinate inside the stash (exclusive, top + height, 1..=10).
+    pub fn bottom(&self) -> u8 {
+        self.y + self.size.height()
+    }
+
+    /// Checks if this placement intersects or overlaps with another stash item placement.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.left() < other.right()
+            && self.right() > other.left()
+            && self.top() < other.bottom()
+            && self.bottom() > other.top()
+    }
+}
+
 /// Container identifier for item placement.
 /// Covers character inventory, Horadric Cube, and Stash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,6 +379,17 @@ mod tests {
         let p_adjacent_y = CubePlacement::new(0, 2, size_1x1).expect("Valid placement");
         assert!(!p1.overlaps(&p_adjacent_y));
         assert!(!p_adjacent_y.overlaps(&p1));
+    }
+
+    #[test]
+    fn test_stash_placement_validation() {
+        let size_2x4 = ItemSize::new(2, 4).expect("Valid 2x4 size");
+        // (8, 6) + (2, 4) -> (10, 10) <= (10, 10): valid (bottom right corner)
+        assert!(StashPlacement::new(8, 6, size_2x4).is_ok());
+        // (9, 6) + (2, 4) -> (11, 10) > 10 width: out of bounds
+        assert!(StashPlacement::new(9, 6, size_2x4).is_err());
+        // (8, 7) + (2, 4) -> (10, 11) > 10 height: out of bounds
+        assert!(StashPlacement::new(8, 7, size_2x4).is_err());
     }
 }
 

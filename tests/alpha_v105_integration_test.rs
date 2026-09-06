@@ -405,6 +405,7 @@ mod tests {
     #[radar_test]
     fn test_verify_cube_harness_across_all_fixtures() {
         use d2r_core::domain::inventory::InventoryGrid;
+        use rayon::prelude::*;
 
         let huffman = HuffmanTree::new();
         let base_dir = "tests/fixtures/savegames/gameplay/normal";
@@ -426,31 +427,39 @@ mod tests {
         collect_d2s(std::path::Path::new(base_dir), &mut save_paths);
         save_paths.sort();
 
-        let mut checked_saves = 0;
+        // Parallel execution with Rayon across all 87 saves
+        let results: Vec<(bool, Result<(), d2r_core::domain::inventory::CubeIntegrityError>, String)> = save_paths
+            .par_iter()
+            .map(|path| {
+                let bytes = fs::read(path).expect("Read savegame failed");
+                if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
+                    let has_cube = items.iter().any(|it| it.is_cube_container());
+                    // Execute Horadric Cube 4-invariants physical and logical integrity harness
+                    let validation = InventoryGrid::validate_cube_integrity(&items);
+                    (has_cube, validation, path.display().to_string())
+                } else {
+                    panic!("Failed to parse player items for: {}", path.display());
+                }
+            })
+            .collect();
+
+        let checked_saves = results.len();
         let mut cube_saves_count = 0;
 
-        for path in &save_paths {
-            let bytes = fs::read(path).expect("Read savegame failed");
-            if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
-                checked_saves += 1;
-                let has_cube = items.iter().any(|it| it.is_cube_container());
-                if has_cube {
-                    cube_saves_count += 1;
-                }
-
-                // Execute the 4-invariants cube harness check
-                let cube_validation = InventoryGrid::validate_cube_integrity(&items);
-                assert!(
-                    cube_validation.is_ok(),
-                    "Cube harness validation failed for {}: {:?}",
-                    path.display(),
-                    cube_validation.err()
-                );
+        for (has_cube, validation, path_str) in results {
+            if has_cube {
+                cube_saves_count += 1;
             }
+            assert!(
+                validation.is_ok(),
+                "Horadric Cube integrity validation failed for {}: {:?}",
+                path_str,
+                validation.err()
+            );
         }
 
         println!(
-            "Cube Harness Verified Across {} saves ({} had Horadric Cube)",
+            "Horadric Cube 4-Invariants Harness Verified Across {} saves ({} had Horadric Cube)",
             checked_saves, cube_saves_count
         );
         assert_eq!(checked_saves, 87, "Expected all 87 saves to be checked");

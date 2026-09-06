@@ -60,5 +60,12 @@ pub fn alpha_inventory_route(item: &Item, is_alpha: bool) -> AlphaInventoryRoute
 
 pub fn is_true_potion(code: &str) -> bool {
     let trimmed = code.trim().to_lowercase();
-    trimmed.starts_with("hp") || trimmed.starts_with("mp") || trimmed.starts_with("rv")
+    trimmed.starts_with("hp")
+        || trimmed.starts_with("mp")
+        || trimmed.starts_with("rv")
+        || trimmed.starts_with("gp")
+        || trimmed.starts_with("op")
+        || trimmed == "vps"
+        || trimmed == "yps"
+        || trimmed == "wms"
 }
