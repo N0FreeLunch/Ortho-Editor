@@ -1,4 +1,6 @@
 use crate::item::Item;
+mod placement;
+use placement::ItemPlacement;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -595,16 +597,9 @@ impl InventoryGrid {
         let mut cell_occupant: [Option<&str>; 12] = [None; 12];
         let mut cube_items_count = 0usize;
 
-        for it in items {
-            let it_code = it.code.trim();
-            if it.is_residue()
-                || it_code.is_empty()
-                || it_code == "wyws"
-                || it_code == "b7ts"
-                || it_code == "ks d"
-                || it.header.flags == 0
-                || crate::data::item_codes::ITEM_TEMPLATES.iter().all(|t| t.code != it_code)
-            {
+        for item in items {
+            let it = ItemPlacement::new(item);
+            if it.should_skip() {
                 continue;
             }
 
@@ -618,15 +613,15 @@ impl InventoryGrid {
 
             if it.is_in_cube() {
                 cube_items_count += 1;
-                let (w, h) = get_item_size(&it.code);
-                let it_code = it.code.trim();
+                let (w, h) = it.size();
+                let it_code = it.code();
 
                 // Out-of-bounds check (x + w <= 3, y + h <= 4)
-                if it.x + w > 3 || it.y + h > 4 {
+                if it.x() + w > 3 || it.y() + h > 4 {
                     return Err(CubeIntegrityError::OutOfBounds {
                         item_code: it_code.to_string(),
-                        x: it.x,
-                        y: it.y,
+                        x: it.x(),
+                        y: it.y(),
                         w,
                         h,
                     });
@@ -634,16 +629,16 @@ impl InventoryGrid {
 
                 // Check collision using 12-bit register mask
                 let mut item_mask = 0u16;
-                for r in it.y..(it.y + h) {
-                    for c in it.x..(it.x + w) {
+                for r in it.y()..(it.y() + h) {
+                    for c in it.x()..(it.x() + w) {
                         let bit = (r as usize) * 3 + (c as usize);
                         item_mask |= 1u16 << bit;
                     }
                 }
 
                 if occupied_mask & item_mask != 0 {
-                    for r in it.y..(it.y + h) {
-                        for c in it.x..(it.x + w) {
+                    for r in it.y()..(it.y() + h) {
+                        for c in it.x()..(it.x() + w) {
                             let bit = (r as usize) * 3 + (c as usize);
                             if (occupied_mask & (1u16 << bit)) != 0 {
                                 if let Some(existing_code) = cell_occupant[bit] {
@@ -660,8 +655,8 @@ impl InventoryGrid {
                 }
 
                 occupied_mask |= item_mask;
-                for r in it.y..(it.y + h) {
-                    for c in it.x..(it.x + w) {
+                for r in it.y()..(it.y() + h) {
+                    for c in it.x()..(it.x() + w) {
                         cell_occupant[(r as usize) * 3 + (c as usize)] = Some(it_code);
                     }
                 }
@@ -683,55 +678,38 @@ impl InventoryGrid {
         let mut occupied_mask: u128 = 0;
         let mut cell_occupant: [Option<&str>; 100] = [None; 100];
 
-        for it in items {
-            let it_code = it.code.trim();
-            if it.is_residue()
-                || it_code.is_empty()
-                || it_code == "wyws"
-                || it_code == "b7ts"
-                || it_code == "ks d"
-                || it.header.flags == 0
-                || crate::data::item_codes::ITEM_TEMPLATES.iter().all(|t| t.code != it_code)
-            {
+        for item in items {
+            let it = ItemPlacement::new(item);
+            if it.should_skip() {
                 continue;
             }
 
-            // Stash items must be stored in container (mode == 4) and placed in stash (page == 1 or location == 4)
-            let is_stored = it.header.mode == 4 || it.body.mode == 4;
-            let is_stash = is_stored
-                && (it.header.page == 1
-                    || it.body.page == 1
-                    || it.header.location == 4
-                    || it.body.location == 4
-                    || crate::verify::alpha_inventory_routing::alpha_inventory_route(it, true)
-                        == crate::verify::alpha_inventory_routing::AlphaInventoryRoute::Stash);
+            if it.is_stash() {
+                let (w, h) = it.size();
+                let it_code = it.code();
 
-            if is_stash {
-                let (w, h) = get_item_size(&it.code);
-                let it_code = it.code.trim();
-
-                if it.x + w > 10 || it.y + h > 10 {
+                if it.x() + w > 10 || it.y() + h > 10 {
                     return Err(ContainerIntegrityError::OutOfBounds {
                         container: ContainerKind::Stash,
                         item_code: it_code.to_string(),
-                        x: it.x,
-                        y: it.y,
+                        x: it.x(),
+                        y: it.y(),
                         w,
                         h,
                     });
                 }
 
                 let mut item_mask = 0u128;
-                for r in it.y..(it.y + h) {
-                    for c in it.x..(it.x + w) {
+                for r in it.y()..(it.y() + h) {
+                    for c in it.x()..(it.x() + w) {
                         let bit = (r as usize) * 10 + (c as usize);
                         item_mask |= 1u128 << bit;
                     }
                 }
 
                 if occupied_mask & item_mask != 0 {
-                    for r in it.y..(it.y + h) {
-                        for c in it.x..(it.x + w) {
+                    for r in it.y()..(it.y() + h) {
+                        for c in it.x()..(it.x() + w) {
                             let bit = (r as usize) * 10 + (c as usize);
                             if (occupied_mask & (1u128 << bit)) != 0 {
                                 if let Some(existing_code) = cell_occupant[bit] {
@@ -749,8 +727,8 @@ impl InventoryGrid {
                 }
 
                 occupied_mask |= item_mask;
-                for r in it.y..(it.y + h) {
-                    for c in it.x..(it.x + w) {
+                for r in it.y()..(it.y() + h) {
+                    for c in it.x()..(it.x() + w) {
                         cell_occupant[(r as usize) * 10 + (c as usize)] = Some(it_code);
                     }
                 }
@@ -767,66 +745,38 @@ impl InventoryGrid {
         let mut occupied_mask: u64 = 0;
         let mut cell_occupant: [Option<&str>; 40] = [None; 40];
 
-        for it in items {
-            let it_code = it.code.trim();
-            if it.is_residue()
-                || it_code.is_empty()
-                || it_code == "wyws"
-                || it_code == "b7ts"
-                || it_code == "ks d"
-                || it.header.flags == 0
-                || crate::data::item_codes::ITEM_TEMPLATES.iter().all(|t| t.code != it_code)
-            {
+        for item in items {
+            let it = ItemPlacement::new(item);
+            if it.should_skip() {
                 continue;
             }
 
-            // Unstored, equipped, stash, or belt items are excluded; only true stored inventory grid items
-            let is_stored = it.header.mode == 4 || it.body.mode == 4;
-            let is_stash = is_stored
-                && (it.header.page == 1
-                    || it.body.page == 1
-                    || it.header.location == 4
-                    || it.body.location == 4
-                    || crate::verify::alpha_inventory_routing::alpha_inventory_route(it, true)
-                        == crate::verify::alpha_inventory_routing::AlphaInventoryRoute::Stash);
+            if it.is_inventory() {
+                let (w, h) = it.size();
+                let it_code = it.code();
 
-            let is_inventory = is_stored
-                && !is_stash
-                && (it.header.page == 0 && it.body.page == 0)
-                && (it.header.location == 0 && it.body.location == 0)
-                && (it.header.mode != 1 && it.body.mode != 1)
-                && (it.header.mode != 2 && it.body.mode != 2)
-                && it.header.y < 4
-                && it.y < 4
-                && crate::verify::alpha_inventory_routing::alpha_inventory_route(it, true)
-                    == crate::verify::alpha_inventory_routing::AlphaInventoryRoute::Inventory;
-
-            if is_inventory {
-                let (w, h) = get_item_size(&it.code);
-                let it_code = it.code.trim();
-
-                if it.x + w > 10 || it.y + h > 4 {
+                if it.x() + w > 10 || it.y() + h > 4 {
                     return Err(ContainerIntegrityError::OutOfBounds {
                         container: ContainerKind::Inventory,
                         item_code: it_code.to_string(),
-                        x: it.x,
-                        y: it.y,
+                        x: it.x(),
+                        y: it.y(),
                         w,
                         h,
                     });
                 }
 
                 let mut item_mask = 0u64;
-                for r in it.y..(it.y + h) {
-                    for c in it.x..(it.x + w) {
+                for r in it.y()..(it.y() + h) {
+                    for c in it.x()..(it.x() + w) {
                         let bit = (r as usize) * 10 + (c as usize);
                         item_mask |= 1u64 << bit;
                     }
                 }
 
                 if occupied_mask & item_mask != 0 {
-                    for r in it.y..(it.y + h) {
-                        for c in it.x..(it.x + w) {
+                    for r in it.y()..(it.y() + h) {
+                        for c in it.x()..(it.x() + w) {
                             let bit = (r as usize) * 10 + (c as usize);
                             if (occupied_mask & (1u64 << bit)) != 0 {
                                 if let Some(existing_code) = cell_occupant[bit] {
@@ -844,8 +794,8 @@ impl InventoryGrid {
                 }
 
                 occupied_mask |= item_mask;
-                for r in it.y..(it.y + h) {
-                    for c in it.x..(it.x + w) {
+                for r in it.y()..(it.y() + h) {
+                    for c in it.x()..(it.x() + w) {
                         cell_occupant[(r as usize) * 10 + (c as usize)] = Some(it_code);
                     }
                 }
