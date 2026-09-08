@@ -369,6 +369,17 @@ pub enum AlphaScannerGapProfile {
 
 pub type ItemHeaderPeek = (u8, u8, u8, String, u32, u8, bool, u64, i8, bool);
 
+/// Provisional output of the full parser's shared header stage.
+///
+/// The hint is not a finalized item code. This stage does not establish item
+/// identity, ownership, body-dependent placement, or scan completeness.
+pub struct ItemHeaderStage {
+    pub header: crate::domain::header::entity::ItemHeader,
+    pub alpha_header_gap: Option<u32>,
+    pub alpha_header_gap_bits: Vec<bool>,
+    pub peek: Option<ItemHeaderPeek>,
+}
+
 impl AlphaScannerGapProfile {
     pub fn label(self) -> String {
         match self {
@@ -2801,7 +2812,13 @@ impl Item {
         Self::from_reader_with_context(&mut cursor, huffman, None, alpha, 0, None, None)
     }
 
-    pub fn from_reader_with_context<R: BitRead>(
+    /// Read the same provisional header used by full item decoding.
+    ///
+    /// The caller supplies the same bounded cursor, section-relative context,
+    /// index, and hints as full parsing. Code-hint discovery may read ahead and
+    /// decode Huffman characters, but does not decode item statistics. The Root
+    /// segment remains open so the full parser can continue at this position.
+    pub fn read_header_stage<R: BitRead>(
         cursor: &mut BitCursor<R>,
         huff: &HuffmanTree,
         ctx: Option<(&[u8], u64)>,
@@ -2809,13 +2826,11 @@ impl Item {
         idx: usize,
         forced_compact: Option<bool>,
         code_hint: Option<&str>,
-    ) -> ParsingResult<Item> {
+    ) -> ParsingResult<ItemHeaderStage> {
         let is_first_item = idx == 0;
         cursor.set_trace(cursor.trace_enabled || crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Root);
-
-        let code_hint = code_hint;
 
         let mut peek = if alpha_mode && ctx.is_some() {
             let (bytes, rel_start_bit) = ctx.unwrap();
@@ -3088,6 +3103,36 @@ impl Item {
                 has_checksum_peek,
                 abs_start_bit,
             )?;
+
+        Ok(ItemHeaderStage {
+            header,
+            alpha_header_gap,
+            alpha_header_gap_bits,
+            peek,
+        })
+    }
+
+    pub fn from_reader_with_context<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        huff: &HuffmanTree,
+        ctx: Option<(&[u8], u64)>,
+        alpha_mode: bool,
+        idx: usize,
+        forced_compact: Option<bool>,
+        code_hint: Option<&str>,
+    ) -> ParsingResult<Item> {
+        let start_bit = cursor.pos();
+        let ItemHeaderStage {
+            header,
+            alpha_header_gap,
+            alpha_header_gap_bits,
+            peek,
+        } = Self::read_header_stage(
+            cursor, huff, ctx, alpha_mode, idx, forced_compact, code_hint,
+        )?;
+        let code_peek = code_hint
+            .filter(|hint| !hint.trim().is_empty())
+            .or(peek.as_ref().map(|p| p.3.as_str()));
 
         if header.is_compact {
             cursor.base_pos = start_bit;
