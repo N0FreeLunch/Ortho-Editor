@@ -1,4 +1,5 @@
 use bitstream_io::{BitRead, BitReader, LittleEndian};
+use d2r_core::data::bit_cursor::BitCursor;
 use d2r_core::domain::item::geometry::{
     ExpectedHeaderWidthProducer, HeaderChecksumBranch, LiveHeaderFamilyClassifier,
 };
@@ -291,6 +292,151 @@ fn classify_local_73_padding_influence(
     }
 }
 
+fn header_limit_provenance(
+    bytes: &[u8],
+    item: &Item,
+    section_item_index: usize,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+) -> serde_json::Value {
+    let range_start = item.range.start;
+    let range_end = item.range.end;
+    let raw_len_bits = range_end.saturating_sub(range_start);
+    let section_input = &item.section_parse_input;
+    let code_hint = section_input
+        .code_hint
+        .as_deref()
+        .filter(|hint| !hint.trim().is_empty())
+        .unwrap_or(item.code.as_str());
+    let peek = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
+        bytes,
+        range_start,
+        Some(range_start),
+        huffman,
+        alpha_mode,
+        section_item_index,
+    );
+    let peek_decision = peek.as_ref().map(|peek| {
+        let target_width_bits = d2r_core::domain::forensic::v105::axioms::get_v105_target_width(
+            peek.5,
+            &peek.3,
+            peek.4,
+            Some(section_item_index),
+        );
+        json!({
+            "status": "observed",
+            "mode": peek.0,
+            "location": peek.1,
+            "x": peek.2,
+            "code_hint": peek.3.trim(),
+            "flags": peek.4,
+            "version": peek.5,
+            "is_compact": peek.6,
+            "consumed_bits": peek.7,
+            "header_gap_hint_bits": peek.8,
+            "has_checksum": peek.9,
+            "target_width_bits": target_width_bits,
+        })
+    });
+
+    let header_stage = if range_start > u64::from(u32::MAX) {
+        json!({
+            "status": "unavailable",
+            "reason": "selected range exceeds BitReader skip width"
+        })
+    } else {
+        let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+        let _ = reader.skip(range_start as u32);
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_pos(range_start);
+        cursor.set_limit(bytes.len() as u64 * 8);
+        cursor.set_trace(true);
+        match Item::read_header_stage(
+            &mut cursor,
+            huffman,
+            Some((bytes, range_start)),
+            alpha_mode,
+            section_item_index,
+            section_input.forced_compact,
+            Some(code_hint),
+        ) {
+            Ok(stage) => json!({
+                "status": "observed",
+                "cursor_position": cursor.pos(),
+                "header": {
+                    "mode": stage.header.mode,
+                    "location": stage.header.location,
+                    "x": stage.header.x,
+                    "y": stage.header.y,
+                    "page": stage.header.page,
+                    "flags": stage.header.flags,
+                    "version": stage.header.version,
+                    "is_compact": stage.header.is_compact,
+                    "has_checksum": stage.header.has_checksum,
+                },
+                "alpha_header_gap_bits": stage.alpha_header_gap_bits.len(),
+                "peek_present": stage.peek.is_some(),
+            }),
+            Err(error) => json!({
+                "status": "unavailable",
+                "reason": error.to_string()
+            }),
+        }
+    };
+
+    let bounded_reparses = [73u64, 80u64]
+        .into_iter()
+        .map(|requested_limit_bits| {
+            let applied_limit_bits = requested_limit_bits.min(raw_len_bits);
+            let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+            match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+                bytes,
+                range_start,
+                0,
+                huffman,
+                section_item_index,
+                alpha_mode,
+                Some(applied_limit_bits),
+                section_input.forced_compact,
+                Some(code_hint),
+                &mut carrier,
+            ) {
+                Ok((parsed, consumed_bits)) => json!({
+                    "requested_limit_bits": requested_limit_bits,
+                    "applied_limit_bits": applied_limit_bits,
+                    "status": "success",
+                    "consumed_bits": consumed_bits,
+                    "final_code": parsed.code.trim(),
+                    "crosses_selected_range_end": range_start.saturating_add(consumed_bits) > range_end,
+                }),
+                Err(error) => json!({
+                    "requested_limit_bits": requested_limit_bits,
+                    "applied_limit_bits": applied_limit_bits,
+                    "status": "failure",
+                    "error": error.to_string(),
+                    "crosses_selected_range_end": carrier.final_bit > range_end,
+                }),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "evidence_surface": "controlled-decoder",
+        "report_only": true,
+        "semantic_authorization": false,
+        "selected_range": {"start": range_start, "end": range_end, "bit_length": raw_len_bits},
+        "selected_section_input": {
+            "code_hint": section_input.code_hint,
+            "forced_compact": section_input.forced_compact,
+            "limit_bits": section_input.limit_bits,
+            "item_index": section_input.item_index,
+        },
+        "peek_decision": peek_decision.unwrap_or_else(|| json!({"status": "unavailable"})),
+        "header_stage": header_stage,
+        "bounded_reparses": bounded_reparses,
+    })
+}
+
 fn section_context_report(
     bytes: &[u8],
     item: &Item,
@@ -357,6 +503,8 @@ fn section_context_report(
         "final_claimed_width_bits": item.section_parse_input.final_claimed_width_bits,
         "item_index": item.section_parse_input.item_index,
     });
+    let header_limit_provenance =
+        header_limit_provenance(bytes, item, section_item_index, huffman, alpha_mode);
     let identity_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
         item.header.version,
         item.header
@@ -1053,6 +1201,7 @@ fn section_context_report(
         "parser_consumption_provenance": parser_consumption_provenance,
         "stored_header_gap_provenance": stored_header_gap_provenance,
         "section_parser_input_provenance": section_parser_input_provenance,
+        "header_limit_provenance": header_limit_provenance,
         "legacy_identity_provenance": legacy_identity_provenance,
         "nudge_symmetry_provenance": nudge_symmetry_provenance,
         "property_provenance": property_provenance,
