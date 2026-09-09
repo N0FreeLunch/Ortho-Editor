@@ -251,6 +251,9 @@ pub struct SectionParseInputProvenance {
     pub alignment_target_width_bits: Option<u64>,
     pub summary_limit_override_applied: Option<bool>,
     pub final_claimed_width_bits: Option<u64>,
+    pub section_base_bit: Option<u64>,
+    pub section_bit_len: Option<u64>,
+    pub section_relative_start_bit: Option<u64>,
     pub item_index: Option<usize>,
 }
 
@@ -263,6 +266,9 @@ impl SectionParseInputProvenance {
         alignment_target_width_bits: Option<u64>,
         summary_limit_override_applied: Option<bool>,
         final_claimed_width_bits: Option<u64>,
+        section_base_bit: u64,
+        section_bit_len: u64,
+        section_relative_start_bit: u64,
         item_index: usize,
     ) -> Self {
         Self {
@@ -273,6 +279,9 @@ impl SectionParseInputProvenance {
             alignment_target_width_bits,
             summary_limit_override_applied,
             final_claimed_width_bits,
+            section_base_bit: Some(section_base_bit),
+            section_bit_len: Some(section_bit_len),
+            section_relative_start_bit: Some(section_relative_start_bit),
             item_index: Some(item_index),
         }
     }
@@ -459,6 +468,9 @@ impl Item {
         alignment_target_width_bits: Option<u64>,
         summary_limit_override_applied: Option<bool>,
         final_claimed_width_bits: Option<u64>,
+        section_base_bit: u64,
+        section_bit_len: u64,
+        section_relative_start_bit: u64,
         item_index: usize,
     ) {
         self.section_parse_input = SectionParseInputProvenance::record(
@@ -469,6 +481,9 @@ impl Item {
             alignment_target_width_bits,
             summary_limit_override_applied,
             final_claimed_width_bits,
+            section_base_bit,
+            section_bit_len,
+            section_relative_start_bit,
             item_index,
         );
     }

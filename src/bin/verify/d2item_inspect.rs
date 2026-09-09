@@ -308,132 +308,156 @@ fn header_limit_provenance(
         .as_deref()
         .filter(|hint| !hint.trim().is_empty())
         .unwrap_or(item.code.as_str());
+    let Some(section_base_bit) = section_input.section_base_bit else {
+        return unavailable_header_limit_provenance(item, "missing section_base_bit");
+    };
+    let Some(section_bit_len) = section_input.section_bit_len else {
+        return unavailable_header_limit_provenance(item, "missing section_bit_len");
+    };
+    let Some(relative_start_bit) = section_input.section_relative_start_bit else {
+        return unavailable_header_limit_provenance(item, "missing section_relative_start_bit");
+    };
+    let Some(original_limit_bits) = section_input.limit_bits else {
+        return unavailable_header_limit_provenance(item, "missing original parser limit_bits");
+    };
+    let Some(local_item_index) = section_input.item_index else {
+        return unavailable_header_limit_provenance(item, "missing section-local item_index");
+    };
+
+    if section_base_bit % 8 != 0 || section_bit_len % 8 != 0 {
+        return unavailable_header_limit_provenance(item, "section geometry is not byte-aligned");
+    }
+    if relative_start_bit >= section_bit_len || relative_start_bit > u64::from(u32::MAX) {
+        return unavailable_header_limit_provenance(item, "relative item start is outside BitReader bounds");
+    }
+
+    let section_start_byte = (section_base_bit / 8) as usize;
+    let section_end_byte = section_start_byte.saturating_add((section_bit_len / 8) as usize);
+    if section_end_byte > bytes.len() {
+        return unavailable_header_limit_provenance(item, "recorded section extends beyond save bytes");
+    }
+    let expected_absolute_start = section_base_bit.saturating_add(relative_start_bit);
+    if expected_absolute_start != range_start {
+        return unavailable_header_limit_provenance(item, "recorded relative start does not match selected range");
+    }
+
+    let section_bytes = &bytes[section_start_byte..section_end_byte];
+    let context_match = range_start == expected_absolute_start
+        && range_end <= section_base_bit.saturating_add(section_bit_len);
+    let recorded_section_context = json!({
+        "status": "observed",
+        "section_base_bit": section_base_bit,
+        "section_bit_len": section_bit_len,
+        "section_relative_start_bit": relative_start_bit,
+        "section_local_item_index": local_item_index,
+        "requested_top_level_item_index": section_item_index,
+        "original_limit_bits": original_limit_bits,
+        "section_byte_range": {"start": section_start_byte, "end": section_end_byte},
+    });
+    if !context_match {
+        return json!({
+            "evidence_surface": "controlled-decoder",
+            "report_only": true,
+            "semantic_authorization": false,
+            "selected_range": {"start": range_start, "end": range_end, "bit_length": raw_len_bits},
+            "recorded_section_context": recorded_section_context,
+            "context_match": false,
+            "reason": "selected range does not remain within recorded section context",
+            "peek_decision": {"status": "unavailable"},
+            "header_stage": {"status": "unavailable"},
+            "bounded_reparses": [],
+        });
+    }
+
     let peek = d2r_core::domain::item::serialization::peek_item_header_at_with_base(
-        bytes,
-        range_start,
+        section_bytes,
+        relative_start_bit,
         Some(range_start),
         huffman,
         alpha_mode,
-        section_item_index,
+        local_item_index,
     );
     let peek_decision = peek.as_ref().map(|peek| {
         let target_width_bits = d2r_core::domain::forensic::v105::axioms::get_v105_target_width(
             peek.5,
             &peek.3,
             peek.4,
-            Some(section_item_index),
+            Some(local_item_index),
         );
         json!({
-            "status": "observed",
-            "mode": peek.0,
-            "location": peek.1,
-            "x": peek.2,
-            "code_hint": peek.3.trim(),
-            "flags": peek.4,
-            "version": peek.5,
-            "is_compact": peek.6,
-            "consumed_bits": peek.7,
-            "header_gap_hint_bits": peek.8,
-            "has_checksum": peek.9,
+            "status": "observed", "mode": peek.0, "location": peek.1, "x": peek.2,
+            "code_hint": peek.3.trim(), "flags": peek.4, "version": peek.5,
+            "is_compact": peek.6, "consumed_bits": peek.7,
+            "header_gap_hint_bits": peek.8, "has_checksum": peek.9,
             "target_width_bits": target_width_bits,
         })
-    });
+    }).unwrap_or_else(|| json!({"status": "unavailable"}));
 
-    let header_stage = if range_start > u64::from(u32::MAX) {
-        json!({
-            "status": "unavailable",
-            "reason": "selected range exceeds BitReader skip width"
-        })
-    } else {
-        let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
-        let _ = reader.skip(range_start as u32);
-        let mut cursor = BitCursor::new(reader);
-        cursor.set_pos(range_start);
-        cursor.set_limit(bytes.len() as u64 * 8);
-        cursor.set_trace(true);
-        match Item::read_header_stage(
-            &mut cursor,
-            huffman,
-            Some((bytes, range_start)),
-            alpha_mode,
-            section_item_index,
-            section_input.forced_compact,
-            Some(code_hint),
-        ) {
-            Ok(stage) => json!({
-                "status": "observed",
-                "cursor_position": cursor.pos(),
-                "header": {
-                    "mode": stage.header.mode,
-                    "location": stage.header.location,
-                    "x": stage.header.x,
-                    "y": stage.header.y,
-                    "page": stage.header.page,
-                    "flags": stage.header.flags,
-                    "version": stage.header.version,
-                    "is_compact": stage.header.is_compact,
-                    "has_checksum": stage.header.has_checksum,
-                },
-                "alpha_header_gap_bits": stage.alpha_header_gap_bits.len(),
-                "peek_present": stage.peek.is_some(),
-            }),
-            Err(error) => json!({
-                "status": "unavailable",
-                "reason": error.to_string()
-            }),
-        }
+    let mut reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+    let _ = reader.skip(relative_start_bit as u32);
+    let mut cursor = BitCursor::new(reader);
+    cursor.set_pos(range_start);
+    cursor.base_pos = section_base_bit;
+    cursor.set_limit(range_start.saturating_add(original_limit_bits));
+    cursor.set_trace(true);
+    let header_stage = match Item::read_header_stage(
+        &mut cursor,
+        huffman,
+        Some((section_bytes, relative_start_bit)),
+        alpha_mode,
+        local_item_index,
+        section_input.forced_compact,
+        Some(code_hint),
+    ) {
+        Ok(stage) => json!({
+            "status": "observed", "cursor_position": cursor.pos(),
+            "applied_limit_bits": original_limit_bits,
+            "absolute_limit_bit": range_start.saturating_add(original_limit_bits),
+            "header": {"mode": stage.header.mode, "location": stage.header.location,
+                "x": stage.header.x, "y": stage.header.y, "page": stage.header.page,
+                "flags": stage.header.flags, "version": stage.header.version,
+                "is_compact": stage.header.is_compact, "has_checksum": stage.header.has_checksum},
+            "alpha_header_gap_bits": stage.alpha_header_gap_bits.len(), "peek_present": stage.peek.is_some(),
+        }),
+        Err(error) => json!({"status": "unavailable", "reason": error.to_string(),
+            "applied_limit_bits": original_limit_bits,
+            "absolute_limit_bit": range_start.saturating_add(original_limit_bits)}),
     };
 
-    let bounded_reparses = [73u64, 80u64]
-        .into_iter()
-        .map(|requested_limit_bits| {
-            let applied_limit_bits = requested_limit_bits.min(raw_len_bits);
-            let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
-            match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
-                bytes,
-                range_start,
-                0,
-                huffman,
-                section_item_index,
-                alpha_mode,
-                Some(applied_limit_bits),
-                section_input.forced_compact,
-                Some(code_hint),
-                &mut carrier,
-            ) {
-                Ok((parsed, consumed_bits)) => json!({
-                    "requested_limit_bits": requested_limit_bits,
-                    "applied_limit_bits": applied_limit_bits,
-                    "status": "success",
-                    "consumed_bits": consumed_bits,
-                    "final_code": parsed.code.trim(),
-                    "crosses_selected_range_end": range_start.saturating_add(consumed_bits) > range_end,
-                }),
-                Err(error) => json!({
-                    "requested_limit_bits": requested_limit_bits,
-                    "applied_limit_bits": applied_limit_bits,
-                    "status": "failure",
-                    "error": error.to_string(),
-                    "crosses_selected_range_end": carrier.final_bit > range_end,
-                }),
-            }
-        })
-        .collect::<Vec<_>>();
+    let available_bits = section_bit_len.saturating_sub(relative_start_bit);
+    let bounded_reparses = [73u64, 80u64].into_iter().map(|requested_limit_bits| {
+        let applied_limit_bits = requested_limit_bits.min(available_bits);
+        let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+        match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+            section_bytes, relative_start_bit, section_base_bit, huffman, local_item_index,
+            alpha_mode, Some(applied_limit_bits), section_input.forced_compact, Some(code_hint), &mut carrier,
+        ) {
+            Ok((parsed, consumed_bits)) => json!({"requested_limit_bits": requested_limit_bits,
+                "applied_limit_bits": applied_limit_bits, "absolute_limit_bit": range_start.saturating_add(applied_limit_bits),
+                "status": "success", "consumed_bits": consumed_bits, "final_code": parsed.code.trim(),
+                "crosses_selected_range_end": range_start.saturating_add(consumed_bits) > range_end}),
+            Err(error) => json!({"requested_limit_bits": requested_limit_bits,
+                "applied_limit_bits": applied_limit_bits, "absolute_limit_bit": range_start.saturating_add(applied_limit_bits),
+                "status": "failure", "error": error.to_string(), "crosses_selected_range_end": carrier.final_bit > range_end}),
+        }
+    }).collect::<Vec<_>>();
 
     json!({
-        "evidence_surface": "controlled-decoder",
-        "report_only": true,
-        "semantic_authorization": false,
+        "evidence_surface": "controlled-decoder", "report_only": true, "semantic_authorization": false,
         "selected_range": {"start": range_start, "end": range_end, "bit_length": raw_len_bits},
-        "selected_section_input": {
-            "code_hint": section_input.code_hint,
-            "forced_compact": section_input.forced_compact,
-            "limit_bits": section_input.limit_bits,
-            "item_index": section_input.item_index,
-        },
-        "peek_decision": peek_decision.unwrap_or_else(|| json!({"status": "unavailable"})),
-        "header_stage": header_stage,
-        "bounded_reparses": bounded_reparses,
+        "recorded_section_context": recorded_section_context, "context_match": true,
+        "peek_decision": peek_decision, "header_stage": header_stage, "bounded_reparses": bounded_reparses,
+    })
+}
+
+fn unavailable_header_limit_provenance(item: &Item, reason: &str) -> serde_json::Value {
+    json!({
+        "evidence_surface": "controlled-decoder", "report_only": true, "semantic_authorization": false,
+        "selected_range": {"start": item.range.start, "end": item.range.end,
+            "bit_length": item.range.end.saturating_sub(item.range.start)},
+        "recorded_section_context": {"status": "unavailable", "reason": reason},
+        "context_match": false, "peek_decision": {"status": "unavailable"},
+        "header_stage": {"status": "unavailable"}, "bounded_reparses": [],
     })
 }
 

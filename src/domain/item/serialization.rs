@@ -2355,6 +2355,9 @@ impl Item {
                         alignment_target_width_bits,
                         summary_limit_override_applied,
                         Some(actual_consumed),
+                        section_bit_offset,
+                        section_bits,
+                        start,
                         item_count,
                     );
                     if alpha_mode
