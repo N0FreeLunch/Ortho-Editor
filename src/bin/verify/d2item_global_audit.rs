@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -742,61 +743,126 @@ fn process_file_with_timeout(
             );
         }
     };
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                "strict worker stdout pipe was unavailable".to_string(),
+            );
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                "strict worker stderr pipe was unavailable".to_string(),
+            );
+        }
+    };
+    let stdout_reader = thread::spawn(move || {
+        let mut stdout = stdout;
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).map(|_| bytes)
+    });
+
     let deadline = Duration::from_millis(timeout_ms);
     let started = Instant::now();
-
-    loop {
+    let worker_status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break Ok(status),
             Ok(None) if started.elapsed() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
-                return bounded_failure_result(
-                    file_path,
+                break Err((
                     "[TIMEOUT]",
                     format!("strict worker exceeded {timeout_ms} ms"),
-                );
+                ));
             }
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
-                return bounded_failure_result(
-                    file_path,
-                    "[ERROR]",
-                    format!("strict worker wait failed: {error}"),
-                );
+                break Err(("[ERROR]", format!("strict worker wait failed: {error}")));
             }
         }
-    }
+    };
+    let stdout = stdout_reader.join();
+    let stderr = stderr_reader.join();
 
-    let output = match child.wait_with_output() {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
+    let stdout = match stdout {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(error)) => {
             *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
             return bounded_failure_result(
                 file_path,
                 "[ERROR]",
-                format!(
-                    "strict worker exited {}: {}",
-                    output.status,
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ),
+                format!("strict worker stdout collection failed: {error}"),
             );
         }
-        Err(error) => {
+        Err(_) => {
             *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
             return bounded_failure_result(
                 file_path,
                 "[ERROR]",
-                format!("strict worker output collection failed: {error}"),
+                "strict worker stdout reader panicked".to_string(),
             );
         }
     };
+    let stderr = match stderr {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(error)) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                format!("strict worker stderr collection failed: {error}"),
+            );
+        }
+        Err(_) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(
+                file_path,
+                "[ERROR]",
+                "strict worker stderr reader panicked".to_string(),
+            );
+        }
+    };
+    let status = match worker_status {
+        Ok(status) => status,
+        Err((status, hint)) => {
+            *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+            return bounded_failure_result(file_path, status, hint);
+        }
+    };
+    if !status.success() {
+        *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
+        return bounded_failure_result(
+            file_path,
+            "[ERROR]",
+            format!(
+                "strict worker exited {}: {}",
+                status,
+                String::from_utf8_lossy(&stderr).trim()
+            ),
+        );
+    }
 
-    match serde_json::from_slice::<WorkerReceipt>(&output.stdout) {
+    match serde_json::from_slice::<WorkerReceipt>(&stdout) {
         Ok(worker) => {
             for (family, count) in worker.failure_breakdown {
                 *failure_breakdown.entry(family).or_insert(0) += count;
