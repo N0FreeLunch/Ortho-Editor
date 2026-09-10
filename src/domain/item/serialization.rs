@@ -2468,6 +2468,23 @@ impl Item {
                         Intentionality::Artifactual,
                         format!("parser_failure_json:{}", failure_json),
                     ));
+                    if !rejected_top_level_candidate {
+                        // Preserve the failed parser call for report-only replay; `limit` is
+                        // the fallback carrier width, not evidence of parser consumption.
+                        opaque.record_section_parse_input(
+                            Some(parse_code_hint),
+                            forced_compact_for_parse,
+                            parse_limit,
+                            (target_width_override > 0).then_some(target_width_override as u64),
+                            None,
+                            None,
+                            Some(limit),
+                            section_bit_offset,
+                            section_bits,
+                            start,
+                            item_count,
+                        );
+                    }
                     let mut bits = Vec::new();
                     let mut fallback_reader =
                         BitReader::endian(io::Cursor::new(section_bytes), LittleEndian);
