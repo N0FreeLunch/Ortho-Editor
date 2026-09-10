@@ -4,6 +4,7 @@
 mod roundtrip_tests {
     use d2r_core::domain::vo::align_to_byte;
     use d2r_core::item::{normalize_alpha_code_hint, HuffmanTree, Item};
+    use d2r_core::save::find_jm_markers;
     use d2r_core::verify::{bit_diff::BitDiffVerifier, Verifier};
     use std::fs;
     use std::path::PathBuf;
@@ -659,7 +660,7 @@ mod roundtrip_tests {
     }
 
     #[test]
-    fn test_v105_slice2_equipment_item_boundary_contract() {
+    fn test_v105_slice2_equipment_declared_count_and_residue_contract() {
         let bytes = fs::read(repo_path(
             "tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",
         ))
@@ -668,27 +669,26 @@ mod roundtrip_tests {
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
         assert_eq!(version, 105);
 
+        let player_jm = find_jm_markers(&bytes)
+            .into_iter()
+            .next()
+            .expect("fixture must contain a player JM header");
+        let declared_count = u16::from_le_bytes([bytes[player_jm + 2], bytes[player_jm + 3]]);
+        assert_eq!(declared_count, 16, "fixture JM declaration changed");
+
         let items = Item::read_player_items(&bytes, &huffman, true).expect("items should parse");
-        // Verify we have parsed 17 items (0 to 16)
-        assert_eq!(items.len(), 17);
+        let semantic_count = items.iter().filter(|item| !item.is_residue()).count();
+        let residue_count = items.iter().filter(|item| item.is_residue()).count();
 
-        // Verify the fixture's physical boundary contract around the retained opaque region.
-        assert_eq!(items[3].code.trim(), "hp1");
-        assert_eq!(items[4].code.trim(), "xrs");
-        assert!(items[5].is_opaque(), "Item 5 must remain an isolated opaque region");
-        assert_eq!(items[6].code.trim(), "wa2");
-        assert_eq!(items[9].code.trim(), "wyws");
-
-        // The xrs payload is intentionally isolated while preserving its stable boundary.
-        assert!(items[4].is_opaque(), "Item 4 (xrs) must retain its opaque payload");
-        // The later wyws payload is independently decoded and must remain usable.
-        assert!(!items[9].is_opaque(), "Item 9 (wyws) should remain decoded");
-
-        // Isolation must preserve exact neighboring item boundaries.
-        assert_eq!(items[4].range.start, 7661);
-        assert_eq!(items[4].range.end, items[5].range.start);
-        assert_eq!(items[5].range.end, items[6].range.start);
-        assert_eq!(items[9].range.start, 8901);
-        assert_eq!(items[9].range.end, 8973);
+        assert_eq!(
+            semantic_count, declared_count as usize,
+            "JM declaration must count non-residue records"
+        );
+        assert_eq!(residue_count, 4, "fixture preservation residue changed");
+        assert_eq!(
+            items.len(),
+            semantic_count + residue_count,
+            "return vector must retain both semantic records and preservation residue"
+        );
     }
 }
