@@ -6,11 +6,124 @@ use d2r_core::domain::item::geometry::{
 use d2r_core::item::{HuffmanTree, Item, ItemModule};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use rayon::prelude::*;
+use serde::Deserialize;
 use serde_json::json;
 use std::env;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+
+const CANDIDATE_EVIDENCE_SCHEMA_VERSION: &str = "candidate-evidence/v1";
+
+#[derive(Debug, Deserialize)]
+struct CandidateEvidenceRecordSet {
+    schema_version: String,
+    records: Vec<CandidateEvidenceRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CandidateEvidenceRecord {
+    selected_section_item_index: usize,
+    range_start: u64,
+    range_end: u64,
+    attribute: String,
+    state: String,
+    evidence_surface: String,
+    source: serde_json::Value,
+    alternatives: Vec<serde_json::Value>,
+    discriminating_test: String,
+    promotion_rule: String,
+    rejection_rule: String,
+}
+
+fn candidate_evidence_report(
+    record_path: &Path,
+    selected_section_item_index: usize,
+    item: &Item,
+) -> Result<serde_json::Value, String> {
+    let raw = fs::read_to_string(record_path).map_err(|error| {
+        format!(
+            "failed to read candidate evidence records '{}': {}",
+            record_path.display(),
+            error
+        )
+    })?;
+    let record_set: CandidateEvidenceRecordSet = serde_json::from_str(&raw).map_err(|error| {
+        format!(
+            "failed to parse candidate evidence records '{}': {}",
+            record_path.display(),
+            error
+        )
+    })?;
+    if record_set.schema_version != CANDIDATE_EVIDENCE_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported candidate evidence schema '{}'; expected '{}'",
+            record_set.schema_version, CANDIDATE_EVIDENCE_SCHEMA_VERSION
+        ));
+    }
+
+    let mut matches = record_set.records.iter().filter(|record| {
+        record.selected_section_item_index == selected_section_item_index
+            && record.range_start == item.range.start
+            && record.range_end == item.range.end
+    });
+    let matched = matches.next();
+    if matches.next().is_some() {
+        return Err(format!(
+            "candidate evidence records contain multiple exact matches for section item {} range {}-{}",
+            selected_section_item_index, item.range.start, item.range.end
+        ));
+    }
+    let Some(record) = matched else {
+        return Ok(json!({
+            "status": "no_matching_record",
+            "report_only": true,
+            "semantic_authorization": false,
+            "selected_section_item_index": selected_section_item_index,
+            "range_start": item.range.start,
+            "range_end": item.range.end,
+        }));
+    };
+
+    if !matches!(
+        record.state.as_str(),
+        "confirmed" | "inferred" | "candidate" | "unknown" | "rejected"
+    ) {
+        return Err(format!(
+            "candidate evidence record for section item {} range {}-{} has unsupported state '{}'",
+            selected_section_item_index, item.range.start, item.range.end, record.state
+        ));
+    }
+    if record.attribute.trim().is_empty()
+        || record.evidence_surface.trim().is_empty()
+        || !record.source.is_object()
+        || record.discriminating_test.trim().is_empty()
+        || record.promotion_rule.trim().is_empty()
+        || record.rejection_rule.trim().is_empty()
+    {
+        return Err(format!(
+            "candidate evidence record for section item {} range {}-{} is missing a required field",
+            selected_section_item_index, item.range.start, item.range.end
+        ));
+    }
+
+    Ok(json!({
+        "status": "matched",
+        "report_only": true,
+        "semantic_authorization": false,
+        "selected_section_item_index": selected_section_item_index,
+        "range_start": record.range_start,
+        "range_end": record.range_end,
+        "attribute": record.attribute,
+        "state": record.state,
+        "evidence_surface": record.evidence_surface,
+        "source": record.source,
+        "alternatives": record.alternatives,
+        "discriminating_test": record.discriminating_test,
+        "promotion_rule": record.promotion_rule,
+        "rejection_rule": record.rejection_rule,
+    }))
+}
 
 fn print_bits_window(bytes: &[u8], start_bit: usize, bit_count: usize) {
     let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
@@ -1896,6 +2009,12 @@ fn main() {
         Some("section-context"),
         "Expose strict section-context rebuild comparison for a selected player-item entry",
     ));
+    parser.add_spec(ArgSpec::option(
+        "candidate-evidence-records",
+        None,
+        Some("candidate-evidence-records"),
+        "Opt-in private candidate-evidence JSON records for selected-item section-context output",
+    ));
     parser.add_spec(ArgSpec::flag(
         "section-segment-witnesses",
         None,
@@ -2077,6 +2196,7 @@ fn main() {
     }
     let compare_path = parsed.get("compare-file");
     let section_context = parsed.is_set("section-context");
+    let candidate_evidence_records = parsed.get("candidate-evidence-records").map(PathBuf::from);
     let section_segment_witnesses = parsed.is_set("section-segment-witnesses");
     let emit_phase_trace = parsed.is_set("emit-phase-trace");
     let coordinate_bit = parsed
@@ -2116,6 +2236,27 @@ fn main() {
         },
         None => None,
     };
+    if candidate_evidence_records.is_some()
+        && !(is_json && section_context && section_item.is_some())
+    {
+        let message =
+            "--candidate-evidence-records requires --json, --section-context, and --section-item";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        return;
+    }
+    if candidate_evidence_records.is_some() && compare_path.is_some() {
+        let message = "--candidate-evidence-records cannot be combined with --compare-file";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        return;
+    }
     if marker_reparse_limit_bits.is_some()
         && !(is_json && marker_section.is_some() && marker_ordinal.is_some())
     {
@@ -2839,7 +2980,7 @@ fn main() {
 
             let item = &items[section_item_index];
             if section_context {
-                let report = section_context_report(
+                let mut report = section_context_report(
                     &bytes,
                     item,
                     section_item_index,
@@ -2848,6 +2989,19 @@ fn main() {
                     emit_phase_trace,
                     coordinate_bit,
                 );
+                if let Some(record_path) = candidate_evidence_records.as_deref() {
+                    let candidate_evidence =
+                        match candidate_evidence_report(record_path, section_item_index, item) {
+                            Ok(report) => report,
+                            Err(error) => {
+                                println!("{}", json!({"errors": [error]}));
+                                return;
+                            }
+                        };
+                    if let Some(object) = report.as_object_mut() {
+                        object.insert("candidate_evidence".to_string(), candidate_evidence);
+                    }
+                }
                 if let Some(compare_path) = compare_path {
                     if !is_json {
                         eprintln!("--compare-file requires --json with --section-context");
