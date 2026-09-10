@@ -535,6 +535,7 @@ fn header_limit_provenance(
     section_item_index: usize,
     huffman: &HuffmanTree,
     alpha_mode: bool,
+    include_recorded_parser_replay: bool,
 ) -> serde_json::Value {
     let range_start = item.range.start;
     let range_end = item.range.end;
@@ -679,12 +680,103 @@ fn header_limit_provenance(
         }
     }).collect::<Vec<_>>();
 
-    json!({
+    let mut report = json!({
         "evidence_surface": "controlled-decoder", "report_only": true, "semantic_authorization": false,
         "selected_range": {"start": range_start, "end": range_end, "bit_length": raw_len_bits},
         "recorded_section_context": recorded_section_context, "context_match": true,
         "peek_decision": peek_decision, "header_stage": header_stage, "bounded_reparses": bounded_reparses,
-    })
+    });
+    if include_recorded_parser_replay {
+        let applied_limit_bits = original_limit_bits.min(available_bits);
+        let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
+        let replay = d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
+            section_bytes,
+            relative_start_bit,
+            section_base_bit,
+            huffman,
+            local_item_index,
+            alpha_mode,
+            Some(applied_limit_bits),
+            section_input.forced_compact,
+            Some(code_hint),
+            &mut carrier,
+        );
+        let last_operation = |outcome: Option<&str>| {
+            carrier
+                .operation_events
+                .iter()
+                .rev()
+                .find(|event| outcome.is_none_or(|expected| event.outcome == expected))
+                .map(|event| {
+                    json!({
+                        "label": event.operation_label,
+                        "pre_read_bit": event.pre_read_bit,
+                        "post_read_bit": event.post_read_bit,
+                        "requested_width_bits": event.requested_width_bits,
+                        "outcome": event.outcome,
+                        "context": event.context_stack,
+                    })
+                })
+                .unwrap_or(serde_json::Value::Null)
+        };
+        let replay_receipt = match replay {
+            Ok((parsed, consumed_bits)) => {
+                let timestamp_was_read = carrier.operation_events.iter().any(|event| {
+                    event.outcome == "success"
+                        && event.operation_label.ends_with("timestamp_flag")
+                });
+                json!({
+                    "status": "success",
+                    "consumed_bits": consumed_bits,
+                    "terminal_cursor_bit": carrier.final_bit,
+                    "final_code": parsed.code.trim(),
+                    "final_header_is_compact": parsed.header.is_compact,
+                    "final_alpha_code_bit_count": parsed.body.alpha_code_bits.len(),
+                    "extended_stats_operation_count": carrier.operation_events.len(),
+                    "timestamp_provenance": if timestamp_was_read {
+                        json!({"status": "captured", "value": parsed.timestamp_flag})
+                    } else {
+                        json!({"status": "default", "value": parsed.timestamp_flag,
+                            "reason": "no successful ExtendedStats timestamp read event"})
+                    },
+                    "alpha_shadow_skip_bits_provenance": match parsed.body.alpha_shadow_skip_bits {
+                        Some(value) => json!({"status": "captured", "value": value}),
+                        None => json!({"status": "default",
+                            "reason": "no captured shadow bits on replay item"}),
+                    },
+                    "last_operation": last_operation(None),
+                    "last_successful_operation": last_operation(Some("success")),
+                })
+            }
+            Err(error) => json!({
+                "status": "failure",
+                "error": error.to_string(),
+                "terminal_cursor_bit": carrier.final_bit,
+                "timestamp_provenance": {"status": "unavailable"},
+                "alpha_shadow_skip_bits_provenance": {"status": "unavailable"},
+                "last_operation": last_operation(None),
+                "last_successful_operation": last_operation(Some("success")),
+            }),
+        };
+        if let Some(object) = report.as_object_mut() {
+            object.insert(
+                "recorded_parser_replay".to_string(),
+                json!({
+                    "provenance": "controlled_decoder_recorded_section_input",
+                    "report_only": true,
+                    "semantic_authorization": false,
+                    "applied_limit_bits": applied_limit_bits,
+                    "absolute_limit_bit": range_start.saturating_add(applied_limit_bits),
+                    "forced_compact": section_input.forced_compact,
+                    "section_base_bit": section_base_bit,
+                    "section_relative_start_bit": relative_start_bit,
+                    "section_local_item_index": local_item_index,
+                    "result": replay_receipt,
+                }),
+            );
+        }
+    }
+    report
 }
 
 fn unavailable_header_limit_provenance(item: &Item, reason: &str) -> serde_json::Value {
@@ -706,6 +798,7 @@ fn section_context_report(
     alpha_mode: bool,
     emit_phase_trace: bool,
     coordinate_bit: Option<u64>,
+    include_recorded_parser_replay: bool,
 ) -> serde_json::Value {
     let raw_len_bits = item.range.end.saturating_sub(item.range.start);
     let code_hint = item.code.trim().to_string();
@@ -764,8 +857,14 @@ fn section_context_report(
         "final_claimed_width_bits": item.section_parse_input.final_claimed_width_bits,
         "item_index": item.section_parse_input.item_index,
     });
-    let header_limit_provenance =
-        header_limit_provenance(bytes, item, section_item_index, huffman, alpha_mode);
+    let header_limit_provenance = header_limit_provenance(
+        bytes,
+        item,
+        section_item_index,
+        huffman,
+        alpha_mode,
+        include_recorded_parser_replay,
+    );
     let identity_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
         item.header.version,
         item.header
@@ -2157,6 +2256,12 @@ fn main() {
         Some("compact-transition-probe"),
         "Report-only comparison of baseline and forced-compact emission for a selected item",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "recorded-parser-replay",
+        None,
+        Some("recorded-parser-replay"),
+        "Report-only replay using the selected item's recorded section parser input",
+    ));
     parser.add_spec(ArgSpec::option(
         "coordinate-bit",
         None,
@@ -2330,6 +2435,7 @@ fn main() {
     let section_segment_witnesses = parsed.is_set("section-segment-witnesses");
     let emit_phase_trace = parsed.is_set("emit-phase-trace");
     let compact_transition_probe = parsed.is_set("compact-transition-probe");
+    let recorded_parser_replay = parsed.is_set("recorded-parser-replay");
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
@@ -2400,6 +2506,25 @@ fn main() {
     }
     if compact_transition_probe && compare_path.is_some() {
         let message = "--compact-transition-probe cannot be combined with --compare-file";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        std::process::exit(1);
+    }
+    if recorded_parser_replay && !(is_json && section_context && section_item.is_some()) {
+        let message =
+            "--recorded-parser-replay requires --json, --section-context, and --section-item";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        std::process::exit(1);
+    }
+    if recorded_parser_replay && compare_path.is_some() {
+        let message = "--recorded-parser-replay cannot be combined with --compare-file";
         if is_json {
             println!("{}", json!({"errors": [message]}));
         } else {
@@ -3138,6 +3263,7 @@ fn main() {
                     is_alpha,
                     emit_phase_trace,
                     coordinate_bit,
+                    recorded_parser_replay,
                 );
                 if let Some(record_path) = candidate_evidence_records.as_deref() {
                     let candidate_evidence =
@@ -3232,6 +3358,7 @@ fn main() {
                         compare_is_alpha,
                         emit_phase_trace,
                         coordinate_bit,
+                        false,
                     );
                     let start_delta_bits =
                         item.range.start as i64 - comparison_item.range.start as i64;
