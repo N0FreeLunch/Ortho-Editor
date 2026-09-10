@@ -354,6 +354,130 @@ fn compare_first_difference_offset(left: &[bool], right: &[bool], base_bit: u64)
     None
 }
 
+fn raw_bits_for_range(bytes: &[u8], start_bit: u64, end_bit: u64) -> Result<Vec<bool>, String> {
+    if end_bit < start_bit || end_bit > bytes.len() as u64 * 8 {
+        return Err(format!(
+            "selected range {}..{} is outside the {}-bit fixture",
+            start_bit,
+            end_bit,
+            bytes.len() as u64 * 8
+        ));
+    }
+
+    Ok((start_bit..end_bit)
+        .map(|absolute_bit| {
+            let byte = bytes[(absolute_bit / 8) as usize];
+            ((byte >> (absolute_bit % 8)) & 1) != 0
+        })
+        .collect())
+}
+
+fn compact_transition_variant_report(
+    name: &str,
+    compact_flag: bool,
+    item: &Item,
+    section_item_index: usize,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    raw_bits: &[bool],
+) -> serde_json::Value {
+    let mut candidate = item.clone();
+    candidate.bits.clear();
+    candidate.header.is_compact = compact_flag;
+
+    match candidate.to_bits_with_phase_trace(section_item_index, huffman, alpha_mode) {
+        Ok((emitted_bits, phases)) => {
+            let overlap = raw_bits.len().min(emitted_bits.len());
+            let first_difference_local = raw_bits[..overlap]
+                .iter()
+                .zip(&emitted_bits[..overlap])
+                .position(|(left, right)| left != right)
+                .or_else(|| (raw_bits.len() != emitted_bits.len()).then_some(overlap));
+            let hamming_distance_overlap = raw_bits[..overlap]
+                .iter()
+                .zip(&emitted_bits[..overlap])
+                .filter(|(left, right)| left != right)
+                .count();
+
+            json!({
+                "name": name,
+                "compact_flag": compact_flag,
+                "emitted_bit_count": emitted_bits.len(),
+                "first_difference_local": first_difference_local,
+                "first_difference_absolute": first_difference_local
+                    .map(|local| item.range.start + local as u64),
+                "hamming_distance_overlap": hamming_distance_overlap,
+                "length_delta": emitted_bits.len() as i64 - raw_bits.len() as i64,
+                "phases": phases,
+                "typed_error": serde_json::Value::Null,
+            })
+        }
+        Err(error) => json!({
+            "name": name,
+            "compact_flag": compact_flag,
+            "emitted_bit_count": serde_json::Value::Null,
+            "first_difference_local": serde_json::Value::Null,
+            "first_difference_absolute": serde_json::Value::Null,
+            "hamming_distance_overlap": serde_json::Value::Null,
+            "length_delta": serde_json::Value::Null,
+            "phases": [],
+            "typed_error": error.to_string(),
+        }),
+    }
+}
+
+fn compact_transition_probe_report(
+    bytes: &[u8],
+    item: &Item,
+    section_item_index: usize,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+) -> serde_json::Value {
+    let raw_bits = match raw_bits_for_range(bytes, item.range.start, item.range.end) {
+        Ok(bits) => bits,
+        Err(error) => {
+            return json!({
+                "report_only": true,
+                "semantic_authorization": false,
+                "selected_section_item_index": section_item_index,
+                "selected_range": {"start": item.range.start, "end": item.range.end},
+                "raw_bit_count": serde_json::Value::Null,
+                "variants": [],
+                "typed_error": error,
+            });
+        }
+    };
+
+    json!({
+        "report_only": true,
+        "semantic_authorization": false,
+        "selected_section_item_index": section_item_index,
+        "selected_range": {"start": item.range.start, "end": item.range.end},
+        "raw_bit_count": raw_bits.len(),
+        "variants": [
+            compact_transition_variant_report(
+                "baseline",
+                item.header.is_compact,
+                item,
+                section_item_index,
+                huffman,
+                alpha_mode,
+                &raw_bits,
+            ),
+            compact_transition_variant_report(
+                "compact_true",
+                true,
+                item,
+                section_item_index,
+                huffman,
+                alpha_mode,
+                &raw_bits,
+            ),
+        ],
+        "typed_error": serde_json::Value::Null,
+    })
+}
+
 fn classify_local_73_padding_influence(
     with_padding_bits: &[bool],
     without_padding_bits: &[bool],
@@ -2027,6 +2151,12 @@ fn main() {
         Some("emit-phase-trace"),
         "Expose bounded strict-emission phase provenance for a selected section item",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "compact-transition-probe",
+        None,
+        Some("compact-transition-probe"),
+        "Report-only comparison of baseline and forced-compact emission for a selected item",
+    ));
     parser.add_spec(ArgSpec::option(
         "coordinate-bit",
         None,
@@ -2199,6 +2329,7 @@ fn main() {
     let candidate_evidence_records = parsed.get("candidate-evidence-records").map(PathBuf::from);
     let section_segment_witnesses = parsed.is_set("section-segment-witnesses");
     let emit_phase_trace = parsed.is_set("emit-phase-trace");
+    let compact_transition_probe = parsed.is_set("compact-transition-probe");
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
@@ -2256,6 +2387,25 @@ fn main() {
             eprintln!("error: {}", message);
         }
         return;
+    }
+    if compact_transition_probe && !(is_json && section_context && section_item.is_some()) {
+        let message =
+            "--compact-transition-probe requires --json, --section-context, and --section-item";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        std::process::exit(1);
+    }
+    if compact_transition_probe && compare_path.is_some() {
+        let message = "--compact-transition-probe cannot be combined with --compare-file";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        std::process::exit(1);
     }
     if marker_reparse_limit_bits.is_some()
         && !(is_json && marker_section.is_some() && marker_ordinal.is_some())
@@ -3000,6 +3150,20 @@ fn main() {
                         };
                     if let Some(object) = report.as_object_mut() {
                         object.insert("candidate_evidence".to_string(), candidate_evidence);
+                    }
+                }
+                if compact_transition_probe {
+                    if let Some(object) = report.as_object_mut() {
+                        object.insert(
+                            "compact_transition_probe".to_string(),
+                            compact_transition_probe_report(
+                                &bytes,
+                                item,
+                                section_item_index,
+                                &huffman,
+                                is_alpha,
+                            ),
+                        );
                     }
                 }
                 if let Some(compare_path) = compare_path {
