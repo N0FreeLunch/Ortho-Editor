@@ -509,6 +509,32 @@ pub fn hypothesis_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
     })
 }
 
+/// Custom test attribute for settled fixture/preservation contracts (ADR-0021).
+/// Records an evidence-backed contract that is neither a semantic inference nor a repair candidate.
+/// Failure protocol: Re-check the raw authority or an intentional preservation-policy change before updating.
+#[proc_macro_attribute]
+pub fn settled_contract_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input: syn::ItemFn = match syn::parse(item) {
+        Ok(f) => f,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let attrs = &input.attrs;
+    let vis = &input.vis;
+    let sig = &input.sig;
+    let body = &input.block;
+
+    TokenStream::from(quote! {
+        #[test]
+        #(#attrs)*
+        #vis #sig {
+            // Settled Contract Boundary: Re-check raw authority or preservation policy;
+            // do not treat a delta as semantic proof or a repair candidate (ADR-0021).
+            #body
+        }
+    })
+}
+
 /// Custom test attribute for Deep Diagnostic Radar tests (ADR-0021, Thinking 3800, 3911).
 /// High-cost corpus-wide audits (87~143 saves). Automatically ignored by default in regular test runs.
 /// Runnable on-demand via `cargo test -- --ignored <test_name>`.
@@ -534,4 +560,3 @@ pub fn radar_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     })
 }
-

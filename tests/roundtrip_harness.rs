@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 mod roundtrip_tests {
+    use d2r_macros::settled_contract_test;
     use d2r_core::domain::vo::align_to_byte;
     use d2r_core::item::{normalize_alpha_code_hint, HuffmanTree, Item};
     use d2r_core::save::find_jm_markers;
@@ -659,7 +660,7 @@ mod roundtrip_tests {
         // If future slices make tsc standalone-parseable, this assertion must be updated.
     }
 
-    #[test]
+    #[settled_contract_test]
     fn test_v105_slice2_equipment_declared_count_and_residue_contract() {
         let bytes = fs::read(repo_path(
             "tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",

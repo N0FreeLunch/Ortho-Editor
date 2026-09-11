@@ -1,4 +1,4 @@
-use d2r_macros::{invariant_test, hypothesis_test, radar_test};
+use d2r_macros::{hypothesis_test, invariant_test, radar_test, settled_contract_test};
 
 #[invariant_test]
 fn test_invariant_attribute_execution() {
@@ -10,6 +10,16 @@ fn test_invariant_attribute_execution() {
 fn test_hypothesis_attribute_execution() {
     let observed_count = 34;
     assert_eq!(observed_count, 34, "Hypothesis snapshot observation");
+}
+
+#[settled_contract_test]
+fn test_settled_contract_attribute_execution() {
+    let declared_count = 16;
+    let non_residue_count = 16;
+    assert_eq!(
+        non_residue_count, declared_count,
+        "Fixture contract changed"
+    );
 }
 
 #[radar_test]
