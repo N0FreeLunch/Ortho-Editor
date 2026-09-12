@@ -529,6 +529,44 @@ fn classify_local_73_padding_influence(
     }
 }
 
+fn cursor_trace_tail<R: BitRead>(cursor: &BitCursor<R>) -> serde_json::Value {
+    let event_json = |event: &d2r_core::data::bit_cursor::BitReadTraceEvent| {
+        json!({
+            "label": event.operation_label,
+            "pre_read_bit": event.pre_read_bit,
+            "post_read_bit": event.post_read_bit,
+            "requested_width_bits": event.requested_width_bits,
+            "outcome": event.outcome,
+            "context": event.context_stack,
+        })
+    };
+    let active_segments = cursor.active_segments();
+    let last_segment = cursor
+        .segments()
+        .iter()
+        .chain(active_segments.iter())
+        .max_by_key(|segment| (segment.end, segment.depth))
+        .map(|segment| {
+            json!({
+                "label": segment.label,
+                "start_bit": segment.start,
+                "end_bit": segment.end,
+                "depth": segment.depth,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null);
+    json!({
+        "last_operation": cursor.operation_events().last().map(event_json),
+        "last_successful_operation": cursor
+            .operation_events()
+            .iter()
+            .rev()
+            .find(|event| event.outcome == "success")
+            .map(event_json),
+        "last_segment_boundary": last_segment,
+    })
+}
+
 fn header_limit_provenance(
     bytes: &[u8],
     item: &Item,
@@ -537,6 +575,7 @@ fn header_limit_provenance(
     alpha_mode: bool,
     include_recorded_parser_replay: bool,
     include_recorded_body_probe: bool,
+    include_dual_limit_body_probe: bool,
 ) -> serde_json::Value {
     let range_start = item.range.start;
     let range_end = item.range.end;
@@ -883,6 +922,136 @@ fn header_limit_provenance(
             );
         }
     }
+    if include_dual_limit_body_probe {
+        let run_mode = |requested_limit_bits: u64| {
+            let applied_limit_bits = requested_limit_bits.min(available_bits);
+            let absolute_limit_bit = range_start.saturating_add(applied_limit_bits);
+            let mut reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
+            let _ = reader.skip(relative_start_bit as u32);
+            let mut cursor = BitCursor::new(reader);
+            cursor.set_pos(range_start);
+            cursor.base_pos = section_base_bit;
+            cursor.set_limit(absolute_limit_bit);
+            cursor.set_trace(true);
+
+            let result = match Item::read_header_stage(
+                &mut cursor,
+                huffman,
+                Some((section_bytes, relative_start_bit)),
+                alpha_mode,
+                local_item_index,
+                section_input.forced_compact,
+                Some(code_hint),
+            ) {
+                Err(error) => json!({
+                    "status": "header_failure",
+                    "error": error.to_string(),
+                    "terminal_cursor_bit": cursor.pos(),
+                }),
+                Ok(stage) => {
+                    let code_peek = Some(code_hint)
+                        .filter(|hint| !hint.trim().is_empty())
+                        .or(stage.peek.as_ref().map(|peek| peek.3.as_str()));
+                    let compact_base_pos_before = cursor.base_pos;
+                    if stage.header.is_compact {
+                        cursor.base_pos = range_start;
+                    }
+                    let compact_base_pos_after = cursor.base_pos;
+                    let stats_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
+                        stage.header.version,
+                        stage
+                            .header
+                            .quality
+                            .unwrap_or(d2r_core::domain::item::quality::ItemQuality::Normal),
+                        stage.header.save_is_alpha,
+                    )
+                    .with_index(local_item_index)
+                    .with_compact(stage.header.is_compact)
+                    .with_code(code_peek.unwrap_or(""));
+                    let header_only = stats_axiom
+                        .is_header_only(stage.header.flags, code_peek.unwrap_or(""));
+                    let header = json!({
+                        "header_cursor_bit": cursor.pos(),
+                        "body_remaining_bits": cursor.remaining(),
+                        "header_is_compact": stage.header.is_compact,
+                        "header_only": header_only,
+                        "compact_base_pos_before": compact_base_pos_before,
+                        "compact_base_pos_after": compact_base_pos_after,
+                        "code_hint": code_peek.map(str::trim),
+                    });
+                    if header_only {
+                        json!({
+                            "status": "header_only",
+                            "header": header,
+                            "body": {
+                                "status": "not_invoked",
+                                "reason": "full parser returns from header-only branch",
+                                "terminal_cursor_bit": cursor.pos(),
+                                "remaining_bits": cursor.remaining(),
+                            },
+                        })
+                    } else {
+                        match d2r_core::domain::item::entity::parse_item_body(
+                            &mut cursor,
+                            huffman,
+                            &stage.header,
+                            stage.header.save_is_alpha,
+                            code_peek,
+                        ) {
+                            Ok((body, alpha_code_bits, _, _, _)) => json!({
+                                "status": "body_success",
+                                "header": header,
+                                "body": {
+                                    "status": "success",
+                                    "terminal_cursor_bit": cursor.pos(),
+                                    "remaining_bits": cursor.remaining(),
+                                    "code": body.code.trim(),
+                                    "alpha_code_bit_count": alpha_code_bits.len(),
+                                },
+                            }),
+                            Err(error) => json!({
+                                "status": "body_failure",
+                                "header": header,
+                                "body": {
+                                    "status": "failure",
+                                    "error": error.to_string(),
+                                    "terminal_cursor_bit": cursor.pos(),
+                                    "remaining_bits": cursor.remaining(),
+                                },
+                            }),
+                        }
+                    }
+                }
+            };
+            json!({
+                "requested_limit_bits": requested_limit_bits,
+                "applied_limit_bits": applied_limit_bits,
+                "absolute_limit_bit": absolute_limit_bit,
+                "result": result,
+                "trace": cursor_trace_tail(&cursor),
+            })
+        };
+
+        if let Some(object) = report.as_object_mut() {
+            object.insert(
+                "dual_limit_body_probe".to_string(),
+                json!({
+                    "provenance": "controlled_decoder_reuses_read_header_stage_and_parse_item_body",
+                    "evidence_surface": "controlled-decoder",
+                    "report_only": true,
+                    "semantic_authorization": false,
+                    "forced_compact": section_input.forced_compact,
+                    "source_range": {
+                        "start": range_start,
+                        "end": range_end,
+                        "bit_length": raw_len_bits,
+                    },
+                    "recorded": run_mode(original_limit_bits),
+                    "selected_range": run_mode(raw_len_bits),
+                }),
+            );
+        }
+    }
     report
 }
 
@@ -907,6 +1076,7 @@ fn section_context_report(
     coordinate_bit: Option<u64>,
     include_recorded_parser_replay: bool,
     include_recorded_body_probe: bool,
+    include_dual_limit_body_probe: bool,
 ) -> serde_json::Value {
     let raw_len_bits = item.range.end.saturating_sub(item.range.start);
     let code_hint = item.code.trim().to_string();
@@ -973,6 +1143,7 @@ fn section_context_report(
         alpha_mode,
         include_recorded_parser_replay,
         include_recorded_body_probe,
+        include_dual_limit_body_probe,
     );
     let identity_axiom = d2r_core::domain::stats::axiom::StatsAxiom::new(
         item.header.version,
@@ -2377,6 +2548,12 @@ fn main() {
         Some("recorded-body-probe"),
         "Report-only header-to-body probe using the selected item's recorded section parser input",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "dual-limit-body-probe",
+        None,
+        Some("dual-limit-body-probe"),
+        "Report-only recorded-limit versus selected-range header-to-body comparison",
+    ));
     parser.add_spec(ArgSpec::option(
         "coordinate-bit",
         None,
@@ -2552,6 +2729,7 @@ fn main() {
     let compact_transition_probe = parsed.is_set("compact-transition-probe");
     let recorded_parser_replay = parsed.is_set("recorded-parser-replay");
     let recorded_body_probe = parsed.is_set("recorded-body-probe");
+    let dual_limit_body_probe = parsed.is_set("dual-limit-body-probe");
     let coordinate_bit = parsed
         .get("coordinate-bit")
         .and_then(|s| s.parse::<u64>().ok());
@@ -2660,6 +2838,25 @@ fn main() {
     }
     if recorded_body_probe && compare_path.is_some() {
         let message = "--recorded-body-probe cannot be combined with --compare-file";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        std::process::exit(1);
+    }
+    if dual_limit_body_probe && !(is_json && section_context && section_item.is_some()) {
+        let message =
+            "--dual-limit-body-probe requires --json, --section-context, and --section-item";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        std::process::exit(1);
+    }
+    if dual_limit_body_probe && compare_path.is_some() {
+        let message = "--dual-limit-body-probe cannot be combined with --compare-file";
         if is_json {
             println!("{}", json!({"errors": [message]}));
         } else {
@@ -3400,6 +3597,7 @@ fn main() {
                     coordinate_bit,
                     recorded_parser_replay,
                     recorded_body_probe,
+                    dual_limit_body_probe,
                 );
                 if let Some(record_path) = candidate_evidence_records.as_deref() {
                     let candidate_evidence =
@@ -3494,6 +3692,7 @@ fn main() {
                         compare_is_alpha,
                         emit_phase_trace,
                         coordinate_bit,
+                        false,
                         false,
                         false,
                     );
