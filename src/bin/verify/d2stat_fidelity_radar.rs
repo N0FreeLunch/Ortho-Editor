@@ -2,6 +2,7 @@ use clap_stub::parse_args;
 use d2r_core::item::{HuffmanTree, Item};
 use rayon::prelude::*;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -103,7 +104,33 @@ struct RadarReport {
     forensic_strict_rebuild_examined: usize,
     forensic_strict_rebuild_lossless: usize,
     forensic_strict_rebuild_rate: f64,
+    forensic_taxonomy: ForensicTaxonomy,
     mismatches: Vec<RadarMismatch>,
+}
+
+#[derive(Debug, Serialize, Default)]
+struct ForensicTaxonomy {
+    by_code: BTreeMap<String, usize>,
+    by_slot: BTreeMap<String, usize>,
+    by_quality: BTreeMap<String, usize>,
+    by_reason: BTreeMap<String, usize>,
+}
+
+impl ForensicTaxonomy {
+    fn merge(&mut self, other: Self) {
+        for (k, v) in other.by_code {
+            *self.by_code.entry(k).or_insert(0) += v;
+        }
+        for (k, v) in other.by_slot {
+            *self.by_slot.entry(k).or_insert(0) += v;
+        }
+        for (k, v) in other.by_quality {
+            *self.by_quality.entry(k).or_insert(0) += v;
+        }
+        for (k, v) in other.by_reason {
+            *self.by_reason.entry(k).or_insert(0) += v;
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -132,6 +159,7 @@ impl RadarReport {
         self.standard_strict_rebuild_lossless += other.standard_strict_rebuild_lossless;
         self.forensic_strict_rebuild_examined += other.forensic_strict_rebuild_examined;
         self.forensic_strict_rebuild_lossless += other.forensic_strict_rebuild_lossless;
+        self.forensic_taxonomy.merge(other.forensic_taxonomy);
         self.mismatches.append(&mut other.mismatches);
     }
 }
@@ -183,7 +211,6 @@ fn record_item_metrics(
         || item.is_residue()
         || item.is_semi_opaque()
         || item.body.v105_7mgw_payload.is_some()
-        || matches!(trimmed, "xrs" | "wa2" | "c8xr" | "rhd" | "ks d" | "b7ts" | "oesw")
         || item.modules.iter().any(|m| {
             matches!(
                 m,
@@ -195,6 +222,68 @@ fn record_item_metrics(
 
     if is_forensic {
         report.forensic_items_count += 1;
+
+        // Taxonomy breakdown
+        let code_key = if trimmed.is_empty() { "(empty)".to_string() } else { trimmed.to_string() };
+        *report.forensic_taxonomy.by_code.entry(code_key).or_insert(0) += 1;
+
+        let slot_key = if item.header.location == 1 {
+            match item.header.y {
+                1 => "Equipped:Helm",
+                2 => "Equipped:Amulet",
+                3 => "Equipped:Armor",
+                4 => "Equipped:RightHand",
+                5 => "Equipped:LeftHand",
+                6 => "Equipped:RightRing",
+                7 => "Equipped:LeftRing",
+                8 => "Equipped:Belt",
+                9 => "Equipped:Boots",
+                10 => "Equipped:Gloves",
+                11 => "Equipped:AlternateRight",
+                12 => "Equipped:AlternateLeft",
+                _ => "Equipped:Other",
+            }.to_string()
+        } else {
+            match item.header.location {
+                0 => "Stored:Inventory/Stash/Cube",
+                2 => "BeltStorage",
+                4 => "Socketed",
+                _ => "OtherLocation",
+            }.to_string()
+        };
+        *report.forensic_taxonomy.by_slot.entry(slot_key).or_insert(0) += 1;
+
+        let quality_key = match item.header.quality {
+            Some(q) => format!("{:?}", q),
+            None => if let Some(raw_q) = item.header.alpha_quality_raw {
+                format!("AlphaRawQuality({})", raw_q)
+            } else {
+                "UnknownQuality".to_string()
+            },
+        };
+        *report.forensic_taxonomy.by_quality.entry(quality_key).or_insert(0) += 1;
+
+        let reason_key = if trimmed.is_empty() {
+            "EmptyCode".to_string()
+        } else if item.is_residue() {
+            "ScannerResidue".to_string()
+        } else if item.body.v105_7mgw_payload.is_some() {
+            "V105_7mgwPayload".to_string()
+        } else if item.is_semi_opaque() {
+            let reason = item.modules.iter().find_map(|m| {
+                if let d2r_core::domain::item::ItemModule::SemiOpaque { reason, .. } = m {
+                    Some(reason.clone())
+                } else {
+                    None
+                }
+            }).unwrap_or_else(|| "SemiOpaqueWithoutReason".to_string());
+            format!("SemiOpaque({})", reason)
+        } else if item.is_opaque() {
+            "OpaqueBitstream".to_string()
+        } else {
+            "OtherModuleForensic".to_string()
+        };
+        *report.forensic_taxonomy.by_reason.entry(reason_key).or_insert(0) += 1;
     } else {
         report.standard_items_count += 1;
     }

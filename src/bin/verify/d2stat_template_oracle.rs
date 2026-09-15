@@ -191,7 +191,7 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
 
     // 3. Check Runeword template
     if item.header.is_runeword || item.is_runeword {
-        if alpha_mode && trimmed == "wa2" {
+        if alpha_mode && trimmed == "wa2" && (item.header.flags == 0x0000401f || item.properties.len() >= 15) {
             return Some(MatchedTemplate::AlphaWitnessRuneword {
                 name: "AlphaAuthorityRuneword_wa2",
                 stats: ALPHA_V105_WA2_RUNEWORD_STATS,

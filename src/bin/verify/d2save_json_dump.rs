@@ -262,72 +262,7 @@ fn main() {
                 }));
             }
 
-            let mut item_clone = item.clone();
-            if item.code.trim() == "wa2" && item.header.is_runeword {
-                use d2r_core::item::ItemBitRange;
-                let default_range = ItemBitRange { start: 0, end: 0 };
-                // Ground Truth Authority Runeword Properties (Hel + Shael + Ral)
-                item_clone.properties = vec![
-                    ItemProperty::new(
-                        198, // item_skillonhit
-                        "item_skillonhit".to_string(),
-                        (120 << 6) | 15, // Chain of Poison (id 120), level 15
-                        10,
-                        10, // 10% chance
-                        default_range,
-                    ),
-                    ItemProperty::new(
-                        201, // item_skillongethit
-                        "item_skillongethit".to_string(),
-                        (125 << 6) | 10, // Mind Barrier (id 125), level 10
-                        2,
-                        2, // 2% chance
-                        default_range,
-                    ),
-                    ItemProperty::new(
-                        127, // item_allskills
-                        "item_allskills".to_string(),
-                        0,
-                        2,
-                        2,
-                        default_range,
-                    ),
-                    ItemProperty::new(
-                        99, // item_fastergethitrate (Shael)
-                        "item_fastergethitrate".to_string(),
-                        0,
-                        20,
-                        20,
-                        default_range,
-                    ),
-                    ItemProperty::new(
-                        17, // item_maxdamage_percent
-                        "item_maxdamage_percent".to_string(),
-                        0,
-                        50,
-                        50,
-                        default_range,
-                    ),
-                    ItemProperty::new(
-                        91, // item_req_percent (Hel)
-                        "item_req_percent".to_string(),
-                        0,
-                        15,
-                        -15,
-                        default_range,
-                    ),
-                    ItemProperty::new(
-                        39, // fireresist (Ral)
-                        "fireresist".to_string(),
-                        0,
-                        30,
-                        30,
-                        default_range,
-                    ),
-                ];
-            }
-
-            let mut props_json = serialize_item_properties(&item_clone.properties);
+            let mut props_json = serialize_item_properties(&item.properties);
             if props_json.is_empty() {
                 if let Some(payload) = &item.body.v105_7mgw_payload {
                     let decoded = decode_opaque_bits_properties(payload);
@@ -337,8 +272,8 @@ fn main() {
                 }
             }
 
-            let fmt_ko = d2r_core::engine::formatter::format_item(&item_clone, "ko", 0, level as u8);
-            let fmt_en = d2r_core::engine::formatter::format_item(&item_clone, "en", 0, level as u8);
+            let fmt_ko = d2r_core::engine::formatter::format_item(item, "ko", 0, level as u8);
+            let fmt_en = d2r_core::engine::formatter::format_item(item, "en", 0, level as u8);
 
             let item_data = json!({
                 "index": i,
@@ -366,9 +301,9 @@ fn main() {
                     "bit_count": item.body.v105_7mgw_payload.as_ref().map(|b| b.len()).unwrap_or(0)
                 }),
                 "option_fidelity": json!({
-                    "coverage_percent": item_clone.detailed_option_fidelity().coverage_percent,
-                    "validity_percent": item_clone.detailed_option_fidelity().validity_percent,
-                    "composite_score": item_clone.detailed_option_fidelity().composite_fidelity_score,
+                    "coverage_percent": item.detailed_option_fidelity().coverage_percent,
+                    "validity_percent": item.detailed_option_fidelity().validity_percent,
+                    "composite_score": item.detailed_option_fidelity().composite_fidelity_score,
                 }),
                 "defense": item.defense,
                 "max_durability": item.max_durability,
