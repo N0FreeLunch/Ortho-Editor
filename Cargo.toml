@@ -140,6 +140,10 @@ name = "d2save_hex_tail"
 path = "src/bin/verify/d2save_hex_tail.rs"
 
 [[bin]]
+name = "d2save_oracle_mutate"
+path = "src/bin/verify/d2save_oracle_mutate.rs"
+
+[[bin]]
 name = "d2save_inventory_check"
 path = "src/bin/verify/d2save_inventory_check.rs"
 
