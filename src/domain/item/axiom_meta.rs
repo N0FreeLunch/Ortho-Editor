@@ -168,6 +168,8 @@ pub struct FidelityContract {
     pub section: &'static str,
     pub preservation: &'static str,
     pub semantic_coverage: &'static str,
+    pub semantic_disposition: &'static str,
+    pub evidence_level: &'static str,
     pub owner: &'static str,
     pub required_proof: &'static str,
 }
@@ -179,6 +181,8 @@ impl FidelityContract {
         section: &'static str,
         preservation: &'static str,
         semantic_coverage: &'static str,
+        semantic_disposition: &'static str,
+        evidence_level: &'static str,
         owner: &'static str,
         required_proof: &'static str,
     ) -> Self {
@@ -188,6 +192,8 @@ impl FidelityContract {
             section,
             preservation,
             semantic_coverage,
+            semantic_disposition,
+            evidence_level,
             owner,
             required_proof,
         }

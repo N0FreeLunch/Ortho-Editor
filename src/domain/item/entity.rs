@@ -41,22 +41,53 @@ pub struct AlphaV105PostBodyAlignment;
     section = "header_gap_alignment",
     preservation = "exact",
     semantic_coverage = "none",
+    semantic_disposition = "not_applicable",
+    evidence_level = "none",
     owner = "AlphaV105HeaderGapAlignment",
     required_proof = "targeted_fixture"
 )]
 pub struct AlphaV105HeaderGapAlignment;
 
+/// Declares the oracle-gated identity seam without assigning an item identity.
+#[fidelity_contract(
+    metric_version = "item_fidelity_v1",
+    format_family = "alpha_v105",
+    section = "ae7_7pw_identity",
+    preservation = "exact",
+    semantic_coverage = "none",
+    semantic_disposition = "deferred",
+    evidence_level = "hypothesis",
+    owner = "AlphaV105DeferredItemIdentity",
+    required_proof = "authority_fixture"
+)]
+pub struct AlphaV105DeferredItemIdentity;
+
 /// Returns the explicitly registered static contracts consumed by fidelity audits.
-pub fn item_fidelity_contracts() -> [FidelityContract; 1] {
-    [FidelityContract::new(
-        AlphaV105HeaderGapAlignment::FIDELITY_METRIC_VERSION,
-        AlphaV105HeaderGapAlignment::FIDELITY_FORMAT_FAMILY,
-        AlphaV105HeaderGapAlignment::FIDELITY_SECTION,
-        AlphaV105HeaderGapAlignment::FIDELITY_PRESERVATION,
-        AlphaV105HeaderGapAlignment::FIDELITY_SEMANTIC_COVERAGE,
-        AlphaV105HeaderGapAlignment::FIDELITY_OWNER,
-        AlphaV105HeaderGapAlignment::FIDELITY_REQUIRED_PROOF,
-    )]
+pub fn item_fidelity_contracts() -> [FidelityContract; 2] {
+    [
+        FidelityContract::new(
+            AlphaV105HeaderGapAlignment::FIDELITY_METRIC_VERSION,
+            AlphaV105HeaderGapAlignment::FIDELITY_FORMAT_FAMILY,
+            AlphaV105HeaderGapAlignment::FIDELITY_SECTION,
+            AlphaV105HeaderGapAlignment::FIDELITY_PRESERVATION,
+            AlphaV105HeaderGapAlignment::FIDELITY_SEMANTIC_COVERAGE,
+            AlphaV105HeaderGapAlignment::FIDELITY_SEMANTIC_DISPOSITION,
+            AlphaV105HeaderGapAlignment::FIDELITY_EVIDENCE_LEVEL,
+            AlphaV105HeaderGapAlignment::FIDELITY_OWNER,
+            AlphaV105HeaderGapAlignment::FIDELITY_REQUIRED_PROOF,
+        ),
+        FidelityContract::new(
+            AlphaV105DeferredItemIdentity::FIDELITY_METRIC_VERSION,
+            AlphaV105DeferredItemIdentity::FIDELITY_FORMAT_FAMILY,
+            AlphaV105DeferredItemIdentity::FIDELITY_SECTION,
+            AlphaV105DeferredItemIdentity::FIDELITY_PRESERVATION,
+            AlphaV105DeferredItemIdentity::FIDELITY_SEMANTIC_COVERAGE,
+            AlphaV105DeferredItemIdentity::FIDELITY_SEMANTIC_DISPOSITION,
+            AlphaV105DeferredItemIdentity::FIDELITY_EVIDENCE_LEVEL,
+            AlphaV105DeferredItemIdentity::FIDELITY_OWNER,
+            AlphaV105DeferredItemIdentity::FIDELITY_REQUIRED_PROOF,
+        ),
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

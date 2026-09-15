@@ -371,6 +371,8 @@ pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut section = None;
     let mut preservation = None;
     let mut semantic_coverage = None;
+    let mut semantic_disposition = None;
+    let mut evidence_level = None;
     let mut owner = None;
     let mut required_proof = None;
 
@@ -385,6 +387,10 @@ pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
             (&mut preservation, "preservation")
         } else if meta.path.is_ident("semantic_coverage") {
             (&mut semantic_coverage, "semantic_coverage")
+        } else if meta.path.is_ident("semantic_disposition") {
+            (&mut semantic_disposition, "semantic_disposition")
+        } else if meta.path.is_ident("evidence_level") {
+            (&mut evidence_level, "evidence_level")
         } else if meta.path.is_ident("owner") {
             (&mut owner, "owner")
         } else if meta.path.is_ident("required_proof") {
@@ -428,6 +434,14 @@ pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(value) if matches!(value.as_str(), "none" | "partial" | "expected") => value,
         _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'semantic_coverage' must be \"none\", \"partial\", or \"expected\". Self-Healing Hint: declare the semantic obligation separately from preservation.").to_compile_error().into(),
     };
+    let semantic_disposition = match semantic_disposition {
+        Some(value) if matches!(value.as_str(), "not_applicable" | "deferred" | "resolved") => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'semantic_disposition' must be \"not_applicable\", \"deferred\", or \"resolved\". Self-Healing Hint: declare whether semantic interpretation is inapplicable, safely deferred, or independently resolved.").to_compile_error().into(),
+    };
+    let evidence_level = match evidence_level {
+        Some(value) if matches!(value.as_str(), "none" | "hypothesis" | "verified") => value,
+        _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'evidence_level' must be \"none\", \"hypothesis\", or \"verified\". Self-Healing Hint: declare static evidence strength without claiming a runtime result.").to_compile_error().into(),
+    };
     let owner = match owner {
         Some(value) if !value.is_empty() => value,
         _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] requires non-empty 'owner'. Self-Healing Hint: name the stable parser or marker owner.").to_compile_error().into(),
@@ -436,6 +450,13 @@ pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(value) if matches!(value.as_str(), "targeted_fixture" | "authority_fixture" | "corpus_regression") => value,
         _ => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'required_proof' must be \"targeted_fixture\", \"authority_fixture\", or \"corpus_regression\". Self-Healing Hint: select the next required runtime proof.").to_compile_error().into(),
     };
+
+    match semantic_disposition.as_str() {
+        "not_applicable" if evidence_level != "none" => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'not_applicable' requires evidence_level = \"none\". Self-Healing Hint: use 'deferred' only for an oracle-gated semantic hypothesis.").to_compile_error().into(),
+        "deferred" if semantic_coverage != "none" || evidence_level != "hypothesis" || required_proof != "authority_fixture" => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'deferred' requires semantic_coverage = \"none\", evidence_level = \"hypothesis\", and required_proof = \"authority_fixture\". Self-Healing Hint: deferred contracts preserve bytes but must not claim semantic resolution.").to_compile_error().into(),
+        "resolved" if semantic_coverage == "none" || evidence_level != "verified" => return syn::Error::new(proc_macro2::Span::call_site(), "#[fidelity_contract] 'resolved' requires semantic coverage and evidence_level = \"verified\". Self-Healing Hint: do not resolve a semantic seam without independent proof.").to_compile_error().into(),
+        _ => {}
+    }
 
     let name = match &input {
         syn::Item::Struct(item_struct) => &item_struct.ident,
@@ -453,6 +474,8 @@ pub fn fidelity_contract(attr: TokenStream, item: TokenStream) -> TokenStream {
             pub const FIDELITY_SECTION: &'static str = #section;
             pub const FIDELITY_PRESERVATION: &'static str = #preservation;
             pub const FIDELITY_SEMANTIC_COVERAGE: &'static str = #semantic_coverage;
+            pub const FIDELITY_SEMANTIC_DISPOSITION: &'static str = #semantic_disposition;
+            pub const FIDELITY_EVIDENCE_LEVEL: &'static str = #evidence_level;
             pub const FIDELITY_OWNER: &'static str = #owner;
             pub const FIDELITY_REQUIRED_PROOF: &'static str = #required_proof;
         }
