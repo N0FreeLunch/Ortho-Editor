@@ -149,7 +149,7 @@ pub fn read_item_stats<R: BitRead>(
     let item_start_rel = section_recovery
         .item_start_bit
         .saturating_sub(cursor.base_pos);
-    if is_v105_shadow_final {
+    if is_v105_shadow_final && trimmed_code != "wa2" {
         let skip_bits_count = if is_shadow_container { 30 } else { 47 };
         let skip_bits =
             cursor.with_context("AlphaShadowSkip", |c| c.read_bits::<u64>(skip_bits_count))?;

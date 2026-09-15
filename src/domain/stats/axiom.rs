@@ -400,6 +400,15 @@ impl StatsAxiom {
                 };
             }
 
+            if _is_runeword {
+                return PropertyRhythm {
+                    id_bits: 9,
+                    value_bits: Some(9),
+                    has_terminal_bit: false,
+                    has_extra_terminal_bit: false,
+                };
+            }
+
             // Alpha v105 Version 0 and 1 rows use a 17-bit rhythm
             // (9-bit stat id + 8-bit value). Reading the value as 9 bits overreads
             // the next property seam and produces the observed 256-offset drift.
@@ -415,7 +424,6 @@ impl StatsAxiom {
             if self.version == 2
                 || self.version == 4
                 || self.version == 6
-                || _is_runeword
                 || self.code.trim() == "Opaque"
             {
                 return PropertyRhythm {

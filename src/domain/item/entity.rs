@@ -3004,7 +3004,7 @@ impl ExtendedStatsData {
         let soft_truncate_on_limit = alpha_mode
             && matches!(
                 trimmed_code,
-                "jav" | "buc" | "ucb8" | "xrs" | "c8xr" | "rhd" | "wa2"
+                "jav" | "buc" | "ucb8" | "xrs" | "c8xr" | "rhd" | "wa2" | "bst"
             );
         trait IntoParsingError {
             fn into_parsing_error(self) -> crate::error::ParsingError;
