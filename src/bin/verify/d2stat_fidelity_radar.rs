@@ -15,6 +15,10 @@ mod clap_stub {
         pub token_efficient: bool,
         pub sequential: bool,
         pub strict_rebuild: bool,
+        pub metric_version: Option<String>,
+        pub parser_revision: Option<String>,
+        pub corpus_manifest: Option<String>,
+        pub worktree_state: Option<String>,
     }
 
     pub fn parse_args() -> Args {
@@ -26,6 +30,10 @@ mod clap_stub {
         let mut token_efficient = false;
         let mut sequential = false;
         let mut strict_rebuild = false;
+        let mut metric_version = None;
+        let mut parser_revision = None;
+        let mut corpus_manifest = None;
+        let mut worktree_state = None;
 
         let mut i = 1;
         while i < args.len() {
@@ -63,6 +71,30 @@ mod clap_stub {
                 "--strict-rebuild" => {
                     strict_rebuild = true;
                 }
+                "--metric-version" => {
+                    if i + 1 < args.len() {
+                        metric_version = Some(args[i + 1].clone());
+                        i += 1;
+                    }
+                }
+                "--parser-revision" => {
+                    if i + 1 < args.len() {
+                        parser_revision = Some(args[i + 1].clone());
+                        i += 1;
+                    }
+                }
+                "--corpus-manifest" => {
+                    if i + 1 < args.len() {
+                        corpus_manifest = Some(args[i + 1].clone());
+                        i += 1;
+                    }
+                }
+                "--worktree-state" => {
+                    if i + 1 < args.len() {
+                        worktree_state = Some(args[i + 1].clone());
+                        i += 1;
+                    }
+                }
                 _ => {}
             }
             i += 1;
@@ -76,6 +108,10 @@ mod clap_stub {
             token_efficient,
             sequential,
             strict_rebuild,
+            metric_version,
+            parser_revision,
+            corpus_manifest,
+            worktree_state,
         }
     }
 }
@@ -104,8 +140,18 @@ struct RadarReport {
     forensic_strict_rebuild_examined: usize,
     forensic_strict_rebuild_lossless: usize,
     forensic_strict_rebuild_rate: f64,
+    evaluation_context: EvaluationContext,
     forensic_taxonomy: ForensicTaxonomy,
     mismatches: Vec<RadarMismatch>,
+}
+
+#[derive(Debug, Serialize, Default)]
+struct EvaluationContext {
+    metric_version: String,
+    parser_revision: String,
+    corpus_manifest: String,
+    worktree_state: String,
+    strict_rebuild: bool,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -161,6 +207,28 @@ impl RadarReport {
         self.forensic_strict_rebuild_lossless += other.forensic_strict_rebuild_lossless;
         self.forensic_taxonomy.merge(other.forensic_taxonomy);
         self.mismatches.append(&mut other.mismatches);
+    }
+}
+
+fn evaluation_context(args: &clap_stub::Args) -> EvaluationContext {
+    EvaluationContext {
+        metric_version: args
+            .metric_version
+            .clone()
+            .unwrap_or_else(|| "radar-v1".to_string()),
+        parser_revision: args
+            .parser_revision
+            .clone()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        corpus_manifest: args
+            .corpus_manifest
+            .clone()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        worktree_state: args
+            .worktree_state
+            .clone()
+            .unwrap_or_else(|| "unrecorded".to_string()),
+        strict_rebuild: args.strict_rebuild,
     }
 }
 
@@ -416,7 +484,10 @@ fn analyze_save(path: &Path, strict_rebuild: bool) -> RadarReport {
 
 fn main() {
     let args = parse_args();
-    let mut report = RadarReport::default();
+    let mut report = RadarReport {
+        evaluation_context: evaluation_context(&args),
+        ..RadarReport::default()
+    };
     let mut save_files = Vec::new();
 
     if let Some(fixture_name) = &args.fixture_name {
@@ -495,5 +566,68 @@ fn main() {
         }
     } else {
         println!("{}", json_output);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evaluation_context_serializes_explicit_and_defaulted_values() {
+        let explicit = clap_stub::Args {
+            corpus_dir: None,
+            items_dir: None,
+            fixture_name: None,
+            output_file: None,
+            token_efficient: false,
+            sequential: false,
+            strict_rebuild: true,
+            metric_version: Some("radar-provenance-v1".to_string()),
+            parser_revision: Some("abc123".to_string()),
+            corpus_manifest: Some("normal-88-current".to_string()),
+            worktree_state: Some("clean".to_string()),
+        };
+        let defaulted = clap_stub::Args {
+            corpus_dir: None,
+            items_dir: None,
+            fixture_name: None,
+            output_file: None,
+            token_efficient: false,
+            sequential: false,
+            strict_rebuild: false,
+            metric_version: None,
+            parser_revision: None,
+            corpus_manifest: None,
+            worktree_state: None,
+        };
+
+        let report = RadarReport {
+            evaluation_context: evaluation_context(&explicit),
+            ..RadarReport::default()
+        };
+        let serialized = serde_json::to_value(report).expect("serialize radar report");
+
+        assert_eq!(
+            serialized["evaluation_context"]["metric_version"],
+            "radar-provenance-v1"
+        );
+        assert_eq!(
+            serialized["evaluation_context"]["parser_revision"],
+            "abc123"
+        );
+        assert_eq!(
+            serialized["evaluation_context"]["corpus_manifest"],
+            "normal-88-current"
+        );
+        assert_eq!(serialized["evaluation_context"]["worktree_state"], "clean");
+        assert_eq!(serialized["evaluation_context"]["strict_rebuild"], true);
+
+        let defaults = evaluation_context(&defaulted);
+        assert_eq!(defaults.metric_version, "radar-v1");
+        assert_eq!(defaults.parser_revision, "unrecorded");
+        assert_eq!(defaults.corpus_manifest, "unrecorded");
+        assert_eq!(defaults.worktree_state, "unrecorded");
+        assert!(!defaults.strict_rebuild);
     }
 }
