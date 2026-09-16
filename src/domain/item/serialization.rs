@@ -2183,7 +2183,7 @@ impl Item {
                     // carrier recovers raw alpha code bits; otherwise retain the original
                     // width-limited result.
                     if alpha_mode
-                        && parse_code_hint.trim() == "wrb"
+                        && matches!(parse_code_hint.trim(), "wrb" | "rin")
                         && target_width_override > 0
                         && (target_width_override as u64) < limit
                         && final_item.body.alpha_code_bits.is_empty()
