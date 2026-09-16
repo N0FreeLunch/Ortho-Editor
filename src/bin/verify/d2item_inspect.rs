@@ -1825,6 +1825,21 @@ fn section_context_report(
         "semantic_replay_authorized": false,
         "report_only": true,
     });
+    let code_emission_source = if alpha_mode && !item.body.alpha_code_bits.is_empty() {
+        "captured_alpha_code_bits"
+    } else if alpha_mode {
+        "huffman_encoded_normalized_code_fallback"
+    } else {
+        "huffman_encoded_code"
+    };
+    let code_emission_source_provenance = json!({
+        "source_kind": code_emission_source,
+        "normalized_code": normalized_code,
+        "captured_alpha_code_bit_count": item.body.alpha_code_bits.len(),
+        "alpha_mode": alpha_mode,
+        "semantic_authorization": false,
+        "report_only": true,
+    });
 
     json!({
         "section_item_index": section_item_index,
@@ -1853,6 +1868,7 @@ fn section_context_report(
         "strict_alignment_input_inventory": strict_alignment_input_inventory,
         "strict_alignment_source_witness": strict_alignment_source_witness,
         "parser_decision_provenance": parser_decision_provenance,
+        "code_emission_source_provenance": code_emission_source_provenance,
         "counterfactual_carrier_probe": counterfactual_carrier_probe,
         "strict_residual_mismatch_runs": strict_residual_mismatch_runs,
         "strict_with_padding_bit_count": with_padding_bits.len(),
