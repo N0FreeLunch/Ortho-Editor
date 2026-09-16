@@ -703,7 +703,9 @@ fn header_limit_provenance(
     };
 
     let available_bits = section_bit_len.saturating_sub(relative_start_bit);
-    let bounded_reparses = [73u64, 80u64].into_iter().map(|requested_limit_bits| {
+    let bounded_reparses = [73u64, 80u64, raw_len_bits]
+        .into_iter()
+        .map(|requested_limit_bits| {
         let applied_limit_bits = requested_limit_bits.min(available_bits);
         let mut carrier = d2r_core::domain::item::serialization::SegmentTraceCarrier::default();
         match d2r_core::domain::item::serialization::parse_item_at_with_limit_with_carrier(
@@ -713,12 +715,15 @@ fn header_limit_provenance(
             Ok((parsed, consumed_bits)) => json!({"requested_limit_bits": requested_limit_bits,
                 "applied_limit_bits": applied_limit_bits, "absolute_limit_bit": range_start.saturating_add(applied_limit_bits),
                 "status": "success", "consumed_bits": consumed_bits, "final_code": parsed.code.trim(),
+                "final_header_is_compact": parsed.header.is_compact,
+                "final_alpha_code_bit_count": parsed.body.alpha_code_bits.len(),
                 "crosses_selected_range_end": range_start.saturating_add(consumed_bits) > range_end}),
             Err(error) => json!({"requested_limit_bits": requested_limit_bits,
                 "applied_limit_bits": applied_limit_bits, "absolute_limit_bit": range_start.saturating_add(applied_limit_bits),
                 "status": "failure", "error": error.to_string(), "crosses_selected_range_end": carrier.final_bit > range_end}),
         }
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     let mut report = json!({
         "evidence_surface": "controlled-decoder", "report_only": true, "semantic_authorization": false,

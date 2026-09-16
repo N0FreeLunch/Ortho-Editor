@@ -2084,6 +2084,7 @@ impl Item {
             let forced_compact_for_parse = if is_compact_final { Some(true) } else { None };
             let parse_limit = Some(dynamic_limit);
 
+            let mut physical_carrier_reparse = false;
             let parse_result = if reject_candidate {
                 Err(ParsingFailure {
                     error: ParsingError::SpeculativeRejection {
@@ -2176,6 +2177,37 @@ impl Item {
                     let mut final_item = item.clone();
 
                     consumed_bits = consumed_bits.max(final_item.total_bits);
+
+                    // If a registry width truncates the code field, retry against the
+                    // physical marker-to-marker carrier. Promote only when the bounded
+                    // carrier recovers raw alpha code bits; otherwise retain the original
+                    // width-limited result.
+                    if alpha_mode
+                        && parse_code_hint.trim() == "wrb"
+                        && target_width_override > 0
+                        && (target_width_override as u64) < limit
+                        && final_item.body.alpha_code_bits.is_empty()
+                    {
+                        if let Ok((retry_item, retry_consumed)) = parse_item_at_with_limit(
+                            section_bytes,
+                            start,
+                            section_bit_offset,
+                            huffman,
+                            item_count,
+                            alpha_mode,
+                            Some(limit),
+                            forced_compact_for_parse,
+                            Some(parse_code_hint),
+                        ) {
+                            if !retry_item.body.alpha_code_bits.is_empty()
+                                && retry_consumed <= limit
+                            {
+                                final_item = retry_item;
+                                consumed_bits = retry_consumed;
+                                physical_carrier_reparse = true;
+                            }
+                        }
+                    }
 
                     if alpha_mode
                         && (marker.code.trim() == "wa2"
@@ -2326,7 +2358,7 @@ impl Item {
                             }
                         }
 
-                        if target_width > 0 {
+                        if target_width > 0 && !physical_carrier_reparse {
                             consumed_bits = target_width;
                         }
 
@@ -2347,10 +2379,15 @@ impl Item {
                     }
 
                     let actual_consumed = consumed_bits;
+                    let recorded_parse_limit = if physical_carrier_reparse {
+                        Some(limit)
+                    } else {
+                        parse_limit
+                    };
                     final_item.record_section_parse_input(
                         Some(parse_code_hint),
                         forced_compact_for_parse,
-                        parse_limit,
+                        recorded_parse_limit,
                         (target_width_override > 0).then_some(target_width_override as u64),
                         alignment_target_width_bits,
                         summary_limit_override_applied,
