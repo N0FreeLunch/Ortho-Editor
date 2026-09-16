@@ -77,6 +77,8 @@ pub struct TemplateOracleReport {
     pub value_in_range_stats: usize,
     pub missing_expected_stats: usize,
     pub extra_unmatched_stats: usize,
+    pub admitted_template_evaluations: usize,
+    pub template_identity_conflicts: usize,
     pub semantic_option_coverage_percent: Option<f64>,
     pub item_evaluations: Vec<ItemEvaluation>,
 }
@@ -85,9 +87,18 @@ pub struct TemplateOracleReport {
 pub struct ItemEvaluation {
     pub file: String,
     pub item_index: usize,
+    pub item_index_contract: &'static str,
+    pub raw_range_start: u64,
+    pub raw_range_end: u64,
+    pub raw_range_len_bits: u64,
     pub code: String,
+    pub unique_id: Option<u16>,
     pub template_type: String,
     pub template_name: String,
+    pub template_code: Option<String>,
+    pub template_match_source: TemplateMatchSource,
+    pub template_identity_status: TemplateIdentityStatus,
+    pub expectations_admitted: bool,
     pub expected_stats_count: usize,
     pub matched_stats_count: usize,
     pub coverage_percent: f64,
@@ -107,6 +118,8 @@ impl TemplateOracleReport {
         self.value_in_range_stats += other.value_in_range_stats;
         self.missing_expected_stats += other.missing_expected_stats;
         self.extra_unmatched_stats += other.extra_unmatched_stats;
+        self.admitted_template_evaluations += other.admitted_template_evaluations;
+        self.template_identity_conflicts += other.template_identity_conflicts;
         self.item_evaluations.append(&mut other.item_evaluations);
     }
 }
@@ -141,10 +154,55 @@ fn is_alpha_v105(bytes: &[u8]) -> bool {
         .is_some_and(|version| version == 105 || version == 0x69)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateMatchSource {
+    UniqueId,
+    UniqueCodeFallback,
+    SetId,
+    SetCodeFallback,
+    RunewordId,
+    AlphaWitness,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateIdentityStatus {
+    ExactCode,
+    CodeConflict,
+    StaticCodeUnavailable,
+}
+
+impl TemplateIdentityStatus {
+    fn expectations_admitted(self) -> bool {
+        !matches!(self, Self::CodeConflict)
+    }
+}
+
+fn template_identity_status(
+    item_code: &str,
+    template_code: Option<&str>,
+) -> TemplateIdentityStatus {
+    match template_code {
+        Some(template_code) if item_code == template_code => TemplateIdentityStatus::ExactCode,
+        Some(_) => TemplateIdentityStatus::CodeConflict,
+        None => TemplateIdentityStatus::StaticCodeUnavailable,
+    }
+}
+
 enum MatchedTemplate<'a> {
-    Unique(&'a UniqueItem),
-    Set(&'a SetItem),
-    Runeword(&'a Runeword),
+    Unique {
+        template: &'a UniqueItem,
+        source: TemplateMatchSource,
+    },
+    Set {
+        template: &'a SetItem,
+        source: TemplateMatchSource,
+    },
+    Runeword {
+        template: &'a Runeword,
+        source: TemplateMatchSource,
+    },
     AlphaWitnessRuneword {
         name: &'static str,
         stats: &'static [ItemStatRange],
@@ -169,11 +227,17 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
     if item.header.quality == Some(ItemQuality::Unique) {
         if let Some(uid) = item.unique_id {
             if let Some(u) = UNIQUE_ITEMS.iter().find(|u| u.id == uid as u32) {
-                return Some(MatchedTemplate::Unique(u));
+                return Some(MatchedTemplate::Unique {
+                    template: u,
+                    source: TemplateMatchSource::UniqueId,
+                });
             }
         }
         if let Some(u) = UNIQUE_ITEMS.iter().find(|u| u.code == trimmed) {
-            return Some(MatchedTemplate::Unique(u));
+            return Some(MatchedTemplate::Unique {
+                template: u,
+                source: TemplateMatchSource::UniqueCodeFallback,
+            });
         }
     }
 
@@ -181,11 +245,17 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
     if item.header.quality == Some(ItemQuality::Set) {
         if let Some(uid) = item.unique_id {
             if let Some(s) = SET_ITEMS.iter().find(|s| s.id == uid as u32) {
-                return Some(MatchedTemplate::Set(s));
+                return Some(MatchedTemplate::Set {
+                    template: s,
+                    source: TemplateMatchSource::SetId,
+                });
             }
         }
         if let Some(s) = SET_ITEMS.iter().find(|s| s.code == trimmed) {
-            return Some(MatchedTemplate::Set(s));
+            return Some(MatchedTemplate::Set {
+                template: s,
+                source: TemplateMatchSource::SetCodeFallback,
+            });
         }
     }
 
@@ -199,7 +269,10 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
         }
         if let Some(rw_id) = item.runeword_id {
             if let Some(rw) = RUNEWORDS.iter().find(|rw| rw.id == rw_id as u32) {
-                return Some(MatchedTemplate::Runeword(rw));
+                return Some(MatchedTemplate::Runeword {
+                    template: rw,
+                    source: TemplateMatchSource::RunewordId,
+                });
             }
         }
     }
@@ -229,12 +302,47 @@ fn evaluate_item_against_template(
 
     report.templated_items_found += 1;
 
-    let (template_type, template_name, expected_stats): (&str, &str, &[ItemStatRange]) = match template {
-        MatchedTemplate::Unique(u) => ("Unique", u.index, u.stats),
-        MatchedTemplate::Set(s) => ("Set", s.index, s.stats),
-        MatchedTemplate::Runeword(rw) => ("Runeword", rw.name, rw.stats),
-        MatchedTemplate::AlphaWitnessRuneword { name, stats } => ("Runeword", name, stats),
+    let (template_type, template_name, template_code, expected_stats, template_match_source): (
+        &str,
+        &str,
+        Option<&str>,
+        &[ItemStatRange],
+        TemplateMatchSource,
+    ) = match template {
+        MatchedTemplate::Unique { template, source } => (
+            "Unique",
+            template.index,
+            Some(template.code),
+            template.stats,
+            source,
+        ),
+        MatchedTemplate::Set { template, source } => (
+            "Set",
+            template.index,
+            Some(template.code),
+            template.stats,
+            source,
+        ),
+        MatchedTemplate::Runeword { template, source } => {
+            ("Runeword", template.name, None, template.stats, source)
+        }
+        MatchedTemplate::AlphaWitnessRuneword { name, stats } => {
+            (
+                "Runeword",
+                name,
+                None,
+                stats,
+                TemplateMatchSource::AlphaWitness,
+            )
+        }
     };
+    let template_identity_status = template_identity_status(item.code.trim(), template_code);
+    let expectations_admitted = template_identity_status.expectations_admitted();
+    if expectations_admitted {
+        report.admitted_template_evaluations += 1;
+    } else {
+        report.template_identity_conflicts += 1;
+    }
 
     let axiom = StatsAxiom::new(
         item.header.version,
@@ -252,32 +360,38 @@ fn evaluate_item_against_template(
     let mut matched_stat_ids = Vec::new();
     let mut missing_stat_ids = Vec::new();
 
-    for expected in expected_stats {
-        report.total_expected_stats += 1;
-        let expected_id = expected.stat_id;
+    if expectations_admitted {
+        for expected in expected_stats {
+            report.total_expected_stats += 1;
+            let expected_id = expected.stat_id;
 
-        if let Some((_, val)) = parsed_effective_stats.iter().find(|(id, _)| *id == expected_id) {
-            matched_stat_ids.push(expected_id);
-            report.matched_expected_stats += 1;
+            if let Some((_, val)) = parsed_effective_stats.iter().find(|(id, _)| *id == expected_id) {
+                matched_stat_ids.push(expected_id);
+                report.matched_expected_stats += 1;
 
-            if *val >= expected.min && *val <= expected.max {
-                report.value_in_range_stats += 1;
+                if *val >= expected.min && *val <= expected.max {
+                    report.value_in_range_stats += 1;
+                }
+            } else {
+                missing_stat_ids.push(expected_id);
+                report.missing_expected_stats += 1;
             }
-        } else {
-            missing_stat_ids.push(expected_id);
-            report.missing_expected_stats += 1;
         }
     }
 
     let mut extra_parsed_stat_ids = Vec::new();
-    for (parsed_id, _) in &parsed_effective_stats {
-        if !expected_stats.iter().any(|e| e.stat_id == *parsed_id) {
-            extra_parsed_stat_ids.push(*parsed_id);
-            report.extra_unmatched_stats += 1;
+    if expectations_admitted {
+        for (parsed_id, _) in &parsed_effective_stats {
+            if !expected_stats.iter().any(|e| e.stat_id == *parsed_id) {
+                extra_parsed_stat_ids.push(*parsed_id);
+                report.extra_unmatched_stats += 1;
+            }
         }
     }
 
-    let coverage_percent = if !expected_stats.is_empty() {
+    let coverage_percent = if !expectations_admitted {
+        0.0
+    } else if !expected_stats.is_empty() {
         (matched_stat_ids.len() as f64 / expected_stats.len() as f64) * 100.0
     } else {
         100.0
@@ -286,9 +400,18 @@ fn evaluate_item_against_template(
     report.item_evaluations.push(ItemEvaluation {
         file: path.display().to_string(),
         item_index,
+        item_index_contract: "player_items_zero_based_flattened",
+        raw_range_start: item.range.start,
+        raw_range_end: item.range.end,
+        raw_range_len_bits: item.range.end.saturating_sub(item.range.start),
         code: item.code.trim().to_string(),
+        unique_id: item.unique_id,
         template_type: template_type.to_string(),
         template_name: template_name.to_string(),
+        template_code: template_code.map(str::to_string),
+        template_match_source,
+        template_identity_status,
+        expectations_admitted,
         expected_stats_count: expected_stats.len(),
         matched_stats_count: matched_stat_ids.len(),
         coverage_percent,
@@ -371,5 +494,91 @@ fn main() {
         }
     } else {
         println!("{}", json_output);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identifiable_unique() -> &'static UniqueItem {
+        UNIQUE_ITEMS
+            .iter()
+            .find(|item| item.id <= u16::MAX as u32 && !item.code.is_empty())
+            .expect("a unique template with a representable id and code")
+    }
+
+    #[test]
+    fn unique_template_match_reports_identifier_and_code_fallback_provenance() {
+        let template = identifiable_unique();
+
+        let mut by_id = Item::default();
+        by_id.header.quality = Some(ItemQuality::Unique);
+        by_id.unique_id = Some(template.id as u16);
+        by_id.code = "not-the-template-code".to_string();
+        let id_source = match find_item_template(&by_id, false) {
+            Some(MatchedTemplate::Unique { source, .. }) => source,
+            _ => panic!("expected an id-based unique template match"),
+        };
+        assert_eq!(id_source, TemplateMatchSource::UniqueId);
+
+        let mut by_code = Item::default();
+        by_code.header.quality = Some(ItemQuality::Unique);
+        by_code.code = template.code.to_string();
+        let code_source = match find_item_template(&by_code, false) {
+            Some(MatchedTemplate::Unique { source, .. }) => source,
+            _ => panic!("expected a code-fallback unique template match"),
+        };
+        assert_eq!(code_source, TemplateMatchSource::UniqueCodeFallback);
+    }
+
+    #[test]
+    fn evaluation_emits_zero_based_selector_and_absolute_raw_range() {
+        let template = identifiable_unique();
+        let mut item = Item::default();
+        item.header.quality = Some(ItemQuality::Unique);
+        item.header.is_identified = true;
+        item.unique_id = Some(template.id as u16);
+        item.code = "different-code".to_string();
+        item.range.start = 14694;
+        item.range.end = 15008;
+
+        let mut report = TemplateOracleReport::default();
+        evaluate_item_against_template(&mut report, Path::new("fixture.d2s"), 60, &item, false);
+        let evaluation = report
+            .item_evaluations
+            .first()
+            .expect("an identified unique item should be evaluated");
+
+        assert_eq!(evaluation.item_index, 60);
+        assert_eq!(evaluation.item_index_contract, "player_items_zero_based_flattened");
+        assert_eq!(evaluation.raw_range_start, 14694);
+        assert_eq!(evaluation.raw_range_end, 15008);
+        assert_eq!(evaluation.raw_range_len_bits, 314);
+        assert_eq!(evaluation.template_match_source, TemplateMatchSource::UniqueId);
+        assert_eq!(evaluation.template_code.as_deref(), Some(template.code));
+        assert_eq!(
+            evaluation.template_identity_status,
+            TemplateIdentityStatus::CodeConflict
+        );
+        assert!(!evaluation.expectations_admitted);
+        assert_eq!(report.template_identity_conflicts, 1);
+        assert_eq!(report.total_expected_stats, 0);
+    }
+
+    #[test]
+    fn static_template_identity_requires_an_exact_code_match() {
+        assert_eq!(
+            template_identity_status("qf2", Some("qf2")),
+            TemplateIdentityStatus::ExactCode
+        );
+        assert_eq!(
+            template_identity_status("7bs", Some("qf2")),
+            TemplateIdentityStatus::CodeConflict
+        );
+        assert_eq!(
+            template_identity_status("wa2", None),
+            TemplateIdentityStatus::StaticCodeUnavailable
+        );
     }
 }

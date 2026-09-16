@@ -262,6 +262,16 @@ fn is_alpha_v105(bytes: &[u8]) -> bool {
         .is_some_and(|version| version == 105 || version == 0x69)
 }
 
+fn item_inspect_hint(path: &Path, item_index: usize, section_context: bool) -> String {
+    let context = if section_context { " --section-context" } else { "" };
+    format!(
+        "d2item_inspect.exe {} --section-item {}{} --json",
+        path.display(),
+        item_index,
+        context
+    )
+}
+
 fn record_item_metrics(
     report: &mut RadarReport,
     path: &Path,
@@ -371,11 +381,7 @@ fn record_item_metrics(
             item_index: Some(item_index),
             code: Some(item.code.trim().to_string()),
             reason: "item_has_no_recorded_raw_bits".to_string(),
-            hint: format!(
-                "d2item_inspect.exe {} --section-item {} --json",
-                path.display(),
-                item_index + 1
-            ),
+            hint: item_inspect_hint(path, item_index, false),
         });
         return;
     }
@@ -393,22 +399,14 @@ fn record_item_metrics(
                 recorded.len(),
                 emitted.len()
             ),
-            hint: format!(
-                "d2item_inspect.exe {} --section-item {} --section-context --json",
-                path.display(),
-                item_index + 1
-            ),
+            hint: item_inspect_hint(path, item_index, true),
         }),
         Err(error) => report.mismatches.push(RadarMismatch {
             file: path.display().to_string(),
             item_index: Some(item_index),
             code: Some(item.code.trim().to_string()),
             reason: format!("item_replay_error: {error}"),
-            hint: format!(
-                "d2item_inspect.exe {} --section-item {} --json",
-                path.display(),
-                item_index + 1
-            ),
+            hint: item_inspect_hint(path, item_index, false),
         }),
     }
 
@@ -629,5 +627,14 @@ mod tests {
         assert_eq!(defaults.corpus_manifest, "unrecorded");
         assert_eq!(defaults.worktree_state, "unrecorded");
         assert!(!defaults.strict_rebuild);
+    }
+
+    #[test]
+    fn item_inspection_hint_preserves_zero_based_item_index() {
+        let hint = item_inspect_hint(Path::new("fixture.d2s"), 60, true);
+        assert_eq!(
+            hint,
+            "d2item_inspect.exe fixture.d2s --section-item 60 --section-context --json"
+        );
     }
 }
