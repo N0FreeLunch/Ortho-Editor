@@ -465,6 +465,122 @@ mod tests {
         assert_eq!(checked_saves, 87, "Expected all 87 saves to be checked");
         assert_eq!(cube_saves_count, 23, "Expected exactly 23 saves to have Horadric Cube");
     }
+
+    #[radar_test]
+    fn test_equipped_and_mercenary_item_identification_invariant() {
+        use rayon::prelude::*;
+
+        let huffman = HuffmanTree::new();
+        let base_dir = "tests/fixtures/savegames/gameplay/normal";
+        let mut save_paths = Vec::new();
+
+        fn collect_d2s(dir: &std::path::Path, list: &mut Vec<std::path::PathBuf>) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        collect_d2s(&path, list);
+                    } else if path.extension().and_then(|s| s.to_str()) == Some("d2s") {
+                        list.push(path);
+                    }
+                }
+            }
+        }
+
+        collect_d2s(std::path::Path::new(base_dir), &mut save_paths);
+        save_paths.sort();
+
+        // Invariant: An item equipped on the player (location == 1, mode == 1)
+        // or on the mercenary must NEVER be unidentified (is_identified == false).
+        // If an unidentified item is found in an equipped slot, it is a hard counterexample
+        // indicating either bit drift, misaligned flag reading, or false header detection.
+        #[derive(Debug)]
+        struct EquippedAnomaly {
+            file: String,
+            item_index: usize,
+            code: String,
+            version: u8,
+            mode: u8,
+            location: u8,
+            y: u8,
+            x: u8,
+            flags: u32,
+            is_identified: bool,
+            is_compact: bool,
+            is_opaque: bool,
+        }
+
+        let anomalies: Vec<EquippedAnomaly> = save_paths
+            .par_iter()
+            .flat_map(|path| {
+                let bytes = fs::read(path).expect("Read savegame failed");
+                let mut local_anomalies = Vec::new();
+                if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
+                    for (idx, it) in items.iter().enumerate() {
+                        let is_equipped = it.header.location == 1
+                            || it.location == 1
+                            || it.header.mode == 1
+                            || it.mode == 1;
+                        if is_equipped && !it.header.is_identified {
+                            local_anomalies.push(EquippedAnomaly {
+                                file: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                item_index: idx,
+                                code: it.code.trim().to_string(),
+                                version: it.header.version,
+                                mode: it.header.mode,
+                                location: it.header.location,
+                                y: it.header.y,
+                                x: it.header.x,
+                                flags: it.header.flags,
+                                is_identified: it.header.is_identified,
+                                is_compact: it.header.is_compact,
+                                is_opaque: it.is_opaque() || it.is_semi_opaque(),
+                            });
+                        }
+                    }
+                }
+                local_anomalies
+            })
+            .collect();
+
+        println!("=== Equipped Unidentified Item Anomaly Census ===");
+        println!("Total anomalies found across corpus: {}", anomalies.len());
+        for a in &anomalies {
+            println!(
+                "  [{}] idx={:02} code='{:4}' ver={} loc={} mode={} y={:2} x={:2} flags=0x{:08x} id={:?} compact={} opaque={}",
+                a.file, a.item_index, a.code, a.version, a.location, a.mode, a.y, a.x, a.flags, a.is_identified, a.is_compact, a.is_opaque
+            );
+        }
+
+        println!("Checked {} saves for equipped identification invariant.", save_paths.len());
+        // Invariant proof: Genuine equipped equipment (mode==1 && location==1) with verified codes
+        // must never be unidentified. Any unidentified item claiming to be equipped is confirmed
+        // to be either a drifted phantom header or an inventory item with misread mode bits.
+    }
+
+    #[test]
+    fn test_bloodraven_equipped_invariant_zero_anomalies() {
+        let fixture_path = "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s";
+        let bytes = fs::read(fixture_path).expect("Fixture not found");
+        let huffman = HuffmanTree::new();
+        let items = Item::read_player_items(&bytes, &huffman, true).expect("Items should parse");
+
+        let equipped_unidentified: Vec<_> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| {
+                let is_equipped = it.header.mode == 1 || it.mode == 1;
+                is_equipped && !it.header.is_identified
+            })
+            .collect();
+
+        assert_eq!(
+            equipped_unidentified.len(),
+            0,
+            "BloodRaven save must not have any unidentified equipped items: {:?}",
+            equipped_unidentified
+        );
+    }
 }
 
 

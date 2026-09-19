@@ -316,7 +316,7 @@ fn scan_item_markers_internal(
             let mut local_markers: Vec<(u64, u32, String, i8, u64, bool)> = Vec::new();
             let section_header_bits = if alpha && chunk_idx == 0 {
                 let mut p = 32;
-                if let Some((version, _, _, _, _, _, _, _, _, _)) =
+                if let Some((_, _, _, _, _, version, _, _, _, _)) =
                     peek_item_header_at_with_gap_profile(bytes, 32, huffman, alpha, 0, gap_profile)
                 {
                     p = crate::domain::forensic::v105::axioms::V105JmMarkerAxiom::default()
@@ -493,7 +493,7 @@ fn scan_item_markers_internal(
                                     )
                                     {
                                         let (n_mode, n_loc, _, n_code, n_flags, n_ver, _, _, _, _) =
-                                            next_header;
+                                            (next_header.0, next_header.1, next_header.2, next_header.3, next_header.4, next_header.5, next_header.6, next_header.7, next_header.8, next_header.9);
                                         if is_plausible_item_header(
                                             n_mode,
                                             n_loc,
@@ -530,6 +530,7 @@ fn scan_item_markers_internal(
                                 && !(is_alpha_runeword_candidate && has_checksum)
                                 && !is_v105_summary
                                 && !override_noncompact
+                                && !is_known
                             {
                                 if let Some(work) = work {
                                     work.lookahead_checks.fetch_add(1, Ordering::Relaxed);
@@ -554,7 +555,6 @@ fn scan_item_markers_internal(
 
                             if alpha
                                 && (trimmed_code == "hp1"
-                                    || trimmed_code == "wyws"
                                     || trimmed_code == "xrs"
                                     || trimmed_code == "wa2")
                             {
