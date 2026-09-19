@@ -161,7 +161,7 @@ impl HeaderAxiom {
             let mut is_compact = if self.version == 7 {
                 false
             } else {
-                (flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0
+                (flags & (1 << 21)) != 0
             };
 
             if let Some(c) = code {

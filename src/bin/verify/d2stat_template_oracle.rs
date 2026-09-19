@@ -1,6 +1,9 @@
 use clap_stub::parse_args;
-use d2r_core::data::generated::{runewords::RUNEWORDS, set_items::SET_ITEMS, unique_items::UNIQUE_ITEMS};
-use d2r_core::data::item_specs::{ItemStatRange, Runeword, SetItem, UniqueItem};
+use d2r_core::data::generated::{
+    gems::GEMS, quality_items::QUALITY_ITEMS, runewords::RUNEWORDS, set_items::SET_ITEMS,
+    unique_items::UNIQUE_ITEMS,
+};
+use d2r_core::data::item_specs::{GemSpec, ItemStatRange, QualityItem, Runeword, SetItem, UniqueItem};
 use d2r_core::domain::item::{HuffmanTree, Item, ItemQuality};
 use d2r_core::domain::stats::axiom::StatsAxiom;
 use rayon::prelude::*;
@@ -72,6 +75,8 @@ pub struct TemplateOracleReport {
     pub total_saves_scanned: usize,
     pub total_items_scanned: usize,
     pub templated_items_found: usize,
+    pub opaque_templated_items: usize,
+    pub identified_templated_items: usize,
     pub total_expected_stats: usize,
     pub matched_expected_stats: usize,
     pub value_in_range_stats: usize,
@@ -92,6 +97,10 @@ pub struct ItemEvaluation {
     pub raw_range_end: u64,
     pub raw_range_len_bits: u64,
     pub code: String,
+    pub is_opaque: bool,
+    pub is_semi_opaque: bool,
+    pub is_identified: bool,
+    pub quality: Option<u8>,
     pub unique_id: Option<u16>,
     pub template_type: String,
     pub template_name: String,
@@ -113,6 +122,8 @@ impl TemplateOracleReport {
         self.total_saves_scanned += other.total_saves_scanned;
         self.total_items_scanned += other.total_items_scanned;
         self.templated_items_found += other.templated_items_found;
+        self.opaque_templated_items += other.opaque_templated_items;
+        self.identified_templated_items += other.identified_templated_items;
         self.total_expected_stats += other.total_expected_stats;
         self.matched_expected_stats += other.matched_expected_stats;
         self.value_in_range_stats += other.value_in_range_stats;
@@ -163,6 +174,8 @@ pub enum TemplateMatchSource {
     SetCodeFallback,
     RunewordId,
     AlphaWitness,
+    SuperiorComboId,
+    GemCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -206,6 +219,14 @@ enum MatchedTemplate<'a> {
     AlphaWitnessRuneword {
         name: &'static str,
         stats: &'static [ItemStatRange],
+    },
+    Superior {
+        template: &'a QualityItem,
+        source: TemplateMatchSource,
+    },
+    Gem {
+        template: &'a GemSpec,
+        source: TemplateMatchSource,
     },
 }
 
@@ -277,6 +298,26 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
         }
     }
 
+    // 4. Check Superior template (High quality, combo id in low_high_graphic_bits)
+    if item.header.quality == Some(ItemQuality::High) {
+        if let Some(lh) = item.low_high_graphic_bits {
+            if let Some(q) = QUALITY_ITEMS.iter().find(|q| q.id == lh as u32) {
+                return Some(MatchedTemplate::Superior {
+                    template: q,
+                    source: TemplateMatchSource::SuperiorComboId,
+                });
+            }
+        }
+    }
+
+    // 5. Check Gem / Rune socketable template
+    if let Some(g) = GEMS.iter().find(|g| g.code == trimmed) {
+        return Some(MatchedTemplate::Gem {
+            template: g,
+            source: TemplateMatchSource::GemCode,
+        });
+    }
+
     None
 }
 
@@ -294,13 +335,18 @@ fn evaluate_item_against_template(
         None => return,
     };
 
-    // Unidentified items do not decode properties in binary savegames;
-    // skip template stat expectations for unidentified items to prevent false missing stats.
-    if !item.header.is_identified {
-        return;
-    }
-
     report.templated_items_found += 1;
+
+    let is_opaque = item.is_opaque();
+    let is_semi_opaque = item.is_semi_opaque();
+    let is_identified = item.header.is_identified;
+
+    if is_opaque {
+        report.opaque_templated_items += 1;
+    }
+    if is_identified {
+        report.identified_templated_items += 1;
+    }
 
     let (template_type, template_name, template_code, expected_stats, template_match_source): (
         &str,
@@ -335,12 +381,35 @@ fn evaluate_item_against_template(
                 TemplateMatchSource::AlphaWitness,
             )
         }
+        MatchedTemplate::Superior { template, source } => {
+            (
+                "Superior",
+                template.mod1_code,
+                None,
+                template.stats,
+                source,
+            )
+        }
+        MatchedTemplate::Gem { template, source } => {
+            (
+                "Gem",
+                template.name,
+                Some(template.code),
+                template.weapon_stats,
+                source,
+            )
+        }
     };
+
     let template_identity_status = template_identity_status(item.code.trim(), template_code);
-    let expectations_admitted = template_identity_status.expectations_admitted();
+    // Unidentified items, completely opaque items, or loose socketables (gems/runes without host equipment)
+    // cannot have active properties verified on their own standalone bitstream.
+    let is_gem = template_type == "Gem";
+    let expectations_admitted = is_identified && !is_opaque && !is_gem && template_identity_status.expectations_admitted();
+
     if expectations_admitted {
         report.admitted_template_evaluations += 1;
-    } else {
+    } else if is_identified && !is_opaque && !is_gem && matches!(template_identity_status, TemplateIdentityStatus::CodeConflict) {
         report.template_identity_conflicts += 1;
     }
 
@@ -405,6 +474,10 @@ fn evaluate_item_against_template(
         raw_range_end: item.range.end,
         raw_range_len_bits: item.range.end.saturating_sub(item.range.start),
         code: item.code.trim().to_string(),
+        is_opaque,
+        is_semi_opaque,
+        is_identified,
+        quality: item.header.quality.map(|q| q as u8),
         unique_id: item.unique_id,
         template_type: template_type.to_string(),
         template_name: template_name.to_string(),
