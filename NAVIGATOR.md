@@ -38,10 +38,10 @@ If rules conflict, keep `AGENTS.md` safety constraints (`No Automatic Push`, dat
 | Domain | Specification (Truth) | Primary Implementation | Verification Tool |
 | :--- | :--- | :--- | :--- |
 | **Bitstream / Save Header** | `../d2r-spec/NAVIGATOR.md` -> Bitstream / Save Header domain (private overlay, if present) | `src/save.rs` | `src/bin/verify/d2save_map.rs`, `src/bin/verify/d2save_verify.rs` |
-| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs`, `src/domain/stats/` | `src/bin/verify/d2item_inspect.rs`, `src/bin/verify/d2stat_fidelity_radar.rs`, `src/bin/verify/d2stat_probe_oracle.rs`, `src/bin/verify/d2stat_tiling_prober.rs` |
+| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs`, `src/domain/stats/` | `src/bin/verify/d2item_inspect.rs`, `src/bin/verify/d2stat_fidelity_radar.rs`, `src/bin/verify/d2stat_probe_oracle.rs`, `src/bin/verify/d2stat_tiling_prober.rs`, `src/bin/verify/d2save_equipped_invariant.rs` |
 | **Inventory / Grid** | `../d2r-spec/NAVIGATOR.md` -> Inventory / Grid domain (private overlay, if present) | `src/inventory.rs` | `src/bin/verify/d2save_inventory_check.rs` |
 | **Status (Attrs/Skills)** | `../d2r-spec/NAVIGATOR.md` -> Status (Attrs/Skills) domain (private overlay, if present) | `src/save.rs` | `src/bin/d2save_status_inspect.rs` |
-| **Save Verification** | `../d2r-spec/NAVIGATOR.md` -> Save Verification domain (private overlay, if present) | - | `src/bin/verify/d2save_verify.rs` |
+| **Save Verification** | `../d2r-spec/NAVIGATOR.md` -> Save Verification domain (private overlay, if present) | - | `src/bin/verify/d2save_verify.rs`, `src/bin/verify/d2save_equipped_invariant.rs` |
 | **UI / Orchestration** | `../d2r-spec/NAVIGATOR.md` -> UI / Orchestration domain (private overlay, if present) | `src/main.rs` | Elm-rs generated types |
 | **Game Data Access / Copyright Boundary** | `../d2r-spec/discussion/0035`, `0104` | `src/data/mod.rs`, `d2r-data/` | [d2r-data/NAVIGATOR.md](./d2r-data/NAVIGATOR.md) |
 | **Item Validation**      | `../d2r-spec/discussion/0034-item-option-interpretation.md`, `0079` | `src/engine/validation.rs` | `tests/item_validation_test.rs` |

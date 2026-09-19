@@ -52,6 +52,10 @@ name = "d2stat_fidelity_radar"
 path = "src/bin/verify/d2stat_fidelity_radar.rs"
 
 [[bin]]
+name = "d2save_equipped_invariant"
+path = "src/bin/verify/d2save_equipped_invariant.rs"
+
+[[bin]]
 name = "d2item_bit_visualizer"
 path = "src/bin/inspect/d2item_bit_visualizer.rs"
 
