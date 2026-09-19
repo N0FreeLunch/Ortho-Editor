@@ -750,13 +750,14 @@ fn scan_item_markers_internal(
             &final_markers[index - 1];
         let prev_trimmed = previous_code.trim();
         code.trim() == "oesw"
-            && *trial_gap == 32
-            && !*trial_gap_is_rhythm
-            && ((prev_trimmed == "9cs"
-                && *offset - *previous_offset == 81
-                && *previous_trial_gap == 24
-                && !*previous_trial_gap_is_rhythm)
-                || prev_trimmed == "msk")
+            && ((prev_trimmed == "cap" && *offset - *previous_offset == 280)
+                || (*trial_gap == 32
+                    && !*trial_gap_is_rhythm
+                    && ((prev_trimmed == "9cs"
+                        && *offset - *previous_offset == 81
+                        && *previous_trial_gap == 24
+                        && !*previous_trial_gap_is_rhythm)
+                        || prev_trimmed == "msk")))
     };
 
     while i < final_markers.len() {

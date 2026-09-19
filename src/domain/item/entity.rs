@@ -1338,7 +1338,7 @@ impl Item {
         .with_compact(self.header.is_compact)
         .with_code(&self.code);
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
-        let geometry = h_axiom.header_geometry(self.header.flags, Some(&self.code));
+        let geometry = h_axiom.header_geometry_with_mode(self.header.flags, Some(&self.code), Some(self.header.mode));
         // 2. Handle Alpha v105 summary items (Potions, Scrolls):
         if is_v105_summary {
             // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
@@ -2544,7 +2544,7 @@ pub fn parse_item_header<R: BitRead>(
         }
     } else {
         // 5. For others, read Y, Page, SocketHint as per geometry.
-        let geometry = h_axiom.header_geometry(flags, code_hint);
+        let geometry = h_axiom.header_geometry_with_mode(flags, code_hint, Some(mode));
         if !geometry.skip_geometry {
             y = cursor.read_bits::<u8>(geometry.y_bits).unwrap_or(0);
             page = cursor.read_bits::<u8>(geometry.page_bits).unwrap_or(0);
@@ -2581,7 +2581,7 @@ pub fn parse_item_header<R: BitRead>(
                 })?;
                 alpha_header_gap_bits = gap_seg.bits;
 
-                if version == 5 && AlphaV105HeaderGapAlignment::align_required() {
+                if version == 5 && AlphaV105HeaderGapAlignment::align_required() && gap_override.is_none() {
                     // Preserve alignment bits: strict rebuilds cannot replay bits
                     // silently consumed by byte_align().
                     let alignment_bits = ((8 - (cursor.pos() % 8)) % 8) as usize;
@@ -2606,7 +2606,7 @@ pub fn parse_item_header<R: BitRead>(
     }
 
     if alpha_mode && !is_v105_summary {
-        let geometry = h_axiom.header_geometry(flags, code_hint);
+        let geometry = h_axiom.header_geometry_with_mode(flags, code_hint, Some(mode));
         if geometry.target_width > 0 {
             let current_bits = (cursor.pos() - start_bit) as u32;
             if current_bits < geometry.target_width {

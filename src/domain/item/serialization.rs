@@ -762,7 +762,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
                         if is_summary {
                             3
                         } else {
-                            let geom = h_axiom.header_geometry(flags, Some(trimmed));
+                            let geom = h_axiom.header_geometry_with_mode(flags, Some(trimmed), Some(mode));
                             if geom.skip_geometry {
                                 0
                             } else {
@@ -2069,8 +2069,17 @@ impl Item {
                 || matches!(marker_code_trimmed, "jav" | "buc")
             {
                 marker.code.as_str()
+            } else if let Some(ref p_code) = peek_code_hint {
+                let p_trimmed = p_code.trim();
+                // Reject malformed codes with internal spaces (e.g. "x p") or length < 3.
+                // Preserve valid peek codes (e.g. "rin", "lea", "cap") to avoid dual-ring regression.
+                if p_trimmed.contains(' ') || p_trimmed.len() < 3 {
+                    marker.code.as_str()
+                } else {
+                    p_code.as_str()
+                }
             } else {
-                peek_code_hint.as_deref().unwrap_or(marker.code.as_str())
+                marker.code.as_str()
             };
             let parse_code_hint = if parse_code_hint_raw.trim() == "hla" {
                 "xrs "
@@ -2460,7 +2469,6 @@ impl Item {
                     }
 
                     items.push(final_item);
-
                     let item_end_bit = start + actual_consumed;
                     for (next_idx, next_m) in markers.iter().enumerate().skip(i + 1) {
                         if next_m.offset < item_end_bit {
@@ -2548,7 +2556,6 @@ impl Item {
                     opaque.total_bits = limit;
                     opaque.logical_width = Some(limit);
                     items.push(opaque);
-
                     let item_end_bit = start + limit;
                     for (next_idx, next_m) in markers.iter().enumerate().skip(i + 1) {
                         if next_m.offset < item_end_bit {
@@ -2888,7 +2895,6 @@ impl Item {
         cursor.set_trace(cursor.trace_enabled || crate::item::item_trace_enabled());
         let start_bit = cursor.pos();
         cursor.begin_segment(ItemSegmentType::Root);
-
         let mut peek = if alpha_mode && ctx.is_some() {
             let (bytes, rel_start_bit) = ctx.unwrap();
             peek_item_header_at_with_base(bytes, rel_start_bit, Some(start_bit), huff, true, idx)
@@ -3130,6 +3136,21 @@ impl Item {
                 return None;
             }
 
+            // Reject unreliable gap guesses from malformed peek codes.
+            // If peek produced a code with whitespace or length < 3, or if
+            // an explicit code_hint was provided and peek's code does not match,
+            // do not override the gap with peek's unverified 0-gap offset.
+            let p_code_trimmed = p.3.trim();
+            if p_code_trimmed.contains(' ') || p_code_trimmed.len() < 3 {
+                return None;
+            }
+            if let Some(hint) = code_hint {
+                let hint_trimmed = hint.trim();
+                if !hint_trimmed.is_empty() && hint_trimmed != p_code_trimmed {
+                    return None;
+                }
+            }
+
             let mut gap = p.8 as usize;
             // Alpha v105 version 7 non-compact items reuse the legacy gap budget
             // differently from the earlier compact/summary cases. Keep the
@@ -3160,7 +3181,6 @@ impl Item {
                 has_checksum_peek,
                 abs_start_bit,
             )?;
-
         Ok(ItemHeaderStage {
             header,
             alpha_header_gap,
@@ -3276,7 +3296,6 @@ impl Item {
             header.save_is_alpha,
             code_peek,
         );
-
         let mut rhythm_recovery = false;
         let (mut body, alpha_code_bits, ear_class, ear_level, ear_player_name) = match body_res {
             Ok(res) => res,

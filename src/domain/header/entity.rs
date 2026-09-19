@@ -334,13 +334,24 @@ impl HeaderAxiom {
         }
         false
     }
+
     pub fn header_geometry(&self, flags: u32, code_hint: Option<&str>) -> HeaderGeometry {
+        self.header_geometry_with_mode(flags, code_hint, None)
+    }
+
+    pub fn header_geometry_with_mode(
+        &self,
+        flags: u32,
+        code_hint: Option<&str>,
+        mode: Option<u8>,
+    ) -> HeaderGeometry {
         let is_compact = self.is_compact(flags, code_hint);
         let is_personalized = self.is_personalized(flags, is_compact);
 
         if self.alpha_mode {
             let is_rw = self.is_runeword(flags, code_hint, false);
             let is_v105_shadow = self.is_v105_shadow(flags, code_hint);
+            let is_equipped = mode == Some(1);
 
             let is_summary = if let Some(c) = code_hint {
                 crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
@@ -362,14 +373,14 @@ impl HeaderAxiom {
                 80
             };
 
-            if is_rw || is_v105_shadow || is_personalized {
+            if is_rw || is_v105_shadow || is_personalized || is_equipped {
                 return HeaderGeometry {
                     y_bits: 0,
                     page_bits: 0,
                     socket_hint_bits: 0,
                     has_header_gap: true,
                     skip_geometry: true,
-                    target_width: 0,
+                    target_width: if is_equipped { 0 } else { target_width },
                 };
             }
 
