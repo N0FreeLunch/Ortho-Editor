@@ -159,6 +159,36 @@ mod tests {
         assert!(!reserialized_items.is_empty(), "Reserialized items section should not be empty");
     }
 
+    #[invariant_test]
+    fn test_rogue_lv7_player_items_invariant() {
+        let fixture_path = "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s";
+        let bytes = fs::read(fixture_path).expect("Fixture not found");
+        let huffman = HuffmanTree::new();
+
+        // Parse player items
+        let items = d2r_core::item::Item::read_player_items(&bytes, &huffman, true)
+            .expect("Player items should parse cleanly without error");
+
+        // Verify player items count and mercenary items recovery
+        assert_eq!(items.len(), 39, "Expected 39 items parsed in Rogue Lv7 save");
+        assert_eq!(items[36].code.trim(), "cap", "Mercenary helmet must be cap");
+        assert_eq!(items[36].total_bits, 296, "Mercenary cap length must be exactly 296 bits");
+        assert!(items[36].header.is_identified, "Mercenary cap must be identified");
+
+        // Verify equipped item invariant: all equipped items (mode == 1) must be identified
+        for (idx, it) in items.iter().enumerate() {
+            let clean_code = it.code.trim();
+            let is_equipped = it.header.mode == 1 || it.mode == 1;
+            if is_equipped {
+                assert!(
+                    it.header.is_identified,
+                    "Equipped item '{}' at index {} must be identified per domain invariant",
+                    clean_code, idx
+                );
+            }
+        }
+    }
+
     #[radar_test]
     fn test_audit_all_87_gameplay_saves() {
         let huffman = HuffmanTree::new();

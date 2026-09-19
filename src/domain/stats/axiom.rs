@@ -196,7 +196,7 @@ impl StatsAxiom {
         if is_runeword || self.is_compact {
             return false;
         }
-        matches!(self.version, 0 | 1 | 2 | 4 | 5 | 6)
+        matches!(self.version, 0 | 1 | 2 | 4 | 6)
     }
 
     pub fn header_geometry(&self, flags: u32) -> HeaderGeometry {

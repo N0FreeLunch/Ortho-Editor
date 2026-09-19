@@ -12,6 +12,10 @@ use rayon::prelude::*;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+thread_local! {
+    static IN_SCANNER_JUMP_PEEK: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
 fn is_alpha_v105_shadow_marker(code: &str) -> bool {
     let trimmed = code.trim();
     // Shadow markers observed in Alpha v105 runewords/socketed items.
@@ -662,6 +666,40 @@ fn scan_item_markers_internal(
                                     j = 150;
                                 } else if best_code.trim() == "msk" && j == 0 {
                                     j = 328;
+                                } else if j == 0
+                                    && !is_alpha_v105_compact_limit_item(&best_code)
+                                    && !IN_SCANNER_JUMP_PEEK.with(|c| c.get())
+                                {
+                                    // Non-compact equipment: parse with limit up to section/chunk boundary
+                                    // to jump past its variable properties and prevent phantom markers inside property stream.
+                                    IN_SCANNER_JUMP_PEEK.with(|c| c.set(true));
+                                    let parse_res =
+                                        crate::domain::item::serialization::parse_item_at_with_limit(
+                                            bytes,
+                                            best_offset,
+                                            0,
+                                            huffman,
+                                            local_markers.len(),
+                                            alpha,
+                                            None,
+                                            None,
+                                            Some(best_code.as_str()),
+                                        );
+                                    IN_SCANNER_JUMP_PEEK.with(|c| c.set(false));
+                                    match &parse_res {
+                                        Ok((parsed_it, consumed)) => {
+                                            let item_len = parsed_it.bits.len() as u64;
+                                            if item_len > 0 && item_len < *consumed {
+                                                j = (item_len + 7) & !7;
+                                            } else if *consumed > 0 {
+                                                j = *consumed;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    if crate::item::item_trace_enabled() {
+                                        eprintln!("[scanner-jump] code={} best_offset={} j={} res={:?}", best_code.trim(), best_offset, j, parse_res.as_ref().map(|(_, c)| *c));
+                                    }
                                 }
                                 if j > 0 {
                                     j
