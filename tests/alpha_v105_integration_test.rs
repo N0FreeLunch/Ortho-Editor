@@ -189,6 +189,24 @@ mod tests {
         }
     }
 
+    #[hypothesis_test]
+    fn test_rogue_stats_verify_rin_seam() {
+        let fixture_path = "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s";
+        let bytes = fs::read(fixture_path).expect("Fixture not found");
+        let huffman = HuffmanTree::new();
+
+        let items = Item::read_player_items(&bytes, &huffman, true).expect("Parsing player items failed");
+        let rings: Vec<_> = items.iter().filter(|it| it.code.trim() == "rin").collect();
+        assert_eq!(rings.len(), 2, "Expected 2 rings in Rogue Stats Verify save");
+
+        // The second ring (index 21) is a Unique Ring with variable length and non-compact structure
+        let unique_ring = rings.iter().find(|it| it.quality == Some(d2r_core::item::ItemQuality::Unique));
+        assert!(unique_ring.is_some(), "Expected a unique ring in Rogue Stats Verify save");
+        let ring = unique_ring.unwrap();
+        assert!(!ring.header.is_compact, "Unique ring must NOT be compact");
+        assert_eq!(ring.bits.len(), 112, "Unique ring bit length should be exactly 112 bits");
+    }
+
     #[radar_test]
     fn test_audit_all_87_gameplay_saves() {
         let huffman = HuffmanTree::new();
