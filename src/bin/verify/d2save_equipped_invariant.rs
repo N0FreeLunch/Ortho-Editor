@@ -469,3 +469,38 @@ fn main() {
         println!("Radar Verdict: ZERO true unidentified violations. All anomalies are parser bit-drifts.");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rogue_stats_verify_fixture_seals_equipped_anomaly_classification() {
+        let fixture = Path::new(
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
+        );
+        let huffman = HuffmanTree::new();
+        let (_, _, anomalies) = audit_file(fixture, &huffman);
+
+        assert!(
+            !anomalies
+                .iter()
+                .any(|anomaly| anomaly.item_index == 8 && anomaly.code == "cap"),
+            "Alpha v105 equipped geometry uses y == 0, so cap index 8 must not be reported"
+        );
+        assert_eq!(
+            anomalies.len(),
+            1,
+            "the fixture should retain exactly the cm3 slot-mismatch phantom"
+        );
+
+        let anomaly = &anomalies[0];
+        assert_eq!(anomaly.item_index, 30);
+        assert_eq!(anomaly.code, "cm3");
+        assert!(anomaly.is_opaque);
+        assert!(matches!(
+            &anomaly.classification,
+            InvariantClassification::SlotMismatchPhantomDrift
+        ));
+    }
+}
