@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::forensic::registry::get_registry;
+use d2r_core::domain::item::scanner::scan_item_markers;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::map_core_sections;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -46,7 +47,11 @@ struct SectionTrace {
     payload_original_len_bits: usize,
     payload_serialized_len_bits: usize,
     top_level_count: usize,
+    accepted_marker_count: usize,
     parsed_item_count: usize,
+    parsed_non_residue_count: usize,
+    parsed_residue_count: usize,
+    socketed_child_count: usize,
     local_match_count: usize,
     prefix_match: bool,
     matching_prefix_bits: usize,
@@ -80,6 +85,7 @@ struct IsolatedInspect {
 struct ItemTrace {
     item_index: usize,
     code: String,
+    is_residue: bool,
     bit_source_contract: &'static str,
     raw_capture_available: bool,
     raw_capture_len_bits: usize,
@@ -627,6 +633,15 @@ fn build_prefix_trace_report_with_strict_item(
         let section_bit_offset = (jm_offset as u64) * 8;
         let next_jm_offset_bit = (next_jm_offset as u64) * 8;
         let top_level_count = read_section_count(section_bytes);
+        let accepted_marker_count = scan_item_markers(
+            section_bytes,
+            huffman,
+            alpha_mode,
+            section_bit_offset,
+            Some(top_level_count),
+            false,
+        )
+        .len();
 
         let items = Item::read_section(
             section_bytes,
@@ -643,6 +658,12 @@ fn build_prefix_trace_report_with_strict_item(
                 jm_offset
             )
         })?;
+        let parsed_non_residue_count = items.iter().filter(|item| !item.is_residue()).count();
+        let parsed_residue_count = items.len() - parsed_non_residue_count;
+        let socketed_child_count = items
+            .iter()
+            .map(|item| item.socketed_items.len())
+            .sum::<usize>();
 
         let payload_start_bit = items
             .first()
@@ -736,6 +757,7 @@ fn build_prefix_trace_report_with_strict_item(
             item_traces.push(ItemTrace {
                 item_index,
                 code: item.code.trim().to_string(),
+                is_residue: item.is_residue(),
                 bit_source_contract: if strict_rebuild_selected {
                     "strict_rebuild_after_cached_bits_clear"
                 } else {
@@ -849,7 +871,11 @@ fn build_prefix_trace_report_with_strict_item(
             payload_original_len_bits: original_payload_bits.len(),
             payload_serialized_len_bits: emitted_prefix.len(),
             top_level_count: top_level_count as usize,
+            accepted_marker_count,
             parsed_item_count: item_traces.len(),
+            parsed_non_residue_count,
+            parsed_residue_count,
+            socketed_child_count,
             local_match_count: section_local_match_count,
             prefix_match,
             matching_prefix_bits,
@@ -1591,5 +1617,58 @@ mod tests {
         assert_eq!(item.section_clamped_raw_len_bits, 765);
         assert!(!item.local_check.as_ref().expect("full local check").matches);
         assert!(item.section_clamped_local_check.matches);
+    }
+
+    #[test]
+    fn normal_sections_partition_parsed_rows_by_residue_class() {
+        let fixtures = [
+            "TESTASSASSIN_Act1_KashyaTalked_AlizaHired.d2s",
+            "TESTASSASSIN_Act1_Rogue_BowArmor.d2s",
+            "TESTASSASSIN_Act1_Rogue_CapBowArmor.d2s",
+        ];
+
+        for fixture_name in fixtures {
+            let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "tests/fixtures/savegames/gameplay/normal/act1/{fixture_name}"
+            ));
+            let bytes = fs::read(&fixture).expect("normal fixture must be readable");
+            let section_map =
+                map_core_sections(&bytes).expect("normal fixture must map JM sections");
+            let report = build_prefix_trace_report_with_strict_item(
+                fixture.to_string_lossy().as_ref(),
+                105,
+                true,
+                &bytes,
+                &section_map.jm_positions,
+                &HuffmanTree::new(),
+                None,
+            )
+            .expect("normal fixture must produce a prefix trace");
+
+            for section in report.sections {
+                assert_eq!(
+                    section.parsed_non_residue_count + section.parsed_residue_count,
+                    section.parsed_item_count,
+                    "{fixture_name} section {} must partition parsed rows",
+                    section.section_index
+                );
+                assert_eq!(
+                    section.parsed_residue_count,
+                    section.items.iter().filter(|item| item.is_residue).count(),
+                    "{fixture_name} section {} must expose each residue row",
+                    section.section_index
+                );
+                assert_eq!(
+                    section.socketed_child_count,
+                    section
+                        .items
+                        .iter()
+                        .map(|item| item.socketed_child_count)
+                        .sum::<usize>(),
+                    "{fixture_name} section {} must aggregate socketed children",
+                    section.section_index
+                );
+            }
+        }
     }
 }
