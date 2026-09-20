@@ -183,13 +183,23 @@ pub enum TemplateMatchSource {
 pub enum TemplateIdentityStatus {
     ExactCode,
     CodeConflict,
+    AmbiguousCodeFallback,
     StaticCodeUnavailable,
 }
 
 impl TemplateIdentityStatus {
     fn expectations_admitted(self) -> bool {
-        !matches!(self, Self::CodeConflict)
+        !matches!(self, Self::CodeConflict | Self::AmbiguousCodeFallback)
     }
+}
+
+fn unique_code_fallback_is_unambiguous(item_code: &str) -> bool {
+    UNIQUE_ITEMS
+        .iter()
+        .filter(|item| item.code == item_code)
+        .take(2)
+        .count()
+        == 1
 }
 
 fn template_identity_status(
@@ -401,7 +411,15 @@ fn evaluate_item_against_template(
         }
     };
 
-    let template_identity_status = template_identity_status(item.code.trim(), template_code);
+    let template_identity_status = if matches!(
+        template_match_source,
+        TemplateMatchSource::UniqueCodeFallback
+    ) && !unique_code_fallback_is_unambiguous(item.code.trim())
+    {
+        TemplateIdentityStatus::AmbiguousCodeFallback
+    } else {
+        template_identity_status(item.code.trim(), template_code)
+    };
     // Unidentified items, completely opaque items, or loose socketables (gems/runes without host equipment)
     // cannot have active properties verified on their own standalone bitstream.
     let is_gem = template_type == "Gem";
@@ -514,17 +532,29 @@ fn evaluate_save_file(path: &Path) -> TemplateOracleReport {
     report
 }
 
+fn save_files_from_input(path: &Path) -> Vec<PathBuf> {
+    if path.is_file()
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("d2s"))
+    {
+        vec![path.to_path_buf()]
+    } else {
+        scan_directory(path, "d2s")
+    }
+}
+
 fn main() {
     let args = parse_args();
     let mut report = TemplateOracleReport::default();
     let mut save_files = Vec::new();
 
     if let Some(fixture_name) = &args.fixture_name {
-        save_files.extend(scan_directory(Path::new(fixture_name), "d2s"));
+        save_files.extend(save_files_from_input(Path::new(fixture_name)));
     }
 
     if let Some(corpus_dir) = &args.corpus_dir {
-        save_files.extend(scan_directory(Path::new(corpus_dir), "d2s"));
+        save_files.extend(save_files_from_input(Path::new(corpus_dir)));
     }
 
     save_files.sort();
@@ -653,5 +683,46 @@ mod tests {
             template_identity_status("wa2", None),
             TemplateIdentityStatus::StaticCodeUnavailable
         );
+    }
+
+    #[test]
+    fn ambiguous_unique_code_fallback_is_not_expectation_admissible() {
+        assert!(UNIQUE_ITEMS.iter().all(|template| template.id != 1774));
+        assert!(!unique_code_fallback_is_unambiguous("rin"));
+
+        let mut item = Item::default();
+        item.header.quality = Some(ItemQuality::Unique);
+        item.header.is_identified = true;
+        item.unique_id = Some(1774);
+        item.code = "rin".to_string();
+
+        let mut report = TemplateOracleReport::default();
+        evaluate_item_against_template(&mut report, Path::new("fixture.d2s"), 20, &item, false);
+        let evaluation = report
+            .item_evaluations
+            .first()
+            .expect("the ring code should retain fallback provenance");
+
+        assert_eq!(
+            evaluation.template_match_source,
+            TemplateMatchSource::UniqueCodeFallback
+        );
+        assert_eq!(
+            evaluation.template_identity_status,
+            TemplateIdentityStatus::AmbiguousCodeFallback
+        );
+        assert!(!evaluation.expectations_admitted);
+        assert_eq!(report.admitted_template_evaluations, 0);
+        assert_eq!(report.total_expected_stats, 0);
+        assert_eq!(report.missing_expected_stats, 0);
+    }
+
+    #[test]
+    fn direct_fixture_input_selects_only_that_save_file() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s");
+        assert!(fixture.is_file());
+
+        assert_eq!(save_files_from_input(&fixture), vec![fixture]);
     }
 }
