@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::forensic::registry::get_registry;
 use d2r_core::item::{HuffmanTree, Item};
@@ -87,9 +87,13 @@ struct ItemTrace {
     raw_start_bit: u64,
     raw_end_bit: u64,
     raw_len_bits: usize,
+    section_clamped_end_bit: u64,
+    range_overrun_bits: usize,
+    section_clamped_raw_len_bits: usize,
     serialized_len_bits: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     local_check: Option<BitCheck>,
+    section_clamped_local_check: BitCheck,
     prefix_checkpoint: PrefixCheckpoint,
     socketed_child_count: usize,
     emitted_child_count: usize,
@@ -655,6 +659,11 @@ fn build_prefix_trace_report_with_strict_item(
 
         for (item_index, item) in items.iter().enumerate() {
             let raw_bits = bits_from_range(bytes, item.range.start, item.range.end);
+            let section_clamped_end_bit = item.range.end.min(payload_end_bit);
+            let range_overrun_bits =
+                item.range.end.saturating_sub(section_clamped_end_bit) as usize;
+            let section_clamped_raw_bits =
+                bits_from_range(bytes, item.range.start, section_clamped_end_bit);
             let strict_rebuild_selected = section_index == 0
                 && strict_rebuild_item
                     .map(|selected_index| selected_index == item_index)
@@ -678,6 +687,11 @@ fn build_prefix_trace_report_with_strict_item(
                 })?;
 
             let local_check = compare_exact_bits(&raw_bits, &serialized_local, item.range.start);
+            let section_clamped_local_check = compare_exact_bits(
+                &section_clamped_raw_bits,
+                &serialized_local,
+                item.range.start,
+            );
             if local_check.matches {
                 section_local_match_count += 1;
             }
@@ -737,8 +751,12 @@ fn build_prefix_trace_report_with_strict_item(
                 raw_start_bit: item.range.start,
                 raw_end_bit: item.range.end,
                 raw_len_bits: raw_bits.len(),
+                section_clamped_end_bit,
+                range_overrun_bits,
+                section_clamped_raw_len_bits: section_clamped_raw_bits.len(),
                 serialized_len_bits: emission.bits.len(),
                 local_check: Some(local_check),
+                section_clamped_local_check,
                 prefix_checkpoint: PrefixCheckpoint {
                     emitted_bits: emitted_prefix.len(),
                     compared_bits: emitted_prefix.len().min(original_payload_bits.len()),
@@ -1540,5 +1558,38 @@ fn get_isolated_inspect(
         })
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rogue_section_one_reports_section_clamped_last_item() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
+        );
+        let bytes = fs::read(&fixture).expect("Rogue fixture must be readable");
+        let section_map = map_core_sections(&bytes).expect("Rogue fixture must map JM sections");
+        let report = build_prefix_trace_report_with_strict_item(
+            fixture.to_string_lossy().as_ref(),
+            105,
+            true,
+            &bytes,
+            &section_map.jm_positions,
+            &HuffmanTree::new(),
+            None,
+        )
+        .expect("Rogue fixture must produce a prefix trace");
+
+        let item = &report.sections[0].items[34];
+        assert_eq!(item.code, "7bk");
+        assert_eq!(item.section_clamped_end_bit, 13160);
+        assert_eq!(item.range_overrun_bits, 3);
+        assert_eq!(item.raw_capture_len_bits, 768);
+        assert_eq!(item.section_clamped_raw_len_bits, 765);
+        assert!(!item.local_check.as_ref().expect("full local check").matches);
+        assert!(item.section_clamped_local_check.matches);
     }
 }
