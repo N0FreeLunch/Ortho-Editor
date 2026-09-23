@@ -1,19 +1,18 @@
-pub mod args;
 pub mod alpha_inventory_routing;
+pub mod args;
 pub mod bit_diff;
 pub mod dedup_pool;
+pub mod delta;
 pub mod desync;
 pub mod forensics;
 pub mod mutation;
-pub mod sba;
 pub mod save_integrity;
+pub mod sba;
 pub mod symmetry;
 pub mod symmetry_analyzer;
 pub mod v2;
-pub mod delta;
 
 pub use dedup_pool::{CachedVerificationReceipt, ItemMemoizationPool, ItemSignature, PoolStats};
-
 
 pub trait Verifier {
     fn verify(&self, fixture: &[u8], reproduced: &[u8]) -> VerificationReport;
@@ -235,12 +234,16 @@ impl OutputManager {
 
         let mut writer = None;
 
-        if is_token_efficient {
+        if let Some(path) = output_path {
+            if let Ok(f) = File::create(path) {
+                writer = Some(Box::new(f) as Box<dyn Write>);
+            }
+        } else if is_token_efficient {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            
+
             let root = std::env::var("AGENT_ARTIFACTS_PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
@@ -251,14 +254,10 @@ impl OutputManager {
                 });
 
             let _ = fs::create_dir_all(&root);
-            
+
             let path = root.join(format!("{}_{}.txt", tool_name, timestamp));
             if let Ok(f) = File::create(&path) {
                 eprintln!("[TOKEN-EFFICIENT] Detail saved to: {}", path.display());
-                writer = Some(Box::new(f) as Box<dyn Write>);
-            }
-        } else if let Some(path) = output_path {
-            if let Ok(f) = File::create(path) {
                 writer = Some(Box::new(f) as Box<dyn Write>);
             }
         }
@@ -276,7 +275,7 @@ impl OutputManager {
                 let _ = writeln!(w, "{}", text);
             }
         }
-        
+
         if self.is_json {
             eprintln!("{}", text);
         } else if !self.is_token_efficient {
@@ -297,14 +296,16 @@ impl OutputManager {
             print!("{}", text);
         }
     }
-    
+
     pub fn json(&mut self, text: &str) {
         if let Some(w) = &mut self.writer {
             let _ = writeln!(w, "{}", text);
         }
-        println!("{}", text);
+        if !self.is_token_efficient {
+            println!("{}", text);
+        }
     }
-    
+
     pub fn summary(&mut self, text: &str) {
         if self.is_json {
             eprintln!("{}", text);
@@ -320,7 +321,7 @@ impl OutputManager {
             }
         }
     }
-    
+
     pub fn is_json(&self) -> bool {
         self.is_json
     }
