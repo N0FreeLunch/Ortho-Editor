@@ -1178,6 +1178,59 @@ fn section_context_report(
     let identity_is_item_alpha = identity_axiom.is_alpha();
     let header_axiom = d2r_core::domain::header::HeaderAxiom::new(item.header.version, alpha_mode);
     let header_is_item_alpha = header_axiom.is_alpha();
+    let quality_code = item.code.trim();
+    let quality_width_axiom = d2r_core::domain::forensic::v105::V105PropertyWidthAxiom::default();
+    let quality_is_runeword = identity_axiom.is_runeword(item.header.flags);
+    let quality_is_fragment = header_is_item_alpha
+        && matches!(item.header.version, 5 | 2 | 1)
+        && (item.header.flags & (1 << 26) != 0 || item.header.flags & (1 << 27) != 0);
+    let quality_is_v105_shadow = header_axiom.is_v105_shadow(item.header.flags, Some(quality_code));
+    let parser_quality_gate = !item.header.is_compact;
+    let parser_v5_extra_gate = quality_width_axiom.has_v5_runeword_extra(item.header.version)
+        && (quality_is_runeword || quality_is_fragment || quality_is_v105_shadow);
+    let parser_authority_runeword_exception = alpha_mode && matches!(quality_code, "xrs" | "c8xr");
+    let emitter_quality_gate =
+        identity_is_item_alpha && item.header.version != 3 && !item.header.is_compact;
+    let emitter_v5_extra_gate = matches!(item.header.version, 1 | 5 | 6 | 7)
+        && (quality_is_runeword || quality_is_v105_shadow);
+    let alpha_quality_input_provenance = json!({
+        "provenance": "ExtendedStatsData::read_from_cursor quality/v5-extra gates and Item::to_bits quality/v5-extra gates",
+        "report_only": true,
+        "semantic_authorization": false,
+        "alpha_mode": alpha_mode,
+        "header": {
+            "version": item.header.version,
+            "flags": item.header.flags,
+            "is_compact": item.header.is_compact,
+            "quality": item.header.quality.map(|quality| format!("{:?}", quality)),
+            "alpha_quality_raw": item.header.alpha_quality_raw,
+            "alpha_v5_runeword_extra": item.header.alpha_v5_runeword_extra,
+        },
+        "body": {
+            "v5_runeword_extra": item.body.v5_runeword_extra,
+        },
+        "is_fragment": quality_is_fragment,
+        "is_v105_shadow": quality_is_v105_shadow,
+        "parser": {
+            "quality_gate": parser_quality_gate,
+            "quality_width_bits": quality_width_axiom.quality_bits(true),
+            "v5_extra_gate": parser_v5_extra_gate,
+            "v5_extra_will_consume": parser_v5_extra_gate && !parser_authority_runeword_exception,
+            "v5_extra_width_bits": quality_width_axiom.v5_runeword_extra_bits(),
+            "is_runeword": quality_is_runeword,
+        },
+        "emitter": {
+            "quality_gate": emitter_quality_gate,
+            "v5_extra_gate": emitter_v5_extra_gate,
+            "v5_extra_will_write": emitter_quality_gate && emitter_v5_extra_gate,
+            "is_runeword": quality_is_runeword,
+        },
+        "authority_runeword_exception": {
+            "applies": parser_authority_runeword_exception,
+            "suppresses_parser_v5_extra_read":
+                parser_authority_runeword_exception && parser_v5_extra_gate,
+        },
+    });
     let nudge_axiom = d2r_core::domain::forensic::v105::V105PropertyWidthAxiom::default();
     let normalized_code = item.code.trim();
     let parser_nudge_eligible = alpha_mode
@@ -1885,6 +1938,7 @@ fn section_context_report(
         "section_parser_input_provenance": section_parser_input_provenance,
         "header_limit_provenance": header_limit_provenance,
         "legacy_identity_provenance": legacy_identity_provenance,
+        "alpha_quality_input_provenance": alpha_quality_input_provenance,
         "nudge_symmetry_provenance": nudge_symmetry_provenance,
         "property_provenance": property_provenance,
         "property_body_gap_provenance": property_body_gap_provenance,
