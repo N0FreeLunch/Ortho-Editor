@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::env;
+use std::ffi::OsString;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArgType {
@@ -220,7 +220,11 @@ impl ArgParser {
             let arg_str = arg.to_string_lossy();
             if arg_str.starts_with("--") {
                 let long_name = &arg_str[2..];
-                if let Some(spec) = self.specs.iter().find(|s| s.long.as_deref() == Some(long_name)) {
+                if let Some(spec) = self
+                    .specs
+                    .iter()
+                    .find(|s| s.long.as_deref() == Some(long_name))
+                {
                     match spec.arg_type {
                         ArgType::Flag => {
                             flags.insert(spec.name.clone(), true);
@@ -231,10 +235,16 @@ impl ArgParser {
                                 if let Some(val) = it.next() {
                                     collected.push(val.to_string_lossy().to_string());
                                 } else {
-                                    return Err(ArgError::Error(format!("Option --{} requires {} value(s)", long_name, spec.value_count)));
+                                    return Err(ArgError::Error(format!(
+                                        "Option --{} requires {} value(s)",
+                                        long_name, spec.value_count
+                                    )));
                                 }
                             }
-                            values.entry(spec.name.clone()).or_insert_with(Vec::new).extend(collected);
+                            values
+                                .entry(spec.name.clone())
+                                .or_insert_with(Vec::new)
+                                .extend(collected);
                         }
                         ArgType::Positional | ArgType::RepeatedPositional => unreachable!(),
                     }
@@ -246,9 +256,14 @@ impl ArgParser {
                     flags.insert("token-efficient".to_string(), true);
                 } else if long_name == "output" {
                     if let Some(val) = it.next() {
-                        values.entry("output".to_string()).or_insert_with(Vec::new).push(val.to_string_lossy().to_string());
+                        values
+                            .entry("output".to_string())
+                            .or_insert_with(Vec::new)
+                            .push(val.to_string_lossy().to_string());
                     } else {
-                        return Err(ArgError::Error("Option --output requires 1 value".to_string()));
+                        return Err(ArgError::Error(
+                            "Option --output requires 1 value".to_string(),
+                        ));
                     }
                 } else {
                     return Err(ArgError::Error(format!("Unknown option --{}", long_name)));
@@ -266,10 +281,16 @@ impl ArgParser {
                                 if let Some(val) = it.next() {
                                     collected.push(val.to_string_lossy().to_string());
                                 } else {
-                                    return Err(ArgError::Error(format!("Option -{} requires {} value(s)", short_name, spec.value_count)));
+                                    return Err(ArgError::Error(format!(
+                                        "Option -{} requires {} value(s)",
+                                        short_name, spec.value_count
+                                    )));
                                 }
                             }
-                            values.entry(spec.name.clone()).or_insert_with(Vec::new).extend(collected);
+                            values
+                                .entry(spec.name.clone())
+                                .or_insert_with(Vec::new)
+                                .extend(collected);
                         }
                         ArgType::Positional | ArgType::RepeatedPositional => unreachable!(),
                     }
@@ -277,29 +298,47 @@ impl ArgParser {
                     return Err(ArgError::Help(self.usage()));
                 } else if short_name == 'o' {
                     if let Some(val) = it.next() {
-                        values.entry("output".to_string()).or_insert_with(Vec::new).push(val.to_string_lossy().to_string());
+                        values
+                            .entry("output".to_string())
+                            .or_insert_with(Vec::new)
+                            .push(val.to_string_lossy().to_string());
                     } else {
                         return Err(ArgError::Error("Option -o requires 1 value".to_string()));
                     }
                 } else if short_name == 't' {
                     // Check if it's -te
                     if arg_str == "-te" {
-                         flags.insert("token-efficient".to_string(), true);
+                        flags.insert("token-efficient".to_string(), true);
                     } else {
-                         return Err(ArgError::Error(format!("Unknown option -{}", short_name)));
+                        return Err(ArgError::Error(format!("Unknown option -{}", short_name)));
                     }
                 } else {
                     return Err(ArgError::Error(format!("Unknown option -{}", short_name)));
                 }
             } else {
                 // Positional
-                if let Some(spec) = self.specs.iter().filter(|s| matches!(s.arg_type, ArgType::Positional)).nth(positional_idx) {
+                if let Some(spec) = self
+                    .specs
+                    .iter()
+                    .filter(|s| matches!(s.arg_type, ArgType::Positional))
+                    .nth(positional_idx)
+                {
                     values.insert(spec.name.clone(), vec![arg_str.to_string()]);
                     positional_idx += 1;
-                } else if let Some(spec) = self.specs.iter().find(|s| matches!(s.arg_type, ArgType::RepeatedPositional)) {
-                    values.entry(spec.name.clone()).or_insert_with(Vec::new).push(arg_str.to_string());
+                } else if let Some(spec) = self
+                    .specs
+                    .iter()
+                    .find(|s| matches!(s.arg_type, ArgType::RepeatedPositional))
+                {
+                    values
+                        .entry(spec.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(arg_str.to_string());
                 } else {
-                    return Err(ArgError::Error(format!("Unexpected positional argument: {}", arg_str)));
+                    return Err(ArgError::Error(format!(
+                        "Unexpected positional argument: {}",
+                        arg_str
+                    )));
                 }
             }
         }
@@ -328,7 +367,10 @@ impl ArgParser {
             }
 
             if spec.required && !values.contains_key(&spec.name) {
-                return Err(ArgError::Error(format!("Missing required argument: {}", spec.name)));
+                return Err(ArgError::Error(format!(
+                    "Missing required argument: {}",
+                    spec.name
+                )));
             }
         }
 
@@ -387,11 +429,12 @@ impl ArgParser {
 
             options_txt.push_str(&format!("  {:20} {}\n", opt, spec.description));
         }
-        
+
         options_txt.push_str("  -h, --help           Show this help message\n");
         options_txt.push_str("      --json           Output in machine-readable JSON format\n");
         options_txt.push_str("  -o, --output <PATH>  Save execution output to a file\n");
-        options_txt.push_str("  -te, --token-efficient AI mode: save to agent_artifacts/ and summarize\n");
+        options_txt
+            .push_str("  -te, --token-efficient AI mode: save to agent_artifacts/ and summarize\n");
 
         usage.push_str(&options_txt);
         usage
@@ -428,8 +471,14 @@ mod tests {
     fn test_basic_parsing() {
         let mut parser = ArgParser::new("test");
         parser.add_arg("input", "input file");
-        parser.add_flag("verbose", "verbose output").short('v').long("verbose");
-        parser.add_opt("output", "output file").short('o').long("output");
+        parser
+            .add_flag("verbose", "verbose output")
+            .short('v')
+            .long("verbose");
+        parser
+            .add_opt("output", "output file")
+            .short('o')
+            .long("output");
 
         let args = vec![
             OsString::from("in.bin"),
@@ -447,7 +496,10 @@ mod tests {
     #[test]
     fn test_multi_value_option() {
         let mut parser = ArgParser::new("test");
-        parser.add_opt("bits", "start and count").long("bits").value_count(2);
+        parser
+            .add_opt("bits", "start and count")
+            .long("bits")
+            .value_count(2);
 
         let args = vec![
             OsString::from("--bits"),
@@ -467,7 +519,7 @@ mod tests {
         let mut parser = ArgParser::new("test");
         parser.add_arg("main", "main file");
         // We still need a way to set repeated positional via add_arg if we want it to be ergonomic
-        // For now, let's update ArgSpec manually for this specific case if needed, 
+        // For now, let's update ArgSpec manually for this specific case if needed,
         // or add add_repeated_arg
         let mut spec = ArgSpec::repeated_positional("extras", "extra files");
         parser.add_spec(spec);
@@ -490,7 +542,7 @@ mod tests {
     fn test_missing_required() {
         let mut parser = ArgParser::new("test");
         parser.add_arg("input", "input file");
-        
+
         let args = vec![];
         let result = parser.parse(args);
         assert!(result.is_err());
@@ -503,8 +555,14 @@ mod tests {
     #[test]
     fn test_new_dsl() {
         let mut parser = ArgParser::new("test");
-        parser.add_arg("name", "your name").optional().default("world");
-        parser.add_flag("verbose", "verbose output").short('v').long("verbose");
+        parser
+            .add_arg("name", "your name")
+            .optional()
+            .default("world");
+        parser
+            .add_flag("verbose", "verbose output")
+            .short('v')
+            .long("verbose");
         parser.add_opt("level", "log level").short('l').default("1");
 
         // Case 1: Missing optional with default
@@ -530,17 +588,22 @@ mod tests {
     #[test]
     fn test_defaults_and_env() {
         let mut parser = ArgParser::new("test");
-        parser.add_opt("port", "port number").long("port").with_default("8080");
-        parser.add_opt("host", "host name").long("host").with_env("TEST_HOST");
+        parser
+            .add_opt("port", "port number")
+            .long("port")
+            .with_default("8080");
+        parser
+            .add_opt("host", "host name")
+            .long("host")
+            .with_env("TEST_HOST");
 
         unsafe {
             env::set_var("TEST_HOST", "localhost");
         }
-        
+
         let args = vec![];
         let parsed = parser.parse(args).unwrap();
         assert_eq!(parsed.get("port").unwrap(), "8080");
         assert_eq!(parsed.get("host").unwrap(), "localhost");
     }
 }
-

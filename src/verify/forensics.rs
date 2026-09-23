@@ -1,6 +1,6 @@
+use crate::verify::SuggestedAction;
 use serde::{Deserialize, Serialize};
 use std::env;
-use crate::verify::SuggestedAction;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ForensicIssue {
@@ -80,11 +80,16 @@ pub fn extract_dna_diagnosis(message: &str) -> Option<DnaDiagnosis> {
     })
 }
 
-pub fn build_self_heal_action(bit_offset: Option<u64>, diagnosis: &DnaDiagnosis) -> SuggestedAction {
+pub fn build_self_heal_action(
+    bit_offset: Option<u64>,
+    diagnosis: &DnaDiagnosis,
+) -> SuggestedAction {
     let bit_offset_val = bit_offset.unwrap_or(0);
     let command = match diagnosis.dna_class.as_str() {
         "stat_alignment_drift" => format!("d2item_desync_detector --bit-offset {}", bit_offset_val),
-        "compact_geometry_shift" => format!("d2item_alignment_oracle --bit-offset {}", bit_offset_val),
+        "compact_geometry_shift" => {
+            format!("d2item_alignment_oracle --bit-offset {}", bit_offset_val)
+        }
         _ => format!("d2save_verify --dump-bits {} 128", bit_offset_val),
     };
 
@@ -232,7 +237,11 @@ pub fn get_bit_color(
         let rel_end = it.range.end - section_bit_offset;
         if bit_idx >= rel_start && bit_idx < rel_end {
             if it.is_residue() {
-                Some(colored::Color::TrueColor { r: 80, g: 80, b: 80 })
+                Some(colored::Color::TrueColor {
+                    r: 80,
+                    g: 80,
+                    b: 80,
+                })
             } else if it
                 .modules
                 .iter()

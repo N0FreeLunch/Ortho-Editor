@@ -67,7 +67,11 @@ impl DomainVerifier for ItemVerifier {
                 for warning in validation.warnings {
                     issues.push(ReportIssue {
                         kind: "item_legitimacy".to_string(),
-                        message: format!("Item legitimacy warning ({}): {}", item.code.trim(), warning),
+                        message: format!(
+                            "Item legitimacy warning ({}): {}",
+                            item.code.trim(),
+                            warning
+                        ),
                         bit_offset: Some(item.range.start),
                     });
                 }

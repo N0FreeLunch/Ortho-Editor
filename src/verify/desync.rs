@@ -1,7 +1,7 @@
+use crate::error::ParsingResult;
+use crate::item::{is_plausible_item_header, peek_item_header_at, HuffmanTree, Item};
 use bitstream_io::BitRead;
 use serde::Serialize;
-use crate::item::{Item, HuffmanTree, peek_item_header_at, is_plausible_item_header};
-use crate::error::ParsingResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,12 +35,19 @@ pub struct DesyncReport {
 }
 
 /// Detects bit-level drift between empirical item starts (Oracle) and parser-calculated starts.
-pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> ParsingResult<Vec<DesyncReport>> {
+pub fn detect_desync(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+) -> ParsingResult<Vec<DesyncReport>> {
     // 1. Find the JM section
     let jm_pos = (0..bytes.len().saturating_sub(1))
         .find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M')
         .ok_or_else(|| crate::error::ParsingFailure {
-            error: crate::error::ParsingError::MissingMarker { marker: "JM".to_string(), bit_offset: 0 },
+            error: crate::error::ParsingError::MissingMarker {
+                marker: "JM".to_string(),
+                bit_offset: 0,
+            },
             context_stack: vec!["detect_desync".to_string()],
             bit_offset: 0,
             context_relative_offset: 0,
@@ -52,28 +59,46 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
     let section_base_bit = ((jm_pos + 4) * 8) as u64;
 
     // 2. Standard Parsing
-    let parsed_items = match Item::read_section(section_payload, 0, count, huffman, is_alpha, false) {
+    let parsed_items = match Item::read_section(section_payload, 0, count, huffman, is_alpha, false)
+    {
         Ok(items) => items,
-        Err(_) => Vec::new() 
+        Err(_) => Vec::new(),
     };
 
     // 3. Oracle Search
     let mut oracle_starts = Vec::new();
     let mut bit_idx = section_base_bit;
     let total_bits = (bytes.len() * 8) as u64;
-    
+
     let mut found_count = 0;
     while bit_idx < total_bits.saturating_sub(100) && found_count < count as usize {
-        if let Some((mode, location, _x, code, flags, version, _is_compact, _header_bits, _nudge, _has_checksum)) =
-            peek_item_header_at(bytes, bit_idx, huffman, is_alpha, 0)
+        if let Some((
+            mode,
+            location,
+            _x,
+            code,
+            flags,
+            version,
+            _is_compact,
+            _header_bits,
+            _nudge,
+            _has_checksum,
+        )) = peek_item_header_at(bytes, bit_idx, huffman, is_alpha, 0)
         {
             if is_plausible_item_header(mode, location, code.as_bytes(), flags, version, is_alpha) {
                 let is_summary = crate::domain::item::serialization::is_v105_summary_code(&code);
                 if !is_alpha || version == 5 || is_summary {
                     // Check lookahead to avoid false positives in Oracle search
-                    if is_alpha && !crate::domain::item::verify_marker_lookahead(bytes, bit_idx + _header_bits, huffman, is_alpha) {
-                         bit_idx += 8;
-                         continue;
+                    if is_alpha
+                        && !crate::domain::item::verify_marker_lookahead(
+                            bytes,
+                            bit_idx + _header_bits,
+                            huffman,
+                            is_alpha,
+                        )
+                    {
+                        bit_idx += 8;
+                        continue;
                     }
                     oracle_starts.push((bit_idx, code.trim().to_string()));
                     found_count += 1;
@@ -93,7 +118,7 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
         let oracle_start = oracle_starts[i].0;
         let parser_start = section_base_bit + parsed_items[i].expected_start_bit;
         let drift = parser_start as i64 - oracle_start as i64;
-        
+
         let bit_dump = if drift != 0 {
             Some(dump_bits_at(bytes, oracle_start, 64))
         } else {
@@ -130,13 +155,16 @@ pub fn detect_desync(bytes: &[u8], huffman: &HuffmanTree, is_alpha: bool) -> Par
 
 pub fn dump_bits_at(bytes: &[u8], start_bit: u64, count: u32) -> String {
     let mut result = String::new();
-    let mut reader = bitstream_io::BitReader::endian(std::io::Cursor::new(bytes), bitstream_io::LittleEndian);
+    let mut reader =
+        bitstream_io::BitReader::endian(std::io::Cursor::new(bytes), bitstream_io::LittleEndian);
     if reader.skip(start_bit as u32).is_err() {
         return "ERROR: Offset out of bounds".to_string();
     }
 
     for i in 0..count {
-        if i > 0 && i % 8 == 0 { result.push(' '); }
+        if i > 0 && i % 8 == 0 {
+            result.push(' ');
+        }
         match reader.read_bit() {
             Ok(true) => result.push('1'),
             Ok(false) => result.push('0'),

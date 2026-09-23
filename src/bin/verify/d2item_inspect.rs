@@ -612,17 +612,26 @@ fn header_limit_provenance(
         return unavailable_header_limit_provenance(item, "section geometry is not byte-aligned");
     }
     if relative_start_bit >= section_bit_len || relative_start_bit > u64::from(u32::MAX) {
-        return unavailable_header_limit_provenance(item, "relative item start is outside BitReader bounds");
+        return unavailable_header_limit_provenance(
+            item,
+            "relative item start is outside BitReader bounds",
+        );
     }
 
     let section_start_byte = (section_base_bit / 8) as usize;
     let section_end_byte = section_start_byte.saturating_add((section_bit_len / 8) as usize);
     if section_end_byte > bytes.len() {
-        return unavailable_header_limit_provenance(item, "recorded section extends beyond save bytes");
+        return unavailable_header_limit_provenance(
+            item,
+            "recorded section extends beyond save bytes",
+        );
     }
     let expected_absolute_start = section_base_bit.saturating_add(relative_start_bit);
     if expected_absolute_start != range_start {
-        return unavailable_header_limit_provenance(item, "recorded relative start does not match selected range");
+        return unavailable_header_limit_provenance(
+            item,
+            "recorded relative start does not match selected range",
+        );
     }
 
     let section_bytes = &bytes[section_start_byte..section_end_byte];
@@ -661,21 +670,24 @@ fn header_limit_provenance(
         alpha_mode,
         local_item_index,
     );
-    let peek_decision = peek.as_ref().map(|peek| {
-        let target_width_bits = d2r_core::domain::forensic::v105::axioms::get_v105_target_width(
-            peek.5,
-            &peek.3,
-            peek.4,
-            Some(local_item_index),
-        );
-        json!({
-            "status": "observed", "mode": peek.0, "location": peek.1, "x": peek.2,
-            "code_hint": peek.3.trim(), "flags": peek.4, "version": peek.5,
-            "is_compact": peek.6, "consumed_bits": peek.7,
-            "header_gap_hint_bits": peek.8, "has_checksum": peek.9,
-            "target_width_bits": target_width_bits,
+    let peek_decision = peek
+        .as_ref()
+        .map(|peek| {
+            let target_width_bits = d2r_core::domain::forensic::v105::axioms::get_v105_target_width(
+                peek.5,
+                &peek.3,
+                peek.4,
+                Some(local_item_index),
+            );
+            json!({
+                "status": "observed", "mode": peek.0, "location": peek.1, "x": peek.2,
+                "code_hint": peek.3.trim(), "flags": peek.4, "version": peek.5,
+                "is_compact": peek.6, "consumed_bits": peek.7,
+                "header_gap_hint_bits": peek.8, "has_checksum": peek.9,
+                "target_width_bits": target_width_bits,
+            })
         })
-    }).unwrap_or_else(|| json!({"status": "unavailable"}));
+        .unwrap_or_else(|| json!({"status": "unavailable"}));
 
     let mut reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     let _ = reader.skip(relative_start_bit as u32);
@@ -864,8 +876,8 @@ fn header_limit_provenance(
                 .with_index(local_item_index)
                 .with_compact(stage.header.is_compact)
                 .with_code(code_peek.unwrap_or(""));
-                let header_only = stats_axiom
-                    .is_header_only(stage.header.flags, code_peek.unwrap_or(""));
+                let header_only =
+                    stats_axiom.is_header_only(stage.header.flags, code_peek.unwrap_or(""));
                 let body_start_bit = cursor.pos();
                 let common = json!({
                     "applied_limit_bits": applied_limit_bits,
@@ -979,8 +991,8 @@ fn header_limit_provenance(
                     .with_index(local_item_index)
                     .with_compact(stage.header.is_compact)
                     .with_code(code_peek.unwrap_or(""));
-                    let header_only = stats_axiom
-                        .is_header_only(stage.header.flags, code_peek.unwrap_or(""));
+                    let header_only =
+                        stats_axiom.is_header_only(stage.header.flags, code_peek.unwrap_or(""));
                     let header = json!({
                         "header_cursor_bit": cursor.pos(),
                         "body_remaining_bits": cursor.remaining(),
@@ -1173,8 +1185,8 @@ fn section_context_report(
         && !item.header.is_compact
         && !nudge_axiom.is_summary_item(item.header.version, normalized_code)
         && !matches!(normalized_code, "us g" | "jav" | "buc");
-    let parser_nudge_will_consume = parser_nudge_eligible
-        && matches!(item.header.version, 0 | 2 | 5);
+    let parser_nudge_will_consume =
+        parser_nudge_eligible && matches!(item.header.version, 0 | 2 | 5);
     let emitter_nudge_will_write = alpha_mode
         && header_is_item_alpha
         && !item.header.is_compact
@@ -1403,11 +1415,8 @@ fn section_context_report(
         );
 
     let original_bits = item.bits.iter().map(|bit| bit.bit).collect::<Vec<_>>();
-    let first_difference_offset = compare_first_difference_offset(
-        &original_bits,
-        &with_padding_bits,
-        item.range.start,
-    );
+    let first_difference_offset =
+        compare_first_difference_offset(&original_bits, &with_padding_bits, item.range.start);
     let property_id_bit_provenance = strict_emission_phases
         .iter()
         .find(|phase| phase.label == "non_summary_property_body")
@@ -1417,7 +1426,10 @@ fn section_context_report(
                 item.header.is_runeword,
                 false,
                 item.header.is_compact,
-                item.properties.first().map(|property| property.stat_id).unwrap_or(0),
+                item.properties
+                    .first()
+                    .map(|property| property.stat_id)
+                    .unwrap_or(0),
             );
             let width = rhythm.id_bits as usize;
             let end = start.saturating_add(width);
@@ -1431,10 +1443,12 @@ fn section_context_report(
                 "report_only": true,
             })
         })
-        .unwrap_or_else(|| json!({
-            "status": "unavailable",
-            "reason": "strict emission trace has no property body phase",
-        }));
+        .unwrap_or_else(|| {
+            json!({
+                "status": "unavailable",
+                "reason": "strict emission trace has no property body phase",
+            })
+        });
     let captured_tail_offset_probe = strict_emission_phases
         .iter()
         .find(|phase| phase.label == "non_summary_captured_tail_material")
@@ -1476,10 +1490,12 @@ fn section_context_report(
                 "report_only": true,
             })
         })
-        .unwrap_or_else(|| json!({
-            "status": "unavailable",
-            "reason": "strict emission trace has no captured tail phase",
-        }));
+        .unwrap_or_else(|| {
+            json!({
+                "status": "unavailable",
+                "reason": "strict emission trace has no captured tail phase",
+            })
+        });
     let opaque_tail_bits = item
         .modules
         .iter()

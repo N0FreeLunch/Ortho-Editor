@@ -1,10 +1,9 @@
-use serde::{Deserialize, Serialize};
 use crate::verify::Report;
+use serde::{Deserialize, Serialize};
 
 use crate::verify::save_integrity::D2SaveVerifyPayload;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-
 #[serde(rename_all = "lowercase")]
 pub enum DeltaStatus {
     Improved,
@@ -56,13 +55,13 @@ impl FidelityDelta {
             }
         }
 
-        // If score is same but we have new issues, it might be a regression in quality 
+        // If score is same but we have new issues, it might be a regression in quality
         // even if the score (which might be coarse) didn't catch it.
         // But for Slice 3, we follow the score delta primarily as per spec.
-        
+
         if status == DeltaStatus::Unchanged && !new_issues.is_empty() {
-             // If we have new issues but score didn't drop, we still mark as regressed if they are "real" issues
-             // But let's stay simple for now.
+            // If we have new issues but score didn't drop, we still mark as regressed if they are "real" issues
+            // But let's stay simple for now.
         }
 
         Self {
@@ -87,6 +86,6 @@ fn extract_dna(issue: &crate::verify::ReportIssue) -> String {
         let emit: i64 = caps[2].parse().unwrap_or(0);
         diff_len = format!(":diff={}", (orig - emit).abs());
     }
-    
+
     format!("{}:{}{}", issue.kind, issue.message, diff_len)
 }

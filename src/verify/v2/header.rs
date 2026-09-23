@@ -1,7 +1,7 @@
+use super::{DomainReport, DomainVerifier};
+use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 use crate::save::{recalculate_checksum, Save};
 use crate::verify::ReportIssue;
-use crate::domain::item::axiom_meta::{ForensicAudit, FidelityScore};
-use super::{DomainVerifier, DomainReport};
 
 pub struct HeaderVerifier;
 
@@ -47,7 +47,11 @@ impl DomainVerifier for HeaderVerifier {
             Ok(calculated_checksum) => {
                 if stored_checksum != calculated_checksum {
                     issues.push(ReportIssue {
-                        kind: if alpha_mode { "checksum_info".to_string() } else { "checksum".to_string() },
+                        kind: if alpha_mode {
+                            "checksum_info".to_string()
+                        } else {
+                            "checksum".to_string()
+                        },
                         message: format!(
                             "stored=0x{:08X}, calculated=0x{:08X}",
                             stored_checksum, calculated_checksum
@@ -97,7 +101,7 @@ mod tests {
         bytes[0..4].copy_from_slice(&0xAA55AA55u32.to_le_bytes()); // magic
         bytes[4..8].copy_from_slice(&0x00000060u32.to_le_bytes()); // version 96
         bytes[8..12].copy_from_slice(&2000u32.to_le_bytes()); // file size in header = 2000
-        
+
         let report = verifier.verify(&bytes, false);
         // Should have size mismatch because actual is 1024
         assert!(report.issues.iter().any(|i| i.kind == "file_size"));

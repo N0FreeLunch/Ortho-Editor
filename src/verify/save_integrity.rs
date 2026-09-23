@@ -7,7 +7,9 @@ use crate::save::{find_jm_markers, map_core_sections, recalculate_checksum, Save
 use crate::verify::v2::{
     header::HeaderVerifier, item::ItemVerifier, progression::ProgressionVerifier, DomainVerifier,
 };
-use crate::verify::{Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction, forensics};
+use crate::verify::{
+    forensics, Report, ReportIssue, ReportMetadata, ReportStatus, SuggestedAction,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,7 +257,10 @@ fn triage_actions(issues: &[ReportIssue]) -> Vec<SuggestedAction> {
     for issue in issues {
         if issue.kind == "item_parity" {
             if let Some(diagnosis) = forensics::extract_dna_diagnosis(&issue.message) {
-                actions.push(forensics::build_self_heal_action(issue.bit_offset, &diagnosis));
+                actions.push(forensics::build_self_heal_action(
+                    issue.bit_offset,
+                    &diagnosis,
+                ));
             }
 
             if let Some(caps) = re_parity.captures(&issue.message) {

@@ -4,8 +4,8 @@ use serde::Serialize;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
+use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
 use crate::verify::dedup_pool::{ItemMemoizationPool, ItemSignature};
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, Default)]
@@ -250,15 +250,20 @@ fn compare_item_with_reserialized(
     }
 
     let is_alpha_socketed_host = alpha_mode && !item.socketed_items.is_empty();
-    let preserve_raw_bits = is_alpha_socketed_host || should_preserve_alpha_compare_bits(item, alpha_mode);
+    let preserve_raw_bits =
+        is_alpha_socketed_host || should_preserve_alpha_compare_bits(item, alpha_mode);
     let mut strict_item = item.clone();
     if !preserve_raw_bits {
         strict_item.bits.clear();
     }
     let reserialized_bits: Vec<bool> = if alpha_mode {
-        strict_item.to_bits(idx, huffman, alpha_mode).unwrap_or_default()
+        strict_item
+            .to_bits(idx, huffman, alpha_mode)
+            .unwrap_or_default()
     } else {
-        let reserialized_bytes = strict_item.to_bytes(idx, huffman, alpha_mode).unwrap_or_default();
+        let reserialized_bytes = strict_item
+            .to_bytes(idx, huffman, alpha_mode)
+            .unwrap_or_default();
 
         let mut rebuilt_bits = Vec::new();
         let mut reader = BitReader::endian(Cursor::new(&reserialized_bytes), LittleEndian);
@@ -312,15 +317,37 @@ fn compare_item_with_reserialized(
         alpha_header_gap: item.body.alpha_header_gap,
         alpha_alignment_padding_len: item.body.alpha_alignment_padding.len(),
         alpha_body_gap_len: item.body.alpha_body_gap_bits.len(),
-        discovered_alpha_header_gap: if alpha_mode { peek_item_header_at(original_bytes, item.range.start, huffman, alpha_mode, 0).map(|p| p.8 as u32) } else { None },
-        parsed_alpha_header_gap: if alpha_mode { Some(item.body.alpha_header_gap_bits.len() as u32) } else { None },
-        orig_bits: Some(original_bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
-        target_bits: Some(reserialized_bits.iter().map(|&b| if b { '1' } else { '0' }).collect()),
-        bit_source_contract: Some(if preserve_raw_bits {
-            "raw_capture_preserving_rebuild"
+        discovered_alpha_header_gap: if alpha_mode {
+            peek_item_header_at(original_bytes, item.range.start, huffman, alpha_mode, 0)
+                .map(|p| p.8 as u32)
         } else {
-            "strict_rebuild_after_cached_bits_clear"
-        }.to_string()),
+            None
+        },
+        parsed_alpha_header_gap: if alpha_mode {
+            Some(item.body.alpha_header_gap_bits.len() as u32)
+        } else {
+            None
+        },
+        orig_bits: Some(
+            original_bits
+                .iter()
+                .map(|b| if b.bit { '1' } else { '0' })
+                .collect(),
+        ),
+        target_bits: Some(
+            reserialized_bits
+                .iter()
+                .map(|&b| if b { '1' } else { '0' })
+                .collect(),
+        ),
+        bit_source_contract: Some(
+            if preserve_raw_bits {
+                "raw_capture_preserving_rebuild"
+            } else {
+                "strict_rebuild_after_cached_bits_clear"
+            }
+            .to_string(),
+        ),
         cached_bits_preserved: Some(preserve_raw_bits),
         comparison_bit_source: Some("original_item_bits".to_string()),
         reserialized_bit_source: Some("item_to_bits".to_string()),
@@ -352,8 +379,7 @@ fn compare_item_with_reserialized(
                 item_diff.recorded_bit_source_label_unavailable = Some(true);
             }
             item_diff.segment = Some(
-                item
-                    .query_bit(idx as u64)
+                item.query_bit(idx as u64)
                     .map(|s| s.label)
                     .unwrap_or_else(|| "Unknown".to_string()),
             );
@@ -392,7 +418,13 @@ pub fn compare_single_item_diff(
     compare_item_with_reserialized(idx, item, huffman, alpha_mode, label, original_bytes, None)
 }
 
-fn compare_two_items(item_a: &Item, item_b: &Item, label: String, bytes_a: &[u8], bytes_b: &[u8]) -> ItemDiff {
+fn compare_two_items(
+    item_a: &Item,
+    item_b: &Item,
+    label: String,
+    bytes_a: &[u8],
+    bytes_b: &[u8],
+) -> ItemDiff {
     let _is_alpha = is_alpha(bytes_a);
 
     let mut item_diff = ItemDiff {
@@ -408,13 +440,31 @@ fn compare_two_items(item_a: &Item, item_b: &Item, label: String, bytes_a: &[u8]
         alpha_alignment_padding_len: item_a.body.alpha_alignment_padding.len(),
         alpha_body_gap_len: item_a.body.alpha_body_gap_bits.len(),
         discovered_alpha_header_gap: if item_a.header.version >= 5 {
-             // In this context, we re-parse using symmetry's huffman
-             let huffman = HuffmanTree::new();
-             peek_item_header_at(bytes_a, item_a.range.start, &huffman, true, 0).map(|p| p.8 as u32)
-        } else { None },
-        parsed_alpha_header_gap: if item_a.header.version >= 5 { Some(item_a.body.alpha_header_gap_bits.len() as u32) } else { None },
-        orig_bits: Some(item_a.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
-        target_bits: Some(item_b.bits.iter().map(|b| if b.bit { '1' } else { '0' }).collect()),
+            // In this context, we re-parse using symmetry's huffman
+            let huffman = HuffmanTree::new();
+            peek_item_header_at(bytes_a, item_a.range.start, &huffman, true, 0).map(|p| p.8 as u32)
+        } else {
+            None
+        },
+        parsed_alpha_header_gap: if item_a.header.version >= 5 {
+            Some(item_a.body.alpha_header_gap_bits.len() as u32)
+        } else {
+            None
+        },
+        orig_bits: Some(
+            item_a
+                .bits
+                .iter()
+                .map(|b| if b.bit { '1' } else { '0' })
+                .collect(),
+        ),
+        target_bits: Some(
+            item_b
+                .bits
+                .iter()
+                .map(|b| if b.bit { '1' } else { '0' })
+                .collect(),
+        ),
         ..Default::default()
     };
 
@@ -522,16 +572,19 @@ mod tests {
         let mut item_a = Item::default();
         item_a.code = "test".to_string();
         for i in 0..100 {
-            item_a.bits.push(RecordedBit { bit: false, offset: i as u64 });
+            item_a.bits.push(RecordedBit {
+                bit: false,
+                offset: i as u64,
+            });
         }
-        
+
         let mut item_b = item_a.clone();
-        
+
         // 2-bit diff
         item_b.bits.truncate(98);
         let diff = compare_two_items(&item_a, &item_b, "Test".to_string(), &[], &[]);
         assert_eq!(diff.mismatch_type.unwrap(), "Length [Nudge (2-bit)]");
-        
+
         // 16-bit diff
         item_b.bits.truncate(84);
         let diff = compare_two_items(&item_a, &item_b, "Test".to_string(), &[], &[]);

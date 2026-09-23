@@ -1,9 +1,9 @@
 // This software is licensed under the PolyForm Noncommercial License 1.0.0.
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
-use std::io;
 use crate::engine::checksum::finalize_save_bytes;
 use crate::save::CHECKSUM_OFFSET;
+use std::io;
 
 /// Mode for mutation addressing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +56,9 @@ pub fn mutate_absolute_bit_and_finalize(bytes: &[u8], bit_offset: usize) -> io::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::save::{recalculate_checksum, Save};
     use std::fs;
     use std::path::Path;
-    use crate::save::{Save, recalculate_checksum};
 
     fn fixture_bytes() -> Vec<u8> {
         let repo_root = env!("CARGO_MANIFEST_DIR");
@@ -69,26 +69,26 @@ mod tests {
     #[test]
     fn test_absolute_bit_flip_and_finalize() -> io::Result<()> {
         let original_bytes = fixture_bytes();
-        
-        // Choose a bit that is safe to flip. 
+
+        // Choose a bit that is safe to flip.
         // 299 is CHAR_NAME_OFFSET, which is typically a safe character string.
-        let bit_offset = 299 * 8; 
-        
+        let bit_offset = 299 * 8;
+
         let mutated_bytes = mutate_absolute_bit_and_finalize(&original_bytes, bit_offset)?;
-        
+
         // 1. Verify the bit flip actually happened in the mutated buffer
         assert_ne!(original_bytes[299], mutated_bytes[299]);
-        
+
         // 2. Reparse with Save::from_bytes
         let save = Save::from_bytes(&mutated_bytes)?;
-        
+
         // 3. Assert header file size matches actual length
         assert_eq!(save.header.file_size as usize, mutated_bytes.len());
-        
+
         // 4. Assert stored checksum equals recalculate_checksum
         let calculated = recalculate_checksum(&mutated_bytes)?;
         assert_eq!(save.header.checksum, calculated);
-        
+
         Ok(())
     }
 }

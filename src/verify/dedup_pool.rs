@@ -1,12 +1,12 @@
 // d2r-core/src/verify/dedup_pool.rs
 // Memory-based Item Deduplication Pool for multi-fixture audit acceleration.
 
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::domain::item::entity::Item;
 use crate::verify::symmetry::ItemDiff;
@@ -291,18 +291,36 @@ pub mod tests {
         item1.code = "hp1 ".to_string();
         item1.header.version = 5;
         item1.bits = vec![
-            RecordedBit { bit: true, offset: 0 },
-            RecordedBit { bit: false, offset: 1 },
-            RecordedBit { bit: true, offset: 2 },
+            RecordedBit {
+                bit: true,
+                offset: 0,
+            },
+            RecordedBit {
+                bit: false,
+                offset: 1,
+            },
+            RecordedBit {
+                bit: true,
+                offset: 2,
+            },
         ];
 
         let mut item2 = Item::default();
         item2.code = "hp1".to_string();
         item2.header.version = 5;
         item2.bits = vec![
-            RecordedBit { bit: true, offset: 0 },
-            RecordedBit { bit: false, offset: 1 },
-            RecordedBit { bit: true, offset: 2 },
+            RecordedBit {
+                bit: true,
+                offset: 0,
+            },
+            RecordedBit {
+                bit: false,
+                offset: 1,
+            },
+            RecordedBit {
+                bit: true,
+                offset: 2,
+            },
         ];
 
         let sig1 = ItemSignature::from_item(&item1, false);
