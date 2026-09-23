@@ -3,9 +3,7 @@ use d2r_core::domain::item::entity::item_fidelity_contracts;
 use d2r_core::domain::item::scanner::{
     scan_item_markers_with_receipt_deadline_profile, ItemMarker, ScannerWorkCounters,
 };
-use d2r_core::domain::item::serialization::{
-    is_likely_jm_section_header, AlphaScannerGapProfile,
-};
+use d2r_core::domain::item::serialization::{is_likely_jm_section_header, AlphaScannerGapProfile};
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -13,14 +11,15 @@ use d2r_core::verify::dedup_pool::{
     CachedVerificationReceipt, ItemMemoizationPool, ItemSignature, PoolStats,
 };
 use d2r_core::verify::symmetry::{
-    calculate_symmetry_diff, compare_single_item_diff, ItemDiff, SymmetryOptions,
+    calculate_symmetry_diff, calculate_symmetry_diff_with_stage_observer, compare_single_item_diff,
+    ItemDiff, SymmetryOptions, SymmetryStageEvent,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -132,6 +131,88 @@ struct AuditResult {
     scanner_sections: Vec<ScannerSectionReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     scanner_candidates: Vec<ScannerCandidateReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    stage_timing_trace: Vec<StageTimingEvent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct StageTimingEvent {
+    stage: String,
+    event: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    item_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<String>,
+}
+
+const STAGE_TIMING_PREFIX: &str = "D2ITEM_STAGE_TIMING ";
+const STAGE_TIMING_STAGES: [&str; 3] = [
+    "topology_parse",
+    "strict_roundtrip_parse",
+    "strict_rebuild_compare",
+];
+
+fn emit_stage_timing_event(event: StageTimingEvent) {
+    let Ok(serialized) = serde_json::to_string(&event) else {
+        return;
+    };
+    let stderr = std::io::stderr();
+    let mut stderr = stderr.lock();
+    let _ = writeln!(stderr, "{STAGE_TIMING_PREFIX}{serialized}");
+    let _ = stderr.flush();
+}
+
+fn parse_stage_timing_events(stderr: &[u8]) -> Vec<StageTimingEvent> {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .filter_map(|line| {
+            let payload = line.strip_prefix(STAGE_TIMING_PREFIX)?;
+            let event = serde_json::from_str::<StageTimingEvent>(payload).ok()?;
+            if !STAGE_TIMING_STAGES.contains(&event.stage.as_str()) {
+                return None;
+            }
+            let valid_shape = match event.event.as_str() {
+                "started" => {
+                    event.elapsed_ms.is_none()
+                        && event.item_count.is_none()
+                        && event.outcome.is_none()
+                }
+                "completed" => {
+                    event.elapsed_ms.is_some()
+                        && matches!(event.outcome.as_deref(), Some("ok" | "error"))
+                }
+                _ => false,
+            };
+            valid_shape.then_some(event)
+        })
+        .collect()
+}
+
+fn emit_symmetry_stage_event(event: SymmetryStageEvent) {
+    let event = match event {
+        SymmetryStageEvent::Started { stage } => StageTimingEvent {
+            stage: stage.to_string(),
+            event: "started".to_string(),
+            elapsed_ms: None,
+            item_count: None,
+            outcome: None,
+        },
+        SymmetryStageEvent::Completed {
+            stage,
+            elapsed_ms,
+            item_count,
+            outcome,
+        } => StageTimingEvent {
+            stage: stage.to_string(),
+            event: "completed".to_string(),
+            elapsed_ms: Some(elapsed_ms),
+            item_count,
+            outcome: Some(outcome.to_string()),
+        },
+    };
+    emit_stage_timing_event(event);
 }
 
 #[derive(Deserialize, Serialize)]
@@ -281,7 +362,11 @@ fn count_item_tree(item: &Item, counters: &mut (usize, usize, usize, usize)) {
     }
 }
 
-fn build_topology_receipt(bytes: &[u8], include_parser: bool) -> TopologyReceipt {
+fn build_topology_receipt(
+    bytes: &[u8],
+    include_parser: bool,
+    profile_stages: bool,
+) -> TopologyReceipt {
     let jm_positions = find_jm_markers(bytes);
     let jm_sections = jm_positions
         .iter()
@@ -322,7 +407,31 @@ fn build_topology_receipt(bytes: &[u8], include_parser: bool) -> TopologyReceipt
         .map(u32::from_le_bytes)
         .is_some_and(|version| version == 105 || version == 6);
     let huffman = HuffmanTree::new();
-    let parser = match Item::read_player_items(bytes, &huffman, alpha_mode) {
+    if profile_stages {
+        emit_stage_timing_event(StageTimingEvent {
+            stage: "topology_parse".to_string(),
+            event: "started".to_string(),
+            elapsed_ms: None,
+            item_count: None,
+            outcome: None,
+        });
+    }
+    let stage_started = profile_stages.then(Instant::now);
+    let parsed_items = Item::read_player_items(bytes, &huffman, alpha_mode);
+    if let (true, Some(stage_started)) = (profile_stages, stage_started) {
+        let (item_count, outcome) = match &parsed_items {
+            Ok(items) => (Some(items.len()), "ok"),
+            Err(_) => (None, "error"),
+        };
+        emit_stage_timing_event(StageTimingEvent {
+            stage: "topology_parse".to_string(),
+            event: "completed".to_string(),
+            elapsed_ms: Some(stage_started.elapsed().as_millis().min(u64::MAX as u128) as u64),
+            item_count,
+            outcome: Some(outcome.to_string()),
+        });
+    }
+    let parser = match parsed_items {
         Ok(items) => {
             let mut counters = (0usize, 0usize, 0usize, 0usize);
             for item in &items {
@@ -599,6 +708,7 @@ struct Args {
     corpus_manifest: String,
     worktree_state: String,
     strict_timeout_ms: Option<u64>,
+    profile_stages: bool,
     target_index: Option<usize>,
     scanner_only: bool,
     scanner_candidate_index: Option<usize>,
@@ -624,7 +734,7 @@ fn bounded_failure_result(file_path: &Path, status: &str, reason: String) -> Aud
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| file_path.display().to_string());
     let mut topology = match fs::read(file_path) {
-        Ok(bytes) => build_topology_receipt(&bytes, false),
+        Ok(bytes) => build_topology_receipt(&bytes, false, false),
         Err(error) => TopologyReceipt {
             jm_sections: Vec::new(),
             parser: ParserTopologyReceipt {
@@ -654,6 +764,7 @@ fn bounded_failure_result(file_path: &Path, status: &str, reason: String) -> Aud
         low_confidence_rows: Vec::new(),
         scanner_sections: Vec::new(),
         scanner_candidates: Vec::new(),
+        stage_timing_trace: Vec::new(),
     }
 }
 
@@ -701,6 +812,9 @@ fn process_file_with_timeout(
         .arg("--json")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if args.profile_stages {
+        command.arg("--profile-stages");
+    }
     if args.no_cache || args.strict_timeout_ms.is_some() {
         command.arg("--no-cache");
     }
@@ -842,16 +956,23 @@ fn process_file_with_timeout(
             );
         }
     };
+    let stage_timing_trace = if args.profile_stages {
+        parse_stage_timing_events(&stderr)
+    } else {
+        Vec::new()
+    };
     let status = match worker_status {
         Ok(status) => status,
         Err((status, hint)) => {
             *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
-            return bounded_failure_result(file_path, status, hint);
+            let mut result = bounded_failure_result(file_path, status, hint);
+            result.stage_timing_trace = stage_timing_trace;
+            return result;
         }
     };
     if !status.success() {
         *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
-        return bounded_failure_result(
+        let mut result = bounded_failure_result(
             file_path,
             "[ERROR]",
             format!(
@@ -860,22 +981,27 @@ fn process_file_with_timeout(
                 String::from_utf8_lossy(&stderr).trim()
             ),
         );
+        result.stage_timing_trace = stage_timing_trace;
+        return result;
     }
 
     match serde_json::from_slice::<WorkerReceipt>(&stdout) {
-        Ok(worker) => {
+        Ok(mut worker) => {
             for (family, count) in worker.failure_breakdown {
                 *failure_breakdown.entry(family).or_insert(0) += count;
             }
+            worker.result.stage_timing_trace = stage_timing_trace;
             worker.result
         }
         Err(error) => {
             *failure_breakdown.entry(FailureFamily::Unknown).or_insert(0) += 1;
-            bounded_failure_result(
+            let mut result = bounded_failure_result(
                 file_path,
                 "[ERROR]",
                 format!("strict worker returned invalid JSON: {error}"),
-            )
+            );
+            result.stage_timing_trace = stage_timing_trace;
+            result
         }
     }
 }
@@ -892,7 +1018,7 @@ fn process_scanner_candidates_with_timeout(
             return bounded_failure_result(file_path, "[ERROR]", format!("Read error: {error}"));
         }
     };
-    let topology = build_topology_receipt(&bytes, false);
+    let topology = build_topology_receipt(&bytes, false, false);
     let positions = find_jm_markers(&bytes);
     let mut candidates = Vec::new();
 
@@ -1006,6 +1132,7 @@ fn process_scanner_candidates_with_timeout(
         low_confidence_rows: Vec::new(),
         scanner_sections: Vec::new(),
         scanner_candidates: candidates,
+        stage_timing_trace: Vec::new(),
     }
 }
 
@@ -1046,11 +1173,16 @@ fn process_file(
                 low_confidence_rows: Vec::new(),
                 scanner_sections: Vec::new(),
                 scanner_candidates: Vec::new(),
+                stage_timing_trace: Vec::new(),
             };
         }
     };
 
-    let topology = build_topology_receipt(&bytes, !args.topology_only && !args.scanner_only);
+    let topology = build_topology_receipt(
+        &bytes,
+        !args.topology_only && !args.scanner_only,
+        args.profile_stages,
+    );
 
     if args.topology_only {
         return AuditResult {
@@ -1065,6 +1197,7 @@ fn process_file(
             low_confidence_rows: Vec::new(),
             scanner_sections: Vec::new(),
             scanner_candidates: Vec::new(),
+            stage_timing_trace: Vec::new(),
         };
     }
 
@@ -1090,6 +1223,7 @@ fn process_file(
                     low_confidence_rows: Vec::new(),
                     scanner_sections: Vec::new(),
                     scanner_candidates: vec![candidate],
+                    stage_timing_trace: Vec::new(),
                 },
                 Err(error) => AuditResult {
                     status: "[ERROR]".to_string(),
@@ -1103,6 +1237,7 @@ fn process_file(
                     low_confidence_rows: Vec::new(),
                     scanner_sections: Vec::new(),
                     scanner_candidates: Vec::new(),
+                    stage_timing_trace: Vec::new(),
                 },
             };
         }
@@ -1122,6 +1257,7 @@ fn process_file(
             low_confidence_rows: Vec::new(),
             scanner_sections,
             scanner_candidates: Vec::new(),
+            stage_timing_trace: Vec::new(),
         };
     }
 
@@ -1132,7 +1268,14 @@ fn process_file(
         pool: args.pool.clone(),
     };
 
-    match calculate_symmetry_diff(&bytes, None, options) {
+    let symmetry_result = if args.profile_stages {
+        let mut observer = emit_symmetry_stage_event;
+        calculate_symmetry_diff_with_stage_observer(&bytes, None, options, &mut observer)
+    } else {
+        calculate_symmetry_diff(&bytes, None, options)
+    };
+
+    match symmetry_result {
         Ok(report) => {
             let status = if report.success { "[PASS]" } else { "[FAIL]" };
             let item_count = report.items.len();
@@ -1229,6 +1372,7 @@ fn process_file(
                 low_confidence_rows,
                 scanner_sections: Vec::new(),
                 scanner_candidates: Vec::new(),
+                stage_timing_trace: Vec::new(),
             }
         }
         Err(e) => {
@@ -1245,6 +1389,7 @@ fn process_file(
                 low_confidence_rows: Vec::new(),
                 scanner_sections: Vec::new(),
                 scanner_candidates: Vec::new(),
+                stage_timing_trace: Vec::new(),
             }
         }
     }
@@ -1733,6 +1878,12 @@ fn main() {
         Some("strict-timeout-ms"),
         "Opt-in per-fixture strict replay deadline in milliseconds",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "profile-stages",
+        None,
+        Some("profile-stages"),
+        "Emit strict item-audit stage timing events into the target JSON receipt; requires --strict-timeout-ms",
+    ));
     parser.add_spec(ArgSpec::option(
         "target-index",
         None,
@@ -1870,13 +2021,19 @@ fn main() {
         Some("extended") | None => AlphaScannerGapProfile::Extended,
         Some("rhythm-only") => AlphaScannerGapProfile::RhythmOnly,
         Some("witness-subset") => AlphaScannerGapProfile::WitnessSubset,
-        Some(value) if value.starts_with("extended-except-mask-") => match value[21..].parse::<u8>() {
-            Ok(mask) if (1..=31).contains(&mask) => AlphaScannerGapProfile::ExtendedExceptMask(mask),
-            _ => {
-                eprintln!("error: --scanner-gap-profile extended-except-mask accepts integers 1 through 31");
-                std::process::exit(1);
+        Some(value) if value.starts_with("extended-except-mask-") => {
+            match value[21..].parse::<u8>() {
+                Ok(mask) if (1..=31).contains(&mask) => {
+                    AlphaScannerGapProfile::ExtendedExceptMask(mask)
+                }
+                _ => {
+                    eprintln!(
+                        "error: --scanner-gap-profile extended-except-mask accepts integers 1 through 31"
+                    );
+                    std::process::exit(1);
+                }
             }
-        },
+        }
         Some(value) => {
             eprintln!("error: unsupported --scanner-gap-profile '{value}'");
             std::process::exit(1);
@@ -1925,6 +2082,7 @@ fn main() {
             .cloned()
             .unwrap_or_else(|| "unrecorded".to_string()),
         strict_timeout_ms,
+        profile_stages: parsed.is_set("profile-stages"),
         target_index,
         scanner_only: parsed.is_set("scanner-only"),
         scanner_candidate_index,
@@ -1937,6 +2095,17 @@ fn main() {
         no_cache,
         pool: None,
     };
+
+    if args.profile_stages
+        && ((args.strict_timeout_ms.is_none() && !args.worker_single_fixture)
+            || args.topology_only
+            || args.scanner_only)
+    {
+        eprintln!(
+            "error: --profile-stages requires a strict player-item audit and cannot be combined with --topology-only or --scanner-only"
+        );
+        std::process::exit(1);
+    }
 
     let path = Path::new(&args.target_dir);
     if !path.is_dir() {
@@ -2026,7 +2195,11 @@ fn main() {
         println!("{:-<100}", "");
     }
 
-    let file_results: Vec<(std::path::PathBuf, AuditResult, HashMap<FailureFamily, usize>)> = if args.fail_fast {
+    let file_results: Vec<(
+        std::path::PathBuf,
+        AuditResult,
+        HashMap<FailureFamily, usize>,
+    )> = if args.fail_fast {
         let mut seq_results = Vec::new();
         for path in file_paths {
             let mut local_breakdown = HashMap::new();
@@ -2124,12 +2297,17 @@ fn main() {
             eprintln!("  Hint:     {}", res.hint);
             if let Some(row) = res.mismatch_rows.first() {
                 eprintln!("  Item:     {} (Code: {})", row.item_label, row.code);
-                eprintln!("  Mismatch: {} @ segment: {}", row.mismatch_type, row.segment);
+                eprintln!(
+                    "  Mismatch: {} @ segment: {}",
+                    row.mismatch_type, row.segment
+                );
                 if let Some(offset) = row.first_mismatch_offset {
                     eprintln!("  Bit Offset: {}", offset);
                 }
             }
-            eprintln!("Execution stopped at first failure. Use --continue-on-fail to audit all files.");
+            eprintln!(
+                "Execution stopped at first failure. Use --continue-on-fail to audit all files."
+            );
             std::process::exit(1);
         }
 
@@ -2219,7 +2397,11 @@ fn main() {
             let stats = pool.stats();
             println!("\nDEDUPLICATION POOL STATS:");
             println!("  Total Item Queries: {}", stats.total_queries());
-            println!("  Cache Hits:         {} ({:.2}%)", stats.hits, stats.hit_ratio * 100.0);
+            println!(
+                "  Cache Hits:         {} ({:.2}%)",
+                stats.hits,
+                stats.hit_ratio * 100.0
+            );
             println!("  Cache Misses:       {}", stats.misses);
             println!("  Unique Identities:  {}", stats.unique_entries);
         }
@@ -2237,5 +2419,81 @@ fn main() {
 
     if total_fail > 0 {
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod stage_timing_tests {
+    use super::*;
+
+    #[test]
+    fn parses_ordered_stage_events_and_ignores_invalid_lines() {
+        let stderr = concat!(
+            "ordinary worker diagnostic\n",
+            "D2ITEM_STAGE_TIMING {\"stage\":\"topology_parse\",\"event\":\"started\"}\n",
+            "D2ITEM_STAGE_TIMING {\"stage\":\"topology_parse\",\"event\":\"completed\",\"elapsed_ms\":27,\"item_count\":4,\"outcome\":\"ok\"}\n",
+            "D2ITEM_STAGE_TIMING malformed\n",
+            "D2ITEM_STAGE_TIMING {\"stage\":\"unknown\",\"event\":\"started\"}\n",
+            "D2ITEM_STAGE_TIMING {\"stage\":\"strict_rebuild_compare\",\"event\":\"completed\",\"outcome\":\"ok\"}\n",
+        );
+
+        let events = parse_stage_timing_events(stderr.as_bytes());
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].stage, "topology_parse");
+        assert_eq!(events[0].event, "started");
+        assert_eq!(events[1].elapsed_ms, Some(27));
+        assert_eq!(events[1].item_count, Some(4));
+        assert_eq!(events[1].outcome.as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn stage_event_serialization_omits_unmeasured_values() {
+        let event = StageTimingEvent {
+            stage: "strict_roundtrip_parse".to_string(),
+            event: "started".to_string(),
+            elapsed_ms: None,
+            item_count: None,
+            outcome: None,
+        };
+
+        let serialized = serde_json::to_value(event).unwrap();
+
+        assert!(serialized.get("elapsed_ms").is_none());
+        assert!(serialized.get("item_count").is_none());
+        assert!(serialized.get("outcome").is_none());
+    }
+
+    #[test]
+    fn default_audit_result_omits_empty_stage_trace() {
+        let result = AuditResult {
+            status: "[PASS]".to_string(),
+            filename: "fixture.d2s".to_string(),
+            item_count: 0,
+            avg_fidelity: 0.0,
+            hint: String::new(),
+            family: None,
+            topology: TopologyReceipt {
+                jm_sections: Vec::new(),
+                parser: ParserTopologyReceipt {
+                    top_level_count: None,
+                    nested_count: None,
+                    total_tree_count: None,
+                    residue_count: None,
+                    opaque_count: None,
+                    raw_span_count: None,
+                    parser_error: None,
+                },
+            },
+            mismatch_rows: Vec::new(),
+            low_confidence_rows: Vec::new(),
+            scanner_sections: Vec::new(),
+            scanner_candidates: Vec::new(),
+            stage_timing_trace: Vec::new(),
+        };
+
+        let serialized = serde_json::to_value(result).unwrap();
+
+        assert!(serialized.get("stage_timing_trace").is_none());
     }
 }

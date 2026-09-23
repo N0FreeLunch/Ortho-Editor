@@ -3,6 +3,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
@@ -74,6 +75,19 @@ pub struct SymmetryOptions {
     pub pool: Option<Arc<ItemMemoizationPool>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymmetryStageEvent {
+    Started {
+        stage: &'static str,
+    },
+    Completed {
+        stage: &'static str,
+        elapsed_ms: u64,
+        item_count: Option<usize>,
+        outcome: &'static str,
+    },
+}
+
 impl SymmetryOptions {
     pub fn roundtrip(roundtrip: bool) -> Self {
         Self {
@@ -93,6 +107,24 @@ pub fn calculate_symmetry_diff(
     bytes_b: Option<&[u8]>,
     options: SymmetryOptions,
 ) -> anyhow::Result<DiffReport> {
+    calculate_symmetry_diff_inner(bytes_a, bytes_b, options, None)
+}
+
+pub fn calculate_symmetry_diff_with_stage_observer(
+    bytes_a: &[u8],
+    bytes_b: Option<&[u8]>,
+    options: SymmetryOptions,
+    observer: &mut dyn FnMut(SymmetryStageEvent),
+) -> anyhow::Result<DiffReport> {
+    calculate_symmetry_diff_inner(bytes_a, bytes_b, options, Some(observer))
+}
+
+fn calculate_symmetry_diff_inner(
+    bytes_a: &[u8],
+    bytes_b: Option<&[u8]>,
+    options: SymmetryOptions,
+    mut observer: Option<&mut dyn FnMut(SymmetryStageEvent)>,
+) -> anyhow::Result<DiffReport> {
     crate::init_rayon_thread_pool();
     let huffman = HuffmanTree::new();
     let is_alpha_a = is_alpha(bytes_a);
@@ -107,11 +139,35 @@ pub fn calculate_symmetry_diff(
     };
 
     if options.roundtrip {
-        let items = Item::read_player_items(bytes_a, &huffman, is_alpha_a)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let parse_started = Instant::now();
+        if let Some(callback) = observer.as_mut() {
+            callback(SymmetryStageEvent::Started {
+                stage: "strict_roundtrip_parse",
+            });
+        }
+        let parsed_items = Item::read_player_items(bytes_a, &huffman, is_alpha_a);
+        if let Some(callback) = observer.as_mut() {
+            let (item_count, outcome) = match &parsed_items {
+                Ok(items) => (Some(items.len()), "ok"),
+                Err(_) => (None, "error"),
+            };
+            callback(SymmetryStageEvent::Completed {
+                stage: "strict_roundtrip_parse",
+                elapsed_ms: parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                item_count,
+                outcome,
+            });
+        }
+        let items = parsed_items.map_err(|e| anyhow::anyhow!("{}", e))?;
         report.item_count_a = items.len();
         report.item_count_b = items.len();
 
+        let compare_started = Instant::now();
+        if let Some(callback) = observer.as_mut() {
+            callback(SymmetryStageEvent::Started {
+                stage: "strict_rebuild_compare",
+            });
+        }
         let filtered_items: Vec<(usize, &Item)> = items
             .iter()
             .enumerate()
@@ -163,6 +219,14 @@ pub fn calculate_symmetry_diff(
         };
 
         report.items.append(&mut diffs);
+        if let Some(callback) = observer.as_mut() {
+            callback(SymmetryStageEvent::Completed {
+                stage: "strict_rebuild_compare",
+                elapsed_ms: compare_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                item_count: Some(report.items.len()),
+                outcome: "ok",
+            });
+        }
     } else {
         let bytes_b =
             bytes_b.ok_or_else(|| anyhow::anyhow!("file_b is required when roundtrip is false"))?;
