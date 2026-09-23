@@ -299,6 +299,12 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     let mut map = serde_json::Map::new();
     map.insert("code".to_string(), json!(item.code.trim()));
     map.insert(
+        "quality".to_string(),
+        json!(format!("{:?}", item.header.quality)),
+    );
+    map.insert("unique_id".to_string(), json!(item.unique_id));
+    map.insert("is_runeword".to_string(), json!(item.header.is_runeword));
+    map.insert(
         "bit_length".to_string(),
         json!(item.range.end - item.range.start),
     );
