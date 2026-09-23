@@ -17,6 +17,7 @@ struct PrefixTraceReport {
     file: String,
     version: u32,
     alpha_mode: bool,
+    failure_first: bool,
     total_jm_sections: usize,
     traced_sections: usize,
     total_items: usize,
@@ -61,6 +62,8 @@ struct SectionTrace {
     last_matching_prefix_byte: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     first_divergence: Option<PrefixDivergence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    truncation_reason: Option<String>,
     items: Vec<ItemTrace>,
 }
 
@@ -247,6 +250,12 @@ fn main() -> Result<()> {
         Some("verbose"),
         "Emit per-item checkpoint rows",
     ));
+    parser.add_spec(ArgSpec::flag(
+        "failure-first",
+        None,
+        Some("failure-first"),
+        "Stop after the first prefix divergence and omit isolated re-parses",
+    ));
     parser.add_spec(ArgSpec::option(
         "strict-rebuild-item",
         None,
@@ -300,6 +309,7 @@ fn main() -> Result<()> {
 
     let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
     let alpha_mode = parsed.is_set("alpha") || version == 105 || version == 6;
+    let failure_first = parsed.is_set("failure-first");
     let huffman = HuffmanTree::new();
     let strict_rebuild_item = parsed
         .get("strict-rebuild-item")
@@ -321,6 +331,7 @@ fn main() -> Result<()> {
         &jm_positions,
         &huffman,
         strict_rebuild_item,
+        failure_first,
     )?;
 
     let flag_count = [
@@ -607,6 +618,7 @@ fn build_prefix_trace_report(
         jm_positions,
         huffman,
         None,
+        false,
     )
 }
 
@@ -618,6 +630,7 @@ fn build_prefix_trace_report_with_strict_item(
     jm_positions: &[usize],
     huffman: &HuffmanTree,
     strict_rebuild_item: Option<usize>,
+    failure_first: bool,
 ) -> Result<PrefixTraceReport> {
     let mut sections = Vec::new();
     let mut total_items = 0usize;
@@ -677,6 +690,7 @@ fn build_prefix_trace_report_with_strict_item(
         let mut item_traces = Vec::new();
         let mut section_local_match_count = 0usize;
         let mut first_divergence: Option<PrefixDivergence> = None;
+        let mut truncation_reason = None;
 
         for (item_index, item) in items.iter().enumerate() {
             let raw_bits = bits_from_range(bytes, item.range.start, item.range.end);
@@ -685,10 +699,11 @@ fn build_prefix_trace_report_with_strict_item(
                 item.range.end.saturating_sub(section_clamped_end_bit) as usize;
             let section_clamped_raw_bits =
                 bits_from_range(bytes, item.range.start, section_clamped_end_bit);
-            let strict_rebuild_selected = section_index == 0
-                && strict_rebuild_item
-                    .map(|selected_index| selected_index == item_index)
-                    .unwrap_or(false);
+            let strict_rebuild_selected = failure_first
+                || (section_index == 0
+                    && strict_rebuild_item
+                        .map(|selected_index| selected_index == item_index)
+                        .unwrap_or(false));
             let trace_item = if strict_rebuild_selected {
                 let mut strict_item = item.clone();
                 strict_item.bits.clear();
@@ -745,14 +760,18 @@ fn build_prefix_trace_report_with_strict_item(
                 }
             }
 
-            let isolated_inspect = get_isolated_inspect(
-                bytes,
-                item.range.start as usize,
-                huffman,
-                alpha_mode,
-                &item.code,
-                raw_bits.len(),
-            );
+            let isolated_inspect = (!failure_first)
+                .then(|| {
+                    get_isolated_inspect(
+                        bytes,
+                        item.range.start as usize,
+                        huffman,
+                        alpha_mode,
+                        &item.code,
+                        raw_bits.len(),
+                    )
+                })
+                .flatten();
 
             item_traces.push(ItemTrace {
                 item_index,
@@ -800,6 +819,10 @@ fn build_prefix_trace_report_with_strict_item(
                 .unwrap_or(false)
             {
                 local_match_count += 1;
+            }
+            if failure_first && first_divergence.is_some() {
+                truncation_reason = Some("first_divergence".to_string());
+                break;
             }
         }
 
@@ -882,8 +905,17 @@ fn build_prefix_trace_report_with_strict_item(
             last_matching_prefix_bit,
             last_matching_prefix_byte,
             first_divergence,
+            truncation_reason,
             items: item_traces,
         });
+        if failure_first
+            && sections
+                .last()
+                .and_then(|section| section.first_divergence.as_ref())
+                .is_some()
+        {
+            break;
+        }
     }
 
     let verdict = if sections_with_divergence == 0 {
@@ -896,6 +928,7 @@ fn build_prefix_trace_report_with_strict_item(
         file: file.to_string(),
         version,
         alpha_mode,
+        failure_first,
         total_jm_sections: jm_positions.len(),
         traced_sections: sections.len(),
         total_items,
@@ -1606,6 +1639,7 @@ mod tests {
             &section_map.jm_positions,
             &HuffmanTree::new(),
             None,
+            false,
         )
         .expect("Rogue fixture must produce a prefix trace");
 
@@ -1642,6 +1676,7 @@ mod tests {
                 &section_map.jm_positions,
                 &HuffmanTree::new(),
                 None,
+                false,
             )
             .expect("normal fixture must produce a prefix trace");
 
