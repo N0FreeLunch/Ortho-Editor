@@ -100,6 +100,10 @@ name = "d2save_structural_diff"
 path = "src/bin/verify/d2save_structural_diff.rs"
 
 [[bin]]
+name = "d2save_temporal_witness"
+path = "src/bin/verify/d2save_temporal_witness.rs"
+
+[[bin]]
 name = "d2item_inspect"
 path = "src/bin/verify/d2item_inspect.rs"
 
