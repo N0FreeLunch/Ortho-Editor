@@ -107,7 +107,7 @@ pub fn calculate_symmetry_diff(
     bytes_b: Option<&[u8]>,
     options: SymmetryOptions,
 ) -> anyhow::Result<DiffReport> {
-    calculate_symmetry_diff_inner(bytes_a, bytes_b, options, None)
+    calculate_symmetry_diff_inner(bytes_a, bytes_b, options, None, None)
 }
 
 pub fn calculate_symmetry_diff_with_stage_observer(
@@ -116,13 +116,31 @@ pub fn calculate_symmetry_diff_with_stage_observer(
     options: SymmetryOptions,
     observer: &mut dyn FnMut(SymmetryStageEvent),
 ) -> anyhow::Result<DiffReport> {
-    calculate_symmetry_diff_inner(bytes_a, bytes_b, options, Some(observer))
+    calculate_symmetry_diff_inner(bytes_a, bytes_b, options, None, Some(observer))
+}
+
+pub fn calculate_symmetry_diff_from_parsed_items(
+    bytes_a: &[u8],
+    items: Vec<Item>,
+    options: SymmetryOptions,
+) -> anyhow::Result<DiffReport> {
+    calculate_symmetry_diff_inner(bytes_a, None, options, Some(items), None)
+}
+
+pub fn calculate_symmetry_diff_from_parsed_items_with_stage_observer(
+    bytes_a: &[u8],
+    items: Vec<Item>,
+    options: SymmetryOptions,
+    observer: &mut dyn FnMut(SymmetryStageEvent),
+) -> anyhow::Result<DiffReport> {
+    calculate_symmetry_diff_inner(bytes_a, None, options, Some(items), Some(observer))
 }
 
 fn calculate_symmetry_diff_inner(
     bytes_a: &[u8],
     bytes_b: Option<&[u8]>,
     options: SymmetryOptions,
+    preparsed_items: Option<Vec<Item>>,
     mut observer: Option<&mut dyn FnMut(SymmetryStageEvent)>,
 ) -> anyhow::Result<DiffReport> {
     crate::init_rayon_thread_pool();
@@ -139,26 +157,30 @@ fn calculate_symmetry_diff_inner(
     };
 
     if options.roundtrip {
-        let parse_started = Instant::now();
-        if let Some(callback) = observer.as_mut() {
-            callback(SymmetryStageEvent::Started {
-                stage: "strict_roundtrip_parse",
-            });
-        }
-        let parsed_items = Item::read_player_items(bytes_a, &huffman, is_alpha_a);
-        if let Some(callback) = observer.as_mut() {
-            let (item_count, outcome) = match &parsed_items {
-                Ok(items) => (Some(items.len()), "ok"),
-                Err(_) => (None, "error"),
-            };
-            callback(SymmetryStageEvent::Completed {
-                stage: "strict_roundtrip_parse",
-                elapsed_ms: parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                item_count,
-                outcome,
-            });
-        }
-        let items = parsed_items.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let items = if let Some(items) = preparsed_items {
+            items
+        } else {
+            let parse_started = Instant::now();
+            if let Some(callback) = observer.as_mut() {
+                callback(SymmetryStageEvent::Started {
+                    stage: "strict_roundtrip_parse",
+                });
+            }
+            let parsed_items = Item::read_player_items(bytes_a, &huffman, is_alpha_a);
+            if let Some(callback) = observer.as_mut() {
+                let (item_count, outcome) = match &parsed_items {
+                    Ok(items) => (Some(items.len()), "ok"),
+                    Err(_) => (None, "error"),
+                };
+                callback(SymmetryStageEvent::Completed {
+                    stage: "strict_roundtrip_parse",
+                    elapsed_ms: parse_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                    item_count,
+                    outcome,
+                });
+            }
+            parsed_items.map_err(|e| anyhow::anyhow!("{}", e))?
+        };
         report.item_count_a = items.len();
         report.item_count_b = items.len();
 
@@ -630,6 +652,7 @@ fn should_preserve_alpha_compare_bits(item: &Item, alpha_mode: bool) -> bool {
 mod tests {
     use super::*;
     use crate::domain::item::entity::{Item, RecordedBit};
+    use d2r_macros::hypothesis_test;
 
     #[test]
     fn test_mismatch_labeling() {
@@ -658,5 +681,85 @@ mod tests {
         item_b.bits.truncate(68);
         let diff = compare_two_items(&item_a, &item_b, "Test".to_string(), &[], &[]);
         assert_eq!(diff.mismatch_type.unwrap(), "Length [RW-Gap (32-bit)]");
+    }
+
+    #[hypothesis_test]
+    fn reused_roundtrip_matches_existing_parse_path() {
+        const FIXTURE: &[u8] =
+            include_bytes!("../../tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        let huffman = HuffmanTree::new();
+        let parsed_items =
+            Item::read_player_items(FIXTURE, &huffman, is_alpha(FIXTURE)).expect("fixture parses");
+        assert!(
+            !parsed_items.is_empty(),
+            "fixture should exercise item comparison"
+        );
+
+        let pool = Arc::new(ItemMemoizationPool::new());
+        let cases = [
+            (None, false, false),
+            (Some(0), true, false),
+            (None, true, true),
+            (Some(0), false, true),
+        ];
+
+        for (target_index, fail_fast, use_pool) in cases {
+            let mut options = SymmetryOptions::roundtrip(true);
+            options.target_index = target_index;
+            options.fail_fast = fail_fast;
+            if use_pool {
+                options.pool = Some(pool.clone());
+            }
+
+            let parsed_path = calculate_symmetry_diff(FIXTURE, None, options.clone())
+                .expect("parsed route works");
+            let reused_path =
+                calculate_symmetry_diff_from_parsed_items(FIXTURE, parsed_items.clone(), options)
+                    .expect("reused route works");
+
+            assert_eq!(
+                serde_json::to_value(parsed_path).expect("parsed report serializes"),
+                serde_json::to_value(reused_path).expect("reused report serializes"),
+                "report parity for target_index={target_index:?}, fail_fast={fail_fast}, use_pool={use_pool}"
+            );
+        }
+    }
+
+    #[hypothesis_test]
+    fn reused_roundtrip_stage_trace_omits_duplicate_parse() {
+        const FIXTURE: &[u8] =
+            include_bytes!("../../tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        let huffman = HuffmanTree::new();
+        let parsed_items =
+            Item::read_player_items(FIXTURE, &huffman, is_alpha(FIXTURE)).expect("fixture parses");
+        let mut events = Vec::new();
+
+        calculate_symmetry_diff_from_parsed_items_with_stage_observer(
+            FIXTURE,
+            parsed_items,
+            SymmetryOptions::roundtrip(true),
+            &mut |event| events.push(event),
+        )
+        .expect("reused route works");
+
+        assert_eq!(
+            events.len(),
+            2,
+            "only the rebuild/compare phase is measured"
+        );
+        assert!(matches!(
+            events[0],
+            SymmetryStageEvent::Started {
+                stage: "strict_rebuild_compare"
+            }
+        ));
+        assert!(matches!(
+            events[1],
+            SymmetryStageEvent::Completed {
+                stage: "strict_rebuild_compare",
+                outcome: "ok",
+                ..
+            }
+        ));
     }
 }

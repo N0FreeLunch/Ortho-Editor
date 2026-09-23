@@ -11,8 +11,10 @@ use d2r_core::verify::dedup_pool::{
     CachedVerificationReceipt, ItemMemoizationPool, ItemSignature, PoolStats,
 };
 use d2r_core::verify::symmetry::{
-    calculate_symmetry_diff, calculate_symmetry_diff_with_stage_observer, compare_single_item_diff,
-    ItemDiff, SymmetryOptions, SymmetryStageEvent,
+    calculate_symmetry_diff, calculate_symmetry_diff_from_parsed_items,
+    calculate_symmetry_diff_from_parsed_items_with_stage_observer,
+    calculate_symmetry_diff_with_stage_observer, compare_single_item_diff, ItemDiff,
+    SymmetryOptions, SymmetryStageEvent,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -304,6 +306,11 @@ struct TopologyReceipt {
     parser: ParserTopologyReceipt,
 }
 
+struct TopologyBuildResult {
+    receipt: TopologyReceipt,
+    parsed_items: Option<Vec<Item>>,
+}
+
 #[derive(Serialize)]
 struct GlobalAuditReport {
     target_dir: String,
@@ -362,11 +369,11 @@ fn count_item_tree(item: &Item, counters: &mut (usize, usize, usize, usize)) {
     }
 }
 
-fn build_topology_receipt(
+fn build_topology_result(
     bytes: &[u8],
     include_parser: bool,
     profile_stages: bool,
-) -> TopologyReceipt {
+) -> TopologyBuildResult {
     let jm_positions = find_jm_markers(bytes);
     let jm_sections = jm_positions
         .iter()
@@ -387,17 +394,20 @@ fn build_topology_receipt(
         .collect();
 
     if !include_parser {
-        return TopologyReceipt {
-            jm_sections,
-            parser: ParserTopologyReceipt {
-                top_level_count: None,
-                nested_count: None,
-                total_tree_count: None,
-                residue_count: None,
-                opaque_count: None,
-                raw_span_count: None,
-                parser_error: Some("skipped by --topology-only".to_string()),
+        return TopologyBuildResult {
+            receipt: TopologyReceipt {
+                jm_sections,
+                parser: ParserTopologyReceipt {
+                    top_level_count: None,
+                    nested_count: None,
+                    total_tree_count: None,
+                    residue_count: None,
+                    opaque_count: None,
+                    raw_span_count: None,
+                    parser_error: Some("skipped by --topology-only".to_string()),
+                },
             },
+            parsed_items: None,
         };
     }
 
@@ -431,37 +441,54 @@ fn build_topology_receipt(
             outcome: Some(outcome.to_string()),
         });
     }
-    let parser = match parsed_items {
+    let (parser, parsed_items) = match parsed_items {
         Ok(items) => {
             let mut counters = (0usize, 0usize, 0usize, 0usize);
             for item in &items {
                 count_item_tree(item, &mut counters);
             }
-            ParserTopologyReceipt {
-                top_level_count: Some(items.len()),
-                nested_count: Some(counters.0.saturating_sub(items.len())),
-                total_tree_count: Some(counters.0),
-                residue_count: Some(counters.1),
-                opaque_count: Some(counters.2),
-                raw_span_count: Some(counters.3),
-                parser_error: None,
-            }
+            (
+                ParserTopologyReceipt {
+                    top_level_count: Some(items.len()),
+                    nested_count: Some(counters.0.saturating_sub(items.len())),
+                    total_tree_count: Some(counters.0),
+                    residue_count: Some(counters.1),
+                    opaque_count: Some(counters.2),
+                    raw_span_count: Some(counters.3),
+                    parser_error: None,
+                },
+                Some(items),
+            )
         }
-        Err(error) => ParserTopologyReceipt {
-            top_level_count: None,
-            nested_count: None,
-            total_tree_count: None,
-            residue_count: None,
-            opaque_count: None,
-            raw_span_count: None,
-            parser_error: Some(error.to_string()),
-        },
+        Err(error) => (
+            ParserTopologyReceipt {
+                top_level_count: None,
+                nested_count: None,
+                total_tree_count: None,
+                residue_count: None,
+                opaque_count: None,
+                raw_span_count: None,
+                parser_error: Some(error.to_string()),
+            },
+            None,
+        ),
     };
 
-    TopologyReceipt {
-        jm_sections,
-        parser,
+    TopologyBuildResult {
+        receipt: TopologyReceipt {
+            jm_sections,
+            parser,
+        },
+        parsed_items,
     }
+}
+
+fn build_topology_receipt(
+    bytes: &[u8],
+    include_parser: bool,
+    profile_stages: bool,
+) -> TopologyReceipt {
+    build_topology_result(bytes, include_parser, profile_stages).receipt
 }
 
 fn scan_sections_for_receipt(
@@ -1178,11 +1205,15 @@ fn process_file(
         }
     };
 
-    let topology = build_topology_receipt(
+    let topology_result = build_topology_result(
         &bytes,
         !args.topology_only && !args.scanner_only,
         args.profile_stages,
     );
+    let TopologyBuildResult {
+        receipt: topology,
+        parsed_items,
+    } = topology_result;
 
     if args.topology_only {
         return AuditResult {
@@ -1268,11 +1299,22 @@ fn process_file(
         pool: args.pool.clone(),
     };
 
-    let symmetry_result = if args.profile_stages {
-        let mut observer = emit_symmetry_stage_event;
-        calculate_symmetry_diff_with_stage_observer(&bytes, None, options, &mut observer)
-    } else {
-        calculate_symmetry_diff(&bytes, None, options)
+    let symmetry_result = match parsed_items {
+        Some(items) if args.profile_stages => {
+            let mut observer = emit_symmetry_stage_event;
+            calculate_symmetry_diff_from_parsed_items_with_stage_observer(
+                &bytes,
+                items,
+                options,
+                &mut observer,
+            )
+        }
+        Some(items) => calculate_symmetry_diff_from_parsed_items(&bytes, items, options),
+        None if args.profile_stages => {
+            let mut observer = emit_symmetry_stage_event;
+            calculate_symmetry_diff_with_stage_observer(&bytes, None, options, &mut observer)
+        }
+        None => calculate_symmetry_diff(&bytes, None, options),
     };
 
     match symmetry_result {
