@@ -4,6 +4,7 @@ use d2r_core::domain::item::geometry::{
     ExpectedHeaderWidthProducer, HeaderChecksumBranch, LiveHeaderFamilyClassifier,
 };
 use d2r_core::item::{HuffmanTree, Item, ItemModule};
+use d2r_core::verify::OutputManager;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -1470,6 +1471,58 @@ fn section_context_report(
     let original_bits = item.bits.iter().map(|bit| bit.bit).collect::<Vec<_>>();
     let first_difference_offset =
         compare_first_difference_offset(&original_bits, &with_padding_bits, item.range.start);
+    let nudge_value_provenance = strict_emission_phases
+        .iter()
+        .find(|phase| phase.label == "non_summary_nudge")
+        .map(|phase| {
+            let start = phase.start as usize;
+            let end = phase.end as usize;
+            let raw_bits = original_bits.get(start..end);
+            let strict_emitted_bits = with_padding_bits.get(start..end);
+            let bit_string = |bits: Option<&[bool]>| {
+                bits.map(|bits| {
+                    bits.iter()
+                        .map(|bit| if *bit { '1' } else { '0' })
+                        .collect::<String>()
+                })
+            };
+            json!({
+                "status": "available",
+                "provenance": "ItemBody.alpha_nudge and matching strict-emission phase",
+                "read_value": item.body.alpha_nudge,
+                "phase_label": phase.label,
+                "phase_start": phase.start,
+                "phase_end": phase.end,
+                "bit_count": phase.end.saturating_sub(phase.start),
+                "raw_bit_source": "parser_selected_item_span",
+                "raw_bits": raw_bits,
+                "raw_bit_string": bit_string(raw_bits),
+                "strict_emitted_bits": strict_emitted_bits,
+                "strict_emitted_bit_string": bit_string(strict_emitted_bits),
+                "independent_physical_boundary_witness": false,
+                "report_only": true,
+                "semantic_authorization": false,
+            })
+        })
+        .unwrap_or_else(|| {
+            json!({
+                "status": "unavailable",
+                "reason": "strict emission trace has no non_summary_nudge phase",
+                "read_value": item.body.alpha_nudge,
+                "phase_label": serde_json::Value::Null,
+                "phase_start": serde_json::Value::Null,
+                "phase_end": serde_json::Value::Null,
+                "bit_count": serde_json::Value::Null,
+                "raw_bit_source": "parser_selected_item_span",
+                "raw_bits": serde_json::Value::Null,
+                "raw_bit_string": serde_json::Value::Null,
+                "strict_emitted_bits": serde_json::Value::Null,
+                "strict_emitted_bit_string": serde_json::Value::Null,
+                "independent_physical_boundary_witness": false,
+                "report_only": true,
+                "semantic_authorization": false,
+            })
+        });
     let property_id_bit_provenance = strict_emission_phases
         .iter()
         .find(|phase| phase.label == "non_summary_property_body")
@@ -1921,7 +1974,7 @@ fn section_context_report(
         "report_only": true,
     });
 
-    json!({
+    let mut section_context = json!({
         "section_item_index": section_item_index,
         "code": item.code.trim(),
         "range_start": item.range.start,
@@ -1978,7 +2031,11 @@ fn section_context_report(
         "local_73_padding_influence": local_73_padding_influence,
         "local_73_padding_influence_reason": local_73_padding_influence_reason,
         "strict_emission_phase_provenance": strict_emission_phase_report,
-    })
+    });
+    if let Some(object) = section_context.as_object_mut() {
+        object.insert("nudge_value_provenance".to_string(), nudge_value_provenance);
+    }
+    section_context
 }
 
 fn section_segment_witness_report(items: &[Item], fixture: &str) -> serde_json::Value {
@@ -3814,7 +3871,12 @@ fn main() {
                     return;
                 }
                 if is_json {
-                    println!("{}", report);
+                    if parsed.get("output").is_some() {
+                        let mut output = OutputManager::new("d2item_inspect", &parsed);
+                        output.json(&report.to_string());
+                    } else {
+                        println!("{}", report);
+                    }
                 } else {
                     println!(
                         "Section item {} '{}' bits {}-{}",
