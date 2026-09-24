@@ -4,8 +4,8 @@ use d2r_core::domain::item::geometry::{
     ExpectedHeaderWidthProducer, HeaderChecksumBranch, LiveHeaderFamilyClassifier,
 };
 use d2r_core::item::{HuffmanTree, Item, ItemModule};
-use d2r_core::verify::OutputManager;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::OutputManager;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -2582,6 +2582,136 @@ fn classify_trace_ownership(
     (ownership_hint.to_string(), ownership_reason)
 }
 
+fn marker_header_preview_report(
+    section_bytes: &[u8],
+    section_base_bit: u64,
+    relative_start_bit: u64,
+    absolute_start_bit: u64,
+    marker_ordinal: usize,
+    candidate_code_hint: &str,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+) -> serde_json::Value {
+    const REQUESTED_LIMIT_BITS: u64 = 256;
+
+    let section_bit_len = (section_bytes.len() as u64).saturating_mul(8);
+    let remaining_section_bits = section_bit_len.saturating_sub(relative_start_bit);
+    let applied_limit_bits = REQUESTED_LIMIT_BITS.min(remaining_section_bits);
+    let requested_context_end_bit = relative_start_bit.saturating_add(applied_limit_bits);
+    let context_prefix_end_bit = (requested_context_end_bit / 8) * 8;
+    let context_prefix_byte_len = usize::try_from(context_prefix_end_bit / 8)
+        .unwrap_or(usize::MAX)
+        .min(section_bytes.len());
+    let clipped_context = &section_bytes[..context_prefix_byte_len];
+    let context_available_bits = context_prefix_end_bit.saturating_sub(relative_start_bit);
+    let common = json!({
+        "candidate_only": true,
+        "report_only": true,
+        "semantic_authorization": false,
+        "identity_established": false,
+        "item_body_decoded": false,
+        "quality_scope": "not_decoded_by_header_stage",
+        "evidence_surface": "controlled-decoder",
+        "provenance": "bounded_marker_local_read_header_stage",
+        "requested_limit_bits": REQUESTED_LIMIT_BITS,
+        "applied_limit_bits": applied_limit_bits,
+        "start_bit": absolute_start_bit,
+        "absolute_limit_bit": absolute_start_bit.saturating_add(applied_limit_bits),
+        "section_base_bit": section_base_bit,
+        "section_relative_start_bit": relative_start_bit,
+        "context_prefix_end_bit": section_base_bit.saturating_add(context_prefix_end_bit),
+        "context_available_bits": context_available_bits,
+        "context_prefix_clipped": true,
+        "decoder_index_context": "accepted-marker-ordinal-not-verified-item-index",
+        "marker_ordinal": marker_ordinal,
+        "candidate_code_hint": candidate_code_hint,
+    });
+
+    if relative_start_bit > u64::from(u32::MAX) {
+        return json!({
+            "status": "unavailable",
+            "reason": "section-relative candidate start exceeds BitReader skip bounds",
+            "observed_range": {
+                "start": absolute_start_bit,
+                "end": absolute_start_bit
+            },
+            "context": common,
+        });
+    }
+
+    let mut reader = BitReader::endian(Cursor::new(clipped_context), LittleEndian);
+    if let Err(error) = reader.skip(relative_start_bit as u32) {
+        return json!({
+            "status": "unavailable",
+            "reason": format!("failed to seek to candidate start in clipped context: {error}"),
+            "observed_range": {
+                "start": absolute_start_bit,
+                "end": absolute_start_bit
+            },
+            "context": common,
+        });
+    }
+
+    let mut cursor = BitCursor::new(reader);
+    cursor.set_pos(absolute_start_bit);
+    cursor.base_pos = section_base_bit;
+    cursor.set_limit(absolute_start_bit.saturating_add(applied_limit_bits));
+    let result = Item::read_header_stage(
+        &mut cursor,
+        huffman,
+        Some((clipped_context, relative_start_bit)),
+        alpha_mode,
+        marker_ordinal,
+        None,
+        Some(candidate_code_hint),
+    );
+    let observed_range = json!({
+        "start": absolute_start_bit,
+        "end": cursor.pos(),
+    });
+
+    match result {
+        Ok(stage) => json!({
+            "status": "observed",
+            "observed_range": observed_range,
+            "context": common,
+            "header": {
+                "flags": stage.header.flags,
+                "version": stage.header.version,
+                "mode": stage.header.mode,
+                "location": stage.header.location,
+                "x": stage.header.x,
+                "y": stage.header.y,
+                "page": stage.header.page,
+                "quality": stage.header.quality.map(|quality| format!("{quality:?}")),
+                "alpha_quality_raw": stage.header.alpha_quality_raw,
+                "alpha_unique_id_raw": stage.header.alpha_unique_id_raw,
+                "alpha_v5_runeword_extra": stage.header.alpha_v5_runeword_extra,
+                "has_checksum": stage.header.has_checksum,
+                "alpha_checksum": stage.header.alpha_checksum,
+                "is_compact": stage.header.is_compact,
+                "is_identified": stage.header.is_identified,
+                "is_socketed": stage.header.is_socketed,
+                "is_personalized": stage.header.is_personalized,
+                "is_runeword": stage.header.is_runeword,
+                "is_ethereal": stage.header.is_ethereal,
+                "is_ear": stage.header.is_ear,
+                "save_is_alpha": stage.header.save_is_alpha,
+                "alpha_header_gap": stage.alpha_header_gap,
+                "alpha_header_gap_bit_count": stage.alpha_header_gap_bits.len(),
+                "peek_code_hint": stage.peek.as_ref().map(|peek| peek.3.trim()),
+                "peek_consumed_bits": stage.peek.as_ref().map(|peek| peek.7),
+            },
+        }),
+        Err(error) => json!({
+            "status": "unavailable",
+            "reason": error.to_string(),
+            "observed_range": observed_range,
+            "context": common,
+        }),
+    }
+}
+
 fn main() {
     let mut parser = ArgParser::new("d2item_inspect")
         .description("Decomposes a .d2i or .d2s item into its bit-fields and props.");
@@ -2641,6 +2771,12 @@ fn main() {
         None,
         Some("marker-ordinal"),
         "Select a zero-based accepted marker ordinal within the selected JM section",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "marker-header-preview",
+        None,
+        Some("marker-header-preview"),
+        "Report a bounded provisional header preview for the selected marker candidate",
     ));
     parser.add_spec(ArgSpec::option(
         "marker-reparse-limit-bits",
@@ -2828,6 +2964,7 @@ fn main() {
     let marker_selector_requested = marker_section_raw.is_some() || marker_ordinal_raw.is_some();
     let marker_section = marker_section_raw.and_then(|s| s.parse::<usize>().ok());
     let marker_ordinal = marker_ordinal_raw.and_then(|s| s.parse::<usize>().ok());
+    let marker_header_preview = parsed.is_set("marker-header-preview");
     if marker_selector_requested
         && (marker_section.is_none()
             || marker_ordinal.is_none()
@@ -2872,6 +3009,15 @@ fn main() {
                     "--bit-offset"
                 }
             );
+        }
+        return;
+    }
+    if marker_header_preview && !(is_json && marker_section.is_some() && marker_ordinal.is_some()) {
+        let message = "--marker-header-preview requires --json and a complete marker selector pair";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
         }
         return;
     }
@@ -3034,6 +3180,20 @@ fn main() {
         && (reparse_limit_bits.is_some() || section_item.is_some() || bit_offset.is_some())
     {
         let message = "--marker-reparse-limit-bits cannot be combined with --reparse-limit-bits, --section-item, or --bit-offset";
+        if is_json {
+            println!("{}", json!({"errors": [message]}));
+        } else {
+            eprintln!("error: {}", message);
+        }
+        return;
+    }
+    if marker_header_preview
+        && (marker_reparse_limit_bits.is_some()
+            || reparse_limit_bits.is_some()
+            || section_item.is_some()
+            || bit_offset.is_some())
+    {
+        let message = "--marker-header-preview cannot be combined with --marker-reparse-limit-bits, --reparse-limit-bits, --section-item, or --bit-offset";
         if is_json {
             println!("{}", json!({"errors": [message]}));
         } else {
@@ -3219,17 +3379,34 @@ fn main() {
                 })
             );
         } else if is_json {
-            println!(
-                "{}",
-                json!({
-                    "selector": {
-                        "marker_section": marker_section,
-                        "marker_ordinal": marker_ordinal
-                    },
-                    "envelope": envelope,
-                    "errors": []
-                })
-            );
+            let mut report = json!({
+                "selector": {
+                    "marker_section": marker_section,
+                    "marker_ordinal": marker_ordinal
+                },
+                "envelope": envelope,
+                "errors": []
+            });
+            if marker_header_preview {
+                let section_base_bit = (section_marker_byte_offset as u64) * 8;
+                let relative_start_bit = envelope
+                    .absolute_item_start_bit
+                    .saturating_sub(section_base_bit);
+                let preview = marker_header_preview_report(
+                    &bytes[section_marker_byte_offset..section_end],
+                    section_base_bit,
+                    relative_start_bit,
+                    envelope.absolute_item_start_bit,
+                    marker_ordinal,
+                    &envelope.trimmed_code,
+                    &huffman,
+                    is_alpha,
+                );
+                if let Some(object) = report.as_object_mut() {
+                    object.insert("marker_header_preview".to_string(), preview);
+                }
+            }
+            println!("{}", report);
         } else {
             println!("Receipt-only marker selection succeeded.");
         }
