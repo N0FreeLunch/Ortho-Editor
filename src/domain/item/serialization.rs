@@ -367,6 +367,134 @@ pub enum AlphaScannerGapProfile {
     ExtendedExceptMask(u8),
 }
 
+#[derive(Clone, Copy)]
+enum ScannerPeekTimingStage {
+    HeaderSetup,
+    TrialConfig,
+    GapReader,
+    CodeDecode,
+    Plausibility,
+    RegistryTemplate,
+    Scoring,
+    GeometryResolution,
+    SummaryClassification,
+    HeaderGeometry,
+}
+
+struct ScannerPeekTiming {
+    enabled: bool,
+    start_bit: u64,
+    profile: AlphaScannerGapProfile,
+    started_at: std::time::Instant,
+    header_setup_us: u128,
+    trial_config_us: u128,
+    gap_reader_us: u128,
+    code_decode_us: u128,
+    plausibility_us: u128,
+    registry_template_us: u128,
+    scoring_us: u128,
+    geometry_resolution_us: u128,
+    summary_classification_us: u128,
+    summary_classification_calls: u64,
+    header_geometry_us: u128,
+    header_geometry_calls: u64,
+    header_geometry_input_signatures: Option<std::collections::HashSet<(u8, u32, u8, String)>>,
+    gap_attempts: u64,
+}
+
+impl ScannerPeekTiming {
+    fn new(enabled: bool, start_bit: u64, profile: AlphaScannerGapProfile) -> Self {
+        Self {
+            enabled,
+            start_bit,
+            profile,
+            started_at: std::time::Instant::now(),
+            header_setup_us: 0,
+            trial_config_us: 0,
+            gap_reader_us: 0,
+            code_decode_us: 0,
+            plausibility_us: 0,
+            registry_template_us: 0,
+            scoring_us: 0,
+            geometry_resolution_us: 0,
+            summary_classification_us: 0,
+            summary_classification_calls: 0,
+            header_geometry_us: 0,
+            header_geometry_calls: 0,
+            header_geometry_input_signatures: enabled.then(std::collections::HashSet::new),
+            gap_attempts: 0,
+        }
+    }
+
+    fn mark(&self) -> Option<std::time::Instant> {
+        self.enabled.then(std::time::Instant::now)
+    }
+
+    fn record_header_geometry_input(&mut self, version: u8, flags: u32, mode: u8, code: &str) {
+        if let Some(signatures) = &mut self.header_geometry_input_signatures {
+            signatures.insert((version, flags, mode, code.to_owned()));
+        }
+    }
+
+    fn record(&mut self, stage: ScannerPeekTimingStage, started: Option<std::time::Instant>) {
+        let Some(started) = started else {
+            return;
+        };
+        let elapsed = started.elapsed().as_micros();
+        match stage {
+            ScannerPeekTimingStage::HeaderSetup => self.header_setup_us += elapsed,
+            ScannerPeekTimingStage::TrialConfig => self.trial_config_us += elapsed,
+            ScannerPeekTimingStage::GapReader => self.gap_reader_us += elapsed,
+            ScannerPeekTimingStage::CodeDecode => self.code_decode_us += elapsed,
+            ScannerPeekTimingStage::Plausibility => self.plausibility_us += elapsed,
+            ScannerPeekTimingStage::RegistryTemplate => self.registry_template_us += elapsed,
+            ScannerPeekTimingStage::Scoring => self.scoring_us += elapsed,
+            ScannerPeekTimingStage::GeometryResolution => self.geometry_resolution_us += elapsed,
+            ScannerPeekTimingStage::SummaryClassification => {
+                self.summary_classification_us += elapsed;
+                self.summary_classification_calls += 1;
+            }
+            ScannerPeekTimingStage::HeaderGeometry => {
+                self.header_geometry_us += elapsed;
+                self.header_geometry_calls += 1;
+            }
+        }
+    }
+}
+
+impl Drop for ScannerPeekTiming {
+    fn drop(&mut self) {
+        if self.enabled {
+            let unique_geometry_inputs = self
+                .header_geometry_input_signatures
+                .as_ref()
+                .map_or(0, |signatures| signatures.len() as u64);
+            eprintln!(
+                "[scanner-peek-profile] start_bit={} gap_profile={} gap_attempts={} total_us={} header_setup_us={} trial_config_us={} gap_reader_us={} code_decode_us={} plausibility_us={} registry_template_us={} scoring_us={} geometry_resolution_us={} summary_classification_us={} summary_classification_calls={} header_geometry_us={} header_geometry_calls={} header_geometry_unique_inputs={} header_geometry_repeated_inputs={} non_geometry_scoring_us={}",
+                self.start_bit,
+                self.profile.label(),
+                self.gap_attempts,
+                self.started_at.elapsed().as_micros(),
+                self.header_setup_us,
+                self.trial_config_us,
+                self.gap_reader_us,
+                self.code_decode_us,
+                self.plausibility_us,
+                self.registry_template_us,
+                self.scoring_us,
+                self.geometry_resolution_us,
+                self.summary_classification_us,
+                self.summary_classification_calls,
+                self.header_geometry_us,
+                self.header_geometry_calls,
+                unique_geometry_inputs,
+                self.header_geometry_calls.saturating_sub(unique_geometry_inputs),
+                self.scoring_us.saturating_sub(self.geometry_resolution_us),
+            );
+        }
+    }
+}
+
 pub type ItemHeaderPeek = (u8, u8, u8, String, u32, u8, bool, u64, i8, bool);
 
 /// Provisional output of the full parser's shared header stage.
@@ -475,6 +603,21 @@ fn peek_item_header_at_with_base_and_gap_profile(
     idx: usize,
     gap_profile: AlphaScannerGapProfile,
 ) -> Option<(ItemHeaderPeek, u64, bool)> {
+    static SCANNER_PROFILE_START_BIT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    static SCANNER_PROFILE_GAP_PROFILE: std::sync::OnceLock<Option<String>> =
+        std::sync::OnceLock::new();
+    let profile_start_matches = *SCANNER_PROFILE_START_BIT.get_or_init(|| {
+        std::env::var("D2R_ITEM_SCANNER_PROFILE_START_BIT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+    }) == Some(start_bit);
+    let profile_gap_matches = SCANNER_PROFILE_GAP_PROFILE
+        .get_or_init(|| std::env::var("D2R_ITEM_SCANNER_PROFILE_GAP_PROFILE").ok())
+        .as_deref()
+        .map_or(true, |profile| profile == gap_profile.label());
+    let profile_trace_enabled = alpha_mode && profile_start_matches && profile_gap_matches;
+    let mut timing = ScannerPeekTiming::new(profile_trace_enabled, start_bit, gap_profile);
+    let header_setup_started = timing.mark();
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     if reader.skip(start_bit as u32).is_err() {
         return None;
@@ -501,10 +644,12 @@ fn peek_item_header_at_with_base_and_gap_profile(
         v_retail = retail_reader.read::<3, u8>().unwrap_or(0);
         retail_skip_ok = true;
     }
+    timing.record(ScannerPeekTimingStage::HeaderSetup, header_setup_started);
 
     let mut best_res: Option<(ItemHeaderPeek, u64, bool)> = None;
     let mut max_confidence = 0;
 
+    let trial_config_started = timing.mark();
     let mut trial_configs = Vec::new();
     if alpha_mode && (v <= 7) {
         let _calculated = calculate_alpha_v105_checksum(flags, v);
@@ -545,6 +690,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
             trial_configs.push((v_retail, mode, loc, x_val, 32 + 3 + 3 + 3 + 4, false));
         }
     }
+    timing.record(ScannerPeekTimingStage::TrialConfig, trial_config_started);
 
     for (version, mode, loc, _x_val, base_header_len, has_checksum) in trial_configs {
         let h_axiom = HeaderAxiom::new(version, alpha_mode);
@@ -554,6 +700,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
             vec![h_axiom.is_compact(flags, None)]
         };
         for is_compact in compact_options {
+            let gap_config_started = timing.mark();
             let mut trial_possible_gaps = Vec::new();
             let rhythm_gap = V105HeaderGapAxiom::default().resolve_gap(
                 version,
@@ -594,22 +741,30 @@ fn peek_item_header_at_with_base_and_gap_profile(
                     }
                 }
             }
+            timing.record(ScannerPeekTimingStage::TrialConfig, gap_config_started);
 
             let geom_bits = if !alpha_mode { 4 } else { 0 };
 
             for gap in trial_possible_gaps {
+                if timing.enabled {
+                    timing.gap_attempts += 1;
+                }
                 let trial_total_skip = base_header_len as u32 + geom_bits + gap as u32;
+                let gap_reader_started = timing.mark();
                 let mut t_reader = BitReader::endian(Cursor::new(section_bytes), LittleEndian);
                 if t_reader.skip(start_bit as u32 + trial_total_skip).is_err() {
+                    timing.record(ScannerPeekTimingStage::GapReader, gap_reader_started);
                     continue;
                 }
                 let mut t_cursor = BitCursor::new(t_reader);
                 let absolute_trial_pos = start_bit + trial_total_skip as u64;
                 t_cursor.set_pos(absolute_trial_pos);
                 t_cursor.base_pos = absolute_trial_pos;
+                timing.record(ScannerPeekTimingStage::GapReader, gap_reader_started);
                 let mut t_code = String::new();
 
                 // Trial 1: Huffman
+                let code_decode_started = timing.mark();
                 let huffman_pos = t_cursor.pos();
                 for _ in 0..4 {
                     if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) {
@@ -646,7 +801,9 @@ fn peek_item_header_at_with_base_and_gap_profile(
                         t_cursor.rollback(huffman_pos);
                     }
                 }
+                timing.record(ScannerPeekTimingStage::CodeDecode, code_decode_started);
 
+                let plausibility_started = timing.mark();
                 let trimmed_norm = crate::item::normalize_alpha_code_hint(t_code.trim());
                 let trimmed = trimmed_norm.trim();
                 if trimmed.len() >= 2 {
@@ -658,8 +815,10 @@ fn peek_item_header_at_with_base_and_gap_profile(
                         || trimmed == "gcw";
                     let is_plausible = h_axiom.is_plausible(mode, loc, trimmed.as_bytes(), flags)
                         || (alpha_mode && is_socketable_rune && (mode == 6 || loc == 6));
+                    timing.record(ScannerPeekTimingStage::Plausibility, plausibility_started);
 
                     if is_plausible {
+                        let registry_template_started = timing.mark();
                         let reg = crate::domain::forensic::registry::get_registry();
                         let is_known = reg
                             .forced_compact_codes
@@ -717,8 +876,13 @@ fn peek_item_header_at_with_base_and_gap_profile(
                                 confidence -= 5000;
                             }
                         }
+                        timing.record(
+                            ScannerPeekTimingStage::RegistryTemplate,
+                            registry_template_started,
+                        );
                     }
 
+                    let scoring_started = timing.mark();
                     if has_checksum {
                         // Slice 5: Increase checksum bonus to favor Alpha-path trials over Retail-path trials
                         confidence += 400;
@@ -757,12 +921,25 @@ fn peek_item_header_at_with_base_and_gap_profile(
                                     ) && flags != 0
                                         && (version <= 2)))));
 
+                    let geometry_resolution_started = timing.mark();
                     let true_geom_bits = if alpha_mode {
+                        let summary_classification_started = timing.mark();
                         let is_summary = w_axiom.is_summary_item(version, trimmed);
+                        timing.record(
+                            ScannerPeekTimingStage::SummaryClassification,
+                            summary_classification_started,
+                        );
                         if is_summary {
                             3
                         } else {
-                            let geom = h_axiom.header_geometry_with_mode(flags, Some(trimmed), Some(mode));
+                            let header_geometry_started = timing.mark();
+                            let geom =
+                                h_axiom.header_geometry_with_mode(flags, Some(trimmed), Some(mode));
+                            timing.record(
+                                ScannerPeekTimingStage::HeaderGeometry,
+                                header_geometry_started,
+                            );
+                            timing.record_header_geometry_input(version, flags, mode, trimmed);
                             if geom.skip_geometry {
                                 0
                             } else {
@@ -772,6 +949,10 @@ fn peek_item_header_at_with_base_and_gap_profile(
                     } else {
                         4
                     };
+                    timing.record(
+                        ScannerPeekTimingStage::GeometryResolution,
+                        geometry_resolution_started,
+                    );
                     let true_base_header_len = 32
                         + version_bits
                         + (if true_has_checksum { 8 } else { 0 })
@@ -804,6 +985,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
                             gap == rhythm_gap,
                         ));
                     }
+                    timing.record(ScannerPeekTimingStage::Scoring, scoring_started);
                 }
             }
         }
