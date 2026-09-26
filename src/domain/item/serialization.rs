@@ -398,6 +398,7 @@ struct ScannerPeekTiming {
     summary_classification_calls: u64,
     header_geometry_us: u128,
     header_geometry_calls: u64,
+    header_geometry_cache_hits: u64,
     header_geometry_input_signatures: Option<std::collections::HashSet<(u8, u32, u8, String)>>,
     gap_attempts: u64,
 }
@@ -421,6 +422,7 @@ impl ScannerPeekTiming {
             summary_classification_calls: 0,
             header_geometry_us: 0,
             header_geometry_calls: 0,
+            header_geometry_cache_hits: 0,
             header_geometry_input_signatures: enabled.then(std::collections::HashSet::new),
             gap_attempts: 0,
         }
@@ -433,6 +435,12 @@ impl ScannerPeekTiming {
     fn record_header_geometry_input(&mut self, version: u8, flags: u32, mode: u8, code: &str) {
         if let Some(signatures) = &mut self.header_geometry_input_signatures {
             signatures.insert((version, flags, mode, code.to_owned()));
+        }
+    }
+
+    fn record_header_geometry_cache_hit(&mut self) {
+        if self.enabled {
+            self.header_geometry_cache_hits += 1;
         }
     }
 
@@ -469,8 +477,11 @@ impl Drop for ScannerPeekTiming {
                 .header_geometry_input_signatures
                 .as_ref()
                 .map_or(0, |signatures| signatures.len() as u64);
+            let geometry_requests = self
+                .header_geometry_calls
+                .saturating_add(self.header_geometry_cache_hits);
             eprintln!(
-                "[scanner-peek-profile] start_bit={} gap_profile={} gap_attempts={} total_us={} header_setup_us={} trial_config_us={} gap_reader_us={} code_decode_us={} plausibility_us={} registry_template_us={} scoring_us={} geometry_resolution_us={} summary_classification_us={} summary_classification_calls={} header_geometry_us={} header_geometry_calls={} header_geometry_unique_inputs={} header_geometry_repeated_inputs={} non_geometry_scoring_us={}",
+                "[scanner-peek-profile] start_bit={} gap_profile={} gap_attempts={} total_us={} header_setup_us={} trial_config_us={} gap_reader_us={} code_decode_us={} plausibility_us={} registry_template_us={} scoring_us={} geometry_resolution_us={} summary_classification_us={} summary_classification_calls={} header_geometry_us={} header_geometry_requests={} header_geometry_calls={} header_geometry_cache_misses={} header_geometry_cache_hits={} header_geometry_unique_inputs={} header_geometry_repeated_inputs={} non_geometry_scoring_us={}",
                 self.start_bit,
                 self.profile.label(),
                 self.gap_attempts,
@@ -486,9 +497,12 @@ impl Drop for ScannerPeekTiming {
                 self.summary_classification_us,
                 self.summary_classification_calls,
                 self.header_geometry_us,
+                geometry_requests,
                 self.header_geometry_calls,
+                self.header_geometry_calls,
+                self.header_geometry_cache_hits,
                 unique_geometry_inputs,
-                self.header_geometry_calls.saturating_sub(unique_geometry_inputs),
+                geometry_requests.saturating_sub(unique_geometry_inputs),
                 self.scoring_us.saturating_sub(self.geometry_resolution_us),
             );
         }
@@ -617,6 +631,13 @@ fn peek_item_header_at_with_base_and_gap_profile(
         .map_or(true, |profile| profile == gap_profile.label());
     let profile_trace_enabled = alpha_mode && profile_start_matches && profile_gap_matches;
     let mut timing = ScannerPeekTiming::new(profile_trace_enabled, start_bit, gap_profile);
+    let mut header_geometry_cache: Vec<(
+        u8,
+        u32,
+        u8,
+        String,
+        crate::domain::header::entity::HeaderGeometry,
+    )> = Vec::new();
     let header_setup_started = timing.mark();
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);
     if reader.skip(start_bit as u32).is_err() {
@@ -932,14 +953,47 @@ fn peek_item_header_at_with_base_and_gap_profile(
                         if is_summary {
                             3
                         } else {
-                            let header_geometry_started = timing.mark();
-                            let geom =
-                                h_axiom.header_geometry_with_mode(flags, Some(trimmed), Some(mode));
-                            timing.record(
-                                ScannerPeekTimingStage::HeaderGeometry,
-                                header_geometry_started,
-                            );
                             timing.record_header_geometry_input(version, flags, mode, trimmed);
+                            let cached_geometry = header_geometry_cache
+                                .iter()
+                                .find(
+                                    |(
+                                        cached_version,
+                                        cached_flags,
+                                        cached_mode,
+                                        cached_code,
+                                        _,
+                                    )| {
+                                        *cached_version == version
+                                            && *cached_flags == flags
+                                            && *cached_mode == mode
+                                            && cached_code.as_str() == trimmed
+                                    },
+                                )
+                                .map(|(_, _, _, _, geometry)| *geometry);
+                            let geom = if let Some(geometry) = cached_geometry {
+                                timing.record_header_geometry_cache_hit();
+                                geometry
+                            } else {
+                                let header_geometry_started = timing.mark();
+                                let geometry = h_axiom.header_geometry_with_mode(
+                                    flags,
+                                    Some(trimmed),
+                                    Some(mode),
+                                );
+                                timing.record(
+                                    ScannerPeekTimingStage::HeaderGeometry,
+                                    header_geometry_started,
+                                );
+                                header_geometry_cache.push((
+                                    version,
+                                    flags,
+                                    mode,
+                                    trimmed.to_owned(),
+                                    geometry,
+                                ));
+                                geometry
+                            };
                             if geom.skip_geometry {
                                 0
                             } else {
