@@ -1375,6 +1375,8 @@ pub fn parse_item_at_with_limit(
     Ok((item, cursor.pos() - absolute_bit))
 }
 
+const D2R_V3_SOCKET_CHILD_MODE: u8 = 6;
+
 fn parse_item_at_d2r_v3(
     bytes: &[u8],
     bit: u64,
@@ -1438,17 +1440,41 @@ fn parse_item_at_d2r_v3(
     item.record_parser_consumed_bits(consumed);
 
     let mut total_consumed = consumed;
+    let filled_sockets = item
+        .body
+        .d2r_v3_auxiliary
+        .as_ref()
+        .map_or(0, |auxiliary| auxiliary.filled_sockets);
+    let socket_capacity = item.sockets.unwrap_or_default();
+    if filled_sockets > socket_capacity || (filled_sockets > 0 && !item.header.is_socketed) {
+        return Err(cursor.fail(ParsingError::UnexpectedValue {
+            field: "D2R v3 filled socket count".to_string(),
+            value: filled_sockets.to_string(),
+            reason: format!(
+                "Declared children exceed capacity {socket_capacity} or lack the socketed flag"
+            ),
+        }));
+    }
     if item.header.is_socketed {
-        let socket_capacity = item.sockets.unwrap_or_default().min(6);
-        for _ in 0..socket_capacity {
+        // Capacity describes available slots, not the number of child records.
+        for _ in 0..filled_sockets {
             let child_start = bit.saturating_add(total_consumed);
-            let Ok((child, child_consumed)) =
-                parse_item_at_d2r_v3(bytes, child_start, huffman, idx, save_version)
-            else {
-                break;
-            };
-            if child.mode != 6 && child.location != 6 && child.header.mode != 6 {
-                break;
+            let (child, child_consumed) =
+                parse_item_at_d2r_v3(bytes, child_start, huffman, idx, save_version)?;
+            if child.header.mode != D2R_V3_SOCKET_CHILD_MODE {
+                return Err(ParsingFailure {
+                    error: ParsingError::UnexpectedValue {
+                        field: "D2R v3 socket child mode".to_string(),
+                        value: child.header.mode.to_string(),
+                        reason: format!(
+                            "Expected mode {D2R_V3_SOCKET_CHILD_MODE}; location does not establish child ownership"
+                        ),
+                    },
+                    context_stack: vec!["parse_item_at_d2r_v3".to_string()],
+                    bit_offset: child_start,
+                    context_relative_offset: child_start.saturating_sub(bit),
+                    hint: Some("Retain the source stream and verify the declared child boundary.".to_string()),
+                });
             }
 
             total_consumed = total_consumed.saturating_add(child_consumed);

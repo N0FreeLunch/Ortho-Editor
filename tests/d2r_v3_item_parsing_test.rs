@@ -3,7 +3,7 @@ use d2r_core::data::bit_cursor::BitCursor;
 use d2r_core::data::unique_items::UNIQUE_ITEMS;
 use d2r_core::domain::stats::parser::read_item_stats_d2r_v3;
 use d2r_core::item::{HuffmanTree, Item, ItemQuality};
-use d2r_macros::hypothesis_test;
+use d2r_macros::{hypothesis_test, settled_contract_test};
 use std::fs;
 use std::io::Cursor;
 
@@ -584,6 +584,116 @@ fn d2r_v3_beta_counted_stream_matches_pinned_item_intervals() {
         [(9536, 9624), (9624, 9712), (9712, 9800)]
     );
     assert_exact_raw_spans(&items);
+}
+
+fn socket_count_fragment(beta: &[u8], filled: u8, children: usize, next_item: bool) -> Vec<u8> {
+    const PARENT_START: usize = 9240 / 8;
+    const PARENT_BODY_END: usize = 9536 / 8;
+    const CHILD_BYTES: usize = 88 / 8;
+    const FILLED_START: usize = 69;
+    assert!(filled < 8 && children <= 3);
+    let mut parent = beta[PARENT_START..PARENT_BODY_END].to_vec();
+    assert_eq!(
+        raw_little_endian(&source_bits(&parent, FILLED_START as u64, 72)),
+        3,
+        "The pinned source field must independently declare three filled sockets"
+    );
+    for offset in 0..3 {
+        let bit = FILLED_START + offset;
+        let mask = 1 << (bit % 8);
+        parent[bit / 8] = (parent[bit / 8] & !mask) | (((filled >> offset) & 1) << (bit % 8));
+    }
+    // This is an in-memory counted-list fragment, not a game-loadable save.
+    let mut fragment = beta[..8].to_vec();
+    fragment.extend_from_slice(b"JM");
+    fragment.extend_from_slice(&(if next_item { 2_u16 } else { 1_u16 }).to_le_bytes());
+    fragment.extend_from_slice(&parent);
+    fragment.extend_from_slice(&beta[PARENT_BODY_END..PARENT_BODY_END + children * CHILD_BYTES]);
+    if next_item {
+        fragment.extend_from_slice(&beta[7360 / 8..7440 / 8]);
+    }
+    fragment
+}
+
+#[settled_contract_test]
+fn d2r_v3_socket_count_controls_child_ownership() {
+    let (beta, authority) =
+        read_d2r_v3_items("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s");
+    assert_eq!(authority[13].socketed_items.len(), 3);
+    assert_eq!(authority[13].range.end, 9800);
+    for filled in 0..=3_u8 {
+        let fragment = socket_count_fragment(&beta, filled, filled as usize, true);
+        let items = Item::read_player_items_d2r_v3(&fragment, &HuffmanTree::new())
+            .expect("Declared children followed by a top-level item must parse");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].sockets, Some(3));
+        assert_eq!(items[0].num_socketed_items, filled);
+        assert_eq!(items[0].socketed_items.len(), filled as usize);
+        assert_eq!(items[0].range.start, 96);
+        let expected_next = 96 + 296 + u64::from(filled) * 88;
+        assert_eq!(items[0].range.end, expected_next);
+        assert_eq!(items[1].range.start, expected_next);
+        assert_eq!(items[1].range.end, expected_next + 80);
+        assert_eq!(items[1].code, authority[0].code);
+        assert_exact_raw_spans(&items);
+        println!(
+            "{{\"case\":\"socket_count_ownership\",\"filled\":{filled},\"capacity\":3,\"next_start\":{expected_next}}}"
+        );
+    }
+}
+
+#[settled_contract_test]
+fn d2r_v3_socket_count_rejects_missing_children() {
+    let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+        .expect("Beta authority must exist");
+    for available in 0..3 {
+        let fragment = socket_count_fragment(&beta, 3, available, false);
+        let result = Item::read_player_items_d2r_v3(&fragment, &HuffmanTree::new());
+        assert!(
+            result.is_err(),
+            "Declared three children but only {available} present must fail, not drop entities"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.bit_offset >= 392,
+            "Failure must identify the child region"
+        );
+        println!(
+            "{{\"case\":\"missing_socket_children\",\"available\":{available},\"rejected\":true}}"
+        );
+    }
+}
+
+#[settled_contract_test]
+fn d2r_v3_socket_count_rejects_capacity_and_mode_conflicts() {
+    let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+        .expect("Beta authority must exist");
+    let overflow = socket_count_fragment(&beta, 4, 3, false);
+    let result = Item::read_player_items_d2r_v3(&overflow, &HuffmanTree::new());
+    assert!(result.is_err(), "Filled count must not exceed capacity");
+    let error = result.unwrap_err();
+    assert!(format!("{:?}", error.error).contains("filled socket count"));
+
+    let mut wrong_mode = socket_count_fragment(&beta, 1, 1, false);
+    const CHILD_START: usize = 96 + 296;
+    // Location six cannot substitute for the header's socket-child mode six.
+    for offset in 0..3 {
+        let bit = CHILD_START + 35 + offset;
+        wrong_mode[bit / 8] &= !(1 << (bit % 8));
+    }
+    for offset in 0..4 {
+        let bit = CHILD_START + 38 + offset;
+        let mask = 1 << (bit % 8);
+        wrong_mode[bit / 8] = (wrong_mode[bit / 8] & !mask) | (((6_u8 >> offset) & 1) << (bit % 8));
+    }
+    let result = Item::read_player_items_d2r_v3(&wrong_mode, &HuffmanTree::new());
+    assert!(
+        result.is_err(),
+        "A non-child mode must not become a child through its location"
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.bit_offset, CHILD_START as u64);
+    assert!(format!("{:?}", error.error).contains("socket child mode"));
 }
 
 #[hypothesis_test]
