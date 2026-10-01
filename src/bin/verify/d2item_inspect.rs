@@ -14,6 +14,9 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
+#[path = "d2item_inspect/d2r_v3.rs"]
+mod d2r_v3;
+
 const CANDIDATE_EVIDENCE_SCHEMA_VERSION: &str = "candidate-evidence/v1";
 
 #[derive(Debug, Deserialize)]
@@ -2719,6 +2722,10 @@ fn main() {
         .add_arg("file", "Path to .d2i or .d2s file")
         .optional();
     parser.add_spec(ArgSpec::option(
+        "dialect", None, Some("dialect"),
+        "Explicit item dialect: d2r-v3 for owned full-save inspection, legacy for unchanged default routing",
+    ));
+    parser.add_spec(ArgSpec::option(
         "corpus-dir",
         None,
         Some("corpus-dir"),
@@ -2874,6 +2881,10 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    if let Some(exit_code) = d2r_v3::run_if_requested(&parsed) {
+        std::process::exit(exit_code);
+    }
 
     let file_opt = parsed.get("file");
     let corpus_dir_opt = parsed.get("corpus-dir");
