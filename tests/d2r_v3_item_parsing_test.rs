@@ -3,7 +3,7 @@ use d2r_core::data::bit_cursor::BitCursor;
 use d2r_core::data::unique_items::UNIQUE_ITEMS;
 use d2r_core::domain::stats::parser::read_item_stats_d2r_v3;
 use d2r_core::item::{HuffmanTree, Item, ItemQuality};
-use d2r_macros::{hypothesis_test, settled_contract_test};
+use d2r_macros::{hypothesis_test, invariant_test, settled_contract_test};
 use std::fs;
 use std::io::Cursor;
 
@@ -93,9 +93,13 @@ fn d2r_v3_set_presence_mask_provenance() {
             .set_property_flags,
         None
     );
-    assert!(without_item_bit_cache(ring)
-        .to_bits_d2r_v3_jewelry(&huffman)
-        .is_err());
+    assert_eq!(
+        without_item_bit_cache(ring)
+            .to_bits_d2r_v3_jewelry(&huffman)
+            .unwrap(),
+        source_bits(&original, 9616, 9832),
+        "preserved Set fields must now support exact reconstruction"
+    );
     let ranges: Vec<_> = baseline
         .iter()
         .map(|item| (item.range.start, item.range.end))
@@ -155,6 +159,215 @@ fn d2r_v3_set_presence_mask_provenance() {
         original,
         "fixture must remain immutable"
     );
+}
+
+#[invariant_test]
+fn d2r_v3_set_jewelry_reconstruction_and_option_witnesses() {
+    let path = "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s";
+    let (bytes, items) = read_d2r_v3_items(path);
+    let huffman = HuffmanTree::new();
+    let ring = &items[10];
+    let semantic = without_item_bit_cache(ring);
+    let original = source_bits(&bytes, 9616, 9832);
+    let rebuilt = semantic
+        .to_bits_d2r_v3_jewelry(&huffman)
+        .expect("Set rebuild");
+    assert_eq!(rebuilt.len(), 216);
+    assert_eq!(rebuilt, original, "Set reconstruction must be bit exact");
+    assert_eq!(ring.unique_id, Some(29));
+    let ranges: Vec<_> = items
+        .iter()
+        .map(|item| (item.range.start, item.range.end))
+        .collect();
+    assert_eq!(items.len(), 38);
+    assert_eq!(items[11].range.start, 9832);
+    for mask in [1_u8, 2, 16] {
+        let mut changed = semantic.clone();
+        let flags = std::array::from_fn(|index| mask & (1 << index) != 0);
+        changed
+            .body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .set_property_flags = Some(flags);
+        let actual = changed.to_bits_d2r_v3_jewelry(&huffman).unwrap();
+        let mut expected = original.clone();
+        expected[138..143].copy_from_slice(&flags);
+        assert_eq!(
+            actual, expected,
+            "mask position must not be synthesized from count"
+        );
+        let reparsed = reparse_jewelry(&actual);
+        assert_eq!(
+            reparsed
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .set_property_flags,
+            Some(flags)
+        );
+        assert_eq!(reparsed.set_list_count, 1);
+        assert_eq!(reparsed.set_attributes.len(), 1);
+        assert_eq!(reparsed.unique_id, Some(29));
+    }
+    for (extra, stat_id, start, end, logical, raw, changed_bit) in [
+        (false, 34, 9759, 9774, 2, 2, 9768),
+        (false, 60, 9774, 9790, 6, 6, 9783),
+        (true, 0, 9799, 9816, 10, 42, 9808),
+    ] {
+        let mut changed = semantic.clone();
+        let list = if extra {
+            &mut changed.set_attributes[0]
+        } else {
+            &mut changed.properties
+        };
+        let property = list
+            .iter_mut()
+            .find(|property| property.stat_id == stat_id)
+            .unwrap();
+        assert_eq!((property.range.start, property.range.end), (start, end));
+        assert_eq!((property.value, property.raw_value), (logical, raw));
+        assert_eq!(
+            raw_little_endian(&source_bits(&bytes, start, start + 9)),
+            stat_id
+        );
+        assert_eq!(
+            raw_little_endian(&source_bits(&bytes, start + 9, end)),
+            raw as u32
+        );
+        // Leave raw_value stale to prove that logical fields drive reconstruction.
+        property.value += 1;
+        let emitted = changed.to_bits_d2r_v3_jewelry(&huffman).unwrap();
+        assert_eq!(emitted.len(), 216);
+        let diff: Vec<_> = original
+            .iter()
+            .zip(&emitted)
+            .enumerate()
+            .filter_map(|(bit, (before, after))| (before != after).then_some(bit as u64 + 9616))
+            .collect();
+        assert_eq!(diff, vec![changed_bit]);
+        let mut patched = bytes.clone();
+        for (index, value) in emitted.iter().enumerate() {
+            let bit = 9616 + index;
+            let bit_mask = 1 << (bit % 8);
+            patched[bit / 8] = (patched[bit / 8] & !bit_mask) | if *value { bit_mask } else { 0 };
+        }
+        // In-memory grammar witness only; not a checksum-valid or game-loaded save.
+        let whole_diff: Vec<_> = (0..bytes.len() * 8)
+            .filter(|bit| (bytes[bit / 8] ^ patched[bit / 8]) & (1 << (bit % 8)) != 0)
+            .collect();
+        assert_eq!(whole_diff, vec![changed_bit as usize]);
+        let readback = Item::read_player_items_d2r_v3(&patched, &huffman).unwrap();
+        assert_eq!(
+            readback
+                .iter()
+                .map(|item| (item.range.start, item.range.end))
+                .collect::<Vec<_>>(),
+            ranges
+        );
+        let actual = &readback[10];
+        assert_eq!(actual.header, ring.header);
+        assert_eq!(actual.unique_id, ring.unique_id);
+        assert_eq!(actual.body.d2r_v3_auxiliary, ring.body.d2r_v3_auxiliary);
+        let mut expected = ring.clone();
+        let expected_list = if extra {
+            &mut expected.set_attributes[0]
+        } else {
+            &mut expected.properties
+        };
+        let expected_property = expected_list
+            .iter_mut()
+            .find(|property| property.stat_id == stat_id)
+            .unwrap();
+        expected_property.value += 1;
+        expected_property.raw_value += 1;
+        assert_eq!(actual.properties, expected.properties);
+        assert_eq!(actual.set_attributes, expected.set_attributes);
+        println!("{{\"case\":\"set_option_witness\",\"stat_id\":{stat_id},\"value_start\":{},\"end\":{end},\"changed_bit\":{changed_bit}}}", start + 9);
+    }
+    assert_eq!(fs::read(path).unwrap(), bytes, "fixture must be immutable");
+}
+
+#[settled_contract_test]
+fn d2r_v3_set_jewelry_rejects_inconsistent_lists() {
+    use d2r_core::domain::stats::entity::StatMaturityTier;
+    let (_, items) = read_d2r_v3_items(
+        "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s",
+    );
+    let ring = without_item_bit_cache(&items[10]);
+    let huffman = HuffmanTree::new();
+    let reject = |item: Item| {
+        assert_eq!(
+            item.to_bits_d2r_v3_jewelry(&huffman).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+    };
+    let mut missing = ring.clone();
+    missing
+        .body
+        .d2r_v3_auxiliary
+        .as_mut()
+        .unwrap()
+        .set_property_flags = None;
+    reject(missing);
+    let mut mask = ring.clone();
+    mask.body
+        .d2r_v3_auxiliary
+        .as_mut()
+        .unwrap()
+        .set_property_flags = Some([false; 5]);
+    reject(mask);
+    let mut count = ring.clone();
+    count.set_list_count = 2;
+    reject(count);
+    let mut absent = ring.clone();
+    absent.set_attributes.clear();
+    reject(absent);
+    let mut additional = ring.clone();
+    additional
+        .set_attributes
+        .push(ring.set_attributes[0].clone());
+    reject(additional);
+    let mut empty = ring.clone();
+    empty.set_attributes[0].clear();
+    reject(empty);
+    let mut terminal = ring.clone();
+    terminal.set_attributes[0].pop();
+    reject(terminal);
+    let mut premature = ring.clone();
+    premature.set_attributes[0].insert(0, ring.set_attributes[0][1].clone());
+    reject(premature);
+    let mut opaque = ring.clone();
+    opaque.set_attributes[0][0].is_opaque = true;
+    reject(opaque);
+    let mut unverified = ring.clone();
+    unverified.set_attributes[0][0].maturity = StatMaturityTier::Inferred;
+    reject(unverified);
+    let mut paired = ring.clone();
+    paired.set_attributes[0][0].stat_id = 17;
+    reject(paired);
+    let mut no_id = ring.clone();
+    no_id.unique_id = None;
+    reject(no_id);
+    let mut overflow_id = ring.clone();
+    overflow_id.unique_id = Some(4096);
+    reject(overflow_id);
+    let magic = without_item_bit_cache(&items[4]);
+    let mut non_set_mask = magic.clone();
+    non_set_mask
+        .body
+        .d2r_v3_auxiliary
+        .as_mut()
+        .unwrap()
+        .set_property_flags = Some([false; 5]);
+    reject(non_set_mask);
+    let mut non_set_count = magic.clone();
+    non_set_count.set_list_count = 1;
+    reject(non_set_count);
+    let mut non_set_list = magic;
+    non_set_list.set_attributes = ring.set_attributes.clone();
+    reject(non_set_list);
 }
 
 #[hypothesis_test]

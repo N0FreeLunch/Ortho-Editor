@@ -4909,6 +4909,48 @@ fn d2r_v3_write_checked(
     emitter.write_bits(value as u32, width)
 }
 
+fn d2r_v3_write_scalar_list(
+    emitter: &mut BitEmitter,
+    properties: &[crate::domain::stats::ItemProperty],
+) -> io::Result<()> {
+    use D2rV3JewelryWidths as W;
+    let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+    let (terminal, scalar_properties) = properties
+        .split_last()
+        .ok_or_else(|| invalid("Missing final D2R v3 property terminator"))?;
+    if terminal.stat_id != W::TERMINATOR || terminal.is_opaque || !terminal.is_verified() {
+        return Err(invalid("Missing verified final D2R v3 property terminator"));
+    }
+    for property in scalar_properties {
+        if property.is_opaque
+            || !property.is_verified()
+            || matches!(property.stat_id, 17 | 18 | 50 | 51 | 57 | 58 | 59 | 511)
+        {
+            return Err(invalid(
+                "Opaque, unverified, paired or premature terminal property is unsupported",
+            ));
+        }
+        let stat = crate::data::stat_costs::STAT_COSTS
+            .iter()
+            .find(|stat| stat.id == property.stat_id)
+            .ok_or_else(|| invalid("Missing D2R v3 property definition"))?;
+        if stat.save_bits == 0 || stat.save_bits > 31 {
+            return Err(invalid("Unsupported D2R v3 scalar value width"));
+        }
+        d2r_v3_write_checked(emitter, property.stat_id as u64, W::STAT_ID, "stat ID")?;
+        d2r_v3_write_checked(
+            emitter,
+            property.param as u64,
+            stat.save_param_bits as u32,
+            "stat parameter",
+        )?;
+        let raw = i64::from(property.value) + i64::from(stat.save_add);
+        let raw = u64::try_from(raw).map_err(|_| invalid("Negative encoded D2R v3 value"))?;
+        d2r_v3_write_checked(emitter, raw, stat.save_bits as u32, "stat value")?;
+    }
+    emitter.write_bits(W::TERMINATOR, W::STAT_ID)
+}
+
 impl Item {
     /// Rebuild identified, non-socketed D2R v3 jewelry from semantic fields.
     /// This opt-in writer never reads whole-item raw bits, segments or offsets.
@@ -4929,7 +4971,7 @@ impl Item {
             || !matches!(self.body.code.trim(), "rin" | "amu")
             || !matches!(
                 quality,
-                ItemQuality::Normal | ItemQuality::Magic | ItemQuality::Unique
+                ItemQuality::Normal | ItemQuality::Magic | ItemQuality::Unique | ItemQuality::Set
             )
             || header.is_compact
             || !header.is_identified
@@ -4940,11 +4982,29 @@ impl Item {
             || matches!(header.mode, 3 | 5 | 6)
             || auxiliary.filled_sockets != 0
             || !self.socketed_items.is_empty()
-            || !self.set_attributes.is_empty()
             || !self.runeword_attributes.is_empty()
             || !self.properties_complete
         {
             return Err(invalid("Unsupported D2R v3 jewelry layout"));
+        }
+        if quality == ItemQuality::Set {
+            let flags = auxiliary
+                .set_property_flags
+                .ok_or_else(|| invalid("Missing D2R v3 Set presence flags"))?;
+            let list_count = flags.iter().filter(|&&flag| flag).count();
+            if list_count != self.set_list_count as usize || list_count != self.set_attributes.len()
+            {
+                return Err(invalid(
+                    "D2R v3 Set flags and property list counts disagree",
+                ));
+            }
+        } else if auxiliary.set_property_flags.is_some()
+            || self.set_list_count != 0
+            || !self.set_attributes.is_empty()
+        {
+            return Err(invalid(
+                "Non-Set jewelry contains D2R v3 Set property state",
+            ));
         }
         for (flag, expected) in [
             (4, true),
@@ -5042,12 +5102,14 @@ impl Item {
                     "suffix",
                 )?;
             }
-            ItemQuality::Unique => {
+            ItemQuality::Unique | ItemQuality::Set => {
                 d2r_v3_write_checked(
                     &mut emitter,
-                    self.unique_id.ok_or_else(|| invalid("Missing unique ID"))? as u64,
+                    self.unique_id
+                        .ok_or_else(|| invalid("Missing unique or Set ID"))?
+                        as u64,
                     W::UNIQUE_ID,
-                    "unique ID",
+                    "unique or Set ID",
                 )?;
             }
             _ => {}
@@ -5070,37 +5132,15 @@ impl Item {
         } else if self.quantity.is_some() {
             return Err(invalid("Quantity exists without the D2R v3 presence flag"));
         }
-        if self.properties.last().map(|property| property.stat_id) != Some(W::TERMINATOR) {
-            return Err(invalid("Missing final D2R v3 property terminator"));
-        }
-        for property in &self.properties[..self.properties.len() - 1] {
-            if property.is_opaque
-                || !property.is_verified()
-                || matches!(property.stat_id, 17 | 18 | 50 | 51 | 57 | 58 | 59 | 511)
-            {
-                return Err(invalid(
-                    "Opaque, unverified, paired or premature terminal property is unsupported",
-                ));
+        if let Some(flags) = auxiliary.set_property_flags {
+            for flag in flags {
+                emitter.write_bit(flag)?;
             }
-            let stat = crate::data::stat_costs::STAT_COSTS
-                .iter()
-                .find(|stat| stat.id == property.stat_id)
-                .ok_or_else(|| invalid("Missing D2R v3 property definition"))?;
-            if stat.save_bits == 0 || stat.save_bits > 31 {
-                return Err(invalid("Unsupported D2R v3 scalar value width"));
-            }
-            d2r_v3_write_checked(&mut emitter, property.stat_id as u64, W::STAT_ID, "stat ID")?;
-            d2r_v3_write_checked(
-                &mut emitter,
-                property.param as u64,
-                stat.save_param_bits as u32,
-                "stat parameter",
-            )?;
-            let raw = i64::from(property.value) + i64::from(stat.save_add);
-            let raw = u64::try_from(raw).map_err(|_| invalid("Negative encoded D2R v3 value"))?;
-            d2r_v3_write_checked(&mut emitter, raw, stat.save_bits as u32, "stat value")?;
         }
-        emitter.write_bits(W::TERMINATOR, W::STAT_ID)?;
+        d2r_v3_write_scalar_list(&mut emitter, &self.properties)?;
+        for properties in &self.set_attributes {
+            d2r_v3_write_scalar_list(&mut emitter, properties)?;
+        }
         emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
         if let Some(quantity) = auxiliary.advanced_stash_quantity {
             d2r_v3_write_checked(
