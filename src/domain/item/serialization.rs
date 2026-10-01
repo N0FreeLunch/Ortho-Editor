@@ -1855,6 +1855,60 @@ pub fn read_player_items(
     Ok(all_items)
 }
 
+fn d2r_v3_list_failure(field: &str, bit_offset: u64, reason: &str) -> ParsingFailure {
+    ParsingFailure {
+        error: ParsingError::UnexpectedValue {
+            field: field.to_string(),
+            value: "invalid or unsupported".to_string(),
+            reason: reason.to_string(),
+        },
+        context_stack: vec!["D2R v3 player list ownership".to_string()],
+        bit_offset,
+        context_relative_offset: 0,
+        hint: Some(
+            "Preserve the input and verify the section boundary; do not scan a later JM list."
+                .to_string(),
+        ),
+    }
+}
+
+/// Reads exactly the caller-owned counted list, without searching other markers.
+/// `section_offset` is a byte offset in `bytes`; item ranges remain absolute.
+pub fn read_counted_list_d2r_v3(
+    bytes: &[u8],
+    section_offset: usize,
+    huffman: &HuffmanTree,
+    save_version: u32,
+) -> ParsingResult<Vec<Item>> {
+    let section_bit = (section_offset as u64).saturating_mul(8);
+    let header = section_offset
+        .checked_add(4)
+        .and_then(|end| bytes.get(section_offset..end))
+        .ok_or_else(|| {
+            d2r_v3_list_failure(
+                "D2R v3 counted list header",
+                section_bit,
+                "The owned list header is truncated",
+            )
+        })?;
+    if &header[..2] != b"JM" {
+        return Err(d2r_v3_list_failure(
+            "D2R v3 counted list marker",
+            section_bit,
+            "The owned section must begin with JM",
+        ));
+    }
+    let count = u16::from_le_bytes([header[2], header[3]]);
+    let mut items = Vec::with_capacity(count as usize);
+    let mut bit = section_bit + 32;
+    for idx in 0..count as usize {
+        let (item, consumed) = parse_item_at_d2r_v3(bytes, bit, huffman, idx, save_version)?;
+        bit += consumed;
+        items.push(item);
+    }
+    Ok(items)
+}
+
 pub fn read_player_items_d2r_v3(bytes: &[u8], huffman: &HuffmanTree) -> ParsingResult<Vec<Item>> {
     let save_version = bytes
         .get(4..8)
@@ -1871,60 +1925,59 @@ pub fn read_player_items_d2r_v3(bytes: &[u8], huffman: &HuffmanTree) -> ParsingR
             context_relative_offset: 0,
             hint: None,
         })?;
-    let mut empty_section = false;
-    let mut last_error = None;
-
-    for pos in crate::save::find_jm_markers(bytes) {
-        if pos + 4 > bytes.len() {
-            continue;
-        }
-        let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
-        if count == 0 {
-            empty_section = true;
-            continue;
-        }
-
-        let mut items = Vec::with_capacity(count as usize);
-        let mut bit = (pos as u64) * 8 + 32;
-        let mut section_error = None;
-
-        for idx in 0..count as usize {
-            match parse_item_at_d2r_v3(bytes, bit, huffman, idx, save_version) {
-                Ok((item, consumed)) => {
-                    bit += consumed;
-                    items.push(item);
-                }
-                Err(error) => {
-                    section_error = Some(error);
-                    break;
-                }
-            }
-        }
-
-        if let Some(error) = section_error {
-            last_error = Some(error);
-        } else if items.len() == count as usize {
-            return Ok(items);
-        }
+    if save_version != 0x69 {
+        return Err(d2r_v3_list_failure(
+            "D2R v3 prefix version",
+            32,
+            "Only the fixture-verified version 0x69 prefix is supported",
+        ));
     }
-
-    if let Some(error) = last_error {
-        return Err(error);
+    if bytes.get(..4) != Some(crate::save::D2S_MAGIC.to_le_bytes().as_slice()) {
+        return Err(d2r_v3_list_failure(
+            "D2R v3 save magic",
+            0,
+            "A full save header is required; use the explicit-offset API for list fragments",
+        ));
     }
-    if empty_section {
-        return Ok(Vec::new());
+    // Locate the player list by consuming its prefix, not by marker recovery.
+    let gf_pos = crate::domain::forensic::v105::V105SectionMarkerAxiom::V105_HEADER_LEN;
+    if bytes.get(gf_pos..gf_pos + 2) != Some(b"gf".as_slice()) {
+        return Err(d2r_v3_list_failure(
+            "D2R v3 attribute marker",
+            gf_pos as u64 * 8,
+            "The verified fixed header must be followed by gf",
+        ));
     }
-
-    Err(ParsingFailure {
-        error: ParsingError::MissingMarker {
-            marker: "JM".to_string(),
-            bit_offset: 0,
-        },
-        context_stack: vec!["read_player_items_d2r_v3".to_string()],
-        bit_offset: 0,
-        context_relative_offset: 0,
-        hint: Some("Could not find a D2R v3 counted JM item list.".to_string()),
-    })
+    let mut cursor = BitCursor::from_raw_at(bytes, (gf_pos as u64 + 2) * 8);
+    cursor.push_context("D2R v3 character attributes");
+    loop {
+        let id_start = cursor.pos();
+        let stat_id = cursor.read_bits::<u32>(9)?;
+        if stat_id == 511 {
+            break;
+        }
+        // Character-stat widths are distinct from item-property widths.
+        // Unverified character IDs must not turn into a guessed section boundary.
+        if stat_id > 15 {
+            return Err(d2r_v3_list_failure(
+                "D2R v3 character attribute ID",
+                id_start,
+                "The full-save locator currently supports only verified character IDs 0..15",
+            ));
+        }
+        cursor.skip(crate::domain::stats::attribute::char_stat_save_bits(stat_id, false) as u64)?;
+    }
+    cursor.byte_align()?;
+    let if_pos = (cursor.pos() / 8) as usize;
+    if bytes.get(if_pos..if_pos + 2) != Some(b"if".as_slice()) {
+        return Err(d2r_v3_list_failure(
+            "D2R v3 skill marker",
+            cursor.pos(),
+            "The character-stat terminator and alignment must end immediately before if",
+        ));
+    }
+    let player_pos = if_pos + 2 + crate::save::SKILL_SECTION_LEN;
+    read_counted_list_d2r_v3(bytes, player_pos, huffman, save_version)
 }
 
 pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
@@ -1968,6 +2021,16 @@ impl Item {
         huffman: &HuffmanTree,
     ) -> ParsingResult<Vec<Item>> {
         read_player_items_d2r_v3(bytes, huffman)
+    }
+
+    /// Reads a counted list at an independently supplied byte offset.
+    pub fn read_counted_list_d2r_v3(
+        bytes: &[u8],
+        section_offset: usize,
+        huffman: &HuffmanTree,
+        save_version: u32,
+    ) -> ParsingResult<Vec<Item>> {
+        read_counted_list_d2r_v3(bytes, section_offset, huffman, save_version)
     }
 
     pub fn read_section_ext(

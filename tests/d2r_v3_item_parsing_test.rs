@@ -586,6 +586,144 @@ fn d2r_v3_beta_counted_stream_matches_pinned_item_intervals() {
     assert_exact_raw_spans(&items);
 }
 
+#[settled_contract_test]
+fn d2r_v3_player_list_keeps_empty_primary_ownership() {
+    let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+        .expect("Beta authority must exist");
+    assert_eq!(&beta[884..886], b"if");
+    assert_eq!(&beta[916..920], b"JM\x10\x00");
+    // Preserve the real prefix; the two list payloads are an in-memory counterexample.
+    let mut candidate = beta[..916].to_vec();
+    candidate.extend_from_slice(b"JM\x00\x00JM\x01\x00");
+    candidate.extend_from_slice(&beta[7360 / 8..7440 / 8]);
+    let items = Item::read_player_items_d2r_v3(&candidate, &HuffmanTree::new())
+        .expect("An empty owned primary list is valid");
+    assert_eq!(
+        items.len(),
+        0,
+        "Secondary items do not belong to the player list"
+    );
+    println!(
+        "{{\"case\":\"empty_primary_ownership\",\"returned_items\":0,\"primary_offset\":916}}"
+    );
+}
+
+#[settled_contract_test]
+fn d2r_v3_player_list_does_not_hide_primary_failure() {
+    let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+        .expect("Beta authority must exist");
+    let mut candidate = beta[..916].to_vec();
+    candidate.extend_from_slice(b"JM\x01\x00");
+    // This parent declares three children, but its body is followed by another list.
+    candidate.extend_from_slice(&beta[9240 / 8..9536 / 8]);
+    candidate.extend_from_slice(b"JM\x01\x00");
+    candidate.extend_from_slice(&beta[7360 / 8..7440 / 8]);
+    let result = Item::read_player_items_d2r_v3(&candidate, &HuffmanTree::new());
+    assert!(
+        result.is_err(),
+        "A later valid list must not hide the primary error"
+    );
+    let error = result.unwrap_err();
+    assert!(
+        error.bit_offset >= 7656,
+        "Keep the original child failure location"
+    );
+    println!(
+        "{{\"case\":\"primary_failure_not_hidden\",\"rejected\":true,\"offset\":{}}}",
+        error.bit_offset
+    );
+}
+
+#[settled_contract_test]
+fn d2r_v3_player_list_ignores_header_and_skill_marker_lookalikes() {
+    let (beta, expected) =
+        read_d2r_v3_items("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s");
+    let mut candidate = beta.clone();
+    for start in [100, 886] {
+        candidate[start..start + 4].copy_from_slice(b"JM\x01\x00");
+        candidate[start + 4..start + 14].copy_from_slice(&beta[7360 / 8..7440 / 8]);
+    }
+    let actual = Item::read_player_items_d2r_v3(&candidate, &HuffmanTree::new())
+        .expect("Marker lookalikes outside the owned player list must be ignored");
+    assert_eq!(actual.len(), 16);
+    for (parsed, original) in actual.iter().zip(&expected) {
+        assert_eq!(
+            (parsed.range.start, parsed.range.end),
+            (original.range.start, original.range.end)
+        );
+        assert_eq!(parsed.code, original.code);
+        assert_eq!(parsed.bits, original.bits);
+    }
+    println!(
+        "{{\"case\":\"prefix_marker_lookalikes\",\"returned_items\":16,\"first_start\":7360}}"
+    );
+}
+
+#[settled_contract_test]
+fn d2r_v3_player_list_rejects_unowned_or_unsupported_prefix() {
+    let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+        .expect("Beta authority must exist");
+    let huffman = HuffmanTree::new();
+    for (field, offset, replacement) in [
+        ("save magic", 0, &b"XXXX"[..]),
+        ("prefix version", 4, &106_u32.to_le_bytes()[..]),
+        ("attribute marker", 833, &b"xx"[..]),
+        ("skill marker", 884, &b"xx"[..]),
+        ("counted list marker", 916, &b"xx"[..]),
+    ] {
+        let mut candidate = beta.clone();
+        candidate[offset..offset + replacement.len()].copy_from_slice(replacement);
+        let result = Item::read_player_items_d2r_v3(&candidate, &huffman);
+        assert!(
+            result.is_err(),
+            "Invalid {field} must not recover through another list"
+        );
+        assert!(format!("{:?}", result.unwrap_err().error).contains(field));
+    }
+    let mut unknown_id = beta.clone();
+    for offset in 0..9 {
+        let bit = 835 * 8 + offset;
+        let mask = 1 << (bit % 8);
+        unknown_id[bit / 8] =
+            (unknown_id[bit / 8] & !mask) | (((85_u32 >> offset) as u8 & 1) << (bit % 8));
+    }
+    let result = Item::read_player_items_d2r_v3(&unknown_id, &huffman);
+    assert!(
+        result.is_err(),
+        "Unverified character IDs must not yield a guessed prefix"
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.bit_offset, 6680);
+    assert!(format!("{:?}", error.error).contains("character attribute ID"));
+    for length in [0, 7, 834, 835, 883, 918] {
+        assert!(Item::read_player_items_d2r_v3(&beta[..length], &huffman).is_err());
+    }
+    println!("{{\"case\":\"invalid_player_prefix\",\"marker_or_version_cases\":5,\"unknown_id_rejected\":true,\"truncation_cases\":6}}");
+}
+
+#[settled_contract_test]
+fn d2r_v3_explicit_list_requires_the_supplied_boundary() {
+    let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
+        .expect("Beta authority must exist");
+    let huffman = HuffmanTree::new();
+    let fragment = b"JM\x00\x00JM\x01\x00";
+    assert!(Item::read_counted_list_d2r_v3(fragment, 0, &huffman, 0x69)
+        .unwrap()
+        .is_empty());
+    assert!(Item::read_player_items_d2r_v3(fragment, &huffman).is_err());
+    for offset in [usize::MAX, fragment.len(), 1, 4] {
+        assert!(Item::read_counted_list_d2r_v3(fragment, offset, &huffman, 0x69).is_err());
+    }
+    for truncated_header in [&b""[..], &b"J"[..], &b"JM"[..], &b"JM\x00"[..]] {
+        assert!(Item::read_counted_list_d2r_v3(truncated_header, 0, &huffman, 0x69).is_err());
+    }
+    let items = Item::read_counted_list_d2r_v3(&beta, 916, &huffman, 0x69)
+        .expect("An independently pinned list offset must retain source ranges");
+    assert_eq!(items.len(), 16);
+    assert_eq!(items[0].range.start, 7360);
+    assert_exact_raw_spans(&items);
+}
+
 fn socket_count_fragment(beta: &[u8], filled: u8, children: usize, next_item: bool) -> Vec<u8> {
     const PARENT_START: usize = 9240 / 8;
     const PARENT_BODY_END: usize = 9536 / 8;
@@ -623,7 +761,7 @@ fn d2r_v3_socket_count_controls_child_ownership() {
     assert_eq!(authority[13].range.end, 9800);
     for filled in 0..=3_u8 {
         let fragment = socket_count_fragment(&beta, filled, filled as usize, true);
-        let items = Item::read_player_items_d2r_v3(&fragment, &HuffmanTree::new())
+        let items = Item::read_counted_list_d2r_v3(&fragment, 8, &HuffmanTree::new(), 0x69)
             .expect("Declared children followed by a top-level item must parse");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].sockets, Some(3));
@@ -648,7 +786,7 @@ fn d2r_v3_socket_count_rejects_missing_children() {
         .expect("Beta authority must exist");
     for available in 0..3 {
         let fragment = socket_count_fragment(&beta, 3, available, false);
-        let result = Item::read_player_items_d2r_v3(&fragment, &HuffmanTree::new());
+        let result = Item::read_counted_list_d2r_v3(&fragment, 8, &HuffmanTree::new(), 0x69);
         assert!(
             result.is_err(),
             "Declared three children but only {available} present must fail, not drop entities"
@@ -669,7 +807,7 @@ fn d2r_v3_socket_count_rejects_capacity_and_mode_conflicts() {
     let beta = fs::read("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s")
         .expect("Beta authority must exist");
     let overflow = socket_count_fragment(&beta, 4, 3, false);
-    let result = Item::read_player_items_d2r_v3(&overflow, &HuffmanTree::new());
+    let result = Item::read_counted_list_d2r_v3(&overflow, 8, &HuffmanTree::new(), 0x69);
     assert!(result.is_err(), "Filled count must not exceed capacity");
     let error = result.unwrap_err();
     assert!(format!("{:?}", error.error).contains("filled socket count"));
@@ -686,7 +824,7 @@ fn d2r_v3_socket_count_rejects_capacity_and_mode_conflicts() {
         let mask = 1 << (bit % 8);
         wrong_mode[bit / 8] = (wrong_mode[bit / 8] & !mask) | (((6_u8 >> offset) & 1) << (bit % 8));
     }
-    let result = Item::read_player_items_d2r_v3(&wrong_mode, &HuffmanTree::new());
+    let result = Item::read_counted_list_d2r_v3(&wrong_mode, 8, &HuffmanTree::new(), 0x69);
     assert!(
         result.is_err(),
         "A non-child mode must not become a child through its location"
