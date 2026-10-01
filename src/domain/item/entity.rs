@@ -140,7 +140,6 @@ fn record_emission_phase(
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BitSegment {
     pub start: u64,
@@ -159,6 +158,19 @@ pub struct CursedItemData {
     pub curse_id: u32,
 }
 
+/// Auxiliary fields belonging to the explicitly selected D2R v3 dialect.
+/// These are field values, not a cached copy of the item stream.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct D2rV3AuxiliaryData {
+    pub save_version: u32,
+    pub stored_in: Option<u8>,
+    pub filled_sockets: u8,
+    pub realm_data: Vec<u32>,
+    pub has_quantity: bool,
+    pub advanced_stash_quantity: Option<u8>,
+    pub alignment_padding: Option<Vec<bool>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ItemBody {
     pub code: String,
@@ -171,6 +183,7 @@ pub struct ItemBody {
     pub max_durability: Option<u32>,
     pub current_durability: Option<u32>,
     pub quantity: Option<u32>,
+    pub d2r_v3_auxiliary: Option<D2rV3AuxiliaryData>,
     // Alpha Forensic Fields
     pub alpha_header_gap: Option<u32>,
     pub alpha_header_gap_bits: Vec<bool>,
@@ -248,6 +261,8 @@ pub struct ExtendedStatsData {
     pub alpha_unique_id_raw: Option<u16>,
     pub v5_runeword_extra: Option<u8>,
     pub alpha_set_list_val: Option<u8>,
+    pub d2r_v3_set_property_flags: [bool; 5],
+    pub d2r_v3_auxiliary: Option<D2rV3AuxiliaryData>,
 }
 
 /// Equality-neutral provenance for the parser's final pre-alignment bit count.
@@ -461,7 +476,11 @@ impl Item {
         }
 
         let decoded = self.properties.iter().filter(|p| !p.is_opaque).count();
-        let valid = self.properties.iter().filter(|p| p.is_valid_stat_range()).count();
+        let valid = self
+            .properties
+            .iter()
+            .filter(|p| p.is_valid_stat_range())
+            .count();
 
         let coverage_percent = (decoded as f32 / total as f32) * 100.0;
         let validity_percent = if decoded > 0 {
@@ -1338,7 +1357,11 @@ impl Item {
         .with_compact(self.header.is_compact)
         .with_code(&self.code);
         let h_axiom = HeaderAxiom::new(self.header.version, alpha_mode);
-        let geometry = h_axiom.header_geometry_with_mode(self.header.flags, Some(&self.code), Some(self.header.mode));
+        let geometry = h_axiom.header_geometry_with_mode(
+            self.header.flags,
+            Some(&self.code),
+            Some(self.header.mode),
+        );
         // 2. Handle Alpha v105 summary items (Potions, Scrolls):
         if is_v105_summary {
             // Write Y, Page, SocketHint (3 bits for Y, 0 for others).
@@ -1359,7 +1382,11 @@ impl Item {
                 && !has_opaque_module
                 && self.total_bits >= emitted_before_gap
                 && self.total_bits < emitted_before_gap + declared_gap_bits as u64
-            { (self.total_bits - emitted_before_gap) as u32 } else { declared_gap_bits };
+            {
+                (self.total_bits - emitted_before_gap) as u32
+            } else {
+                declared_gap_bits
+            };
             if gap_bits > 0 {
                 let subphase_start = emitter.written_bits();
                 let gap_val = self.body.alpha_header_gap.unwrap_or(0);
@@ -1427,10 +1454,7 @@ impl Item {
             let mut final_target = target as u64;
             // A strict rebuild must not synthesize target-width padding beyond a known
             // parsed physical span. Raw-bit replay remains the earlier fast path.
-            if self.bits.is_empty()
-                && self.total_bits > 0
-                && self.total_bits < final_target
-            {
+            if self.bits.is_empty() && self.total_bits > 0 && self.total_bits < final_target {
                 final_target = self.total_bits;
             }
             let opaque_tail_len: usize = self
@@ -1532,9 +1556,10 @@ impl Item {
                     if composed_alignment_material {
                         padding_needed as usize
                     } else {
-                        self.body.alpha_alignment_padding.len().max(
-                            opaque_alignment_material.as_ref().map_or(0, Vec::len),
-                        )
+                        self.body
+                            .alpha_alignment_padding
+                            .len()
+                            .max(opaque_alignment_material.as_ref().map_or(0, Vec::len))
                     }
                     .min(padding_needed as usize)
                 };
@@ -1919,7 +1944,7 @@ impl Item {
                     matches!(trimmed_code, "rin" | "amu" | "cm1" | "cm2" | "cm3");
                 if has_multi_graphics_to_write {
                     emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?;
-                if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
+                    if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
                         eprintln!(
                             "[to-emitter-field] after multi_graphics pos={}",
                             emitter.written_bits() - start_bit
@@ -2107,7 +2132,10 @@ impl Item {
                             trimmed.trim_matches(|c: char| c.is_whitespace() || c == '\0'),
                             "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw"
                         );
-                    if trace_alpha && is_authority && (self.header.version == 1 || self.header.version == 0) {
+                    if trace_alpha
+                        && is_authority
+                        && (self.header.version == 1 || self.header.version == 0)
+                    {
                         let alignment_anchor =
                             match trimmed.trim_matches(|c: char| c.is_whitespace() || c == '\0') {
                                 "wa2" => 8096u64,
@@ -2383,6 +2411,120 @@ impl Item {
     }
 }
 
+pub fn parse_item_header_d2r_v3<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+) -> ParsingResult<ItemHeader> {
+    parse_item_header_d2r_v3_with_storage(cursor).map(|(header, _)| header)
+}
+
+pub(crate) fn parse_item_header_d2r_v3_with_storage<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+) -> ParsingResult<(ItemHeader, Option<u8>)> {
+    cursor.begin_segment(ItemSegmentType::Header);
+
+    let flags = cursor.read_bits::<u32>(32)?;
+    let has_extended_version = cursor.read_bits::<u8>(1)? != 0;
+    let version_low = cursor.read_bits::<u8>(2)?;
+    let version = if has_extended_version {
+        version_low.saturating_add(99)
+    } else {
+        version_low
+    };
+    let mode = cursor.read_bits::<u8>(3)?;
+
+    let mut raw_stored_in = None;
+    let (location, x, y, page) = if matches!(mode, 3 | 5) {
+        let column = cursor.read_bits::<u16>(16)?;
+        let row = cursor.read_bits::<u16>(16)?;
+        (
+            0,
+            column.min(u8::MAX as u16) as u8,
+            row.min(u8::MAX as u16) as u8,
+            0,
+        )
+    } else {
+        let position = cursor.read_bits::<u8>(4)?;
+        let column = cursor.read_bits::<u8>(4)?;
+        let row = cursor.read_bits::<u8>(4)?;
+        let stored_in = cursor.read_bits::<u8>(3)?;
+        raw_stored_in = Some(stored_in);
+        let stored_in = stored_in.saturating_sub(1);
+        (position, column, row, stored_in)
+    };
+
+    cursor.end_segment();
+
+    Ok((
+        ItemHeader {
+            flags,
+            version,
+            mode,
+            location,
+            x,
+            y,
+            page,
+            socket_hint: 0,
+            id: None,
+            level: None,
+            quality: None,
+            is_compact: flags & (1 << 21) != 0,
+            is_identified: flags & (1 << 4) != 0,
+            is_socketed: flags & (1 << 11) != 0,
+            is_personalized: flags & (1 << 24) != 0,
+            is_runeword: flags & (1 << 26) != 0,
+            is_ethereal: flags & (1 << 22) != 0,
+            is_ear: flags & (1 << 16) != 0,
+            has_checksum: false,
+            alpha_checksum: None,
+            alpha_quality_raw: None,
+            alpha_v5_runeword_extra: None,
+            alpha_unique_id_raw: None,
+            save_is_alpha: false,
+        },
+        raw_stored_in,
+    ))
+}
+
+pub fn consume_d2r_v3_compact_tail<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    save_version: u32,
+    code: &str,
+    is_ear: bool,
+) -> ParsingResult<()> {
+    if is_ear {
+        return Ok(());
+    }
+
+    let has_realm_data = cursor.read_bit()?;
+    if has_realm_data {
+        let realm_data_count = if save_version > 96 {
+            4
+        } else if save_version > 93 {
+            3
+        } else {
+            2
+        };
+        cursor.skip_and_record(realm_data_count * 32)?;
+    }
+
+    if save_version <= 99 {
+        return Ok(());
+    }
+
+    if save_version <= 101 {
+        let is_stackable = crate::domain::item::serialization::item_template(code)
+            .map(|template| template.is_stackable)
+            .unwrap_or(false);
+        if is_stackable {
+            cursor.skip_and_record(8)?;
+        }
+    } else if cursor.read_bit()? {
+        cursor.skip_and_record(8)?;
+    }
+
+    Ok(())
+}
+
 pub fn parse_item_header<R: BitRead>(
     cursor: &mut BitCursor<R>,
     alpha_mode: bool,
@@ -2581,15 +2723,19 @@ pub fn parse_item_header<R: BitRead>(
                 })?;
                 alpha_header_gap_bits = gap_seg.bits;
 
-                if version == 5 && AlphaV105HeaderGapAlignment::align_required() && gap_override.is_none() {
+                if version == 5
+                    && AlphaV105HeaderGapAlignment::align_required()
+                    && gap_override.is_none()
+                {
                     // Preserve alignment bits: strict rebuilds cannot replay bits
                     // silently consumed by byte_align().
                     let alignment_bits = ((8 - (cursor.pos() % 8)) % 8) as usize;
                     let actual_read = alignment_bits.min(cursor.remaining() as usize);
                     if actual_read > 0 {
-                        let alignment_seg = cursor.with_context("AlphaHeaderGapAlignmentPadding", |c| {
-                            Ok(AlphaHeaderGap::parse(c, actual_read)?)
-                        })?;
+                        let alignment_seg = cursor
+                            .with_context("AlphaHeaderGapAlignmentPadding", |c| {
+                                Ok(AlphaHeaderGap::parse(c, actual_read)?)
+                            })?;
                         alpha_header_gap_bits.extend(alignment_seg.bits);
                     }
                 }
@@ -2957,6 +3103,7 @@ pub fn parse_item_body<R: BitRead>(
             max_durability: None,
             current_durability: None,
             quantity: None,
+            d2r_v3_auxiliary: None,
             alpha_header_gap: None,
             alpha_header_gap_bits: Vec::new(),
             alpha_code_bits: alpha_code_bits.clone(),
@@ -3104,8 +3251,7 @@ impl ExtendedStatsData {
 
             if !is_compact {
                 let q_bits = w_axiom.quality_bits(true) as u32;
-                let quality_raw =
-                    read_or_truncate!(cursor, "alpha_quality", direct q_bits, cursor.read_bits::<u8>(q_bits));
+                let quality_raw = read_or_truncate!(cursor, "alpha_quality", direct q_bits, cursor.read_bits::<u8>(q_bits));
                 let quality = ItemQuality::from(quality_raw);
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
@@ -3306,14 +3452,16 @@ impl ExtendedStatsData {
 
         let is_ear = !alpha_mode && (header.flags & (1 << 24)) != 0;
         if !is_ear && !alpha_mode && header.version != 5 && header.version != 7 {
-            let has_realm_data = read_or_truncate!(cursor, "has_realm_data", direct 1, cursor.read_bit());
+            let has_realm_data =
+                read_or_truncate!(cursor, "has_realm_data", direct 1, cursor.read_bit());
             if has_realm_data {
                 let _realm_data_1 = read_or_truncate!(cursor, "realm_data_1", direct 32, cursor.read_bits::<u32>(32));
                 let _realm_data_2 = read_or_truncate!(cursor, "realm_data_2", direct 32, cursor.read_bits::<u32>(32));
                 let _realm_data_3 = read_or_truncate!(cursor, "realm_data_3", direct 32, cursor.read_bits::<u32>(32));
             }
         }
-        data.timestamp_flag = read_or_truncate!(cursor, "timestamp_flag", direct 1, cursor.read_bit());
+        data.timestamp_flag =
+            read_or_truncate!(cursor, "timestamp_flag", direct 1, cursor.read_bit());
         if trace_alpha && trimmed_code == "wa2" {
             eprintln!(
                 "[timestamp-parse] wa2 timestamp_flag={} pos={}",
@@ -3353,9 +3501,11 @@ impl ExtendedStatsData {
             let m_dur = read_or_truncate!(cursor, "max_durability", direct max_bits, cursor.read_bits::<u32>(max_bits));
             data.max_durability = Some(m_dur);
             if m_dur > 0 {
-                data.current_durability =
-                    Some(read_or_truncate!(cursor, "current_durability", direct cur_bits, cursor.read_bits::<u32>(cur_bits)));
-                let _extra = read_or_truncate!(cursor, "durability_extra", direct 1, cursor.read_bit());
+                data.current_durability = Some(
+                    read_or_truncate!(cursor, "current_durability", direct cur_bits, cursor.read_bits::<u32>(cur_bits)),
+                );
+                let _extra =
+                    read_or_truncate!(cursor, "durability_extra", direct 1, cursor.read_bit());
             }
         }
         if reads_quantity && axiom.reads_quantity() {
@@ -3369,8 +3519,10 @@ impl ExtendedStatsData {
         }
         if is_socketed_flag {
             let sock_bits = w_axiom.socket_bits() as u32;
-            data.sockets =
-                Some(read_or_truncate!(cursor, "sockets", direct sock_bits, cursor.read_bits::<u8>(sock_bits)) as u8);
+            data.sockets = Some(
+                read_or_truncate!(cursor, "sockets", direct sock_bits, cursor.read_bits::<u8>(sock_bits))
+                    as u8,
+            );
         }
         if quality_val == ItemQuality::Set {
             let set_bits = w_axiom.set_list_bits() as u32;
@@ -3388,6 +3540,171 @@ impl ExtendedStatsData {
         cursor.end_segment();
         Ok(data)
     }
+}
+
+impl ExtendedStatsData {
+    pub fn read_d2r_v3_from_cursor<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        code: &str,
+        header: &ItemHeader,
+        save_version: u32,
+    ) -> ParsingResult<Self> {
+        cursor.begin_segment(ItemSegmentType::ExtendedStats);
+        let mut data = Self::default();
+        let trimmed_code = code.trim();
+
+        let mut auxiliary = D2rV3AuxiliaryData {
+            save_version,
+            filled_sockets: cursor.read_bits::<u8>(3)?,
+            ..Default::default()
+        };
+        data.id = Some(cursor.read_bits::<u32>(32)?);
+        data.level = Some(cursor.read_bits::<u8>(7)?);
+        let quality_raw = cursor.read_bits::<u8>(4)?;
+        let quality = ItemQuality::from(quality_raw);
+        data.quality = Some(quality);
+
+        data.has_multiple_graphics = cursor.read_bit()?;
+        if data.has_multiple_graphics {
+            data.multi_graphics_bits = Some(cursor.read_bits::<u8>(3)?);
+        }
+        data.has_class_specific_data = cursor.read_bit()?;
+        if data.has_class_specific_data {
+            data.class_specific_bits = Some(cursor.read_bits::<u16>(11)?);
+        }
+
+        match quality {
+            ItemQuality::Low => {
+                data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(3)?);
+            }
+            ItemQuality::Normal => {
+                if matches!(trimmed_code, "cm1" | "cm2" | "cm3") {
+                    cursor.skip_and_record(12)?;
+                } else if matches!(trimmed_code, "tsc" | "isc" | "tbk" | "ibk") {
+                    data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(5)?);
+                }
+            }
+            ItemQuality::High => {
+                data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(3)?);
+            }
+            ItemQuality::Magic => {
+                data.magic_prefix = Some(cursor.read_bits::<u16>(11)?);
+                data.magic_suffix = Some(cursor.read_bits::<u16>(11)?);
+            }
+            ItemQuality::Set => {
+                data.unique_id = Some(cursor.read_bits::<u16>(12)?);
+            }
+            ItemQuality::Rare | ItemQuality::Crafted => {
+                data.rare_name_1 = Some(cursor.read_bits::<u8>(8)?);
+                data.rare_name_2 = Some(cursor.read_bits::<u8>(8)?);
+                for affix in &mut data.rare_affixes {
+                    if cursor.read_bit()? {
+                        *affix = Some(cursor.read_bits::<u16>(11)?);
+                    }
+                }
+            }
+            ItemQuality::Unique => {
+                data.unique_id = Some(cursor.read_bits::<u16>(12)?);
+            }
+        }
+
+        if header.is_runeword {
+            data.runeword_id = Some(cursor.read_bits::<u16>(16)?);
+        }
+        if header.is_personalized {
+            let bits_per_char = if save_version >= 0x62 { 8 } else { 7 };
+            let mut name = String::new();
+            for _ in 0..16 {
+                let ch = cursor.read_bits::<u8>(bits_per_char)?;
+                if ch == 0 {
+                    break;
+                }
+                name.push(char::from(ch));
+            }
+            data.personalized_player_name = Some(name);
+        }
+
+        let has_realm_data = cursor.read_bit()?;
+        if has_realm_data {
+            let realm_data_count = if save_version > 96 {
+                4
+            } else if save_version > 93 {
+                3
+            } else {
+                2
+            };
+            for _ in 0..realm_data_count {
+                auxiliary.realm_data.push(cursor.read_bits::<u32>(32)?);
+            }
+        }
+
+        if trimmed_code == "gld" {
+            let _not_gold = cursor.read_bit()?;
+            data.quantity = Some(cursor.read_bits::<u32>(12)?);
+        }
+
+        let template =
+            crate::domain::item::serialization::item_template(trimmed_code).ok_or_else(|| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 item template".to_string(),
+                    value: trimmed_code.to_string(),
+                    reason: "The type-specific field layout is unavailable for this item code"
+                        .to_string(),
+                })
+            })?;
+
+        if template.is_armor {
+            let width = d2r_v3_stat_width(cursor, 31)?;
+            data.defense = Some(cursor.read_bits::<u32>(width)?);
+        }
+        if template.has_durability {
+            let max_width = d2r_v3_stat_width(cursor, 73)?;
+            let current_width = d2r_v3_stat_width(cursor, 72)?;
+            let maximum = cursor.read_bits::<u32>(max_width)?;
+            data.max_durability = Some(maximum);
+            if maximum > 0 {
+                data.current_durability = Some(cursor.read_bits::<u32>(current_width)?);
+            }
+        }
+
+        if save_version >= 0x69 {
+            auxiliary.has_quantity = cursor.read_bit()?;
+            if auxiliary.has_quantity {
+                data.quantity = Some(cursor.read_bits::<u32>(9)?);
+            }
+        } else if template.is_stackable {
+            data.quantity = Some(cursor.read_bits::<u32>(9)?);
+        }
+        if header.is_socketed {
+            let width = d2r_v3_stat_width(cursor, 194)?;
+            data.sockets = Some(cursor.read_bits::<u8>(width)?);
+        }
+        if quality == ItemQuality::Set {
+            for flag in &mut data.d2r_v3_set_property_flags {
+                *flag = cursor.read_bit()?;
+            }
+            data.set_list_count = data
+                .d2r_v3_set_property_flags
+                .iter()
+                .filter(|flag| **flag)
+                .count() as u8;
+        }
+
+        data.d2r_v3_auxiliary = Some(auxiliary);
+        cursor.end_segment();
+        Ok(data)
+    }
+}
+
+fn d2r_v3_stat_width<R: BitRead>(cursor: &BitCursor<R>, stat_id: u32) -> ParsingResult<u32> {
+    crate::domain::stats::stat_save_bits(stat_id).ok_or_else(|| {
+        cursor.fail(ParsingError::UnexpectedValue {
+            field: "D2R v3 stat-cost width".to_string(),
+            value: stat_id.to_string(),
+            reason: "The required physical field width is missing from the D2R stat-cost table"
+                .to_string(),
+        })
+    })
 }
 
 fn is_potion_code(code: &str) -> bool {
@@ -3441,6 +3758,9 @@ mod tests {
         });
 
         assert!(!item.is_placed(), "opaque placement must report unplaced");
-        assert!(item.placement().is_none(), "opaque placement must return None");
+        assert!(
+            item.placement().is_none(),
+            "opaque placement must return None"
+        );
     }
 }

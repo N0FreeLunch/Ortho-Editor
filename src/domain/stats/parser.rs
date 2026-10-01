@@ -7,6 +7,7 @@ use bitstream_io::BitRead;
 use std::cell::{Cell, RefCell};
 
 pub const MAX_ALPHA_V105_ITEM_BITS: u64 = 1500;
+const D2R_V3_PAIRED_STAT_IDS: &[(u32, &[u32])] = &[(17, &[18]), (50, &[51]), (57, &[58, 59])];
 
 #[derive(Clone, Debug)]
 pub struct SocketRecoveryTraceEvent {
@@ -80,6 +81,89 @@ pub fn read_item_stats<R: BitRead>(
     Option<u64>,
     Vec<crate::domain::item::Item>,
 )> {
+    read_item_stats_with_unidentified_policy(
+        cursor,
+        code,
+        version,
+        ctx,
+        huffman,
+        alpha_mode,
+        quality,
+        flags,
+        is_runeword,
+        is_v105_shadow,
+        is_personalized,
+        is_compact,
+        is_socketed,
+        false,
+    )
+}
+
+pub fn read_item_stats_d2r_v3<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    code: &str,
+    version: u8,
+    ctx: Option<(&[u8], u64)>,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    quality: Option<ItemQuality>,
+    flags: u32,
+    is_runeword: bool,
+    is_v105_shadow: bool,
+    is_personalized: bool,
+    is_compact: bool,
+    is_socketed: bool,
+) -> ParsingResult<(
+    Vec<ItemProperty>,
+    bool,
+    bool,
+    Option<u8>,
+    Option<Vec<bool>>,
+    Option<u64>,
+    Vec<crate::domain::item::Item>,
+)> {
+    read_item_stats_with_unidentified_policy(
+        cursor,
+        code,
+        version,
+        ctx,
+        huffman,
+        alpha_mode,
+        quality,
+        flags,
+        is_runeword,
+        is_v105_shadow,
+        is_personalized,
+        is_compact,
+        is_socketed,
+        true,
+    )
+}
+
+fn read_item_stats_with_unidentified_policy<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    code: &str,
+    version: u8,
+    ctx: Option<(&[u8], u64)>,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+    quality: Option<ItemQuality>,
+    flags: u32,
+    is_runeword: bool,
+    is_v105_shadow: bool,
+    is_personalized: bool,
+    is_compact: bool,
+    is_socketed: bool,
+    consume_unidentified: bool,
+) -> ParsingResult<(
+    Vec<ItemProperty>,
+    bool,
+    bool,
+    Option<u8>,
+    Option<Vec<bool>>,
+    Option<u64>,
+    Vec<crate::domain::item::Item>,
+)> {
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     cursor.begin_segment(ItemSegmentType::Stats);
@@ -94,7 +178,8 @@ pub fn read_item_stats<R: BitRead>(
     let is_alpha = axiom.is_alpha();
 
     let is_v105_shadow_final = alpha_mode && is_v105_shadow;
-    let is_authority_host = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "wa2") && !is_compact;
+    let is_authority_host =
+        alpha_mode && matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "wa2") && !is_compact;
     let is_shadow_container = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr") && !is_compact;
 
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
@@ -106,7 +191,12 @@ pub fn read_item_stats<R: BitRead>(
         || (trimmed_code.starts_with('r') && trimmed_code.len() <= 3);
 
     let is_identified = (flags & (1 << 4)) != 0;
-    if !is_identified && !is_runeword && !is_shadow_container && !is_authority_host {
+    if !is_identified
+        && !consume_unidentified
+        && !is_runeword
+        && !is_shadow_container
+        && !is_authority_host
+    {
         return Ok((Vec::new(), true, false, None, None, None, Vec::new()));
     }
 
@@ -328,7 +418,7 @@ pub fn read_item_stats<R: BitRead>(
             cursor.base_pos
         );
     }
-    let (props, complete, term, nested_items) = read_property_list(
+    let (props, complete, term, nested_items) = read_property_list_with_pair_policy(
         cursor,
         trimmed_code,
         version,
@@ -337,6 +427,7 @@ pub fn read_item_stats<R: BitRead>(
         is_runeword,
         is_v105_shadow_final || is_shadow_container || is_runeword,
         &axiom,
+        consume_unidentified && !alpha_mode,
         Some(&child_offsets),
         Some(&child_offset_codes),
         |bytes, pos, huff, idx, alpha| {
@@ -465,6 +556,50 @@ pub fn read_property_list<R: BitRead, F>(
     alpha_runeword: bool,
     is_v105_shadow: bool,
     axiom: &StatsAxiom,
+    child_marker_offsets: Option<&[u64]>,
+    child_marker_codes: Option<&std::collections::HashMap<u64, String>>,
+    recovery_fn: F,
+) -> ParsingResult<(
+    Vec<ItemProperty>,
+    bool,
+    bool,
+    Vec<crate::domain::item::Item>,
+)>
+where
+    F: FnMut(
+        &[u8],
+        u64,
+        &HuffmanTree,
+        usize,
+        bool,
+    ) -> ParsingResult<(crate::domain::item::Item, u64)>,
+{
+    read_property_list_with_pair_policy(
+        recorder,
+        code,
+        version,
+        _section_recovery,
+        huffman,
+        alpha_runeword,
+        is_v105_shadow,
+        axiom,
+        false,
+        child_marker_offsets,
+        child_marker_codes,
+        recovery_fn,
+    )
+}
+
+fn read_property_list_with_pair_policy<R: BitRead, F>(
+    recorder: &mut BitCursor<R>,
+    code: &str,
+    version: u8,
+    _section_recovery: PropertyReaderContext,
+    huffman: &HuffmanTree,
+    alpha_runeword: bool,
+    is_v105_shadow: bool,
+    axiom: &StatsAxiom,
+    consume_d2r_v3_paired_stats: bool,
     child_marker_offsets: Option<&[u64]>,
     child_marker_codes: Option<&std::collections::HashMap<u64, String>>,
     mut recovery_fn: F,
@@ -637,14 +772,15 @@ where
             is_compact,
             is_v105_shadow,
             preserve_trailing_align,
+            consume_d2r_v3_paired_stats,
             axiom,
             _section_recovery.clone(),
             &mut recovery_fn,
         );
 
         match result {
-            Ok(Some((prop, is_term, term_bit, items))) => {
-                props.push(prop);
+            Ok(Some((parsed_properties, is_term, term_bit, items))) => {
+                props.extend(parsed_properties);
                 nested_items.extend(items);
                 if axiom.is_alpha() && is_actual_runeword && nested_items.len() >= 3 {
                     saw_terminator = true;
@@ -970,7 +1106,7 @@ where
         bool,
     ) -> ParsingResult<(crate::domain::item::Item, u64)>,
 {
-    parse_single_property_internal(
+    let parsed = parse_single_property_internal(
         recorder,
         version,
         huffman,
@@ -978,10 +1114,15 @@ where
         false,
         false,
         false,
+        false,
         axiom,
         reader_ctx,
         &mut recovery_fn,
-    )
+    )?;
+    Ok(parsed.map(|(mut properties, is_term, term_bit, items)| {
+        let property = properties.remove(0);
+        (property, is_term, term_bit, items)
+    }))
 }
 
 fn parse_single_property_internal<R: BitRead, F>(
@@ -992,10 +1133,18 @@ fn parse_single_property_internal<R: BitRead, F>(
     is_compact: bool,
     is_v105_shadow: bool,
     preserve_trailing_align: bool,
+    consume_d2r_v3_paired_stats: bool,
     axiom: &StatsAxiom,
     reader_ctx: PropertyReaderContext,
     recovery_fn: &mut F,
-) -> ParsingResult<Option<(ItemProperty, bool, bool, Vec<crate::domain::item::Item>)>>
+) -> ParsingResult<
+    Option<(
+        Vec<ItemProperty>,
+        bool,
+        bool,
+        Vec<crate::domain::item::Item>,
+    )>,
+>
 where
     F: FnMut(
         &[u8],
@@ -1049,7 +1198,7 @@ where
             }
         }
         return Ok(Some((
-            ItemProperty {
+            vec![ItemProperty {
                 stat_id,
                 raw_value: 0,
                 param: 0,
@@ -1062,7 +1211,7 @@ where
                 is_opaque: false,
                 opaque_bits: None,
                 maturity: crate::domain::stats::StatMaturityTier::Verified,
-            },
+            }],
             true,
             term_bit,
             Vec::new(),
@@ -1226,29 +1375,68 @@ where
             .unwrap_or(raw_value)
     };
 
-    Ok(Some((
-        ItemProperty {
-            stat_id,
-            raw_value: raw_value as i32,
-            param,
-            name: if is_unknown_stat {
-                "opaque_property".to_string()
-            } else {
-                stat_cost.map(|s| s.name.to_string()).unwrap_or_default()
-            },
-            value: logical_value,
-            range: ItemBitRange {
-                start: entry_start,
-                end: entry_end,
-            },
-            is_opaque: is_unknown_stat,
-            opaque_bits: None,
-            maturity: axiom.stat_maturity(stat_id, !is_unknown_stat),
+    let property = ItemProperty {
+        stat_id,
+        raw_value: raw_value as i32,
+        param,
+        name: if is_unknown_stat {
+            "opaque_property".to_string()
+        } else {
+            stat_cost.map(|s| s.name.to_string()).unwrap_or_default()
         },
-        false,
-        false,
-        nested_items,
-    )))
+        value: logical_value,
+        range: ItemBitRange {
+            start: entry_start,
+            end: entry_end,
+        },
+        is_opaque: is_unknown_stat,
+        opaque_bits: None,
+        maturity: axiom.stat_maturity(stat_id, !is_unknown_stat),
+    };
+    let mut properties = vec![property];
+
+    if consume_d2r_v3_paired_stats && !axiom.is_alpha() {
+        let companion_stat_ids =
+            D2R_V3_PAIRED_STAT_IDS
+                .iter()
+                .find_map(|(paired_stat_id, companion_stat_ids)| {
+                    (*paired_stat_id == stat_id).then_some(*companion_stat_ids)
+                });
+        if let Some(companion_stat_ids) = companion_stat_ids {
+            for companion_stat_id in companion_stat_ids.iter().copied() {
+                if let Some(companion_stat) = crate::data::stat_costs::STAT_COSTS
+                    .iter()
+                    .find(|stat| stat.id == companion_stat_id)
+                {
+                    let companion_start = recorder.pos();
+                    let companion_width = companion_stat.save_bits as u32;
+                    let companion_raw_value = if companion_width > 32 {
+                        recorder.skip_and_record(companion_width)?;
+                        0
+                    } else {
+                        recorder.read_bits::<u32>(companion_width)? as i32
+                    };
+                    let companion_end = recorder.pos();
+                    properties.push(ItemProperty {
+                        stat_id: companion_stat_id,
+                        raw_value: companion_raw_value,
+                        param: 0,
+                        name: companion_stat.name.to_string(),
+                        value: companion_raw_value.wrapping_sub(companion_stat.save_add),
+                        range: ItemBitRange {
+                            start: companion_start,
+                            end: companion_end,
+                        },
+                        is_opaque: false,
+                        opaque_bits: None,
+                        maturity: axiom.stat_maturity(companion_stat_id, true),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(Some((properties, false, false, nested_items)))
 }
 
 #[cfg(test)]
@@ -1265,8 +1453,12 @@ mod tests {
         );
         let bytes = std::fs::read(fixture).expect("save must exist");
         let huffman = HuffmanTree::new();
-        let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true).expect("items must parse");
-        let wa2 = items.iter().find(|it| it.code.trim() == "wa2").expect("wa2 item must exist");
+        let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true)
+            .expect("items must parse");
+        let wa2 = items
+            .iter()
+            .find(|it| it.code.trim() == "wa2")
+            .expect("wa2 item must exist");
         assert_eq!(wa2.header.version, 2);
         assert_eq!(wa2.code.trim(), "wa2");
         assert!(wa2.header.is_runeword);
@@ -1284,8 +1476,12 @@ mod tests {
         );
         let bytes = std::fs::read(fixture).expect("save must exist");
         let huffman = HuffmanTree::new();
-        let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true).expect("items must parse");
-        let bst = items.iter().find(|it| it.code.trim() == "bst").expect("bst item must exist");
+        let items = crate::domain::item::Item::read_player_items(&bytes, &huffman, true)
+            .expect("items must parse");
+        let bst = items
+            .iter()
+            .find(|it| it.code.trim() == "bst")
+            .expect("bst item must exist");
         assert_eq!(bst.header.version, 7);
         assert_eq!(bst.code.trim(), "bst");
         assert!(!bst.header.is_identified);
@@ -1349,7 +1545,9 @@ mod tests {
             },
         );
 
-        let (prop, is_term, _, _) = result.expect("should parse property").expect("should have prop");
+        let (prop, is_term, _, _) = result
+            .expect("should parse property")
+            .expect("should have prop");
         assert!(!is_term, "first entry should not be terminator");
         assert_eq!(prop.stat_id, 509);
         assert!(prop.is_opaque, "unknown stat id must be marked as opaque");
@@ -1395,8 +1593,14 @@ mod tests {
             },
         );
 
-        assert!(result.is_ok(), "bounded runeword property list should parse");
-        assert!(cursor.pos() <= 18, "property list must not cross the caller limit");
+        assert!(
+            result.is_ok(),
+            "bounded runeword property list should parse"
+        );
+        assert!(
+            cursor.pos() <= 18,
+            "property list must not cross the caller limit"
+        );
         assert_eq!(cursor.limit(), Some(18));
     }
 }

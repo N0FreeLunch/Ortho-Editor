@@ -10,6 +10,7 @@ use crate::domain::item::axiom_meta::{
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
+use crate::domain::item::subdomains::property::{AlphaPropertyCombinator, PropertyNormalizer};
 use crate::domain::item::subdomains::stats::StatsCombinator;
 use crate::domain::item::Item;
 use crate::domain::stats::{ItemProperty, ItemStats, StatsAxiom};
@@ -520,6 +521,7 @@ pub struct ItemHeaderStage {
     pub alpha_header_gap: Option<u32>,
     pub alpha_header_gap_bits: Vec<bool>,
     pub peek: Option<ItemHeaderPeek>,
+    pub d2r_v3_stored_in: Option<u8>,
 }
 
 impl AlphaScannerGapProfile {
@@ -1373,6 +1375,96 @@ pub fn parse_item_at_with_limit(
     Ok((item, cursor.pos() - absolute_bit))
 }
 
+fn parse_item_at_d2r_v3(
+    bytes: &[u8],
+    bit: u64,
+    huffman: &HuffmanTree,
+    idx: usize,
+    save_version: u32,
+) -> ParsingResult<(Item, u64)> {
+    let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
+    let _ = reader.skip(bit as u32);
+    let mut cursor = BitCursor::new(reader);
+    cursor.set_pos(bit);
+    cursor.base_pos = 0;
+
+    let mut item = Item::from_reader_with_context_d2r_v3(
+        &mut cursor,
+        huffman,
+        Some((bytes, bit)),
+        idx,
+        save_version,
+    )?;
+    let unaligned_end = cursor.pos();
+    cursor.byte_align()?;
+    if let Some(auxiliary) = item.body.d2r_v3_auxiliary.as_mut() {
+        auxiliary.alignment_padding = Some(read_alignment_padding_bits(
+            bytes,
+            unaligned_end,
+            cursor.pos() - unaligned_end,
+        ));
+    }
+    let consumed = cursor.pos().saturating_sub(bit);
+    if consumed == 0 {
+        return Err(cursor.fail(ParsingError::UnexpectedValue {
+            field: "D2R v3 item length".to_string(),
+            value: "0".to_string(),
+            reason: "The counted-item reader consumed no source bits".to_string(),
+        }));
+    }
+
+    let raw_bits = read_alignment_padding_bits(bytes, bit, consumed);
+    if raw_bits.len() as u64 != consumed {
+        return Err(cursor.fail(ParsingError::UnexpectedValue {
+            field: "D2R v3 raw item span".to_string(),
+            value: raw_bits.len().to_string(),
+            reason: format!("Could not retain all {consumed} consumed source bits"),
+        }));
+    }
+
+    item.bits = raw_bits
+        .into_iter()
+        .enumerate()
+        .map(|(offset, value)| crate::domain::item::RecordedBit {
+            bit: value,
+            offset: bit.saturating_add(offset as u64),
+        })
+        .collect();
+    item.range.start = bit;
+    item.range.end = bit + consumed;
+    item.total_bits = consumed;
+    item.logical_width = Some(consumed);
+    item.expected_start_bit = bit;
+    item.record_parser_consumed_bits(consumed);
+
+    let mut total_consumed = consumed;
+    if item.header.is_socketed {
+        let socket_capacity = item.sockets.unwrap_or_default().min(6);
+        for _ in 0..socket_capacity {
+            let child_start = bit.saturating_add(total_consumed);
+            let Ok((child, child_consumed)) =
+                parse_item_at_d2r_v3(bytes, child_start, huffman, idx, save_version)
+            else {
+                break;
+            };
+            if child.mode != 6 && child.location != 6 && child.header.mode != 6 {
+                break;
+            }
+
+            total_consumed = total_consumed.saturating_add(child_consumed);
+            item.bits.extend(child.bits.iter().cloned());
+            item.socketed_items.push(child);
+        }
+    }
+
+    item.num_socketed_items = item.socketed_items.len() as u8;
+    item.range.end = bit.saturating_add(total_consumed);
+    item.total_bits = total_consumed;
+    item.logical_width = Some(total_consumed);
+
+    Ok((item, total_consumed))
+}
+
 fn read_alignment_padding_bits(bytes: &[u8], start_bit: u64, bit_count: u64) -> Vec<bool> {
     if bit_count == 0 {
         return Vec::new();
@@ -1391,6 +1483,37 @@ fn read_alignment_padding_bits(bytes: &[u8], start_bit: u64, bit_count: u64) -> 
     }
 
     bits
+}
+
+fn trim_d2r_v3_property_terminator<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    properties: &mut [crate::domain::stats::ItemProperty],
+) -> ParsingResult<()> {
+    let terminator = properties
+        .iter_mut()
+        .rev()
+        .find(|property| property.name == "terminator")
+        .ok_or_else(|| {
+            cursor.fail(ParsingError::UnexpectedValue {
+                field: "D2R v3 property terminator".to_string(),
+                value: "missing".to_string(),
+                reason:
+                    "The property reader reported termination without retaining its 9-bit marker"
+                        .to_string(),
+            })
+        })?;
+    let end = terminator.range.start.saturating_add(9);
+    if cursor.pos() < end {
+        return Err(cursor.fail(ParsingError::UnexpectedValue {
+            field: "D2R v3 property terminator end".to_string(),
+            value: cursor.pos().to_string(),
+            reason: format!("The cursor precedes the 9-bit terminator end at {end}"),
+        }));
+    }
+
+    cursor.rollback(end);
+    terminator.range.end = end;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1544,14 +1667,59 @@ pub fn read_player_items(
     huffman: &HuffmanTree,
     alpha: bool,
 ) -> ParsingResult<Vec<Item>> {
+    let trace_alpha = alpha && crate::item::item_trace_enabled();
+    if trace_alpha {
+        eprintln!("[player-items] phase=begin bytes={}", bytes.len());
+    }
+
+    let init_started = std::time::Instant::now();
     crate::init_rayon_thread_pool();
+    if trace_alpha {
+        eprintln!(
+            "[player-items] phase=rayon-ready elapsed_ms={}",
+            init_started.elapsed().as_millis()
+        );
+    }
+
     let mut all_items = Vec::new();
+    let marker_scan_started = std::time::Instant::now();
     let all_jm_positions = crate::save::find_jm_markers(bytes);
+    if trace_alpha {
+        eprintln!(
+            "[player-items] phase=jm-markers-found count={} elapsed_ms={}",
+            all_jm_positions.len(),
+            marker_scan_started.elapsed().as_millis()
+        );
+    }
+
     let mut jm_positions = Vec::new();
-    for &pos in &all_jm_positions {
-        if is_likely_jm_section_header(bytes, pos, alpha, huffman) {
+    for (candidate_index, &pos) in all_jm_positions.iter().enumerate() {
+        let candidate_started = std::time::Instant::now();
+        if trace_alpha {
+            eprintln!(
+                "[player-items] phase=jm-candidate-start index={} pos={}",
+                candidate_index, pos
+            );
+        }
+        let is_header = is_likely_jm_section_header(bytes, pos, alpha, huffman);
+        if trace_alpha {
+            eprintln!(
+                "[player-items] phase=jm-candidate-end index={} pos={} accepted={} elapsed_ms={}",
+                candidate_index,
+                pos,
+                is_header,
+                candidate_started.elapsed().as_millis()
+            );
+        }
+        if is_header {
             jm_positions.push(pos);
         }
+    }
+    if trace_alpha {
+        eprintln!(
+            "[player-items] phase=jm-filter-complete accepted={}",
+            jm_positions.len()
+        );
     }
 
     if jm_positions.is_empty() {
@@ -1583,14 +1751,37 @@ pub fn read_player_items(
         let next_pos = jm_positions.get(i + 1).cloned().unwrap_or(bytes.len());
         let section_bytes = &bytes[pos..next_pos];
 
-        match Item::read_section(
+        let section_started = std::time::Instant::now();
+        if trace_alpha {
+            eprintln!(
+                "[player-items] phase=section-start index={} pos={} next_pos={} count={}",
+                i, pos, next_pos, count
+            );
+        }
+        let section_result = Item::read_section(
             section_bytes,
             (pos as u64) * 8,
             count,
             huffman,
             alpha,
             false,
-        ) {
+        );
+        if trace_alpha {
+            let outcome = if section_result.is_ok() {
+                "ok"
+            } else {
+                "error"
+            };
+            eprintln!(
+                "[player-items] phase=section-end index={} pos={} outcome={} elapsed_ms={}",
+                i,
+                pos,
+                outcome,
+                section_started.elapsed().as_millis()
+            );
+        }
+
+        match section_result {
             Ok(items) => {
                 all_items.extend(items);
             }
@@ -1638,6 +1829,78 @@ pub fn read_player_items(
     Ok(all_items)
 }
 
+pub fn read_player_items_d2r_v3(bytes: &[u8], huffman: &HuffmanTree) -> ParsingResult<Vec<Item>> {
+    let save_version = bytes
+        .get(4..8)
+        .and_then(|raw| <[u8; 4]>::try_from(raw).ok())
+        .map(u32::from_le_bytes)
+        .ok_or_else(|| ParsingFailure {
+            error: ParsingError::UnexpectedValue {
+                field: "D2R v3 save version".to_string(),
+                value: "missing".to_string(),
+                reason: "The save header does not contain a complete version field".to_string(),
+            },
+            context_stack: vec!["read_player_items_d2r_v3".to_string()],
+            bit_offset: 32,
+            context_relative_offset: 0,
+            hint: None,
+        })?;
+    let mut empty_section = false;
+    let mut last_error = None;
+
+    for pos in crate::save::find_jm_markers(bytes) {
+        if pos + 4 > bytes.len() {
+            continue;
+        }
+        let count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        if count == 0 {
+            empty_section = true;
+            continue;
+        }
+
+        let mut items = Vec::with_capacity(count as usize);
+        let mut bit = (pos as u64) * 8 + 32;
+        let mut section_error = None;
+
+        for idx in 0..count as usize {
+            match parse_item_at_d2r_v3(bytes, bit, huffman, idx, save_version) {
+                Ok((item, consumed)) => {
+                    bit += consumed;
+                    items.push(item);
+                }
+                Err(error) => {
+                    section_error = Some(error);
+                    break;
+                }
+            }
+        }
+
+        if let Some(error) = section_error {
+            last_error = Some(error);
+        } else if items.len() == count as usize {
+            return Ok(items);
+        }
+    }
+
+    if let Some(error) = last_error {
+        return Err(error);
+    }
+    if empty_section {
+        return Ok(Vec::new());
+    }
+
+    Err(ParsingFailure {
+        error: ParsingError::MissingMarker {
+            marker: "JM".to_string(),
+            bit_offset: 0,
+        },
+        context_stack: vec!["read_player_items_d2r_v3".to_string()],
+        bit_offset: 0,
+        context_relative_offset: 0,
+        hint: Some("Could not find a D2R v3 counted JM item list.".to_string()),
+    })
+}
+
 pub fn from_bytes(bytes: &[u8], huffman: &HuffmanTree, alpha: bool) -> ParsingResult<Item> {
     from_bytes_with_hint(bytes, huffman, alpha, None)
 }
@@ -1672,6 +1935,13 @@ impl Item {
         alpha: bool,
     ) -> ParsingResult<Vec<Item>> {
         read_player_items(bytes, huffman, alpha)
+    }
+
+    pub fn read_player_items_d2r_v3(
+        bytes: &[u8],
+        huffman: &HuffmanTree,
+    ) -> ParsingResult<Vec<Item>> {
+        read_player_items_d2r_v3(bytes, huffman)
     }
 
     pub fn read_section_ext(
@@ -1712,6 +1982,15 @@ impl Item {
         alpha_mode: bool,
         verbose: bool,
     ) -> ParsingResult<Vec<Item>> {
+        let trace_alpha = alpha_mode && crate::item::item_trace_enabled();
+        if trace_alpha {
+            eprintln!(
+                "[read-section] phase=begin bit_offset={} bytes={} top_level_count={}",
+                section_bit_offset,
+                section_bytes.len(),
+                top_level_count
+            );
+        }
         let mut items: Vec<Item> = Vec::new();
         let section_bits = (section_bytes.len() * 8) as u64;
 
@@ -1731,6 +2010,10 @@ impl Item {
             }
         }
 
+        let marker_scan_started = std::time::Instant::now();
+        if trace_alpha {
+            eprintln!("[read-section] phase=marker-scan-start");
+        }
         let mut markers = crate::domain::item::scanner::scan_item_markers(
             section_bytes,
             huffman,
@@ -1739,7 +2022,15 @@ impl Item {
             Some(top_level_count),
             verbose,
         );
+        if trace_alpha {
+            eprintln!(
+                "[read-section] phase=marker-scan-end candidates={} elapsed_ms={}",
+                markers.len(),
+                marker_scan_started.elapsed().as_millis()
+            );
+        }
 
+        let marker_adjustment_started = std::time::Instant::now();
         if alpha_mode {
             for marker in &mut markers {
                 let trimmed = marker.code.trim();
@@ -1764,7 +2055,9 @@ impl Item {
                 } else if trimmed == "msk" {
                     if marker.offset % 8 == 0 && marker.offset < section_bytes.len() as u64 * 8 {
                         // Check candidate offsets (same offset or shifted by 16 or 24)
-                        for candidate_offset in [marker.offset, marker.offset + 16, marker.offset + 24] {
+                        for candidate_offset in
+                            [marker.offset, marker.offset + 16, marker.offset + 24]
+                        {
                             if candidate_offset < section_bytes.len() as u64 * 8 {
                                 if let Some((_, _, _, peek_code, _, _, _, _, _, _)) =
                                     peek_item_header_at_with_base(
@@ -1786,6 +2079,12 @@ impl Item {
                     }
                 }
             }
+        }
+        if trace_alpha {
+            eprintln!(
+                "[read-section] phase=marker-adjustment-end elapsed_ms={}",
+                marker_adjustment_started.elapsed().as_millis()
+            );
         }
         let mut section_header_bits = 32;
         if alpha_mode {
@@ -2371,7 +2670,8 @@ impl Item {
                                 item_count,
                             )
                             .map(|(_, _, _, c, _, _, _, _, _, _)| c);
-                            let retry_hint = candidate_code_hint.as_deref().or(Some(parse_code_hint));
+                            let retry_hint =
+                                candidate_code_hint.as_deref().or(Some(parse_code_hint));
                             if let Ok((retry_item, consumed)) = parse_item_at_with_limit(
                                 section_bytes,
                                 candidate_start,
@@ -2392,7 +2692,10 @@ impl Item {
                         // Absorb the shift bits into the predecessor item if available
                         let shift_bits = read_alignment_padding_bits(section_bytes, start, shift);
                         if let Some(prev_item) = items.last_mut() {
-                            prev_item.body.alpha_alignment_padding.extend(shift_bits.clone());
+                            prev_item
+                                .body
+                                .alpha_alignment_padding
+                                .extend(shift_bits.clone());
                             for (idx, b) in shift_bits.iter().enumerate() {
                                 prev_item.bits.push(crate::domain::item::RecordedBit {
                                     bit: *b,
@@ -2690,7 +2993,16 @@ impl Item {
                             missing_bits as u64,
                         );
                         if crate::item::item_trace_enabled() {
-                            eprintln!("[harness-debug-pad] code='{}' start={} total_bits={} bits_len={} missing={} tail_start_rel={} tail_bits={:?}", final_item.code.trim(), start, final_item.total_bits, final_item.bits.len(), missing_bits, tail_start_rel, tail_bits);
+                            eprintln!(
+                                "[harness-debug-pad] code='{}' start={} total_bits={} bits_len={} missing={} tail_start_rel={} tail_bits={:?}",
+                                final_item.code.trim(),
+                                start,
+                                final_item.total_bits,
+                                final_item.bits.len(),
+                                missing_bits,
+                                tail_start_rel,
+                                tail_bits
+                            );
                         }
                         if !tail_bits.is_empty() {
                             let tail_start_abs = section_bit_offset + tail_start_rel;
@@ -2921,7 +3233,8 @@ impl Item {
         if alpha_mode {
             for item in &mut items {
                 let preserve_trusted_compact_tail = matches!(item.code.trim(), "jav" | "buc")
-                    || (item.header.save_is_alpha && (item.header.is_compact || is_v105_summary_code(&item.code)));
+                    || (item.header.save_is_alpha
+                        && (item.header.is_compact || is_v105_summary_code(&item.code)));
                 let needs_raw_capture =
                     preserve_trusted_compact_tail || item.bits.len() < item.total_bits as usize;
 
@@ -2996,7 +3309,9 @@ impl Item {
                             .iter()
                             .filter_map(|module| match module {
                                 crate::domain::item::ItemModule::Opaque(bits)
-                                | crate::domain::item::ItemModule::Residue(bits) => Some(bits.len()),
+                                | crate::domain::item::ItemModule::Residue(bits) => {
+                                    Some(bits.len())
+                                }
                                 _ => None,
                             })
                             .sum::<usize>();
@@ -3422,6 +3737,24 @@ impl Item {
             alpha_header_gap,
             alpha_header_gap_bits,
             peek,
+            d2r_v3_stored_in: None,
+        })
+    }
+
+    fn read_header_stage_d2r_v3<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        _idx: usize,
+    ) -> ParsingResult<ItemHeaderStage> {
+        cursor.set_trace(cursor.trace_enabled || crate::item::item_trace_enabled());
+        cursor.begin_segment(ItemSegmentType::Root);
+        let (header, stored_in) =
+            crate::domain::item::entity::parse_item_header_d2r_v3_with_storage(cursor)?;
+        Ok(ItemHeaderStage {
+            header,
+            alpha_header_gap: None,
+            alpha_header_gap_bits: Vec::new(),
+            peek: None,
+            d2r_v3_stored_in: stored_in,
         })
     }
 
@@ -3434,15 +3767,70 @@ impl Item {
         forced_compact: Option<bool>,
         code_hint: Option<&str>,
     ) -> ParsingResult<Item> {
+        Self::from_reader_with_context_mode(
+            cursor,
+            huff,
+            ctx,
+            alpha_mode,
+            idx,
+            forced_compact,
+            code_hint,
+            false,
+            None,
+        )
+    }
+
+    pub fn from_reader_with_context_d2r_v3<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        huff: &HuffmanTree,
+        ctx: Option<(&[u8], u64)>,
+        idx: usize,
+        save_version: u32,
+    ) -> ParsingResult<Item> {
+        Self::from_reader_with_context_mode(
+            cursor,
+            huff,
+            ctx,
+            false,
+            idx,
+            None,
+            None,
+            true,
+            Some(save_version),
+        )
+    }
+
+    fn from_reader_with_context_mode<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        huff: &HuffmanTree,
+        ctx: Option<(&[u8], u64)>,
+        alpha_mode: bool,
+        idx: usize,
+        forced_compact: Option<bool>,
+        code_hint: Option<&str>,
+        d2r_v3_mode: bool,
+        d2r_v3_save_version: Option<u32>,
+    ) -> ParsingResult<Item> {
         let start_bit = cursor.pos();
         let ItemHeaderStage {
             header,
             alpha_header_gap,
             alpha_header_gap_bits,
             peek,
-        } = Self::read_header_stage(
-            cursor, huff, ctx, alpha_mode, idx, forced_compact, code_hint,
-        )?;
+            d2r_v3_stored_in,
+        } = if d2r_v3_mode {
+            Self::read_header_stage_d2r_v3(cursor, idx)?
+        } else {
+            Self::read_header_stage(
+                cursor,
+                huff,
+                ctx,
+                alpha_mode,
+                idx,
+                forced_compact,
+                code_hint,
+            )?
+        };
         let code_peek = code_hint
             .filter(|hint| !hint.trim().is_empty())
             .or(peek.as_ref().map(|p| p.3.as_str()));
@@ -3603,6 +3991,15 @@ impl Item {
                 return Err(e);
             }
         };
+        let is_d2r_v3_compact = d2r_v3_save_version.is_some() && header.is_compact;
+        if let Some(save_version) = d2r_v3_save_version.filter(|_| header.is_compact) {
+            crate::domain::item::entity::consume_d2r_v3_compact_tail(
+                cursor,
+                save_version,
+                &body.code,
+                header.is_ear,
+            )?;
+        }
         if header.save_is_alpha {
             let reg = crate::domain::forensic::registry::get_registry();
             if body.code.trim().is_empty() {
@@ -3686,14 +4083,20 @@ impl Item {
         body.alpha_header_gap = alpha_header_gap;
         body.alpha_header_gap_bits = alpha_header_gap_bits;
 
-        let axiom = StatsAxiom::new(header.version, ItemQuality::Normal, header.save_is_alpha)
+        let stats_version = d2r_v3_save_version
+            .map(|version| version as u8)
+            .unwrap_or(header.version);
+        let axiom = StatsAxiom::new(stats_version, ItemQuality::Normal, header.save_is_alpha)
             .with_compact(header.is_compact)
             .with_code(&body.code);
         let hinted_template = code_hint
             .map(|hint| crate::domain::item::serialization::item_template(hint.trim()))
             .flatten();
-        let detected_runeword =
-            header.is_runeword && !body_is_template && hinted_template.is_none();
+        let detected_runeword = if d2r_v3_mode {
+            header.is_runeword
+        } else {
+            header.is_runeword && !body_is_template && hinted_template.is_none()
+        };
 
         // Slice 9: Alpha v105 runewords are shadow containers and skip standard extended stats.
         let skip_ext_stats =
@@ -3701,7 +4104,16 @@ impl Item {
 
         let ext_axiom = axiom.clone();
 
-        let ext_data = if !rhythm_recovery && !skip_ext_stats {
+        let ext_data = if is_d2r_v3_compact {
+            crate::domain::item::entity::ExtendedStatsData::default()
+        } else if let Some(save_version) = d2r_v3_save_version {
+            crate::domain::item::entity::ExtendedStatsData::read_d2r_v3_from_cursor(
+                cursor,
+                &body.code,
+                &header,
+                save_version,
+            )?
+        } else if !rhythm_recovery && !skip_ext_stats {
             match crate::domain::item::entity::ExtendedStatsData::read_from_cursor(
                 cursor,
                 &body.code,
@@ -3749,6 +4161,10 @@ impl Item {
         body.quantity = ext_data.quantity;
         body.v5_runeword_extra = ext_data.v5_runeword_extra;
         body.alpha_set_list_val = ext_data.alpha_set_list_val;
+        body.d2r_v3_auxiliary = ext_data.d2r_v3_auxiliary.clone();
+        if let Some(auxiliary) = body.d2r_v3_auxiliary.as_mut() {
+            auxiliary.stored_in = d2r_v3_stored_in;
+        }
 
         let code = body.code.clone();
 
@@ -3830,7 +4246,7 @@ impl Item {
         let is_v105_summary = alpha_mode
             && crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default()
                 .is_summary_item(item.header.version, &item.code);
-        if !is_v105_summary {
+        if !is_v105_summary && !is_d2r_v3_compact {
             let is_v105_shadow = !code_peek
                 .map_or(false, |code| matches!(code.trim(), "jav" | "buc"))
                 && (axiom.is_v105_shadow(item.header.flags, Some(&item.code))
@@ -3919,11 +4335,11 @@ impl Item {
             }
 
             let combinator = StatsCombinator;
-            let (props, complete, term, _v5_extra, _unused_bits, shadow_bits, nested_items) =
-                combinator.read_stats(
+            let stats_result = if d2r_v3_mode {
+                crate::domain::stats::parser::read_item_stats_d2r_v3(
                     cursor,
                     &item.code,
-                    item.header.version,
+                    stats_version,
                     ctx,
                     huff,
                     item.header.save_is_alpha,
@@ -3938,7 +4354,45 @@ impl Item {
                     item.header.is_personalized,
                     item.header.is_compact,
                     item.header.is_socketed || (authority_runeword_hint && !item.header.is_compact),
-                )?;
+                )?
+            } else {
+                combinator.read_stats(
+                    cursor,
+                    &item.code,
+                    stats_version,
+                    ctx,
+                    huff,
+                    item.header.save_is_alpha,
+                    item.header.quality,
+                    item.header.flags,
+                    item.header.is_runeword || (authority_runeword_hint && !item.header.is_compact),
+                    if authority_runeword_hint && !item.header.is_compact {
+                        false
+                    } else {
+                        is_v105_shadow || rhythm_recovery
+                    },
+                    item.header.is_personalized,
+                    item.header.is_compact,
+                    item.header.is_socketed || (authority_runeword_hint && !item.header.is_compact),
+                )?
+            };
+            let (mut props, complete, term, _v5_extra, _unused_bits, shadow_bits, nested_items) =
+                stats_result;
+
+            if d2r_v3_mode {
+                let quality_val = item.header.quality.unwrap_or(ItemQuality::Normal);
+                let axiom = StatsAxiom::new(stats_version, quality_val, item.header.save_is_alpha)
+                    .with_compact(item.header.is_compact)
+                    .with_code(&item.code);
+                AlphaPropertyCombinator.normalize(&mut props, &item.code, &axiom);
+            }
+
+            if d2r_v3_mode && props.iter().any(|property| property.name == "terminator") {
+                trim_d2r_v3_property_terminator(cursor, &mut props)?;
+            }
+            if d2r_v3_mode && !item.header.is_identified {
+                props.clear();
+            }
 
             item.properties = props.clone();
             item.stats.properties = props;
@@ -3946,10 +4400,87 @@ impl Item {
             item.terminator_bit = term;
             item.body.alpha_shadow_skip_bits = shadow_bits;
             item.socketed_items = nested_items;
+
+            if let Some(save_version) = d2r_v3_save_version {
+                for has_set_properties in ext_data.d2r_v3_set_property_flags {
+                    if !has_set_properties {
+                        continue;
+                    }
+                    let (mut set_props, _, _, _, _, _, _) =
+                        crate::domain::stats::parser::read_item_stats_d2r_v3(
+                            cursor,
+                            &item.code,
+                            save_version as u8,
+                            None,
+                            huff,
+                            false,
+                            item.header.quality,
+                            item.header.flags,
+                            false,
+                            false,
+                            false,
+                            false,
+                            false,
+                        )?;
+                    if set_props
+                        .iter()
+                        .any(|property| property.name == "terminator")
+                    {
+                        trim_d2r_v3_property_terminator(cursor, &mut set_props)?;
+                    }
+                    if !item.header.is_identified {
+                        set_props.clear();
+                    }
+                    item.set_attributes.push(set_props);
+                }
+                if item.header.is_runeword {
+                    let (mut runeword_props, _, _, _, _, _, _) =
+                        crate::domain::stats::parser::read_item_stats_d2r_v3(
+                            cursor,
+                            &item.code,
+                            save_version as u8,
+                            None,
+                            huff,
+                            false,
+                            item.header.quality,
+                            item.header.flags,
+                            false,
+                            false,
+                            false,
+                            false,
+                            false,
+                        )?;
+                    if runeword_props
+                        .iter()
+                        .any(|property| property.name == "terminator")
+                    {
+                        trim_d2r_v3_property_terminator(cursor, &mut runeword_props)?;
+                    }
+                    if !item.header.is_identified {
+                        runeword_props.clear();
+                    }
+                    item.runeword_attributes = runeword_props;
+                }
+
+                if save_version > 101 {
+                    if cursor.read_bit()? {
+                        let stack_size = cursor.read_bits::<u8>(8)?;
+                        if let Some(auxiliary) = item.body.d2r_v3_auxiliary.as_mut() {
+                            auxiliary.advanced_stash_quantity = Some(stack_size);
+                        }
+                    }
+                } else if save_version > 99
+                    && crate::domain::item::serialization::item_template(&item.code)
+                        .map(|template| template.is_stackable)
+                        .unwrap_or(false)
+                {
+                    let _advanced_stash_stack_size = cursor.read_bits::<u8>(8)?;
+                }
+            }
         }
 
         let axiom = StatsAxiom::new(
-            item.header.version,
+            stats_version,
             item.header.quality.unwrap_or(ItemQuality::Normal),
             alpha_mode,
         )
@@ -3965,7 +4496,7 @@ impl Item {
                     )),
         )
         .with_code(&item.code);
-        let padding = if item.header.is_compact {
+        let padding = if d2r_v3_mode || item.header.is_compact {
             Vec::new()
         } else {
             let nudge_comb = NudgeCombinator;
@@ -4251,6 +4782,260 @@ pub struct PropertyReaderContext<'a> {
     pub item_start_bit: u64,
 }
 
+/// Physical widths for the explicitly selected D2R v3 stored-item grammar.
+struct D2rV3JewelryWidths;
+
+impl D2rV3JewelryWidths {
+    const FLAGS: u32 = 32;
+    const VERSION_LOW: u32 = 2;
+    const MODE: u32 = 3;
+    const POSITION: u32 = 4;
+    const STORED_IN: u32 = 3;
+    const FILLED_SOCKETS: u32 = 3;
+    const ITEM_ID: u32 = 32;
+    const LEVEL: u32 = 7;
+    const QUALITY: u32 = 4;
+    const GRAPHIC: u32 = 3;
+    const CLASS_DATA: u32 = 11;
+    const AFFIX: u32 = 11;
+    const UNIQUE_ID: u32 = 12;
+    const QUANTITY: u32 = 9;
+    const STASH_QUANTITY: u32 = 8;
+    const STAT_ID: u32 = 9;
+    const TERMINATOR: u32 = 511;
+}
+
+fn d2r_v3_write_checked(
+    emitter: &mut BitEmitter,
+    value: u64,
+    width: u32,
+    field: &str,
+) -> io::Result<()> {
+    if width > 32 || value >= (1u64 << width) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("D2R v3 {field} value {value} does not fit {width} bits"),
+        ));
+    }
+    emitter.write_bits(value as u32, width)
+}
+
+impl Item {
+    /// Rebuild identified, non-socketed D2R v3 jewelry from semantic fields.
+    /// This opt-in writer never reads whole-item raw bits, segments or offsets.
+    /// Unsupported layouts fail instead of falling back to the generic dialect.
+    pub fn to_bits_d2r_v3_jewelry(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+        let auxiliary = self
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .ok_or_else(|| invalid("Missing explicit D2R v3 layout provenance"))?;
+        let header = &self.header;
+        let quality = header
+            .quality
+            .ok_or_else(|| invalid("Missing jewelry quality"))?;
+        if auxiliary.save_version != 0x69
+            || header.save_is_alpha
+            || !matches!(self.body.code.trim(), "rin" | "amu")
+            || !matches!(
+                quality,
+                ItemQuality::Normal | ItemQuality::Magic | ItemQuality::Unique
+            )
+            || header.is_compact
+            || !header.is_identified
+            || header.is_ear
+            || header.is_socketed
+            || header.is_personalized
+            || header.is_runeword
+            || matches!(header.mode, 3 | 5 | 6)
+            || auxiliary.filled_sockets != 0
+            || !self.socketed_items.is_empty()
+            || !self.set_attributes.is_empty()
+            || !self.runeword_attributes.is_empty()
+            || !self.properties_complete
+        {
+            return Err(invalid("Unsupported D2R v3 jewelry layout"));
+        }
+        for (flag, expected) in [
+            (4, true),
+            (11, false),
+            (16, false),
+            (21, false),
+            (24, false),
+            (26, false),
+        ] {
+            if (header.flags & (1 << flag) != 0) != expected {
+                return Err(invalid(
+                    "D2R v3 header flags disagree with the selected layout",
+                ));
+            }
+        }
+        let stored_in = auxiliary
+            .stored_in
+            .ok_or_else(|| invalid("Missing stored-in field"))?;
+        if stored_in.saturating_sub(1) != header.page {
+            return Err(invalid(
+                "D2R v3 stored-in field disagrees with semantic page",
+            ));
+        }
+        let (extended_version, version_low) = match header.version {
+            0..=3 => (false, header.version),
+            99..=102 => (true, header.version - 99),
+            _ => return Err(invalid("Unsupported D2R v3 item version")),
+        };
+        let mut emitter = BitEmitter::new();
+        use D2rV3JewelryWidths as W;
+        d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
+        emitter.write_bit(extended_version)?;
+        d2r_v3_write_checked(&mut emitter, version_low as u64, W::VERSION_LOW, "version")?;
+        d2r_v3_write_checked(&mut emitter, header.mode as u64, W::MODE, "mode")?;
+        for (value, name) in [
+            (header.location, "location"),
+            (header.x, "column"),
+            (header.y, "row"),
+        ] {
+            d2r_v3_write_checked(&mut emitter, value as u64, W::POSITION, name)?;
+        }
+        d2r_v3_write_checked(&mut emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
+        emitter.extend_bits(huffman.encode(&format!("{} ", self.body.code.trim()))?)?;
+        d2r_v3_write_checked(
+            &mut emitter,
+            auxiliary.filled_sockets as u64,
+            W::FILLED_SOCKETS,
+            "filled sockets",
+        )?;
+        d2r_v3_write_checked(
+            &mut emitter,
+            header.id.ok_or_else(|| invalid("Missing item ID"))? as u64,
+            W::ITEM_ID,
+            "item ID",
+        )?;
+        d2r_v3_write_checked(
+            &mut emitter,
+            header.level.ok_or_else(|| invalid("Missing item level"))? as u64,
+            W::LEVEL,
+            "level",
+        )?;
+        d2r_v3_write_checked(&mut emitter, quality as u64, W::QUALITY, "quality")?;
+        emitter.write_bit(self.has_multiple_graphics)?;
+        if self.has_multiple_graphics {
+            d2r_v3_write_checked(
+                &mut emitter,
+                self.multi_graphics_bits
+                    .ok_or_else(|| invalid("Missing graphic"))? as u64,
+                W::GRAPHIC,
+                "graphic",
+            )?;
+        }
+        emitter.write_bit(self.has_class_specific_data)?;
+        if self.has_class_specific_data {
+            d2r_v3_write_checked(
+                &mut emitter,
+                self.class_specific_bits
+                    .ok_or_else(|| invalid("Missing class data"))? as u64,
+                W::CLASS_DATA,
+                "class data",
+            )?;
+        }
+        match quality {
+            ItemQuality::Magic => {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    self.magic_prefix.ok_or_else(|| invalid("Missing prefix"))? as u64,
+                    W::AFFIX,
+                    "prefix",
+                )?;
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    self.magic_suffix.ok_or_else(|| invalid("Missing suffix"))? as u64,
+                    W::AFFIX,
+                    "suffix",
+                )?;
+            }
+            ItemQuality::Unique => {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    self.unique_id.ok_or_else(|| invalid("Missing unique ID"))? as u64,
+                    W::UNIQUE_ID,
+                    "unique ID",
+                )?;
+            }
+            _ => {}
+        }
+        emitter.write_bit(!auxiliary.realm_data.is_empty())?;
+        if !auxiliary.realm_data.is_empty() && auxiliary.realm_data.len() != 4 {
+            return Err(invalid("D2R v3 realm data must contain four words"));
+        }
+        for &word in &auxiliary.realm_data {
+            d2r_v3_write_checked(&mut emitter, word as u64, 32, "realm word")?;
+        }
+        emitter.write_bit(auxiliary.has_quantity)?;
+        if auxiliary.has_quantity {
+            d2r_v3_write_checked(
+                &mut emitter,
+                self.quantity.ok_or_else(|| invalid("Missing quantity"))? as u64,
+                W::QUANTITY,
+                "quantity",
+            )?;
+        } else if self.quantity.is_some() {
+            return Err(invalid("Quantity exists without the D2R v3 presence flag"));
+        }
+        if self.properties.last().map(|property| property.stat_id) != Some(W::TERMINATOR) {
+            return Err(invalid("Missing final D2R v3 property terminator"));
+        }
+        for property in &self.properties[..self.properties.len() - 1] {
+            if property.is_opaque
+                || !property.is_verified()
+                || matches!(property.stat_id, 17 | 18 | 50 | 51 | 57 | 58 | 59 | 511)
+            {
+                return Err(invalid(
+                    "Opaque, unverified, paired or premature terminal property is unsupported",
+                ));
+            }
+            let stat = crate::data::stat_costs::STAT_COSTS
+                .iter()
+                .find(|stat| stat.id == property.stat_id)
+                .ok_or_else(|| invalid("Missing D2R v3 property definition"))?;
+            if stat.save_bits == 0 || stat.save_bits > 31 {
+                return Err(invalid("Unsupported D2R v3 scalar value width"));
+            }
+            d2r_v3_write_checked(&mut emitter, property.stat_id as u64, W::STAT_ID, "stat ID")?;
+            d2r_v3_write_checked(
+                &mut emitter,
+                property.param as u64,
+                stat.save_param_bits as u32,
+                "stat parameter",
+            )?;
+            let raw = i64::from(property.value) + i64::from(stat.save_add);
+            let raw = u64::try_from(raw).map_err(|_| invalid("Negative encoded D2R v3 value"))?;
+            d2r_v3_write_checked(&mut emitter, raw, stat.save_bits as u32, "stat value")?;
+        }
+        emitter.write_bits(W::TERMINATOR, W::STAT_ID)?;
+        emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
+        if let Some(quantity) = auxiliary.advanced_stash_quantity {
+            d2r_v3_write_checked(
+                &mut emitter,
+                quantity as u64,
+                W::STASH_QUANTITY,
+                "stash quantity",
+            )?;
+        }
+        let padding = auxiliary
+            .alignment_padding
+            .as_ref()
+            .ok_or_else(|| invalid("Missing independently captured alignment field"))?;
+        let required_padding = ((8 - emitter.written_bits() % 8) % 8) as usize;
+        if padding.len() != required_padding {
+            return Err(invalid(
+                "D2R v3 alignment field does not match the rebuilt grammar",
+            ));
+        }
+        emitter.extend_bits(padding.iter().copied())?;
+        Ok(emitter.into_bits())
+    }
+}
+
 pub struct BitEmitter {
     writer: BitWriter<Vec<u8>, LittleEndian>,
     written: u64,
@@ -4474,7 +5259,12 @@ pub fn write_property_list(
         emitter.write_bits(terminator, id_bits)?;
     }
     let preserve_trailing_align = axiom.is_alpha()
-        && (version == 0 || version == 1 || version == 2 || version == 4 || version == 6 || version == 7);
+        && (version == 0
+            || version == 1
+            || version == 2
+            || version == 4
+            || version == 6
+            || version == 7);
     if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit {
@@ -4537,7 +5327,7 @@ impl HuffmanTree {
             ('g', "11010"),
             ('h', "00011"),
             ('i', "1111110"),
-            ('j', "000101111"),
+            ('j', "000101110"),
             ('k', "010010"),
             ('l', "11101"),
             ('m', "01101"),
