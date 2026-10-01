@@ -165,6 +165,8 @@ pub struct D2rV3AuxiliaryData {
     pub save_version: u32,
     pub stored_in: Option<u8>,
     pub filled_sockets: u8,
+    /// Presence flags in read order; absence means this layout has no Set mask.
+    pub set_property_flags: Option<[bool; 5]>,
     pub realm_data: Vec<u32>,
     pub has_quantity: bool,
     pub advanced_stash_quantity: Option<u8>,
@@ -3683,6 +3685,7 @@ impl ExtendedStatsData {
             for flag in &mut data.d2r_v3_set_property_flags {
                 *flag = cursor.read_bit()?;
             }
+            auxiliary.set_property_flags = Some(data.d2r_v3_set_property_flags);
             data.set_list_count = data
                 .d2r_v3_set_property_flags
                 .iter()

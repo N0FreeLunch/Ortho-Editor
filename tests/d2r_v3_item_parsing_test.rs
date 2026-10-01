@@ -61,6 +61,102 @@ fn without_item_bit_cache(item: &Item) -> Item {
     semantic
 }
 
+#[settled_contract_test]
+fn d2r_v3_set_presence_mask_provenance() {
+    let path = "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s";
+    let (original, baseline) = read_d2r_v3_items(path);
+    let huffman = HuffmanTree::new();
+    assert_eq!(baseline.len(), 38);
+    let ring = &baseline[10];
+    assert_eq!(ring.code.trim(), "rin");
+    assert_eq!(ring.header.quality, Some(ItemQuality::Set));
+    assert_eq!(ring.unique_id, Some(29));
+    assert_eq!((ring.range.start, ring.range.end), (9616, 9832));
+    assert_eq!(baseline[11].range.start, 9832);
+    assert_eq!(raw_little_endian(&source_bits(&original, 9754, 9759)), 1);
+    assert_eq!(ring.set_list_count, 1);
+    assert_eq!(ring.set_attributes.len(), 1);
+    assert_eq!(
+        ring.body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .unwrap()
+            .set_property_flags,
+        Some([true, false, false, false, false])
+    );
+    assert_eq!(
+        baseline[4]
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .unwrap()
+            .set_property_flags,
+        None
+    );
+    assert!(without_item_bit_cache(ring)
+        .to_bits_d2r_v3_jewelry(&huffman)
+        .is_err());
+    let ranges: Vec<_> = baseline
+        .iter()
+        .map(|item| (item.range.start, item.range.end))
+        .collect();
+    let mut seen = Vec::new();
+    // Counterfactuals exercise the reader grammar only, not checksum or game-load validity.
+    for mask in [1_u8, 2, 16] {
+        let mut bytes = original.clone();
+        let flags = std::array::from_fn(|index| mask & (1 << index) != 0);
+        for (index, flag) in flags.iter().enumerate() {
+            let bit = 9754 + index;
+            let bit_mask = 1 << (bit % 8);
+            bytes[bit / 8] = (bytes[bit / 8] & !bit_mask) | if *flag { bit_mask } else { 0 };
+        }
+        assert_eq!(
+            raw_little_endian(&source_bits(&bytes, 9754, 9759)),
+            u32::from(mask)
+        );
+        let changed_bits: Vec<_> = (0..original.len() * 8)
+            .filter(|bit| (original[bit / 8] ^ bytes[bit / 8]) & (1 << (bit % 8)) != 0)
+            .collect();
+        assert_eq!(changed_bits.len(), if mask == 1 { 0 } else { 2 });
+        assert!(changed_bits.iter().all(|bit| (9754..9759).contains(bit)));
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman).unwrap();
+        assert_eq!(items.len(), 38);
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| (item.range.start, item.range.end))
+                .collect::<Vec<_>>(),
+            ranges
+        );
+        let actual = &items[10];
+        assert_eq!(actual.header, ring.header);
+        assert_eq!(actual.unique_id, ring.unique_id);
+        assert_eq!(actual.set_list_count, ring.set_list_count);
+        assert_eq!(actual.properties, ring.properties);
+        assert_eq!(actual.set_attributes, ring.set_attributes);
+        let retained = actual
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .unwrap()
+            .set_property_flags;
+        assert_eq!(retained, Some(flags));
+        assert!(
+            !seen.contains(&retained),
+            "equal-popcount masks must remain distinct"
+        );
+        seen.push(retained);
+        let mut expected_auxiliary = ring.body.d2r_v3_auxiliary.clone();
+        expected_auxiliary.as_mut().unwrap().set_property_flags = Some(flags);
+        assert_eq!(actual.body.d2r_v3_auxiliary, expected_auxiliary);
+    }
+    assert_eq!(
+        fs::read(path).unwrap(),
+        original,
+        "fixture must remain immutable"
+    );
+}
+
 #[hypothesis_test]
 fn d2r_v3_jewelry_manald_rebuild_and_option_bit_witnesses() {
     let (bytes, items) = read_d2r_v3_items(
