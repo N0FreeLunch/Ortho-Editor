@@ -11,6 +11,9 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "d2stat_template_oracle/d2r_v3.rs"]
+mod d2r_v3;
+
 mod clap_stub {
     pub struct Args {
         pub corpus_dir: Option<String>,
@@ -545,6 +548,9 @@ fn save_files_from_input(path: &Path) -> Vec<PathBuf> {
 }
 
 fn main() {
+    if let Some(exit_code) = d2r_v3::dispatch(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        std::process::exit(exit_code);
+    }
     let args = parse_args();
     let mut report = TemplateOracleReport::default();
     let mut save_files = Vec::new();
