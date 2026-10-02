@@ -1,4 +1,5 @@
 //! Explicit, read-only bridge to the owned D2R v3 primary-list reader.
+use d2r_core::domain::stats::ItemProperty;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::ParsedArgs;
 use serde_json::{json, Value};
@@ -87,11 +88,38 @@ fn selection(args: &ParsedArgs) -> Result<Selector, Value> {
     }
 }
 
+fn property_list(kind: &str, ordinal: usize, properties: &[ItemProperty]) -> Value {
+    json!({
+        "kind": kind, "ordinal": ordinal,
+        "stats": properties.iter().filter(|property| property.stat_id != 511).map(|property| json!({
+            "id": property.stat_id, "name": property.name, "parameter": property.param,
+            "raw_value": property.raw_value, "value": property.value,
+            "range": {"start": property.range.start, "end": property.range.end},
+            "range_basis": "parser-owned-absolute-span; companion stats may omit an ID",
+            "is_opaque": property.is_opaque,
+        })).collect::<Vec<_>>(),
+        "control_markers": properties.iter().filter(|property| property.stat_id == 511).map(|property| json!({
+            "id": property.stat_id, "range": {"start": property.range.start, "end": property.range.end},
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn record(item: &Item) -> Value {
     let body_end = item
         .socketed_items
         .first()
         .map_or(item.range.end, |child| child.range.start);
+    let base = property_list("base", 0, &item.properties);
+    let mut lists = vec![base.clone()];
+    if !item.runeword_attributes.is_empty() {
+        lists.push(property_list("runeword", 0, &item.runeword_attributes));
+    }
+    lists.extend(
+        item.set_attributes
+            .iter()
+            .enumerate()
+            .map(|(ordinal, properties)| property_list("set", ordinal, properties)),
+    );
     json!({
         "code": item.code.trim(),
         "quality": item.header.quality.map(|quality| format!("{quality:?}")),
@@ -103,16 +131,10 @@ fn record(item: &Item) -> Value {
         "mode": item.header.mode, "location": item.body.location,
         "x": item.body.x, "y": item.body.y,
         "properties_complete": item.properties_complete,
-        "stats": item.properties.iter().filter(|property| property.stat_id != 511).map(|property| json!({
-            "id": property.stat_id, "name": property.name, "parameter": property.param,
-            "raw_value": property.raw_value, "value": property.value,
-            "range": {"start": property.range.start, "end": property.range.end},
-            "range_basis": "parser-owned-absolute-span; companion stats may omit an ID",
-            "is_opaque": property.is_opaque,
-        })).collect::<Vec<_>>(),
-        "control_markers": item.properties.iter().filter(|property| property.stat_id == 511).map(|property| json!({
-            "id": property.stat_id, "range": {"start": property.range.start, "end": property.range.end},
-        })).collect::<Vec<_>>(),
+        "stats": base["stats"],
+        "control_markers": base["control_markers"],
+        "property_lists": lists,
+        "list_basis": "Parser-owned lists in stored order; ordinals are not active Set bonus tiers. Top-level stats/control_markers alias base only.",
         "socket_children": item.socketed_items.iter().map(record).collect::<Vec<_>>(),
     })
 }
@@ -274,6 +296,159 @@ mod tests {
             ]),
             flags: HashMap::new(),
         }
+    }
+
+    fn tuples(list: &Value) -> Vec<Value> {
+        list["stats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|stat| {
+                json!([
+                    stat["id"],
+                    stat["value"],
+                    stat["raw_value"],
+                    stat["parameter"],
+                    stat["range"]["start"],
+                    stat["range"]["end"]
+                ])
+            })
+            .collect()
+    }
+
+    fn assert_base_aliases(item: &Value) {
+        assert_eq!(item["property_lists"][0]["kind"], "base");
+        assert_eq!(item["property_lists"][0]["ordinal"], 0);
+        assert_eq!(item["stats"], item["property_lists"][0]["stats"]);
+        assert_eq!(
+            item["control_markers"],
+            item["property_lists"][0]["control_markers"]
+        );
+        assert!(item["list_basis"]
+            .as_str()
+            .unwrap()
+            .contains("not active Set bonus tiers"));
+    }
+
+    #[settled_contract_test]
+    fn d2r_v3_auxiliary_runeword_projection() {
+        let result = report(
+            &fs::read(BETA).unwrap(),
+            &args(),
+            &Selector::Coordinate(9240),
+        );
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["top_level_item_count"], 16);
+        let item = &result["selected"][0]["item"];
+        assert_base_aliases(item);
+        assert_eq!(item["stats"], json!([]));
+        assert_eq!(item["property_lists"].as_array().unwrap().len(), 2);
+        let list = &item["property_lists"][1];
+        assert_eq!(list["kind"], "runeword");
+        assert_eq!(list["ordinal"], 0);
+        assert_eq!(
+            tuples(list),
+            vec![
+                json!([17, 60, 60, 0, 9416, 9434]),
+                json!([18, 60, 60, 0, 9434, 9443]),
+                json!([83, 2, 2, 7, 9443, 9458]),
+                json!([198, 10, 10, 25551, 9458, 9490]),
+                json!([201, 2, 2, 24778, 9490, 9522]),
+            ]
+        );
+        assert_eq!(
+            list["control_markers"],
+            json!([{"id":511,"range":{"start":9522,"end":9531}}])
+        );
+        assert_eq!(item["body_range"], json!({"start":9240,"end":9536}));
+        let children = item["socket_children"].as_array().unwrap();
+        assert_eq!(children.len(), 3);
+        for child in children {
+            assert_base_aliases(child);
+        }
+        let manald = report(
+            &fs::read(AFTER).unwrap(),
+            &args(),
+            &Selector::Coordinate(11320),
+        );
+        let ring = &manald["selected"][0]["item"];
+        assert_base_aliases(ring);
+        assert_eq!(ring["property_lists"].as_array().unwrap().len(), 1);
+        assert_eq!(ring["stats"].as_array().unwrap().len(), 4);
+    }
+
+    #[settled_contract_test]
+    fn d2r_v3_auxiliary_set_projection() {
+        let fixture =
+            "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s";
+        let result = report(
+            &fs::read(fixture).unwrap(),
+            &args(),
+            &Selector::Coordinate(9616),
+        );
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["top_level_item_count"], 38);
+        let item = &result["selected"][0]["item"];
+        assert_base_aliases(item);
+        assert_eq!(item["property_lists"].as_array().unwrap().len(), 2);
+        assert_eq!(item["quality"], "Set");
+        assert_eq!(item["unique_id"], 29);
+        assert_eq!(item["range"], json!({"start":9616,"end":9832}));
+        assert_eq!(
+            tuples(&item["property_lists"][0]),
+            vec![
+                json!([34, 2, 2, 0, 9759, 9774]),
+                json!([60, 6, 6, 0, 9774, 9790]),
+            ]
+        );
+        let list = &item["property_lists"][1];
+        assert_eq!(list["kind"], "set");
+        assert_eq!(list["ordinal"], 0);
+        assert_eq!(tuples(list), vec![json!([0, 10, 42, 0, 9799, 9816])]);
+        assert_eq!(
+            list["control_markers"],
+            json!([{"id":511,"range":{"start":9816,"end":9825}}])
+        );
+    }
+
+    #[settled_contract_test]
+    fn d2r_v3_auxiliary_order_empty_and_opaque_occurrences() {
+        let mut items =
+            Item::read_player_items_d2r_v3(&fs::read(BETA).unwrap(), &HuffmanTree::new()).unwrap();
+        let mut item = items.remove(13);
+        let mut opaque = item.runeword_attributes[0].clone();
+        opaque.is_opaque = true;
+        opaque.name = "synthetic_opaque".into();
+        item.properties.clear();
+        item.runeword_attributes.clear();
+        item.set_attributes = vec![
+            vec![],
+            vec![opaque.clone(), opaque.clone()],
+            vec![opaque.clone()],
+        ];
+        let output = record(&item);
+        assert_base_aliases(&output);
+        let lists = output["property_lists"].as_array().unwrap();
+        assert_eq!(lists.len(), 4);
+        assert_eq!(lists[0]["stats"], json!([]));
+        assert_eq!(lists[0]["control_markers"], json!([]));
+        for (ordinal, list) in lists[1..].iter().enumerate() {
+            assert_eq!(list["kind"], "set");
+            assert_eq!(list["ordinal"], ordinal);
+            assert_eq!(list["control_markers"], json!([]));
+        }
+        assert_eq!(lists[1]["stats"], json!([]));
+        let stats = lists[2]["stats"].as_array().unwrap();
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0], stats[1]);
+        assert_eq!(stats[0]["is_opaque"], true);
+        assert_eq!(stats[0]["name"], "synthetic_opaque");
+        assert_eq!(
+            stats[0]["range"],
+            json!({"start":opaque.range.start,"end":opaque.range.end})
+        );
+        assert_eq!(lists[3]["stats"].as_array().unwrap().len(), 1);
+        assert_eq!(lists[3]["stats"][0], stats[0]);
     }
 
     #[settled_contract_test]
