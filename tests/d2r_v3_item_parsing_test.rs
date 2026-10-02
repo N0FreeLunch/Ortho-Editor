@@ -61,6 +61,270 @@ fn without_item_bit_cache(item: &Item) -> Item {
     semantic
 }
 
+#[invariant_test]
+fn d2r_v3_rare_jewelry_reconstruction_and_option_witnesses() {
+    use d2r_core::domain::stats::entity::ItemProperty;
+    let path = "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s";
+    let (bytes, items) = read_d2r_v3_items(path);
+    let huffman = HuffmanTree::new();
+    assert_eq!(items.len(), 38);
+    let ring = &items[12];
+    assert_eq!(ring.code.trim(), "rin");
+    assert_eq!(ring.header.quality, Some(ItemQuality::Rare));
+    assert_eq!((ring.range.start, ring.range.end), (10136, 10400));
+    assert_eq!(items[13].range.start, 10400);
+    assert_eq!((ring.rare_name_1, ring.rare_name_2), (Some(169), Some(94)));
+    assert_eq!(
+        ring.rare_affixes,
+        [Some(389), Some(300), None, Some(379), None, Some(182)]
+    );
+    for (start, end, value) in [(10260, 10268, 169), (10268, 10276, 94)] {
+        assert_eq!(raw_little_endian(&source_bits(&bytes, start, end)), value);
+    }
+    for (slot, start) in [10276, 10288, 10300, 10301, 10313, 10314]
+        .into_iter()
+        .enumerate()
+    {
+        let affix = ring.rare_affixes[slot];
+        assert_eq!(source_bits(&bytes, start, start + 1), vec![affix.is_some()]);
+        if let Some(value) = affix {
+            assert_eq!(
+                raw_little_endian(&source_bits(&bytes, start + 1, start + 12)),
+                u32::from(value)
+            );
+        }
+    }
+    let semantic = without_item_bit_cache(ring);
+    let original = source_bits(&bytes, 10136, 10400);
+    let ranges: Vec<_> = items
+        .iter()
+        .map(|item| (item.range.start, item.range.end))
+        .collect();
+    let verify = |changed: &Item, expected: &[bool], properties: &[ItemProperty]| {
+        let emitted = changed
+            .to_bits_d2r_v3_jewelry(&huffman)
+            .expect("Rare rebuild");
+        assert_eq!(emitted.len(), 264);
+        assert_eq!(
+            emitted, expected,
+            "semantic reconstruction must match independently expected bits"
+        );
+        let local = reparse_jewelry(&emitted);
+        // The leaf reader stops before the counted-list owner's alignment field.
+        assert_eq!((local.range.start, local.range.end), (0, 263));
+        assert_eq!(local.total_bits, 263);
+        assert_eq!(
+            local
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .alignment_padding,
+            None
+        );
+        assert_eq!(
+            ring.body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .alignment_padding,
+            Some(vec![original[263]])
+        );
+        assert_eq!(local.header, ring.header);
+        assert_eq!(
+            (local.rare_name_1, local.rare_name_2),
+            (changed.rare_name_1, changed.rare_name_2)
+        );
+        assert_eq!(local.rare_affixes, changed.rare_affixes);
+        assert_eq!(
+            local
+                .properties
+                .iter()
+                .map(|p| (p.stat_id, p.param, p.raw_value, p.value))
+                .collect::<Vec<_>>(),
+            properties
+                .iter()
+                .map(|p| (p.stat_id, p.param, p.raw_value, p.value))
+                .collect::<Vec<_>>()
+        );
+        let mut patched = bytes.clone();
+        for (index, value) in emitted.iter().enumerate() {
+            let bit = 10136 + index;
+            let mask = 1 << (bit % 8);
+            patched[bit / 8] = (patched[bit / 8] & !mask) | if *value { mask } else { 0 };
+        }
+        // Grammar witness only; no checksum-valid save or game-load assertion.
+        let full_diff: Vec<_> = (0..bytes.len() * 8)
+            .filter(|bit| (bytes[bit / 8] ^ patched[bit / 8]) & (1 << (bit % 8)) != 0)
+            .collect();
+        let expected_diff: Vec<_> = original
+            .iter()
+            .zip(expected)
+            .enumerate()
+            .filter_map(|(bit, (a, b))| (a != b).then_some(10136 + bit))
+            .collect();
+        assert_eq!(full_diff, expected_diff);
+        let readback = Item::read_player_items_d2r_v3(&patched, &huffman).unwrap();
+        assert_eq!(
+            readback
+                .iter()
+                .map(|item| (item.range.start, item.range.end))
+                .collect::<Vec<_>>(),
+            ranges
+        );
+        let actual = &readback[12];
+        assert_eq!(actual.header, ring.header);
+        assert_eq!(
+            (actual.rare_name_1, actual.rare_name_2),
+            (changed.rare_name_1, changed.rare_name_2)
+        );
+        assert_eq!(actual.rare_affixes, changed.rare_affixes);
+        assert_eq!(actual.properties, properties);
+        assert_eq!(actual.body.d2r_v3_auxiliary, ring.body.d2r_v3_auxiliary);
+        assert_eq!(actual.set_attributes, ring.set_attributes);
+        assert_eq!(actual.unique_id, ring.unique_id);
+    };
+    verify(&semantic, &original, &ring.properties);
+    for (id, start, end, raw, logical, new_value, changed_bit) in [
+        (0, 10328, 10345, 35, 3, 2, 10337),
+        (1, 10345, 10361, 36, 4, 5, 10354),
+        (41, 10361, 10379, 206, 6, 7, 10370),
+        (118, 10379, 10389, 1, 1, 0, 10388),
+    ] {
+        assert_eq!(
+            raw_little_endian(&source_bits(&bytes, start, start + 9)),
+            id
+        );
+        assert_eq!(
+            raw_little_endian(&source_bits(&bytes, start + 9, end)),
+            raw as u32
+        );
+        let mut changed = semantic.clone();
+        let property = changed
+            .properties
+            .iter_mut()
+            .find(|p| p.stat_id == id)
+            .unwrap();
+        assert_eq!(
+            (
+                property.value,
+                property.raw_value,
+                property.range.start,
+                property.range.end
+            ),
+            (logical, raw, start, end)
+        );
+        // Keep raw_value stale: only the logical field drives the emitted value.
+        property.value = new_value;
+        let mut expected = original.clone();
+        expected[(changed_bit - 10136) as usize] ^= true;
+        let mut properties = ring.properties.clone();
+        let expected_property = properties.iter_mut().find(|p| p.stat_id == id).unwrap();
+        expected_property.value = new_value;
+        expected_property.raw_value += new_value - logical;
+        verify(&changed, &expected, &properties);
+    }
+    let identity_bits = |item: &Item| {
+        let mut bits = Vec::new();
+        for value in [item.rare_name_1.unwrap(), item.rare_name_2.unwrap()] {
+            bits.extend((0..8).map(|bit| value & (1 << bit) != 0));
+        }
+        for affix in item.rare_affixes {
+            bits.push(affix.is_some());
+            if let Some(value) = affix {
+                bits.extend((0..11).map(|bit| value & (1 << bit) != 0));
+            }
+        }
+        bits
+    };
+    assert_eq!(identity_bits(&semantic), source_bits(&bytes, 10260, 10326));
+    let mut counterfactuals = Vec::new();
+    for name in 0..2 {
+        let mut changed = semantic.clone();
+        let target = if name == 0 {
+            &mut changed.rare_name_1
+        } else {
+            &mut changed.rare_name_2
+        };
+        *target = Some(target.unwrap() ^ 1);
+        counterfactuals.push(changed);
+    }
+    for slot in [0, 1, 3, 5] {
+        let mut changed = semantic.clone();
+        changed.rare_affixes[slot] = Some(changed.rare_affixes[slot].unwrap() ^ 1);
+        counterfactuals.push(changed);
+    }
+    let mut zero = semantic.clone();
+    zero.rare_affixes[0] = Some(0);
+    counterfactuals.push(zero);
+    for absent in [2, 4] {
+        let mut changed = semantic.clone();
+        changed.rare_affixes[0] = None;
+        changed.rare_affixes[absent] = Some(0);
+        counterfactuals.push(changed);
+    }
+    for changed in counterfactuals {
+        let mut expected = original.clone();
+        expected[124..190].copy_from_slice(&identity_bits(&changed));
+        verify(&changed, &expected, &ring.properties);
+    }
+    assert_eq!(
+        fs::read(path).unwrap(),
+        bytes,
+        "fixture must remain immutable"
+    );
+}
+
+#[settled_contract_test]
+fn d2r_v3_rare_jewelry_rejects_inconsistent_identity() {
+    use d2r_core::domain::stats::entity::StatMaturityTier;
+    let (_, items) = read_d2r_v3_items(
+        "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s",
+    );
+    let ring = without_item_bit_cache(&items[12]);
+    let huffman = HuffmanTree::new();
+    let reject = |item: Item| {
+        assert_eq!(
+            item.to_bits_d2r_v3_jewelry(&huffman).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        )
+    };
+    for name in 0..2 {
+        let mut missing = ring.clone();
+        if name == 0 {
+            missing.rare_name_1 = None;
+        } else {
+            missing.rare_name_2 = None;
+        }
+        reject(missing);
+    }
+    for slot in 0..6 {
+        let mut overflow = ring.clone();
+        overflow.rare_affixes[slot] = Some(2048);
+        reject(overflow);
+    }
+    let mut crafted = ring.clone();
+    crafted.header.quality = Some(ItemQuality::Crafted);
+    reject(crafted);
+    let mut opaque = ring.clone();
+    opaque.properties[0].is_opaque = true;
+    reject(opaque);
+    let mut unverified = ring.clone();
+    unverified.properties[0].maturity = StatMaturityTier::Inferred;
+    reject(unverified);
+    let mut paired = ring.clone();
+    paired.properties[0].stat_id = 17;
+    reject(paired);
+    let mut missing_terminal = ring.clone();
+    missing_terminal.properties.pop();
+    reject(missing_terminal);
+    let mut premature = ring.clone();
+    premature
+        .properties
+        .insert(0, ring.properties.last().unwrap().clone());
+    reject(premature);
+}
+
 #[settled_contract_test]
 fn d2r_v3_set_presence_mask_provenance() {
     let path = "tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Quest1_AshearaTalked.d2s";

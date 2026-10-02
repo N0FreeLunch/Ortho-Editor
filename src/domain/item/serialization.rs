@@ -4887,6 +4887,7 @@ impl D2rV3JewelryWidths {
     const GRAPHIC: u32 = 3;
     const CLASS_DATA: u32 = 11;
     const AFFIX: u32 = 11;
+    const RARE_NAME: u32 = 8;
     const UNIQUE_ID: u32 = 12;
     const QUANTITY: u32 = 9;
     const STASH_QUANTITY: u32 = 8;
@@ -4971,7 +4972,11 @@ impl Item {
             || !matches!(self.body.code.trim(), "rin" | "amu")
             || !matches!(
                 quality,
-                ItemQuality::Normal | ItemQuality::Magic | ItemQuality::Unique | ItemQuality::Set
+                ItemQuality::Normal
+                    | ItemQuality::Magic
+                    | ItemQuality::Unique
+                    | ItemQuality::Set
+                    | ItemQuality::Rare
             )
             || header.is_compact
             || !header.is_identified
@@ -5101,6 +5106,25 @@ impl Item {
                     W::AFFIX,
                     "suffix",
                 )?;
+            }
+            ItemQuality::Rare => {
+                for (name, field) in [
+                    (self.rare_name_1, "first Rare name"),
+                    (self.rare_name_2, "second Rare name"),
+                ] {
+                    d2r_v3_write_checked(
+                        &mut emitter,
+                        name.ok_or_else(|| invalid("Missing Rare name"))? as u64,
+                        W::RARE_NAME,
+                        field,
+                    )?;
+                }
+                for affix in self.rare_affixes {
+                    emitter.write_bit(affix.is_some())?;
+                    if let Some(id) = affix {
+                        d2r_v3_write_checked(&mut emitter, id as u64, W::AFFIX, "Rare affix")?;
+                    }
+                }
             }
             ItemQuality::Unique | ItemQuality::Set => {
                 d2r_v3_write_checked(
