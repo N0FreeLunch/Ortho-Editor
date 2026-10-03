@@ -393,7 +393,9 @@ mod tests {
     }
 
     #[settled_contract_test]
-    fn generated_cathan_disagreement_remains_red_without_parser_or_template_coercion() {
+    fn cathan_source_concordance_and_counterfactual_mismatch() {
+        use d2r_core::domain::stats::entity::ItemProperty;
+
         let path = fixture("TESTDRUID_Quest1_AshearaTalked.d2s", "act3");
         let receipt = observe(&fs::read(&path).unwrap(), &path);
         assert_eq!(receipt.status, "ok");
@@ -404,10 +406,65 @@ mod tests {
             .iter()
             .find(|row| row.unique_id == Some(29) && row.code == "rin")
             .unwrap();
+        assert_eq!(row.item_index, 10);
         assert_eq!((row.raw_range_start, row.raw_range_end), (9616, 9832));
-        assert!(row.missing_stat_ids.contains(&36));
-        assert!(row.extra_parsed_stat_ids.contains(&34));
+        assert!(row.expectations_admitted);
+        assert_eq!((row.expected_stats_count, row.matched_stats_count), (2, 2));
+        assert!(row.missing_stat_ids.is_empty());
+        assert!(row.extra_parsed_stat_ids.is_empty());
         assert!(!row.extra_parsed_stat_ids.contains(&511));
+        let mut parsed = row.parsed_stats.clone();
+        parsed.sort();
+        assert_eq!(parsed, vec![(34, 2), (60, 6)]);
+        let template = super::super::SET_ITEMS
+            .iter()
+            .find(|template| template.id == 29)
+            .unwrap();
+        let mut expected: Vec<_> = template
+            .stats
+            .iter()
+            .map(|stat| (stat.stat_id, stat.min, stat.max, stat.param))
+            .collect();
+        expected.sort();
+        assert_eq!(expected, vec![(34, 2, 2, 0), (60, 6, 6, 0)]);
+
+        // Synthetic wrong-stat input checks rejection; no save bytes are modified.
+        let mut wrong = Item::default();
+        wrong.header.version = 105;
+        wrong.header.quality = Some(d2r_core::item::ItemQuality::Set);
+        wrong.header.is_identified = true;
+        wrong.unique_id = Some(29);
+        wrong.code = row.code.clone();
+        wrong.properties = parsed
+            .iter()
+            .map(|&(id, value)| {
+                ItemProperty::new(
+                    if id == 34 { 36 } else { id },
+                    String::new(),
+                    0,
+                    value,
+                    value,
+                    Default::default(),
+                )
+            })
+            .collect();
+        let original = wrong.properties.clone();
+        let mut rejected = TemplateOracleReport::default();
+        super::super::evaluate_item_against_template(&mut rejected, &path, 10, &wrong, false);
+        assert_eq!(wrong.properties, original);
+        assert_eq!(rejected.item_evaluations.len(), 1);
+        let rejected_row = &rejected.item_evaluations[0];
+        assert!(rejected_row.expectations_admitted);
+        assert_eq!(rejected_row.missing_stat_ids, vec![34]);
+        assert_eq!(rejected_row.extra_parsed_stat_ids, vec![36]);
+        assert_eq!(
+            (
+                rejected_row.expected_stats_count,
+                rejected_row.matched_stats_count
+            ),
+            (2, 1)
+        );
+        assert_eq!(rejected.value_in_range_stats, 1);
     }
 
     #[settled_contract_test]
