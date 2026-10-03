@@ -124,7 +124,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2save_structural_diff`** | Save | **Structural Diff**: Compares structural metadata between two saves to detect layout shifts. |
 | **`d2item_serialization_audit`** | Item | **Fidelity Master**: Visual bitstream alignment and forensic audit report. |
 | **`d2item_xray`** | Item | **Bit X-Ray**: Detailed bit-level visualization and decomposition of item property streams. |
-| **`d2item_global_audit`** | Item | **Batch Auditor**: Scans directories for serialization parity mismatches. |
+| **`d2item_global_audit`** | Item | **Batch Auditor**: Scans directories for serialization parity mismatches. `analyze-report <report.json> --json --token-efficient` summarizes a saved report without parsing saves; detects inconsistent counts and groups timeout stages. Analysis exit 0 does not mean the saved audit passed. |
 | **`d2save_taxonomy`** | Save | **Structural Auditor**: Categorizes fixtures by version and bitstream shape. |
 | **`d2item_rhythm_oracle`** | Item | **Rhythm Oracle**: Validates 9-bit property stream rhythms and terminators. |
 | **`d2item_alignment_oracle`** | Item | **Alignment Oracle**: Detects bit-drift and calculates required offsets. |

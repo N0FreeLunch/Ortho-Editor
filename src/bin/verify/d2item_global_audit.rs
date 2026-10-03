@@ -1,3 +1,6 @@
+#[path = "d2item_global_audit/report_analysis.rs"]
+mod report_analysis;
+
 use d2r_core::domain::item::axiom_meta::FidelityContract;
 use d2r_core::domain::item::entity::item_fidelity_contracts;
 use d2r_core::domain::item::scanner::{
@@ -1821,6 +1824,9 @@ fn build_staged_receipt_table(file_paths: &[std::path::PathBuf]) -> Arc<ItemMemo
 }
 
 fn main() {
+    if env::args().nth(1).as_deref() == Some("analyze-report") {
+        std::process::exit(report_analysis::run(env::args().skip(2)));
+    }
     let mut parser = ArgParser::new("d2item_global_audit");
     parser
         .add_spec(ArgSpec::positional("target_dir", "Directory containing .d2s files").optional());
