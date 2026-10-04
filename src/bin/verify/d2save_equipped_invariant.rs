@@ -19,6 +19,34 @@
 //!    The physical laws of the game world always take precedence over verification heuristics.
 
 use d2r_core::item::{HuffmanTree, Item};
+
+/// The audit covers only the primary player list, not mercenary/corpse/golem lists.
+/// Slot compatibility is a partial diagnostic heuristic, not a complete gear oracle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Dialect {
+    #[serde(rename = "alpha")]
+    Alpha,
+    #[serde(rename = "d2r-v3")]
+    D2rV3,
+}
+
+impl Dialect {
+    fn parse(value: Option<&str>) -> Result<Self, &'static str> {
+        match value {
+            Some("alpha") => Ok(Self::Alpha),
+            Some("d2r-v3") => Ok(Self::D2rV3),
+            _ => Err("--dialect requires alpha or d2r-v3"),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Alpha => "alpha",
+            Self::D2rV3 => "d2r-v3",
+        }
+    }
+}
+
 use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -28,6 +56,7 @@ use std::time::Instant;
 
 mod cli {
     pub struct Args {
+        pub dialect: super::Dialect,
         pub corpus_dir: Option<String>,
         pub fixture: Option<String>,
         pub json: bool,
@@ -37,6 +66,7 @@ mod cli {
 
     pub fn parse_args() -> Args {
         let args: Vec<String> = std::env::args().collect();
+        let mut dialect = super::Dialect::Alpha;
         let mut corpus_dir = None;
         let mut fixture = None;
         let mut json = false;
@@ -46,6 +76,14 @@ mod cli {
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
+                "--dialect" => {
+                    dialect = super::Dialect::parse(args.get(i + 1).map(String::as_str))
+                        .unwrap_or_else(|message| {
+                            eprintln!("{message}");
+                            std::process::exit(64);
+                        });
+                    i += 1;
+                }
                 "--corpus-dir" => {
                     if i + 1 < args.len() {
                         corpus_dir = Some(args[i + 1].clone());
@@ -71,6 +109,7 @@ mod cli {
         }
 
         Args {
+            dialect,
             corpus_dir,
             fixture,
             json,
@@ -80,14 +119,19 @@ mod cli {
     }
 
     fn print_help() {
-        println!("d2save_equipped_invariant - D2R Equipped & Mercenary Item Identification Invariant Verifier");
+        println!(
+            "d2save_equipped_invariant - D2R Equipped & Mercenary Item Identification Invariant Verifier"
+        );
         println!();
         println!("USAGE:");
         println!("    d2save_equipped_invariant [OPTIONS]");
         println!();
         println!("OPTIONS:");
+        println!("    --dialect <NAME>        alpha (default) or d2r-v3; primary player list only");
         println!("    --fixture <PATH>        Verify a single .d2s save file (fast diagnosis)");
-        println!("    --corpus-dir <PATH>     Directory of saves to scan (default: tests/fixtures/savegames)");
+        println!(
+            "    --corpus-dir <PATH>     Directory of saves to scan (default: tests/fixtures/savegames)"
+        );
         println!("    --json                  Output structured JSON report");
         println!("    --token-efficient       Output compact summary for token conservation");
         println!("    --verbose, -v           Detailed per-anomaly breakdown");
@@ -127,6 +171,12 @@ pub struct EquippedAnomaly {
 
 #[derive(Debug, Serialize)]
 pub struct InvariantAuditReport {
+    pub schema_version: &'static str,
+    pub dialect: Dialect,
+    pub status: &'static str,
+    pub coverage_limit: &'static str,
+    pub total_saves_parsed: usize,
+    pub parse_failures: Vec<AuditFailure>,
     pub total_saves_checked: usize,
     pub total_items_checked: usize,
     pub total_equipped_checked: usize,
@@ -138,6 +188,61 @@ pub struct InvariantAuditReport {
     pub affected_files: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub anomalies: Vec<EquippedAnomaly>,
+}
+
+impl InvariantAuditReport {
+    fn exit_code(&self) -> i32 {
+        if !self.parse_failures.is_empty() {
+            2
+        } else if self.total_anomalies > 0 {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditFailure {
+    file: String,
+    stage: &'static str,
+    message: String,
+    bit_offset: Option<u64>,
+    context: Vec<String>,
+    hint: String,
+}
+
+#[derive(Debug, Default)]
+struct FileAudit {
+    items: usize,
+    equipped: usize,
+    anomalies: Vec<EquippedAnomaly>,
+    failure: Option<AuditFailure>,
+}
+
+fn failed_audit(
+    path: &Path,
+    stage: &'static str,
+    message: String,
+    bit_offset: Option<u64>,
+    context: Vec<String>,
+    dialect: Dialect,
+) -> FileAudit {
+    FileAudit {
+        failure: Some(AuditFailure {
+            file: path.to_string_lossy().into_owned(),
+            stage,
+            message,
+            bit_offset,
+            context,
+            hint: format!(
+                "Preserve the input; inspect the first primary failure: d2item_inspect \"{}\" --dialect {} --section-item 0 --json",
+                path.display(),
+                dialect.label()
+            ),
+        }),
+        ..FileAudit::default()
+    }
 }
 
 /// Check if an item code is physically incompatible with a given body slot in Diablo II.
@@ -152,7 +257,8 @@ fn is_slot_incompatible(code: &str, body_slot: u8) -> Option<&'static str> {
     if matches!(clean, "cm1" | "cm2" | "cm3") {
         return Some("Charms can only function in player inventory, never equipped in body slots");
     }
-    if clean.starts_with('r') && clean.len() == 3 && clean[1..].chars().all(|c| c.is_ascii_digit()) {
+    if clean.starts_with('r') && clean.len() == 3 && clean[1..].chars().all(|c| c.is_ascii_digit())
+    {
         return Some("Runes cannot be directly equipped in body slots outside of socketed items");
     }
     if matches!(clean, "key" | "tsc" | "isc" | "tbk" | "ibk" | "gld") {
@@ -170,7 +276,31 @@ fn is_slot_incompatible(code: &str, body_slot: u8) -> Option<&'static str> {
     }
 
     // Belts (slot 8) cannot be rings, amulets, boots, gloves, helms, etc.
-    if body_slot == 8 && matches!(clean, "rin" | "amu" | "cap" | "skp" | "hlm" | "fhl" | "ghm" | "crn" | "msk" | "bhm" | "lbt" | "vbt" | "mbt" | "tbt" | "hbt" | "lgl" | "vgl" | "mgl" | "tgl" | "hgl") {
+    if body_slot == 8
+        && matches!(
+            clean,
+            "rin"
+                | "amu"
+                | "cap"
+                | "skp"
+                | "hlm"
+                | "fhl"
+                | "ghm"
+                | "crn"
+                | "msk"
+                | "bhm"
+                | "lbt"
+                | "vbt"
+                | "mbt"
+                | "tbt"
+                | "hbt"
+                | "lgl"
+                | "vgl"
+                | "mgl"
+                | "tgl"
+                | "hgl"
+        )
+    {
         return Some("Non-belt item cannot be equipped in belt slot (8)");
     }
 
@@ -184,11 +314,12 @@ fn classify_anomaly(
     mode: u8,
     y: u8,
     flags: u32,
+    dialect: Dialect,
 ) -> (InvariantClassification, String) {
     let clean_code = code.trim();
 
     // Condition 1: Check for phantom codes, invalid characters, or invalid body slot
-    let axiom = d2r_core::domain::header::HeaderAxiom::new(version, true);
+    let axiom = d2r_core::domain::header::HeaderAxiom::new(version, dialect == Dialect::Alpha);
     let is_valid_item = axiom.is_plausible(mode, location, code.as_bytes(), flags)
         || axiom.is_plausible(mode, location, clean_code.as_bytes(), flags);
 
@@ -199,7 +330,10 @@ fn classify_anomaly(
     // DESIGN INTENT: If future save format changes restore geometry for equipped items,
     // the y==0 check may need to be re-evaluated here.
     let is_invalid_body_loc = (mode == 1) && (y > 12);
-    let is_known_phantom = matches!(clean_code, "wyws" | "wsd" | "wsd " | "oesw" | "w   " | "yws " | "s   " | "kk h");
+    let is_known_phantom = matches!(
+        clean_code,
+        "wyws" | "wsd" | "wsd " | "oesw" | "w   " | "yws " | "s   " | "kk h"
+    );
     let has_internal_space = clean_code.contains(' ') && clean_code.len() > 3;
 
     // Condition 1: Slot incompatibility has higher diagnostic value than generic
@@ -215,7 +349,12 @@ fn classify_anomaly(
     }
 
     // Condition 2: Check for phantom codes, invalid characters, or invalid body slot.
-    if !is_valid_item || is_known_phantom || is_invalid_body_loc || has_internal_space || clean_code.len() < 3 {
+    if !is_valid_item
+        || is_known_phantom
+        || is_invalid_body_loc
+        || has_internal_space
+        || clean_code.len() < 3
+    {
         return (
             InvariantClassification::PhantomHeaderDrift,
             format!(
@@ -259,14 +398,14 @@ fn collect_d2s_files(dir: &Path, list: &mut Vec<PathBuf>) {
     }
 }
 
-fn audit_file(
-    path: &Path,
-    huffman: &HuffmanTree,
-) -> (usize, usize, Vec<EquippedAnomaly>) {
-    let Ok(bytes) = fs::read(path) else {
-        return (0, 0, Vec::new());
-    };
+fn audit_file(path: &Path, huffman: &HuffmanTree, dialect: Dialect) -> FileAudit {
+    match fs::read(path) {
+        Ok(bytes) => audit_bytes(path, &bytes, huffman, dialect),
+        Err(error) => failed_audit(path, "read", error.to_string(), None, Vec::new(), dialect),
+    }
+}
 
+fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialect) -> FileAudit {
     let filename = path
         .file_name()
         .unwrap_or_default()
@@ -277,7 +416,24 @@ fn audit_file(
     let mut total_equipped = 0;
     let mut anomalies = Vec::new();
 
-    if let Ok(items) = Item::read_player_items(&bytes, huffman, true) {
+    let parsed = match dialect {
+        Dialect::Alpha => Item::read_player_items(bytes, huffman, true),
+        Dialect::D2rV3 => Item::read_player_items_d2r_v3(bytes, huffman),
+    };
+    let items = match parsed {
+        Ok(items) => items,
+        Err(failure) => {
+            return failed_audit(
+                path,
+                "primary_parse",
+                failure.to_string(),
+                Some(failure.bit_offset),
+                failure.context_stack,
+                dialect,
+            );
+        }
+    };
+    {
         total_items += items.len();
         for (idx, it) in items.iter().enumerate() {
             // In D2 save format, mode == 1 indicates an equipped item (body slot 1..=10).
@@ -286,7 +442,9 @@ fn audit_file(
 
             if is_equipped {
                 total_equipped += 1;
-                if !it.header.is_identified {
+                let has_slot_mismatch =
+                    is_slot_incompatible(&it.code, it.header.location).is_some();
+                if !it.header.is_identified || (dialect == Dialect::D2rV3 && has_slot_mismatch) {
                     let is_opaque = it.is_opaque() || it.is_semi_opaque();
                     let has_slot_mismatch =
                         is_slot_incompatible(&it.code, it.header.location).is_some();
@@ -305,6 +463,7 @@ fn audit_file(
                         it.header.mode,
                         it.header.y,
                         it.header.flags,
+                        dialect,
                     );
 
                     anomalies.push(EquippedAnomaly {
@@ -328,7 +487,12 @@ fn audit_file(
         }
     }
 
-    (total_items, total_equipped, anomalies)
+    FileAudit {
+        items: total_items,
+        equipped: total_equipped,
+        anomalies,
+        failure: None,
+    }
 }
 
 fn main() {
@@ -341,7 +505,10 @@ fn main() {
     if let Some(ref single_fixture) = args.fixture {
         let p = PathBuf::from(single_fixture);
         if !p.exists() {
-            eprintln!("Error: Specified fixture file does not exist: {}", single_fixture);
+            eprintln!(
+                "Error: Specified fixture file does not exist: {}",
+                single_fixture
+            );
             std::process::exit(1);
         }
         save_paths.push(p);
@@ -365,20 +532,27 @@ fn main() {
     }
 
     // Parallel audit using rayon
-    let results: Vec<(usize, usize, Vec<EquippedAnomaly>)> = save_paths
+    let results: Vec<FileAudit> = save_paths
         .par_iter()
-        .map(|path| audit_file(path, &huffman))
+        .map(|path| audit_file(path, &huffman, args.dialect))
         .collect();
 
     let mut total_items = 0;
     let mut total_equipped = 0;
     let mut all_anomalies = Vec::new();
+    let mut total_saves_parsed = 0;
+    let mut parse_failures = Vec::new();
     let mut affected_files_set = BTreeMap::new();
 
-    for (items_cnt, equipped_cnt, file_anomalies) in results {
-        total_items += items_cnt;
-        total_equipped += equipped_cnt;
-        for anom in file_anomalies {
+    for result in results {
+        if let Some(failure) = result.failure {
+            parse_failures.push(failure);
+            continue;
+        }
+        total_saves_parsed += 1;
+        total_items += result.items;
+        total_equipped += result.equipped;
+        for anom in result.anomalies {
             *affected_files_set.entry(anom.file.clone()).or_insert(0) += 1;
             all_anomalies.push(anom);
         }
@@ -401,6 +575,18 @@ fn main() {
     let affected_files: Vec<String> = affected_files_set.into_keys().collect();
 
     let report = InvariantAuditReport {
+        schema_version: "d2save-equipped-primary/v1",
+        dialect: args.dialect,
+        status: if !parse_failures.is_empty() {
+            "error"
+        } else if !all_anomalies.is_empty() {
+            "anomaly"
+        } else {
+            "ok"
+        },
+        coverage_limit: "Primary player list identification and partial slot rules only; no mercenary/corpse/golem lists, complete slot oracle, game-load or fidelity proof.",
+        total_saves_parsed,
+        parse_failures,
         total_saves_checked: save_paths.len(),
         total_items_checked: total_items,
         total_equipped_checked: total_equipped,
@@ -420,7 +606,7 @@ fn main() {
     if args.json {
         let json_str = serde_json::to_string_pretty(&report).unwrap();
         println!("{}", json_str);
-        return;
+        std::process::exit(report.exit_code());
     }
 
     // Human-readable console output
@@ -429,16 +615,35 @@ fn main() {
     println!("  d2save_equipped_invariant: D2R Equipped Identification Invariant Radar");
     println!("================================================================================");
     println!("Files audited:       {}", save_paths.len());
+    println!("Dialect:             {}", args.dialect.label());
+    println!("Parsed saves:        {}", total_saves_parsed);
+    println!("Parse failures:      {}", report.parse_failures.len());
+    for failure in report.parse_failures.iter().take(1) {
+        println!("First failure: {}: {}", failure.file, failure.message);
+        println!("Hint: {}", failure.hint);
+    }
     println!("Total items:         {}", total_items);
     println!("Equipped items:      {}", total_equipped);
     println!("Total anomalies:     {}", all_anomalies.len());
     println!("Elapsed time:        {:.2?}", elapsed);
     println!("--------------------------------------------------------------------------------");
     println!("Anomaly Breakdown:");
-    println!("  [1] Phantom Header Drift:        {} (Bit-drift rupture from preceding option stream)", phantom_count);
-    println!("  [2] Slot Mismatch Phantom Drift: {} (Physically impossible slot assignment from bit-drift)", slot_mismatch_count);
-    println!("  [3] Flag Shift Anomaly:          {} (Bit 5 set instead of Bit 4)", flag_shift_count);
-    println!("  [4] True Unidentified Violation: {} (Genuine equipped item unidentified)", true_violation_count);
+    println!(
+        "  [1] Phantom Header Drift:        {} (Bit-drift rupture from preceding option stream)",
+        phantom_count
+    );
+    println!(
+        "  [2] Slot Mismatch Phantom Drift: {} (Physically impossible slot assignment from bit-drift)",
+        slot_mismatch_count
+    );
+    println!(
+        "  [3] Flag Shift Anomaly:          {} (Bit 5 set instead of Bit 4)",
+        flag_shift_count
+    );
+    println!(
+        "  [4] True Unidentified Violation: {} (Genuine equipped item unidentified)",
+        true_violation_count
+    );
     println!("--------------------------------------------------------------------------------");
 
     if !affected_files.is_empty() {
@@ -449,12 +654,23 @@ fn main() {
     }
 
     if args.verbose || (!args.token_efficient && !all_anomalies.is_empty()) {
-        println!("--------------------------------------------------------------------------------");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
         println!("Sample Anomalies (First 20):");
         for anom in all_anomalies.iter().take(20) {
             println!(
                 "  [{}] idx={:02} code='{:4}' ver={} loc={} mode={} y={:2} x={:2} flags={} class={:?}",
-                anom.file, anom.item_index, anom.code, anom.version, anom.location, anom.mode, anom.y, anom.x, anom.flags, anom.classification
+                anom.file,
+                anom.item_index,
+                anom.code,
+                anom.version,
+                anom.location,
+                anom.mode,
+                anom.y,
+                anom.x,
+                anom.flags,
+                anom.classification
             );
         }
         if all_anomalies.len() > 20 {
@@ -463,16 +679,51 @@ fn main() {
     }
 
     println!("================================================================================");
-    if true_violation_count > 0 {
-        eprintln!("WARNING: Found {} TRUE unidentified equipped items!", true_violation_count);
+    if !report.parse_failures.is_empty() {
+        eprintln!("Radar Verdict: INCOMPLETE; unparsed saves cannot establish the invariant.");
+    } else if true_violation_count > 0 {
+        eprintln!(
+            "WARNING: Found {} TRUE unidentified equipped items!",
+            true_violation_count
+        );
     } else {
-        println!("Radar Verdict: ZERO true unidentified violations. All anomalies are parser bit-drifts.");
+        println!(
+            "Radar Verdict: ZERO true unidentified violations. Review reported drift anomalies and coverage limits."
+        );
     }
+    std::process::exit(report.exit_code());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use d2r_macros::settled_contract_test;
+
+    #[settled_contract_test]
+    fn explicit_dialect_rejects_missing_and_unknown_values() {
+        assert_eq!(Dialect::parse(Some("alpha")), Ok(Dialect::Alpha));
+        assert_eq!(Dialect::parse(Some("d2r-v3")), Ok(Dialect::D2rV3));
+        assert!(Dialect::parse(None).is_err());
+        assert!(Dialect::parse(Some("unknown")).is_err());
+    }
+
+    #[settled_contract_test]
+    fn truncated_primary_is_a_failure_not_an_empty_audit() {
+        let audit = audit_bytes(
+            Path::new("truncated.d2s"),
+            &[],
+            &HuffmanTree::new(),
+            Dialect::D2rV3,
+        );
+        assert_eq!((audit.items, audit.equipped), (0, 0));
+        let failure = audit
+            .failure
+            .expect("an unparsed save must not be a clean audit");
+        assert_eq!(failure.stage, "primary_parse");
+        assert!(failure.bit_offset.is_some());
+        assert!(!failure.message.is_empty());
+        assert!(failure.hint.contains("--dialect d2r-v3"));
+    }
 
     #[test]
     fn rogue_stats_verify_fixture_seals_equipped_anomaly_classification() {
@@ -480,7 +731,12 @@ mod tests {
             "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
         );
         let huffman = HuffmanTree::new();
-        let (_, _, anomalies) = audit_file(fixture, &huffman);
+        let audit = audit_file(fixture, &huffman, Dialect::Alpha);
+        assert!(
+            audit.failure.is_none(),
+            "the legacy fixture must actually parse"
+        );
+        let anomalies = audit.anomalies;
 
         assert!(
             !anomalies
