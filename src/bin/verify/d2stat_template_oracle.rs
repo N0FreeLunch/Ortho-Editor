@@ -8,6 +8,7 @@ use d2r_core::domain::item::{HuffmanTree, Item, ItemQuality};
 use d2r_core::domain::stats::axiom::StatsAxiom;
 use rayon::prelude::*;
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,6 +22,7 @@ mod clap_stub {
         pub output_file: Option<String>,
         pub token_efficient: bool,
         pub sequential: bool,
+        pub template_census: bool,
     }
 
     pub fn parse_args() -> Args {
@@ -30,6 +32,7 @@ mod clap_stub {
         let mut output_file = None;
         let mut token_efficient = false;
         let mut sequential = false;
+        let mut template_census = false;
 
         let mut i = 1;
         while i < args.len() {
@@ -58,6 +61,9 @@ mod clap_stub {
                 "--sequential" => {
                     sequential = true;
                 }
+                "--template-census" => {
+                    template_census = true;
+                }
                 _ => {}
             }
             i += 1;
@@ -69,7 +75,162 @@ mod clap_stub {
             output_file,
             token_efficient,
             sequential,
+            template_census,
         }
+    }
+}
+#[derive(Debug, Serialize, Default)]
+pub struct TemplateCensusReport {
+    pub total_templates: usize,
+    pub unique_templates_count: usize,
+    pub set_templates_count: usize,
+    pub runeword_templates_count: usize,
+    pub total_template_stat_instances: usize,
+    pub supported_stat_instances: usize,
+    pub unsupported_stat_instances: usize,
+    pub hypothesis_coverage_percent: f64,
+    pub distinct_stat_ids_count: usize,
+    pub supported_distinct_stat_ids_count: usize,
+    pub unsupported_distinct_stat_ids_count: usize,
+    pub supported_stat_ids: Vec<u32>,
+    pub unsupported_stat_ids: Vec<u32>,
+    pub category_breakdown: CategoryBreakdown,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct CategoryBreakdown {
+    pub unique_stats_total: usize,
+    pub unique_stats_supported: usize,
+    pub unique_coverage_percent: f64,
+    pub set_stats_total: usize,
+    pub set_stats_supported: usize,
+    pub set_coverage_percent: f64,
+    pub runeword_stats_total: usize,
+    pub runeword_stats_supported: usize,
+    pub runeword_coverage_percent: f64,
+}
+
+fn run_template_census() -> TemplateCensusReport {
+    let mut all_distinct_stat_ids = BTreeSet::new();
+    let mut supported_distinct_stat_ids = BTreeSet::new();
+    let mut unsupported_distinct_stat_ids = BTreeSet::new();
+
+    let mut total_template_stat_instances = 0;
+    let mut supported_stat_instances = 0;
+    let mut unsupported_stat_instances = 0;
+
+    let mut unique_stats_total = 0;
+    let mut unique_stats_supported = 0;
+
+    for item in UNIQUE_ITEMS.iter() {
+        for stat in item.stats.iter() {
+            let stat_id = stat.stat_id;
+            all_distinct_stat_ids.insert(stat_id);
+            total_template_stat_instances += 1;
+            unique_stats_total += 1;
+
+            if d2r_core::domain::stats::stat_save_bits(stat_id).is_some() {
+                supported_distinct_stat_ids.insert(stat_id);
+                supported_stat_instances += 1;
+                unique_stats_supported += 1;
+            } else {
+                unsupported_distinct_stat_ids.insert(stat_id);
+                unsupported_stat_instances += 1;
+            }
+        }
+    }
+
+    let mut set_stats_total = 0;
+    let mut set_stats_supported = 0;
+
+    for item in SET_ITEMS.iter() {
+        for stat in item.stats.iter() {
+            let stat_id = stat.stat_id;
+            all_distinct_stat_ids.insert(stat_id);
+            total_template_stat_instances += 1;
+            set_stats_total += 1;
+
+            if d2r_core::domain::stats::stat_save_bits(stat_id).is_some() {
+                supported_distinct_stat_ids.insert(stat_id);
+                supported_stat_instances += 1;
+                set_stats_supported += 1;
+            } else {
+                unsupported_distinct_stat_ids.insert(stat_id);
+                unsupported_stat_instances += 1;
+            }
+        }
+    }
+
+    let mut runeword_stats_total = 0;
+    let mut runeword_stats_supported = 0;
+
+    for item in RUNEWORDS.iter() {
+        for stat in item.stats.iter() {
+            let stat_id = stat.stat_id;
+            all_distinct_stat_ids.insert(stat_id);
+            total_template_stat_instances += 1;
+            runeword_stats_total += 1;
+
+            if d2r_core::domain::stats::stat_save_bits(stat_id).is_some() {
+                supported_distinct_stat_ids.insert(stat_id);
+                supported_stat_instances += 1;
+                runeword_stats_supported += 1;
+            } else {
+                unsupported_distinct_stat_ids.insert(stat_id);
+                unsupported_stat_instances += 1;
+            }
+        }
+    }
+
+    let hypothesis_coverage_percent = if total_template_stat_instances > 0 {
+        (supported_stat_instances as f64 / total_template_stat_instances as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let unique_coverage_percent = if unique_stats_total > 0 {
+        (unique_stats_supported as f64 / unique_stats_total as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let set_coverage_percent = if set_stats_total > 0 {
+        (set_stats_supported as f64 / set_stats_total as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let runeword_coverage_percent = if runeword_stats_total > 0 {
+        (runeword_stats_supported as f64 / runeword_stats_total as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    TemplateCensusReport {
+        total_templates: UNIQUE_ITEMS.len() + SET_ITEMS.len() + RUNEWORDS.len(),
+        unique_templates_count: UNIQUE_ITEMS.len(),
+        set_templates_count: SET_ITEMS.len(),
+        runeword_templates_count: RUNEWORDS.len(),
+        total_template_stat_instances,
+        supported_stat_instances,
+        unsupported_stat_instances,
+        hypothesis_coverage_percent,
+        distinct_stat_ids_count: all_distinct_stat_ids.len(),
+        supported_distinct_stat_ids_count: supported_distinct_stat_ids.len(),
+        unsupported_distinct_stat_ids_count: unsupported_distinct_stat_ids.len(),
+        supported_stat_ids: supported_distinct_stat_ids.into_iter().collect(),
+        unsupported_stat_ids: unsupported_distinct_stat_ids.into_iter().collect(),
+        category_breakdown: CategoryBreakdown {
+            unique_stats_total,
+            unique_stats_supported,
+            unique_coverage_percent,
+            set_stats_total,
+            set_stats_supported,
+            set_coverage_percent,
+            runeword_stats_total,
+            runeword_stats_supported,
+            runeword_coverage_percent,
+        },
     }
 }
 
@@ -552,6 +713,28 @@ fn main() {
         std::process::exit(exit_code);
     }
     let args = parse_args();
+
+    if args.template_census {
+        let census = run_template_census();
+        let json_output = if args.token_efficient {
+            serde_json::to_string(&census).unwrap()
+        } else {
+            serde_json::to_string_pretty(&census).unwrap()
+        };
+
+        if let Some(output_path) = args.output_file {
+            if let Some(parent) = Path::new(&output_path).parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Err(e) = fs::write(&output_path, &json_output) {
+                eprintln!("Failed to write census report to {output_path}: {e}");
+            }
+        }
+
+        println!("{json_output}");
+        return;
+    }
+
     let mut report = TemplateOracleReport::default();
     let mut save_files = Vec::new();
 
@@ -730,5 +913,14 @@ mod tests {
         assert!(fixture.is_file());
 
         assert_eq!(save_files_from_input(&fixture), vec![fixture]);
+    }
+
+    #[test]
+    fn static_template_census_reports_hypothesis_coverage() {
+        let census = run_template_census();
+        assert!(census.total_templates > 500);
+        assert!(census.total_template_stat_instances > 2000);
+        assert!(census.supported_stat_instances > 1500);
+        assert!(census.hypothesis_coverage_percent > 50.0);
     }
 }
