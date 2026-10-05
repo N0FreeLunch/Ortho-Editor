@@ -3,7 +3,8 @@ use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
 };
-use crate::domain::header::entity::{calculate_alpha_v105_checksum, HeaderAxiom, ItemSegmentType};
+use crate::domain::header::entity::{HeaderAxiom, ItemSegmentType, calculate_alpha_v105_checksum};
+use crate::domain::item::Item;
 use crate::domain::item::axiom_meta::{
     Confidence, ForensicAudit, ForensicAxiom, ForensicMetadata, Intentionality,
 };
@@ -12,7 +13,6 @@ use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
 use crate::domain::item::subdomains::property::{AlphaPropertyCombinator, PropertyNormalizer};
 use crate::domain::item::subdomains::stats::StatsCombinator;
-use crate::domain::item::Item;
 use crate::domain::stats::{ItemProperty, ItemStats, StatsAxiom};
 use crate::error::{ParsingError, ParsingFailure, ParsingResult};
 use crate::item::BitSegment;
@@ -1473,7 +1473,10 @@ fn parse_item_at_d2r_v3(
                     context_stack: vec!["parse_item_at_d2r_v3".to_string()],
                     bit_offset: child_start,
                     context_relative_offset: child_start.saturating_sub(bit),
-                    hint: Some("Retain the source stream and verify the declared child boundary.".to_string()),
+                    hint: Some(
+                        "Retain the source stream and verify the declared child boundary."
+                            .to_string(),
+                    ),
                 });
             }
 
@@ -4874,6 +4877,12 @@ pub struct PropertyReaderContext<'a> {
 /// Physical widths for the explicitly selected D2R v3 stored-item grammar.
 struct D2rV3JewelryWidths;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum D2rV3StoredLayout {
+    Jewelry,
+    Armor,
+}
+
 impl D2rV3JewelryWidths {
     const FLAGS: u32 = 32;
     const VERSION_LOW: u32 = 2;
@@ -4886,6 +4895,7 @@ impl D2rV3JewelryWidths {
     const QUALITY: u32 = 4;
     const GRAPHIC: u32 = 3;
     const CLASS_DATA: u32 = 11;
+    const HIGH_SUBTYPE: u32 = 3;
     const AFFIX: u32 = 11;
     const RARE_NAME: u32 = 8;
     const UNIQUE_ID: u32 = 12;
@@ -4957,6 +4967,21 @@ impl Item {
     /// This opt-in writer never reads whole-item raw bits, segments or offsets.
     /// Unsupported layouts fail instead of falling back to the generic dialect.
     pub fn to_bits_d2r_v3_jewelry(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Jewelry)
+    }
+
+    /// Rebuild identified Normal/High D2R v3 armor with positive stored durability.
+    /// Stored body fields are emitted unchanged, without an effective-value formula.
+    /// Socketed, opaque and unsupported states fail rather than replaying cached bits.
+    pub fn to_bits_d2r_v3_armor(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Armor)
+    }
+
+    fn to_bits_d2r_v3_stored(
+        &self,
+        huffman: &HuffmanTree,
+        layout: D2rV3StoredLayout,
+    ) -> io::Result<Vec<bool>> {
         let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
         let auxiliary = self
             .body
@@ -4967,17 +4992,27 @@ impl Item {
         let quality = header
             .quality
             .ok_or_else(|| invalid("Missing jewelry quality"))?;
+        let supported_kind = match layout {
+            D2rV3StoredLayout::Jewelry => {
+                matches!(self.body.code.trim(), "rin" | "amu")
+                    && matches!(
+                        quality,
+                        ItemQuality::Normal
+                            | ItemQuality::Magic
+                            | ItemQuality::Unique
+                            | ItemQuality::Set
+                            | ItemQuality::Rare
+                    )
+            }
+            D2rV3StoredLayout::Armor => {
+                item_template(self.body.code.trim())
+                    .is_some_and(|template| template.is_armor && template.has_durability)
+                    && matches!(quality, ItemQuality::Normal | ItemQuality::High)
+            }
+        };
         if auxiliary.save_version != 0x69
             || header.save_is_alpha
-            || !matches!(self.body.code.trim(), "rin" | "amu")
-            || !matches!(
-                quality,
-                ItemQuality::Normal
-                    | ItemQuality::Magic
-                    | ItemQuality::Unique
-                    | ItemQuality::Set
-                    | ItemQuality::Rare
-            )
+            || !supported_kind
             || header.is_compact
             || !header.is_identified
             || header.is_ear
@@ -4990,7 +5025,45 @@ impl Item {
             || !self.runeword_attributes.is_empty()
             || !self.properties_complete
         {
-            return Err(invalid("Unsupported D2R v3 jewelry layout"));
+            return Err(invalid(match layout {
+                D2rV3StoredLayout::Jewelry => "Unsupported D2R v3 jewelry layout",
+                D2rV3StoredLayout::Armor => "Unsupported D2R v3 armor layout",
+            }));
+        }
+        if layout == D2rV3StoredLayout::Armor {
+            if auxiliary.has_quantity
+                || self.quantity.is_some()
+                || self.body.quantity.is_some()
+                || !auxiliary.realm_data.is_empty()
+                || auxiliary.advanced_stash_quantity.is_some()
+                || self.magic_prefix.is_some()
+                || self.magic_suffix.is_some()
+                || self.rare_name_1.is_some()
+                || self.rare_name_2.is_some()
+                || self.rare_affixes.iter().any(Option::is_some)
+                || self.unique_id.is_some()
+                || self.runeword_id.is_some()
+                || self.runeword_level.is_some()
+            {
+                return Err(invalid("Unsupported D2R v3 armor auxiliary state"));
+            }
+            if self.code.trim() != self.body.code.trim()
+                || self.defense != self.body.defense
+                || self.max_durability != self.body.max_durability
+                || self.current_durability != self.body.current_durability
+            {
+                return Err(invalid("D2R v3 armor body and semantic aliases disagree"));
+            }
+            if self.body.defense.is_none()
+                || self.body.max_durability.is_none_or(|maximum| maximum == 0)
+                || self.body.current_durability.is_none()
+            {
+                return Err(invalid("Missing positive-durability D2R v3 armor body"));
+            }
+            match (quality, self.low_high_graphic_bits) {
+                (ItemQuality::Normal, None) | (ItemQuality::High, Some(_)) => {}
+                _ => return Err(invalid("D2R v3 armor quality and subtype disagree")),
+            }
         }
         if quality == ItemQuality::Set {
             let flags = auxiliary
@@ -5093,6 +5166,16 @@ impl Item {
             )?;
         }
         match quality {
+            ItemQuality::High => {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    self.low_high_graphic_bits
+                        .ok_or_else(|| invalid("Missing High armor subtype"))?
+                        as u64,
+                    W::HIGH_SUBTYPE,
+                    "High subtype",
+                )?;
+            }
             ItemQuality::Magic => {
                 d2r_v3_write_checked(
                     &mut emitter,
@@ -5144,6 +5227,26 @@ impl Item {
         }
         for &word in &auxiliary.realm_data {
             d2r_v3_write_checked(&mut emitter, word as u64, 32, "realm word")?;
+        }
+        if layout == D2rV3StoredLayout::Armor {
+            // These are encoded body values, not logical scalar properties with SaveAdd.
+            for (value, stat_id, name) in [
+                (self.body.defense, 31, "stored defense"),
+                (self.body.max_durability, 73, "stored maximum durability"),
+                (
+                    self.body.current_durability,
+                    72,
+                    "stored current durability",
+                ),
+            ] {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    value.ok_or_else(|| invalid("Missing D2R v3 armor body field"))? as u64,
+                    crate::domain::stats::stat_save_bits(stat_id)
+                        .ok_or_else(|| invalid("Missing D2R v3 armor body width"))?,
+                    name,
+                )?;
+            }
         }
         emitter.write_bit(auxiliary.has_quantity)?;
         if auxiliary.has_quantity {

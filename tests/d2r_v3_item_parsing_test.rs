@@ -61,6 +61,350 @@ fn without_item_bit_cache(item: &Item) -> Item {
     semantic
 }
 
+const ARMOR_FIXTURE: &str = "tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s";
+
+fn assert_stored_item_model(actual: &Item, expected: &Item) {
+    assert_eq!(actual.header, expected.header);
+    assert_eq!(actual.code.trim(), expected.code.trim());
+    let mut actual_body = actual.body.clone();
+    let mut expected_body = expected.body.clone();
+    actual_body.alpha_code_bits.clear();
+    expected_body.alpha_code_bits.clear();
+    assert_eq!(actual_body, expected_body);
+    assert_eq!(
+        (
+            actual.defense,
+            actual.max_durability,
+            actual.current_durability,
+            actual.quantity,
+            actual.sockets
+        ),
+        (
+            expected.defense,
+            expected.max_durability,
+            expected.current_durability,
+            expected.quantity,
+            expected.sockets
+        )
+    );
+    assert_eq!(
+        (
+            actual.has_multiple_graphics,
+            actual.multi_graphics_bits,
+            actual.has_class_specific_data,
+            actual.class_specific_bits,
+            actual.low_high_graphic_bits
+        ),
+        (
+            expected.has_multiple_graphics,
+            expected.multi_graphics_bits,
+            expected.has_class_specific_data,
+            expected.class_specific_bits,
+            expected.low_high_graphic_bits
+        )
+    );
+    assert_eq!(
+        (
+            actual.magic_prefix,
+            actual.magic_suffix,
+            actual.rare_name_1,
+            actual.rare_name_2,
+            actual.rare_affixes,
+            actual.unique_id,
+            actual.runeword_id,
+            actual.runeword_level
+        ),
+        (
+            expected.magic_prefix,
+            expected.magic_suffix,
+            expected.rare_name_1,
+            expected.rare_name_2,
+            expected.rare_affixes,
+            expected.unique_id,
+            expected.runeword_id,
+            expected.runeword_level
+        )
+    );
+    assert_eq!(
+        (
+            actual.properties_complete,
+            actual.terminator_bit,
+            actual.set_list_count
+        ),
+        (
+            expected.properties_complete,
+            expected.terminator_bit,
+            expected.set_list_count
+        )
+    );
+    let logical = |properties: &[d2r_core::domain::stats::entity::ItemProperty]| {
+        properties
+            .iter()
+            .map(|p| (p.stat_id, p.param, p.value, p.is_opaque, p.is_verified()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(logical(&actual.properties), logical(&expected.properties));
+    assert_eq!(
+        actual
+            .set_attributes
+            .iter()
+            .map(|p| logical(p))
+            .collect::<Vec<_>>(),
+        expected
+            .set_attributes
+            .iter()
+            .map(|p| logical(p))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        logical(&actual.runeword_attributes),
+        logical(&expected.runeword_attributes)
+    );
+    assert_eq!(actual.socketed_items.len(), expected.socketed_items.len());
+    for (a, b) in actual.socketed_items.iter().zip(&expected.socketed_items) {
+        assert_eq!(a.range, b.range);
+        assert_stored_item_model(a, b);
+    }
+}
+
+fn read_stored_leaf(bytes: &[u8], start: u64, index: usize) -> (Item, u64) {
+    let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+    reader.skip(u32::try_from(start).unwrap()).unwrap();
+    let mut cursor = BitCursor::new(reader);
+    cursor.set_pos(start);
+    cursor.base_pos = 0;
+    let mut item = Item::from_reader_with_context_d2r_v3(
+        &mut cursor,
+        &HuffmanTree::new(),
+        Some((bytes, start)),
+        index,
+        0x69,
+    )
+    .expect("natural explicit-dialect leaf decode");
+    let unaligned = cursor.pos();
+    assert_eq!((item.range.start, item.range.end), (start, unaligned));
+    assert!(!item.header.is_socketed && item.socketed_items.is_empty());
+    assert_eq!(
+        item.body.d2r_v3_auxiliary.as_ref().unwrap().filled_sockets,
+        0
+    );
+    cursor.byte_align().unwrap();
+    let aligned = cursor.pos();
+    let padding = source_bits(bytes, unaligned, aligned);
+    assert_eq!(padding.len() as u64, (8 - unaligned % 8) % 8);
+    item.body
+        .d2r_v3_auxiliary
+        .as_mut()
+        .unwrap()
+        .alignment_padding = Some(padding);
+    (item, aligned)
+}
+
+fn patch_raw_field(bytes: &mut [u8], start: u64, end: u64, value: u32) {
+    assert!((1..=31).contains(&(end - start)));
+    assert!(u64::from(value) < 1_u64 << (end - start));
+    for bit in start..end {
+        let mask = 1 << (bit % 8);
+        let byte = &mut bytes[bit as usize / 8];
+        if value & (1 << (bit - start)) != 0 {
+            *byte |= mask;
+        } else {
+            *byte &= !mask;
+        }
+    }
+}
+
+fn change_stored_armor(item: &mut Item, field: &str, raw: u32) {
+    match field {
+        "defense" => {
+            item.body.defense = Some(raw);
+            item.defense = Some(raw);
+        }
+        "maximum" => {
+            item.body.max_durability = Some(raw);
+            item.max_durability = Some(raw);
+        }
+        "current" => {
+            item.body.current_durability = Some(raw);
+            item.current_durability = Some(raw);
+        }
+        "stat16" => item.properties[0].value -= 1,
+        "stat75" => item.properties[1].value -= 1,
+        _ => panic!("unknown test field"),
+    }
+}
+
+#[invariant_test]
+fn d2r_v3_armor_reconstruction_and_field_mutations_are_bit_exact() {
+    let (bytes, items) = read_d2r_v3_items(ARMOR_FIXTURE);
+    let huffman = HuffmanTree::new();
+    assert_eq!(items.len(), 16);
+    for (index, code, quality, start, end) in [
+        (4, "hla", ItemQuality::Normal, 7680, 7840),
+        (5, "lgl", ItemQuality::Magic, 7840, 8040),
+        (7, "lbt", ItemQuality::High, 8240, 8440),
+        (8, "cap", ItemQuality::Low, 8440, 8608),
+    ] {
+        let expected = &items[index];
+        assert_eq!(
+            (
+                expected.code.trim(),
+                expected.header.quality,
+                expected.range.start,
+                expected.range.end
+            ),
+            (code, Some(quality), start, end)
+        );
+        let (leaf, natural_end) = read_stored_leaf(&bytes, start, index);
+        assert_eq!(natural_end, end);
+        assert_stored_item_model(&leaf, expected);
+        if index == 4 || index == 7 {
+            let semantic = without_item_bit_cache(&leaf);
+            assert_eq!(
+                semantic.to_bits_d2r_v3_armor(&huffman).unwrap(),
+                source_bits(&bytes, start, end)
+            );
+        }
+    }
+    // The stored base maximum is not the computed in-game maximum.
+    assert_eq!(
+        (
+            items[7].body.max_durability,
+            items[7].body.current_durability
+        ),
+        (Some(12), Some(13))
+    );
+    assert_eq!(
+        (
+            items[7].properties[1].stat_id,
+            items[7].properties[1].raw_value,
+            items[7].properties[1].value
+        ),
+        (75, 34, 14)
+    );
+    let fields = [
+        (4, "defense", 7799, 7810, 34, 35),
+        (4, "maximum", 7810, 7818, 28, 29),
+        (4, "current", 7818, 7827, 28, 27),
+        (7, "defense", 8361, 8372, 14, 15),
+        (7, "maximum", 8372, 8380, 12, 13),
+        (7, "current", 8380, 8389, 13, 12),
+        (7, "stat16", 8399, 8408, 15, 14),
+        (7, "stat75", 8417, 8424, 34, 33),
+    ];
+    let mut combined = bytes.clone();
+    let mut desired = items.clone();
+    for (index, field, start, end, before, after) in fields {
+        assert_eq!(raw_little_endian(&source_bits(&bytes, start, end)), before);
+        let target = &items[index];
+        let mut semantic = without_item_bit_cache(target);
+        let stale_raw: Vec<_> = semantic.properties.iter().map(|p| p.raw_value).collect();
+        change_stored_armor(&mut semantic, field, after);
+        assert_eq!(
+            semantic
+                .properties
+                .iter()
+                .map(|p| p.raw_value)
+                .collect::<Vec<_>>(),
+            stale_raw
+        );
+        let emitted = semantic.to_bits_d2r_v3_armor(&huffman).unwrap();
+        assert_eq!(emitted.len() as u64, target.range.end - target.range.start);
+        let mut patched = bytes.clone();
+        patch_raw_field(&mut patched, start, end, after);
+        assert_eq!(
+            emitted,
+            source_bits(&patched, target.range.start, target.range.end)
+        );
+        assert_eq!(
+            source_bits(&patched, 0, start),
+            source_bits(&bytes, 0, start)
+        );
+        assert_eq!(
+            source_bits(&patched, end, bytes.len() as u64 * 8),
+            source_bits(&bytes, end, bytes.len() as u64 * 8)
+        );
+        let (actual, natural_end) = read_stored_leaf(&patched, target.range.start, index);
+        assert_eq!(natural_end, target.range.end);
+        assert_stored_item_model(&actual, &semantic);
+        let (next, next_end) = read_stored_leaf(&patched, natural_end, index + 1);
+        assert_eq!(next_end, items[index + 1].range.end);
+        assert_stored_item_model(&next, &items[index + 1]);
+        change_stored_armor(&mut desired[index], field, after);
+        patch_raw_field(&mut combined, start, end, after);
+    }
+    let reparsed = Item::read_player_items_d2r_v3(&combined, &huffman).unwrap();
+    assert_eq!(reparsed.len(), 16);
+    for (actual, expected) in reparsed.iter().zip(&desired) {
+        assert_eq!(actual.range, expected.range);
+        assert_stored_item_model(actual, expected);
+    }
+    println!(
+        "Armor reconstruction verified:2 originals;8 mutations;20 leaf decodes;16 combined primary seams."
+    );
+}
+
+#[settled_contract_test]
+fn d2r_v3_armor_rejects_unsupported_or_lossy_states() {
+    let (_, items) = read_d2r_v3_items(ARMOR_FIXTURE);
+    let huffman = HuffmanTree::new();
+    let mut rejected = 0;
+    let mut reject = |item: Item| {
+        let error = item
+            .to_bits_d2r_v3_armor(&huffman)
+            .expect_err("unsupported armor must not silently fall back");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        rejected += 1;
+    };
+    for index in [4, 7] {
+        let semantic = without_item_bit_cache(&items[index]);
+        let mut bad = semantic.clone();
+        bad.body.defense = None;
+        reject(bad);
+        let mut bad = semantic.clone();
+        let overflow = 1 << d2r_core::domain::stats::stat_save_bits(31).unwrap();
+        bad.body.defense = Some(overflow);
+        bad.defense = Some(overflow);
+        reject(bad);
+        let mut bad = semantic.clone();
+        bad.body.current_durability = None;
+        reject(bad);
+        let mut bad = semantic.clone();
+        bad.header.quality = Some(ItemQuality::Magic);
+        reject(bad);
+        let mut bad = semantic.clone();
+        bad.quantity = Some(1);
+        reject(bad);
+        let mut bad = semantic.clone();
+        bad.properties.pop();
+        reject(bad);
+        let mut bad = semantic.clone();
+        bad.body.max_durability = Some(0);
+        bad.max_durability = Some(0);
+        reject(bad);
+    }
+    let mut bad = without_item_bit_cache(&items[7]);
+    bad.low_high_graphic_bits = None;
+    reject(bad);
+    let mut bad = without_item_bit_cache(&items[7]);
+    bad.properties[0].is_opaque = true;
+    reject(bad);
+    let mut bad = without_item_bit_cache(&items[7]);
+    bad.low_high_graphic_bits = Some(8);
+    reject(bad);
+    let mut bad = without_item_bit_cache(&items[4]);
+    bad.low_high_graphic_bits = Some(1);
+    reject(bad);
+    let mut bad = without_item_bit_cache(&items[4]);
+    bad.current_durability = Some(29);
+    reject(bad);
+    let mut bad = without_item_bit_cache(&items[4]);
+    bad.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 4];
+    reject(bad);
+    assert_eq!(rejected, 20);
+    println!("Armor rejection contract verified:20 InvalidInput controls.");
+}
+
 #[invariant_test]
 fn d2r_v3_rare_jewelry_reconstruction_and_option_witnesses() {
     use d2r_core::domain::stats::entity::ItemProperty;
@@ -548,7 +892,10 @@ fn d2r_v3_set_jewelry_reconstruction_and_option_witnesses() {
         expected_property.raw_value += 1;
         assert_eq!(actual.properties, expected.properties);
         assert_eq!(actual.set_attributes, expected.set_attributes);
-        println!("{{\"case\":\"set_option_witness\",\"stat_id\":{stat_id},\"value_start\":{},\"end\":{end},\"changed_bit\":{changed_bit}}}", start + 9);
+        println!(
+            "{{\"case\":\"set_option_witness\",\"stat_id\":{stat_id},\"value_start\":{},\"end\":{end},\"changed_bit\":{changed_bit}}}",
+            start + 9
+        );
     }
     assert_eq!(fs::read(path).unwrap(), bytes, "fixture must be immutable");
 }
@@ -740,10 +1087,15 @@ fn d2r_v3_jewelry_manald_rebuild_and_option_bit_witnesses() {
                 (previous.param, expected_value)
             );
         }
-        println!("{{\"case\":\"option_bit_witness\",\"stat_id\":{stat_id},\"id_start\":{start},\"value_start\":{},\"end\":{end},\"width\":{width},\"save_add\":{save_add},\"raw\":{raw},\"logical\":{logical},\"mutation_confined\":true}}", start + 9);
+        println!(
+            "{{\"case\":\"option_bit_witness\",\"stat_id\":{stat_id},\"id_start\":{start},\"value_start\":{},\"end\":{end},\"width\":{width},\"save_add\":{save_add},\"raw\":{raw},\"logical\":{logical},\"mutation_confined\":true}}",
+            start + 9
+        );
     }
     assert_eq!(raw_little_endian(&source_bits(&bytes, 11524, 11533)), 511);
-    println!("{{\"case\":\"manald_semantic_reconstruction\",\"source_bits\":216,\"emitted_bits\":216,\"differing_bits\":0,\"raw_item_cache_used\":false}}");
+    println!(
+        "{{\"case\":\"manald_semantic_reconstruction\",\"source_bits\":216,\"emitted_bits\":216,\"differing_bits\":0,\"raw_item_cache_used\":false}}"
+    );
 }
 
 #[hypothesis_test]
@@ -1271,7 +1623,9 @@ fn d2r_v3_player_list_rejects_unowned_or_unsupported_prefix() {
     for length in [0, 7, 834, 835, 883, 918] {
         assert!(Item::read_player_items_d2r_v3(&beta[..length], &huffman).is_err());
     }
-    println!("{{\"case\":\"invalid_player_prefix\",\"marker_or_version_cases\":5,\"unknown_id_rejected\":true,\"truncation_cases\":6}}");
+    println!(
+        "{{\"case\":\"invalid_player_prefix\",\"marker_or_version_cases\":5,\"unknown_id_rejected\":true,\"truncation_cases\":6}}"
+    );
 }
 
 #[settled_contract_test]
@@ -1280,9 +1634,11 @@ fn d2r_v3_explicit_list_requires_the_supplied_boundary() {
         .expect("Beta authority must exist");
     let huffman = HuffmanTree::new();
     let fragment = b"JM\x00\x00JM\x01\x00";
-    assert!(Item::read_counted_list_d2r_v3(fragment, 0, &huffman, 0x69)
-        .unwrap()
-        .is_empty());
+    assert!(
+        Item::read_counted_list_d2r_v3(fragment, 0, &huffman, 0x69)
+            .unwrap()
+            .is_empty()
+    );
     assert!(Item::read_player_items_d2r_v3(fragment, &huffman).is_err());
     for offset in [usize::MAX, fragment.len(), 1, 4] {
         assert!(Item::read_counted_list_d2r_v3(fragment, offset, &huffman, 0x69).is_err());
@@ -1453,9 +1809,11 @@ fn d2r_v3_same_assassin_pair_recovers_the_cap_to_manald_swap() {
         option_vector,
         [(7, 0, 20), (27, 0, 20), (62, 0, 6), (74, 0, 8)]
     );
-    assert!(semantic_properties
-        .iter()
-        .all(|property| !property.is_opaque));
+    assert!(
+        semantic_properties
+            .iter()
+            .all(|property| !property.is_opaque)
+    );
 
     let manald_template = UNIQUE_ITEMS
         .iter()
