@@ -1,8 +1,8 @@
-use bitstream_io::{BitRead, Numeric};
-use crate::domain::item::{BitSegment, RecordedBit};
-use crate::domain::item::quality::ItemQuality;
 use crate::domain::header::entity::ItemSegmentType;
+use crate::domain::item::quality::ItemQuality;
+use crate::domain::item::{BitSegment, RecordedBit};
 use crate::error::{BackingBitCursor, ParsingError, ParsingFailure, ParsingResult};
+use bitstream_io::{BitRead, Numeric};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -36,11 +36,17 @@ impl<R: BitRead> BackingBitCursor for BitCursor<R> {
     }
 
     fn context_stack(&self) -> Vec<String> {
-        self.context_stack.iter().map(|(label, _, _)| label.clone()).collect()
+        self.context_stack
+            .iter()
+            .map(|(label, _, _)| label.clone())
+            .collect()
     }
 
     fn current_context_start(&self) -> u64 {
-        self.context_stack.last().map(|(_, start, _)| *start).unwrap_or(0)
+        self.context_stack
+            .last()
+            .map(|(_, start, _)| *start)
+            .unwrap_or(0)
     }
 }
 
@@ -138,12 +144,17 @@ impl<R: BitRead> BitCursor<R> {
     }
 
     /// Reads multiple bits from the stream as a numeric type.
-    pub fn read_bits<T: Numeric + From<u8> + std::ops::BitOrAssign + std::ops::Shl<u32, Output = T>>(&mut self, count: u32) -> ParsingResult<T> {
+    pub fn read_bits<
+        T: Numeric + From<u8> + std::ops::BitOrAssign + std::ops::Shl<u32, Output = T>,
+    >(
+        &mut self,
+        count: u32,
+    ) -> ParsingResult<T> {
         let pre_read_bit = self.bit_pos;
         let context_stack = self.context_stack();
         let operation_label = context_stack
             .last()
-            .filter(|label| label.starts_with("ExtendedStats:"))
+            .filter(|label| label.starts_with("ExtendedStats:") || *label == "Stats")
             .cloned();
         let mut value = T::from(0u8);
         let max_bits = (std::mem::size_of::<T>() * 8) as u32;
@@ -226,7 +237,8 @@ impl<R: BitRead> BitCursor<R> {
 
     /// Begins a new semantic segment with a custom label.
     pub fn push_context(&mut self, label: &str) {
-        self.context_stack.push((label.to_string(), self.bit_pos, None));
+        self.context_stack
+            .push((label.to_string(), self.bit_pos, None));
     }
 
     /// Begins a new semantic segment from an enum type.
@@ -235,8 +247,13 @@ impl<R: BitRead> BitCursor<R> {
     }
 
     /// Begins a new semantic segment with an expected bit length.
-    pub fn begin_segment_with_expected(&mut self, segment_type: ItemSegmentType, expected: Option<u64>) {
-        self.context_stack.push((format!("{:?}", segment_type), self.bit_pos, expected));
+    pub fn begin_segment_with_expected(
+        &mut self,
+        segment_type: ItemSegmentType,
+        expected: Option<u64>,
+    ) {
+        self.context_stack
+            .push((format!("{:?}", segment_type), self.bit_pos, expected));
     }
 
     /// Ends the current semantic segment and records it.
@@ -259,7 +276,8 @@ impl<R: BitRead> BitCursor<R> {
     }
 
     pub fn with_context<T, F>(&mut self, name: &str, mut f: F) -> ParsingResult<T>
-    where F: FnMut(&mut Self) -> ParsingResult<T>
+    where
+        F: FnMut(&mut Self) -> ParsingResult<T>,
     {
         self.push_context(name);
         let res = f(self);
@@ -272,7 +290,10 @@ impl<R: BitRead> BitCursor<R> {
     }
 
     pub fn context_stack(&self) -> Vec<String> {
-        self.context_stack.iter().map(|(label, _, _)| label.clone()).collect()
+        self.context_stack
+            .iter()
+            .map(|(label, _, _)| label.clone())
+            .collect()
     }
 
     pub fn get_context_count(&self) -> usize {
@@ -335,7 +356,7 @@ impl<R: BitRead> BitCursor<R> {
     }
 
     pub fn peek_bits_string(&mut self, _count: u32) -> ParsingResult<String> {
-         Ok("peek_not_implemented".to_string())
+        Ok("peek_not_implemented".to_string())
     }
 }
 
@@ -412,7 +433,10 @@ mod tests {
         assert_eq!(cursor.operation_events()[1].outcome, "failure");
         assert_eq!(cursor.operation_events()[1].pre_read_bit, 2);
         assert_eq!(cursor.operation_events()[1].post_read_bit, 2);
-        assert_eq!(cursor.operation_events()[1].context_stack, vec!["ExtendedStats:id"]);
+        assert_eq!(
+            cursor.operation_events()[1].context_stack,
+            vec!["ExtendedStats:id"]
+        );
 
         let bytes = vec![0b00000000];
         let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
@@ -421,6 +445,36 @@ mod tests {
         non_extended.push_context("Other:id");
         assert!(non_extended.read_bits::<u32>(1).is_ok());
         assert!(non_extended.operation_events().is_empty());
+    }
+
+    #[test]
+    fn test_stats_context_read_bits_trace_events() {
+        let bytes = vec![0b00000000];
+        let reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_trace(true);
+        cursor.set_limit(2);
+
+        cursor.push_context("Stats");
+        let success = cursor.read_bits::<u32>(2);
+        assert_eq!(success.unwrap(), 0);
+        let failure = cursor.read_bits::<u32>(2);
+        assert!(failure.is_err());
+        cursor.pop_context();
+
+        assert_eq!(cursor.operation_events().len(), 2);
+        assert_eq!(cursor.operation_events()[0].operation_label, "Stats");
+        assert_eq!(cursor.operation_events()[0].requested_width_bits, Some(2));
+        assert_eq!(cursor.operation_events()[0].pre_read_bit, 0);
+        assert_eq!(cursor.operation_events()[0].post_read_bit, 2);
+        assert_eq!(cursor.operation_events()[0].outcome, "success");
+        assert_eq!(cursor.operation_events()[0].context_stack, vec!["Stats"]);
+        assert_eq!(cursor.operation_events()[1].operation_label, "Stats");
+        assert_eq!(cursor.operation_events()[1].requested_width_bits, Some(2));
+        assert_eq!(cursor.operation_events()[1].pre_read_bit, 2);
+        assert_eq!(cursor.operation_events()[1].post_read_bit, 2);
+        assert_eq!(cursor.operation_events()[1].outcome, "failure");
+        assert_eq!(cursor.operation_events()[1].context_stack, vec!["Stats"]);
     }
 
     #[test]
@@ -441,8 +495,14 @@ mod tests {
         assert_eq!(cursor.operation_events().len(), 2);
         assert_eq!(cursor.operation_events()[0].outcome, "success");
         assert_eq!(cursor.operation_events()[1].outcome, "failure");
-        assert_eq!(cursor.operation_events()[0].operation_label, "ExtendedStats:id");
-        assert_eq!(cursor.operation_events()[1].operation_label, "ExtendedStats:id");
+        assert_eq!(
+            cursor.operation_events()[0].operation_label,
+            "ExtendedStats:id"
+        );
+        assert_eq!(
+            cursor.operation_events()[1].operation_label,
+            "ExtendedStats:id"
+        );
         assert_eq!(
             cursor.operation_events()[0].context_stack,
             vec!["Root", "ExtendedStats", "ExtendedStats:id"]
