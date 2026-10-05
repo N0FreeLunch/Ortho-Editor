@@ -2,16 +2,18 @@
 // Standalone verification binary for collecting item opaque predicate hits across a save corpus.
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::Instant;
 
 use std::collections::BTreeMap;
 
 use d2r_core::domain::item::opaque_probe::{
-    collect_boundary_candidates, probe_opaque_item, BoundaryCandidate, OpaqueProbeRequest,
-    ParserProbe,
+    BoundaryCandidate, OpaqueProbeRequest, ParserProbe, collect_boundary_candidates,
+    probe_opaque_item,
 };
 use d2r_core::domain::item::scanner::scan_item_markers;
 use d2r_core::item::{HuffmanTree, Item, ItemClassProjection};
@@ -120,6 +122,118 @@ struct CollectedItemInfo<'a> {
     is_top_level: bool,
 }
 
+#[derive(Default)]
+struct SaveCensusResult {
+    unreadable_save: Option<UnreadableSave>,
+    total_items_collected: usize,
+    cache_ineligible_count: usize,
+    opaque_predicate_hit_count: usize,
+    classification_counts: ClassificationCounts,
+    rows: Vec<CensusRow>,
+}
+
+fn validate_input_options(file: Option<&str>, has_limit: bool) -> Result<()> {
+    if file.is_some() && has_limit {
+        anyhow::bail!("--file cannot be combined with --limit");
+    }
+    Ok(())
+}
+
+fn parse_limit(value: Option<&str>) -> Result<Option<usize>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let limit = value.parse::<usize>().with_context(|| {
+        format!(
+            "Invalid --limit value '{}': expected a positive integer",
+            value
+        )
+    })?;
+    if limit == 0 {
+        anyhow::bail!("--limit must be greater than zero");
+    }
+    Ok(Some(limit))
+}
+
+fn limit_sorted_save_paths(
+    mut save_files: Vec<PathBuf>,
+    limit: Option<usize>,
+) -> Result<Vec<PathBuf>> {
+    if limit == Some(0) {
+        anyhow::bail!("--limit must be greater than zero");
+    }
+    save_files.sort();
+    if let Some(limit) = limit {
+        save_files.truncate(limit);
+    }
+    Ok(save_files)
+}
+
+fn collect_d2s_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_d2s_recursive(&path, files);
+            } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("d2s") {
+                files.push(path);
+            }
+        }
+    }
+}
+
+fn select_save_files(
+    saves_dir: &str,
+    file: Option<&str>,
+    limit_value: Option<&str>,
+) -> Result<(String, Vec<PathBuf>)> {
+    validate_input_options(file, limit_value.is_some())?;
+    let limit = parse_limit(limit_value)?;
+
+    if let Some(file) = file {
+        let save_path = PathBuf::from(file);
+        if !save_path.is_file() {
+            anyhow::bail!("--file path '{}' does not exist or is not a file", file);
+        }
+        if save_path.extension().and_then(|s| s.to_str()) != Some("d2s") {
+            anyhow::bail!("--file path '{}' must have a .d2s extension", file);
+        }
+
+        let report_dir = save_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        return Ok((report_dir.display().to_string(), vec![save_path]));
+    }
+
+    let saves_dir_path = Path::new(saves_dir);
+    if !saves_dir_path.exists() || !saves_dir_path.is_dir() {
+        anyhow::bail!(
+            "Saves directory '{}' does not exist or is not a directory",
+            saves_dir
+        );
+    }
+
+    let mut save_files = Vec::new();
+    collect_d2s_recursive(saves_dir_path, &mut save_files);
+    let save_files = limit_sorted_save_paths(save_files, limit)?;
+    Ok((saves_dir.to_string(), save_files))
+}
+
+fn parallel_map_ordered<T, R, F>(items: &[T], map: F) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(usize, &T) -> R + Send + Sync,
+{
+    items
+        .par_iter()
+        .enumerate()
+        .map(|(index, item)| map(index, item))
+        .collect()
+}
+
 fn collect_items_recursive<'a>(
     item: &'a Item,
     section: Option<String>,
@@ -166,12 +280,29 @@ fn main() -> Result<()> {
         .default("tests/fixtures/savegames/modified");
 
     parser
+        .add_opt(
+            "file",
+            "Scan exactly one .d2s save file; overrides --saves-dir",
+        )
+        .long("file");
+
+    parser
+        .add_opt(
+            "limit",
+            "Scan the first N saves from the sorted directory listing",
+        )
+        .long("limit");
+
+    parser
         .add_flag("json", "Emit opaque census report in JSON format to stdout")
         .short('j')
         .long("json");
 
     parser
-        .add_flag("probe", "Probe top-level opaque items using section boundary candidates")
+        .add_flag(
+            "probe",
+            "Probe top-level opaque items using section boundary candidates",
+        )
         .long("probe");
 
     parser
@@ -215,40 +346,58 @@ fn main() -> Result<()> {
         process::exit(1);
     }
 
-    let saves_dir_str = parsed
+    let configured_saves_dir = parsed
         .get("saves-dir")
-        .cloned()
-        .unwrap_or_else(|| "tests/fixtures/savegames/modified".to_string());
-
-    let saves_dir_path = Path::new(&saves_dir_str);
-    if !saves_dir_path.exists() || !saves_dir_path.is_dir() {
-        eprintln!(
-            "[ERROR] Saves directory '{}' does not exist or is not a directory.",
-            saves_dir_str
-        );
-        process::exit(1);
-    }
-
-    let enable_probe = parsed.is_set("probe");
-
-    let mut save_files: Vec<PathBuf> = Vec::new();
-    fn collect_d2s_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    collect_d2s_recursive(&path, files);
-                } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("d2s") {
-                    files.push(path);
-                }
-            }
-        }
-    }
-    collect_d2s_recursive(saves_dir_path, &mut save_files);
-    save_files.sort();
+        .map(String::as_str)
+        .unwrap_or("tests/fixtures/savegames/modified");
+    let (saves_dir_str, save_files) = select_save_files(
+        configured_saves_dir,
+        parsed.get("file").map(String::as_str),
+        parsed.get("limit").map(String::as_str),
+    )?;
 
     let total_saves_scanned = save_files.len();
     let huffman = HuffmanTree::new();
+    let per_save_results: Vec<Result<SaveCensusResult>> =
+        parallel_map_ordered(&save_files, |index, save_path| {
+            let started_at = Instant::now();
+            let save_file = save_path.display().to_string();
+            eprintln!(
+                "[CENSUS] started index={}/{} path={}",
+                index + 1,
+                total_saves_scanned,
+                save_file
+            );
+
+            match process_save(save_path, &huffman, enable_probe, enable_trace_header_gap) {
+                Ok(result) => {
+                    let outcome = if result.unreadable_save.is_some() {
+                        "unreadable"
+                    } else {
+                        "readable"
+                    };
+                    eprintln!(
+                        "[CENSUS] completed index={}/{} elapsed_ms={} outcome={} path={}",
+                        index + 1,
+                        total_saves_scanned,
+                        started_at.elapsed().as_millis(),
+                        outcome,
+                        save_file
+                    );
+                    Ok(result)
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[CENSUS] failed index={}/{} elapsed_ms={} outcome=error path={}",
+                        index + 1,
+                        total_saves_scanned,
+                        started_at.elapsed().as_millis(),
+                        save_file
+                    );
+                    Err(error).with_context(|| format!("Failed to census save '{}'", save_file))
+                }
+            }
+        });
 
     let mut unreadable_saves = Vec::new();
     let mut total_items_collected = 0usize;
@@ -257,118 +406,20 @@ fn main() -> Result<()> {
     let mut classification_counts = ClassificationCounts::default();
     let mut rows = Vec::new();
 
-    for save_path in &save_files {
-        let save_file_rel = save_path.display().to_string();
-        let bytes = match fs::read(save_path) {
-            Ok(b) => b,
-            Err(e) => {
-                unreadable_saves.push(UnreadableSave {
-                    save_file: save_file_rel,
-                    reason: format!("File read error: {}", e),
-                });
-                continue;
-            }
-        };
-
-        if bytes.len() < 8 {
-            unreadable_saves.push(UnreadableSave {
-                save_file: save_file_rel,
-                reason: "File buffer under 8 bytes".to_string(),
-            });
-            continue;
+    for result in per_save_results {
+        let mut result = result?;
+        if let Some(unreadable_save) = result.unreadable_save.take() {
+            unreadable_saves.push(unreadable_save);
         }
-
-        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-        let is_alpha = version == 105;
-
-        let jm_positions = find_jm_markers(&bytes);
-        if jm_positions.is_empty() {
-            unreadable_saves.push(UnreadableSave {
-                save_file: save_file_rel,
-                reason: "No JM section markers found".to_string(),
-            });
-            continue;
-        }
-
-        let pos = jm_positions[0];
-        if bytes.len() < pos + 4 {
-            unreadable_saves.push(UnreadableSave {
-                save_file: save_file_rel,
-                reason: "Player Items JM section header truncated".to_string(),
-            });
-            continue;
-        }
-
-        let item_count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
-        let next_pos = jm_positions.get(1).copied().unwrap_or(bytes.len());
-        let section_data = &bytes[pos..next_pos];
-        let section_bit_offset = pos as u64 * 8;
-
-        let top_items = match Item::read_section(
-            section_data,
-            section_bit_offset,
-            item_count,
-            &huffman,
-            is_alpha,
-            false,
-        ) {
-            Ok(items) => items,
-            Err(e) => {
-                unreadable_saves.push(UnreadableSave {
-                    save_file: save_file_rel,
-                    reason: format!("Failed to parse Player Items section: {}", e),
-                });
-                continue;
-            }
-        };
-
-        let scanner_markers = if enable_probe {
-            Some(scan_item_markers(
-                section_data,
-                &huffman,
-                is_alpha,
-                section_bit_offset,
-                Some(item_count),
-                true,
-            ))
-        } else {
-            None
-        };
-
-        let mut save_item_counter = 0usize;
-
-        for (t_idx, top_item) in top_items.iter().enumerate() {
-            let mut collected = Vec::new();
-            let top_path = format!("{}", t_idx);
-            collect_items_recursive(
-                top_item,
-                Some("Player Items".to_string()),
-                &top_path,
-                &mut save_item_counter,
-                t_idx,
-                true,
-                &mut collected,
-            );
-
-            for info in collected {
-                process_collected_item(
-                    info,
-                    &save_file_rel,
-                    &bytes,
-                    &huffman,
-                    is_alpha,
-                    enable_probe,
-                    enable_trace_header_gap,
-                    scanner_markers.as_deref(),
-                    section_bit_offset,
-                    &mut total_items_collected,
-                    &mut cache_ineligible_count,
-                    &mut opaque_predicate_hit_count,
-                    &mut classification_counts,
-                    &mut rows,
-                )?;
-            }
-        }
+        total_items_collected += result.total_items_collected;
+        cache_ineligible_count += result.cache_ineligible_count;
+        opaque_predicate_hit_count += result.opaque_predicate_hit_count;
+        classification_counts.parsed_with_raw_carrier +=
+            result.classification_counts.parsed_with_raw_carrier;
+        classification_counts.semi_opaque += result.classification_counts.semi_opaque;
+        classification_counts.residue += result.classification_counts.residue;
+        classification_counts.opaque += result.classification_counts.opaque;
+        rows.append(&mut result.rows);
     }
 
     let causal_taxonomy = if enable_causal_taxonomy {
@@ -386,7 +437,8 @@ fn main() -> Result<()> {
                     if probe.outcome == "parse_failure" {
                         let err_str = probe.failure_error.clone().unwrap_or_default();
                         let ctx_stack = probe.failure_context_stack.clone().unwrap_or_default();
-                        let nearest_delta = if let Some(fail_offset) = probe.failure_bit_offset_abs {
+                        let nearest_delta = if let Some(fail_offset) = probe.failure_bit_offset_abs
+                        {
                             if let Some(candidates) = &row.boundary_candidates {
                                 candidates
                                     .iter()
@@ -483,6 +535,128 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn unreadable_result(save_file: String, reason: String) -> SaveCensusResult {
+    SaveCensusResult {
+        unreadable_save: Some(UnreadableSave { save_file, reason }),
+        ..SaveCensusResult::default()
+    }
+}
+
+fn process_save(
+    save_path: &Path,
+    huffman: &HuffmanTree,
+    enable_probe: bool,
+    enable_trace_header_gap: bool,
+) -> Result<SaveCensusResult> {
+    let save_file = save_path.display().to_string();
+    let bytes = match fs::read(save_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return Ok(unreadable_result(
+                save_file,
+                format!("File read error: {}", error),
+            ));
+        }
+    };
+
+    if bytes.len() < 8 {
+        return Ok(unreadable_result(
+            save_file,
+            "File buffer under 8 bytes".to_string(),
+        ));
+    }
+
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version == 105;
+    let jm_positions = find_jm_markers(&bytes);
+    if jm_positions.is_empty() {
+        return Ok(unreadable_result(
+            save_file,
+            "No JM section markers found".to_string(),
+        ));
+    }
+
+    let pos = jm_positions[0];
+    if bytes.len() < pos + 4 {
+        return Ok(unreadable_result(
+            save_file,
+            "Player Items JM section header truncated".to_string(),
+        ));
+    }
+
+    let item_count = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+    let next_pos = jm_positions.get(1).copied().unwrap_or(bytes.len());
+    let section_data = &bytes[pos..next_pos];
+    let section_bit_offset = pos as u64 * 8;
+
+    let top_items = match Item::read_section(
+        section_data,
+        section_bit_offset,
+        item_count,
+        huffman,
+        is_alpha,
+        false,
+    ) {
+        Ok(items) => items,
+        Err(error) => {
+            return Ok(unreadable_result(
+                save_file,
+                format!("Failed to parse Player Items section: {}", error),
+            ));
+        }
+    };
+
+    let scanner_markers = if enable_probe {
+        Some(scan_item_markers(
+            section_data,
+            huffman,
+            is_alpha,
+            section_bit_offset,
+            Some(item_count),
+            true,
+        ))
+    } else {
+        None
+    };
+
+    let mut result = SaveCensusResult::default();
+    let mut save_item_counter = 0usize;
+    for (top_level_item_index, top_item) in top_items.iter().enumerate() {
+        let mut collected = Vec::new();
+        let top_path = top_level_item_index.to_string();
+        collect_items_recursive(
+            top_item,
+            Some("Player Items".to_string()),
+            &top_path,
+            &mut save_item_counter,
+            top_level_item_index,
+            true,
+            &mut collected,
+        );
+
+        for info in collected {
+            process_collected_item(
+                info,
+                &save_file,
+                &bytes,
+                huffman,
+                is_alpha,
+                enable_probe,
+                enable_trace_header_gap,
+                scanner_markers.as_deref(),
+                section_bit_offset,
+                &mut result.total_items_collected,
+                &mut result.cache_ineligible_count,
+                &mut result.opaque_predicate_hit_count,
+                &mut result.classification_counts,
+                &mut result.rows,
+            )?;
+        }
+    }
+
+    Ok(result)
 }
 
 fn process_collected_item(
@@ -610,4 +784,43 @@ fn process_collected_item(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_and_limit_are_mutually_exclusive() {
+        let error = validate_input_options(Some("save.d2s"), true).unwrap_err();
+        assert!(error.to_string().contains("cannot be combined"));
+    }
+
+    #[test]
+    fn limit_must_be_a_positive_integer() {
+        assert_eq!(parse_limit(Some("2")).unwrap(), Some(2));
+        assert!(parse_limit(Some("0")).is_err());
+        assert!(parse_limit(Some("not-a-number")).is_err());
+    }
+
+    #[test]
+    fn limit_selects_prefix_after_sorting_paths() {
+        let paths = vec![
+            PathBuf::from("c.d2s"),
+            PathBuf::from("a.d2s"),
+            PathBuf::from("b.d2s"),
+        ];
+        let selected = limit_sorted_save_paths(paths, Some(2)).unwrap();
+        assert_eq!(
+            selected,
+            vec![PathBuf::from("a.d2s"), PathBuf::from("b.d2s")]
+        );
+    }
+
+    #[test]
+    fn parallel_mapping_preserves_input_order() {
+        let paths = ["a.d2s", "b.d2s", "c.d2s"];
+        let mapped = parallel_map_ordered(&paths, |index, path| format!("{index}:{path}"));
+        assert_eq!(mapped, vec!["0:a.d2s", "1:b.d2s", "2:c.d2s"]);
+    }
 }
