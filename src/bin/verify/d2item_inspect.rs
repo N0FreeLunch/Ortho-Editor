@@ -4,8 +4,8 @@ use d2r_core::domain::item::geometry::{
     ExpectedHeaderWidthProducer, HeaderChecksumBranch, LiveHeaderFamilyClassifier,
 };
 use d2r_core::item::{HuffmanTree, Item, ItemModule};
-use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::OutputManager;
+use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -314,17 +314,18 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     );
     map.insert(
         "stats".to_string(),
-        json!(item
-            .properties
-            .iter()
-            .map(|p| {
-                json!({
-                    "id": p.stat_id,
-                    "name": p.name,
-                    "is_unknown": p.name.starts_with("Unknown")
+        json!(
+            item.properties
+                .iter()
+                .map(|p| {
+                    json!({
+                        "id": p.stat_id,
+                        "name": p.name,
+                        "is_unknown": p.name.starts_with("Unknown")
+                    })
                 })
-            })
-            .collect::<Vec<_>>()),
+                .collect::<Vec<_>>()
+        ),
     );
 
     let residue = item.modules.iter().find_map(|m| {
@@ -345,6 +346,22 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     }
 
     serde_json::Value::Object(map)
+}
+
+fn emit_selected_item_json(
+    parsed: &d2r_core::verify::args::ParsedArgs,
+    report: &serde_json::Value,
+    summary: &str,
+) {
+    if parsed.get("output").is_some() || parsed.is_set("token-efficient") {
+        let mut output = OutputManager::new("d2item_inspect", parsed);
+        output.json(&report.to_string());
+        if parsed.is_set("token-efficient") {
+            output.summary(summary);
+        }
+    } else {
+        println!("{}", report);
+    }
 }
 
 fn compare_first_difference_offset(left: &[bool], right: &[bool], base_bit: u64) -> Option<u64> {
@@ -4059,12 +4076,15 @@ fn main() {
                     return;
                 }
                 if is_json {
-                    if parsed.get("output").is_some() {
-                        let mut output = OutputManager::new("d2item_inspect", &parsed);
-                        output.json(&report.to_string());
-                    } else {
-                        println!("{}", report);
-                    }
+                    emit_selected_item_json(
+                        &parsed,
+                        &report,
+                        &format!(
+                            "Inspected section item {} ('{}')",
+                            section_item_index,
+                            item.code.trim()
+                        ),
+                    );
                 } else {
                     println!(
                         "Section item {} '{}' bits {}-{}",
@@ -4345,13 +4365,20 @@ fn main() {
             }
 
             if is_json {
-                println!(
-                    "{}",
-                    json!({
-                        "section_item_index": section_item_index,
-                        "item": item_to_json(item, None),
-                        "errors": []
-                    })
+                let report = json!({
+                    "section_item_index": section_item_index,
+                    "item": item_to_json(item, None),
+                    "errors": []
+                });
+                emit_selected_item_json(
+                    &parsed,
+                    &report,
+                    &format!(
+                        "Inspected section item {} ('{}', {} bits)",
+                        section_item_index,
+                        item.code.trim(),
+                        item.range.end.saturating_sub(item.range.start)
+                    ),
                 );
             } else {
                 println!(
@@ -4502,5 +4529,54 @@ fn main() {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn token_efficient_selected_item_json_writes_explicit_output() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+        let output_path = std::env::temp_dir().join(format!(
+            "d2item_inspect_selected_item_{}_{}.json",
+            std::process::id(),
+            unique
+        ));
+        let mut parser = ArgParser::new("d2item_inspect_test").disable_dotenv();
+        parser.add_flag("json", "Emit JSON").long("json");
+        parser
+            .add_flag("token-efficient", "Use token-efficient output")
+            .long("token-efficient");
+        parser.add_opt("output", "Output path").long("output");
+        let parsed = parser
+            .parse(vec![
+                OsString::from("--json"),
+                OsString::from("--token-efficient"),
+                OsString::from("--output"),
+                OsString::from(output_path.to_string_lossy().as_ref()),
+            ])
+            .expect("test arguments should parse");
+        let report = json!({
+            "section_item_index": 0,
+            "item": {"code": "vgl"},
+            "errors": []
+        });
+
+        emit_selected_item_json(&parsed, &report, "selected item inspected");
+
+        let artifact = fs::read_to_string(&output_path)
+            .expect("explicit output path should receive selected-item JSON");
+        let parsed_artifact: serde_json::Value =
+            serde_json::from_str(&artifact).expect("output artifact should be valid JSON");
+        assert_eq!(parsed_artifact["section_item_index"], 0);
+        assert_eq!(parsed_artifact["item"]["code"], "vgl");
+        fs::remove_file(&output_path).expect("test output should be removable");
     }
 }
