@@ -101,6 +101,28 @@ struct TilingPath {
     trailing_padding_bits: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PruneReason {
+    MaxDepthExceeded,
+    InsufficientStatIdBits,
+    StatIdReadFailure,
+    UnrecognizedStatId,
+    InsufficientParameterBits,
+    InsufficientValueBits,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FirstPrune {
+    relative_offset: usize,
+    depth: usize,
+    reason: PruneReason,
+    raw_stat_id: Option<u16>,
+    canonical_stat_id: Option<u16>,
+    required_bits: Option<usize>,
+    remaining_bits: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct TilingReport {
     input_file: Option<String>,
@@ -109,6 +131,7 @@ struct TilingReport {
     total_solutions: usize,
     is_unique: bool,
     pruned_branches_count: usize,
+    first_prune: Option<FirstPrune>,
     solutions: Vec<TilingPath>,
     alpha_mode: bool,
 }
@@ -137,11 +160,13 @@ fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
 }
 
 fn bitstring_to_bits(s: &str) -> Vec<bool> {
-    s.chars().filter_map(|c| match c {
-        '0' => Some(false),
-        '1' => Some(true),
-        _ => None,
-    }).collect()
+    s.chars()
+        .filter_map(|c| match c {
+            '0' => Some(false),
+            '1' => Some(true),
+            _ => None,
+        })
+        .collect()
 }
 
 // Translate Alpha v105 raw stat ID to canonical stat ID if applicable
@@ -169,25 +194,70 @@ struct TilingSolverContext<'a> {
     is_alpha: bool,
     solutions: Vec<TilingPath>,
     pruned_count: usize,
+    first_prune: Option<FirstPrune>,
 }
 
 impl<'a> TilingSolverContext<'a> {
+    fn record_prune(
+        &mut self,
+        relative_offset: usize,
+        depth: usize,
+        reason: PruneReason,
+        raw_stat_id: Option<u16>,
+        canonical_stat_id: Option<u16>,
+        required_bits: Option<usize>,
+    ) {
+        self.pruned_count += 1;
+        if self.first_prune.is_none() {
+            self.first_prune = Some(FirstPrune {
+                relative_offset,
+                depth,
+                reason,
+                raw_stat_id,
+                canonical_stat_id,
+                required_bits,
+                remaining_bits: self.bits.len().saturating_sub(relative_offset),
+            });
+        }
+    }
+
     fn search(&mut self, offset: usize, current_path: &mut Vec<DecodedProperty>, depth: usize) {
         if depth > self.max_depth {
-            self.pruned_count += 1;
+            self.record_prune(
+                offset,
+                depth,
+                PruneReason::MaxDepthExceeded,
+                None,
+                None,
+                None,
+            );
             return;
         }
 
         // Check if remaining bits are enough to read 9-bit ID
         if offset + 9 > self.bits.len() {
-            self.pruned_count += 1;
+            self.record_prune(
+                offset,
+                depth,
+                PruneReason::InsufficientStatIdBits,
+                None,
+                None,
+                Some(9),
+            );
             return;
         }
 
         let raw_id = match read_u32_from_bits(self.bits, offset, 9) {
             Some(v) => v as u16,
             None => {
-                self.pruned_count += 1;
+                self.record_prune(
+                    offset,
+                    depth,
+                    PruneReason::StatIdReadFailure,
+                    None,
+                    None,
+                    Some(9),
+                );
                 return;
             }
         };
@@ -218,12 +288,18 @@ impl<'a> TilingSolverContext<'a> {
         if let Some(rule) = self.schema.get_rule(canonical_id) {
             let mut cur_pos = offset + 9;
             let mut valid = true;
+            let mut failed_read = None;
 
             let param = if rule.save_param_bits > 0 {
                 if let Some(p) = read_u32_from_bits(self.bits, cur_pos, rule.save_param_bits) {
                     cur_pos += rule.save_param_bits;
                     p
                 } else {
+                    failed_read = Some((
+                        PruneReason::InsufficientParameterBits,
+                        cur_pos,
+                        rule.save_param_bits,
+                    ));
                     valid = false;
                     0
                 }
@@ -236,6 +312,8 @@ impl<'a> TilingSolverContext<'a> {
                     cur_pos += rule.save_bits;
                     v as i32
                 } else {
+                    failed_read =
+                        Some((PruneReason::InsufficientValueBits, cur_pos, rule.save_bits));
                     valid = false;
                     0
                 }
@@ -263,11 +341,27 @@ impl<'a> TilingSolverContext<'a> {
                 // Backtrack
                 current_path.pop();
             } else {
-                self.pruned_count += 1;
+                if let Some((reason, failed_offset, required_bits)) = failed_read {
+                    self.record_prune(
+                        failed_offset,
+                        depth,
+                        reason,
+                        Some(raw_id),
+                        Some(canonical_id),
+                        Some(required_bits),
+                    );
+                }
             }
         } else {
             // Unrecognized stat ID -> Prune
-            self.pruned_count += 1;
+            self.record_prune(
+                offset,
+                depth,
+                PruneReason::UnrecognizedStatId,
+                Some(raw_id),
+                Some(canonical_id),
+                None,
+            );
         }
     }
 }
@@ -316,6 +410,7 @@ fn main() -> anyhow::Result<()> {
         is_alpha: args.alpha,
         solutions: Vec::new(),
         pruned_count: 0,
+        first_prune: None,
     };
 
     let mut current_path = Vec::new();
@@ -329,6 +424,7 @@ fn main() -> anyhow::Result<()> {
         total_solutions,
         is_unique: total_solutions == 1,
         pruned_branches_count: ctx.pruned_count,
+        first_prune: ctx.first_prune.clone(),
         solutions: ctx.solutions,
         alpha_mode: args.alpha,
     };
@@ -343,20 +439,88 @@ fn main() -> anyhow::Result<()> {
         println!("Start Bit Offset: {}", args.bit_offset);
         println!("Bits Evaluated: {}", slice_bits.len());
         println!("Total Reachable Paths: {}", total_solutions);
-        println!("Unique Path: {}", if report.is_unique { "YES" } else { "NO" });
+        println!(
+            "Unique Path: {}",
+            if report.is_unique { "YES" } else { "NO" }
+        );
         println!("Pruned Branches: {}", report.pruned_branches_count);
+        if let Some(prune) = &report.first_prune {
+            println!(
+                "First Prune: {:?} at relative bit {} (depth {}, raw_stat_id={:?}, required_bits={:?}, remaining_bits={})",
+                prune.reason,
+                prune.relative_offset,
+                prune.depth,
+                prune.raw_stat_id,
+                prune.required_bits,
+                prune.remaining_bits
+            );
+        }
         println!("Alpha Mode: {}", args.alpha);
         println!();
 
         for (idx, path) in report.solutions.iter().enumerate() {
-            println!("--- Solution #{} (Consumed {} bits, Trailing padding {} bits) ---", 
-                idx + 1, path.total_bits_consumed, path.trailing_padding_bits);
+            println!(
+                "--- Solution #{} (Consumed {} bits, Trailing padding {} bits) ---",
+                idx + 1,
+                path.total_bits_consumed,
+                path.trailing_padding_bits
+            );
             for prop in &path.properties {
-                println!("  Stat {}: {} (param={}, raw={}, val={}, bits={})", 
-                    prop.stat_id, prop.name, prop.param, prop.raw_value, prop.value, prop.bits_consumed);
+                println!(
+                    "  Stat {}: {} (param={}, raw={}, val={}, bits={})",
+                    prop.stat_id,
+                    prop.name,
+                    prop.param,
+                    prop.raw_value,
+                    prop.value,
+                    prop.bits_consumed
+                );
             }
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use d2r_macros::hypothesis_test;
+
+    #[hypothesis_test]
+    fn reports_first_unknown_stat_id_prune() {
+        let schema = StatSchemaRegistry::default_v99();
+        let unknown_id = (0..=510u16)
+            .find(|&stat_id| schema.get_rule(stat_id).is_none())
+            .expect("the test schema must contain at least one unmapped stat ID");
+        let bits: Vec<bool> = (0..9).map(|bit| (unknown_id & (1 << bit)) != 0).collect();
+        let mut context = TilingSolverContext {
+            bits: &bits,
+            schema,
+            max_depth: 24,
+            is_alpha: false,
+            solutions: Vec::new(),
+            pruned_count: 0,
+            first_prune: None,
+        };
+
+        context.search(0, &mut Vec::new(), 0);
+
+        let prune = context
+            .first_prune
+            .as_ref()
+            .expect("the unknown ID must produce a prune record");
+        assert_eq!(prune.relative_offset, 0);
+        assert_eq!(prune.depth, 0);
+        assert_eq!(prune.reason, PruneReason::UnrecognizedStatId);
+        assert_eq!(prune.raw_stat_id, Some(unknown_id));
+        assert_eq!(prune.canonical_stat_id, Some(unknown_id));
+        assert_eq!(prune.required_bits, None);
+        assert_eq!(prune.remaining_bits, 9);
+        assert_eq!(context.pruned_count, 1);
+        assert!(context.solutions.is_empty());
+
+        let json = serde_json::to_value(prune).expect("prune record should serialize");
+        assert_eq!(json["reason"], "unrecognized_stat_id");
+    }
 }
