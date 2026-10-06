@@ -2049,3 +2049,211 @@ fn d2r_v3_new_items_parsing_test() {
     }
 }
 
+#[test]
+fn d2r_v3_remaining_items_parsing_test() {
+    let huffman = HuffmanTree::new();
+
+    // 1. Coldkill (Hatchet, Unique ID 129)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Coldkill_9ha.d2s";
+        let bytes = fs::read(path).expect("Could not read Coldkill fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Coldkill fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "9ha");
+        assert_eq!(item.header.quality, Some(ItemQuality::Unique));
+        assert_eq!(item.unique_id, Some(129));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let stat_ids: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(stat_ids.contains(&17), "Enhanced damage min (17)");
+        assert!(stat_ids.contains(&18), "Enhanced damage max (18)");
+        assert!(stat_ids.contains(&43), "Cold resist (43)");
+        assert!(stat_ids.contains(&44), "Max cold resist (44)");
+        assert!(stat_ids.contains(&54), "Cold min damage (54)");
+        assert!(stat_ids.contains(&55), "Cold max damage (55)");
+        assert!(stat_ids.contains(&56), "Cold length (56)");
+        assert!(stat_ids.contains(&93), "Attack speed (93)");
+        assert!(stat_ids.contains(&198), "Cast skill on striking (198)");
+        assert!(stat_ids.contains(&201), "Cast skill when struck (201)");
+    }
+
+    // 2. Djinn Slayer (Ataghan 7sm, Unique ID 290)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_DjinnSlayer_9tw.d2s";
+        let bytes = fs::read(path).expect("Could not read Djinn Slayer fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Djinn Slayer fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "7sm");
+        assert_eq!(item.header.quality, Some(ItemQuality::Unique));
+        assert_eq!(item.unique_id, Some(290));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let stat_ids: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(stat_ids.contains(&17), "Enhanced damage min (17)");
+        assert!(stat_ids.contains(&18), "Enhanced damage max (18)");
+        assert!(stat_ids.contains(&48), "Fire min damage (48)");
+        assert!(stat_ids.contains(&49), "Fire max damage (49)");
+        assert!(stat_ids.contains(&62), "Mana steal (62)");
+        assert!(stat_ids.contains(&121), "Damage to Demons (121)");
+        assert!(stat_ids.contains(&123), "Attack rating vs Demons (123)");
+        assert!(stat_ids.contains(&145), "Flat lightning absorb (145)");
+    }
+
+    // 3. Hellcast (Heavy Crossbow, Unique ID 69)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Hellcast_hxb.d2s";
+        let bytes = fs::read(path).expect("Could not read Hellcast fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Hellcast fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "hxb");
+        assert_eq!(item.header.quality, Some(ItemQuality::Unique));
+        assert_eq!(item.unique_id, Some(69));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let stat_ids: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(stat_ids.contains(&17), "Enhanced damage min (17)");
+        assert!(stat_ids.contains(&18), "Enhanced damage max (18)");
+        assert!(stat_ids.contains(&19), "Attack rating (19)");
+        assert!(stat_ids.contains(&39), "Fire resist (39)");
+        assert!(stat_ids.contains(&40), "Max fire resist (40)");
+        assert!(stat_ids.contains(&48), "Fire min damage (48)");
+        assert!(stat_ids.contains(&49), "Fire max damage (49)");
+        assert!(stat_ids.contains(&93), "Attack speed (93)");
+        assert!(stat_ids.contains(&158), "Piercing attack (158)");
+    }
+
+    // 4. Kuko Shakaku (Cedar Bow, Unique ID 190)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_KukoShakaku_8lb.d2s";
+        let bytes = fs::read(path).expect("Could not read Kuko Shakaku fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Kuko Shakaku fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "8lb");
+        assert_eq!(item.header.quality, Some(ItemQuality::Unique));
+        assert_eq!(item.unique_id, Some(190));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let stat_ids: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(stat_ids.contains(&17), "Enhanced damage min (17)");
+        assert!(stat_ids.contains(&18), "Enhanced damage max (18)");
+        assert!(stat_ids.contains(&48), "Fire min damage (48)");
+        assert!(stat_ids.contains(&49), "Fire max damage (49)");
+        assert!(stat_ids.contains(&107), "Bow and Crossbow skill tab (107)");
+        assert!(stat_ids.contains(&156), "Piercing (156)");
+        assert!(stat_ids.contains(&158), "Piercing (158)");
+        assert!(stat_ids.contains(&188), "Fires explosive arrows (188)");
+    }
+
+    // 5. Arctic Mitts (Light Gauntlets, Set ID 57)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Set_ArcticMitts_tgl.d2s";
+        let bytes = fs::read(path).expect("Could not read Arctic Mitts fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Arctic Mitts fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "tgl");
+        assert_eq!(item.header.quality, Some(ItemQuality::Set));
+        assert_eq!(item.unique_id, Some(57));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let base_stats: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(base_stats.contains(&7), "Life bonus (7)");
+        assert!(base_stats.contains(&93), "Attack speed (93)");
+
+        assert_eq!(item.set_attributes.len(), 2);
+        let set0_stats: Vec<u32> = item.set_attributes[0].iter().map(|p| p.stat_id).collect();
+        assert!(set0_stats.contains(&19), "Attack rating (19)");
+        let set1_stats: Vec<u32> = item.set_attributes[1].iter().map(|p| p.stat_id).collect();
+        assert!(set1_stats.contains(&2), "Dexterity (2)");
+    }
+
+    // 6. Bane's Authority (Sharkskin Belt zvb upgraded from vbl, Set ID 134)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Set_BanesAuthority_zvb.d2s";
+        let bytes = fs::read(path).expect("Could not read Bane's Authority fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Bane's Authority fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "zvb");
+        assert_eq!(item.header.quality, Some(ItemQuality::Set));
+        assert_eq!(item.unique_id, Some(134));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let base_stats: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(base_stats.contains(&7), "Life bonus (7)");
+        assert!(base_stats.contains(&92), "Level requirement reduction (92)");
+        assert!(base_stats.contains(&105), "Faster cast rate (105)");
+
+        assert_eq!(item.set_attributes.len(), 1);
+        let set0_stats: Vec<u32> = item.set_attributes[0].iter().map(|p| p.stat_id).collect();
+        assert!(set0_stats.contains(&1), "Strength bonus (1)");
+    }
+
+    // 7. Bane's Oathmaker (Kriss kri, Set ID 132)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Set_BanesOathmaker_kri.d2s";
+        let bytes = fs::read(path).expect("Could not read Bane's Oathmaker fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Bane's Oathmaker fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "kri");
+        assert_eq!(item.header.quality, Some(ItemQuality::Set));
+        assert_eq!(item.unique_id, Some(132));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let base_stats: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(base_stats.contains(&96), "Faster run/walk (96)");
+        assert!(base_stats.contains(&218), "Damage per level (218)");
+
+        assert_eq!(item.set_attributes.len(), 2);
+        let set0_stats: Vec<u32> = item.set_attributes[0].iter().map(|p| p.stat_id).collect();
+        assert!(set0_stats.contains(&138), "Mana after kill (138)");
+        let set1_stats: Vec<u32> = item.set_attributes[1].iter().map(|p| p.stat_id).collect();
+        assert!(set1_stats.contains(&141), "Deadly strike (141)");
+    }
+
+    // 8. Bane's Wraithskin (Hard Leather Armor hla, Set ID 133)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Set_BanesWraithskin_hla.d2s";
+        let bytes = fs::read(path).expect("Could not read Bane's Wraithskin fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Bane's Wraithskin fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "hla");
+        assert_eq!(item.header.quality, Some(ItemQuality::Set));
+        assert_eq!(item.unique_id, Some(133));
+        assert!(item.properties.iter().all(|p| !p.is_opaque));
+        assert_eq!(item.properties.last().map(|p| p.stat_id), Some(511));
+
+        let base_stats: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(base_stats.contains(&31), "Defense bonus (31)");
+        assert!(base_stats.contains(&37), "Magic resist (37)");
+
+        assert_eq!(item.set_attributes.len(), 2);
+        let set0_stats: Vec<u32> = item.set_attributes[0].iter().map(|p| p.stat_id).collect();
+        assert!(set0_stats.contains(&99), "Faster hit recovery (99)");
+        let set1_stats: Vec<u32> = item.set_attributes[1].iter().map(|p| p.stat_id).collect();
+        assert!(set1_stats.contains(&224), "Defense per level (224)");
+    }
+}
+
+
