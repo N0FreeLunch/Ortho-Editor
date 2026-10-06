@@ -2037,6 +2037,15 @@ fn d2r_v3_new_items_parsing_test() {
         assert_eq!(item.code.trim(), "72h");
         assert!(item.header.is_runeword);
         assert_eq!(item.socketed_items.len(), 3);
+        let socket_codes: Vec<String> = item.socketed_items.iter().map(|s| s.code.trim().to_string()).collect();
+        assert_eq!(socket_codes, ["r13", "r18", "r02"]);
+
+        let rw_stat_ids: Vec<u32> = item.runeword_attributes.iter().map(|p| p.stat_id).collect();
+        assert!(rw_stat_ids.contains(&17), "Enhanced damage min (17) must be present");
+        assert!(rw_stat_ids.contains(&18), "Enhanced damage max (18) must be present");
+        assert!(rw_stat_ids.contains(&93), "Attack speed (93) must be present");
+        assert!(rw_stat_ids.contains(&151), "Fanaticism aura (151) must be present");
+        assert!(rw_stat_ids.contains(&198), "Burst of Speed on striking (198) must be present");
     }
 }
 
