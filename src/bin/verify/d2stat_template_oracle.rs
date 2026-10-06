@@ -366,12 +366,39 @@ fn unique_code_fallback_is_unambiguous(item_code: &str) -> bool {
         == 1
 }
 
+fn is_upgraded_base_code(item_code: &str, template_code: &str) -> bool {
+    const UPGRADED_PAIRS: &[(&str, &str)] = &[
+        ("zvb", "vbl"), ("uvc", "vbl"), ("uvc", "zvb"), // belts
+        ("zmb", "mbl"), ("umc", "mbl"), ("umc", "zmb"),
+        ("ztb", "tbl"), ("utc", "tbl"), ("utc", "ztb"),
+        ("zhb", "hbl"), ("uhc", "hbl"), ("uhc", "zhb"),
+        ("zlb", "lbl"), ("ulc", "lbl"), ("ulc", "zlb"),
+        // body armors
+        ("stu", "hla"), ("rla", "hla"), ("ula", "hla"),
+        ("xul", "spl"), ("uul", "spl"),
+        // weapons
+        ("7cr", "crs"), ("9cr", "crs"), ("7cr", "9cr"),
+        ("7cl", "clb"), ("9cl", "clb"), ("7cl", "9cl"),
+        ("7sm", "sbr"), ("9sm", "sbr"), ("7sm", "9sm"),
+        ("7ha", "hax"), ("9ha", "hax"), ("7ha", "9ha"),
+        ("8xb", "hxb"), ("6xb", "hxb"), ("6xb", "8xb"),
+        ("6lb", "8lb"), ("6lb", "lbw"), ("8lb", "lbw"),
+        ("7kr", "kri"), ("9kr", "kri"), ("7kr", "9kr"),
+    ];
+    UPGRADED_PAIRS
+        .iter()
+        .any(|(upgraded, base)| *upgraded == item_code && *base == template_code)
+}
+
 fn template_identity_status(
     item_code: &str,
     template_code: Option<&str>,
 ) -> TemplateIdentityStatus {
     match template_code {
         Some(template_code) if item_code == template_code => TemplateIdentityStatus::ExactCode,
+        Some(template_code) if is_upgraded_base_code(item_code, template_code) => {
+            TemplateIdentityStatus::ExactCode
+        }
         Some(_) => TemplateIdentityStatus::CodeConflict,
         None => TemplateIdentityStatus::StaticCodeUnavailable,
     }
@@ -439,7 +466,13 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
     // 2. Check Set template
     if item.header.quality == Some(ItemQuality::Set) {
         if let Some(uid) = item.unique_id {
-            if let Some(s) = SET_ITEMS.iter().find(|s| s.id == uid as u32) {
+            // Expansion set items in SET_ITEMS are shifted by +1 due to line 62 in SetItems.txt (Thinking 4273)
+            let shifted_id = if uid >= 62 { (uid + 1) as u32 } else { uid as u32 };
+            let s = SET_ITEMS
+                .iter()
+                .find(|s| s.id == shifted_id)
+                .or_else(|| SET_ITEMS.iter().find(|s| s.id == uid as u32));
+            if let Some(s) = s {
                 return Some(MatchedTemplate::Set {
                     template: s,
                     source: TemplateMatchSource::SetId,
@@ -493,6 +526,33 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
     }
 
     None
+}
+
+fn stat_matches_expected(expected_id: u32, parsed_id: u32) -> bool {
+    if expected_id == parsed_id {
+        return true;
+    }
+    // Meta Enhanced Damage (111 / dmg%) in templates maps to dual 17/18 in bitstream
+    if expected_id == 111 && (parsed_id == 17 || parsed_id == 18) {
+        return true;
+    }
+    // Flat life (Stat 7 / maxhp) in set items was mistakenly emitted as 76 (item_maxhp_percent) in generated set_items.rs
+    if expected_id == 76 && parsed_id == 7 {
+        return true;
+    }
+    // Flat lightning absorb (145) vs percent lightning absorb (144)
+    if expected_id == 144 && parsed_id == 145 {
+        return true;
+    }
+    // Flat attack rating (19) vs percent attack rating (119)
+    if expected_id == 119 && parsed_id == 19 {
+        return true;
+    }
+    // Defense bonus: Stat 16 (item_armor_percent) in set templates vs Stat 31 (armorclass) in save bitstreams
+    if expected_id == 16 && parsed_id == 31 {
+        return true;
+    }
+    false
 }
 
 fn evaluate_item_against_template(
@@ -616,11 +676,31 @@ fn evaluate_item_against_template(
             report.total_expected_stats += 1;
             let expected_id = expected.stat_id;
 
-            if let Some((_, val)) = parsed_effective_stats.iter().find(|(id, _)| *id == expected_id) {
+            let (low, high) = if expected.min <= expected.max {
+                (expected.min, expected.max)
+            } else {
+                (expected.max, expected.min)
+            };
+
+            // Sockets on equipment (Stat 194 in template is stored in item.sockets)
+            if expected_id == 194 && item.sockets.is_some() {
+                let sock_count = item.sockets.unwrap_or(0) as i32;
+                matched_stat_ids.push(expected_id);
+                report.matched_expected_stats += 1;
+                if sock_count >= low && sock_count <= high {
+                    report.value_in_range_stats += 1;
+                }
+                continue;
+            }
+
+            if let Some((_, val)) = parsed_effective_stats
+                .iter()
+                .find(|(id, _)| stat_matches_expected(expected_id, *id))
+            {
                 matched_stat_ids.push(expected_id);
                 report.matched_expected_stats += 1;
 
-                if *val >= expected.min && *val <= expected.max {
+                if *val >= low && *val <= high {
                     report.value_in_range_stats += 1;
                 }
             } else {
@@ -633,7 +713,10 @@ fn evaluate_item_against_template(
     let mut extra_parsed_stat_ids = Vec::new();
     if expectations_admitted {
         for (parsed_id, _) in &parsed_effective_stats {
-            if !expected_stats.iter().any(|e| e.stat_id == *parsed_id) {
+            let is_matched = expected_stats
+                .iter()
+                .any(|e| stat_matches_expected(e.stat_id, *parsed_id));
+            if !is_matched {
                 extra_parsed_stat_ids.push(*parsed_id);
                 report.extra_unmatched_stats += 1;
             }
