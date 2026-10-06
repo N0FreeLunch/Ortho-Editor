@@ -3659,7 +3659,7 @@ impl ExtendedStatsData {
             let width = d2r_v3_stat_width(cursor, 31)?;
             data.defense = Some(cursor.read_bits::<u32>(width)?);
         }
-        if template.has_durability {
+        if template.has_durability || template.is_weapon {
             let max_width = d2r_v3_stat_width(cursor, 73)?;
             let current_width = d2r_v3_stat_width(cursor, 72)?;
             let maximum = cursor.read_bits::<u32>(max_width)?;

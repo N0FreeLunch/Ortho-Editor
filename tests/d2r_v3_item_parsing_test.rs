@@ -1953,3 +1953,90 @@ fn d2r_v3_assassin_before_bounded_count_prefix_search() {
         largest_successful_prefix, first_failing_prefix
     );
 }
+
+#[test]
+fn d2r_v3_new_items_parsing_test() {
+    let huffman = HuffmanTree::new();
+
+    // 1. Lightsabre (Phase Blade, Unique ID 259)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Lightsabre_7cr.d2s";
+        let bytes = fs::read(path).expect("Could not read Lightsabre fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Lightsabre fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "7cr");
+        assert_eq!(item.header.quality, Some(ItemQuality::Unique));
+        assert_eq!(item.unique_id, Some(259));
+
+        let stat_ids: Vec<u32> = item.properties.iter().map(|p| p.stat_id).collect();
+        assert!(stat_ids.contains(&17), "Enhanced damage min (17) must be present");
+        assert!(stat_ids.contains(&18), "Enhanced damage max (18) must be present");
+        assert!(stat_ids.contains(&21), "Min damage (21) must be present");
+        assert!(stat_ids.contains(&22), "Max damage (22) must be present");
+        assert!(stat_ids.contains(&50), "Lightning min damage (50) must be present");
+        assert!(stat_ids.contains(&51), "Lightning max damage (51) must be present");
+        assert!(stat_ids.contains(&52), "Magic min damage (52) must be present");
+        assert!(stat_ids.contains(&53), "Magic max damage (53) must be present");
+        assert!(stat_ids.contains(&62), "Mana steal (62) must be present");
+        assert!(stat_ids.contains(&89), "Light radius (89) must be present");
+        assert!(stat_ids.contains(&93), "Attack speed (93) must be present");
+        assert!(stat_ids.contains(&115), "Ignore target defense (115) must be present");
+        assert!(stat_ids.contains(&144), "Lightning absorb (144) must be present");
+        assert!(stat_ids.contains(&195), "Chain lightning on attack (195) must be present");
+    }
+
+    // 2. Nord's Tenderizer (Truncheon, Unique ID 384)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_NordsTenderizer_7cl.d2s";
+        let bytes = fs::read(path).expect("Could not read Nord's Tenderizer fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Nord's Tenderizer fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "7cl");
+        assert_eq!(item.header.quality, Some(ItemQuality::Unique));
+        assert_eq!(item.unique_id, Some(384));
+    }
+
+    // 3. Treachery (Mage Plate, Runeword Shael+Thul+Lem)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s";
+        let bytes = fs::read(path).expect("Could not read Treachery fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Treachery fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "uea");
+        assert!(item.header.is_runeword);
+        assert_eq!(item.socketed_items.len(), 3);
+    }
+
+    // 4. Cure (Grand Crown, Runeword Shael+Io+Tal)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Cure_xrn.d2s";
+        let bytes = fs::read(path).expect("Could not read Cure fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Cure fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "xrn");
+        assert!(item.header.is_runeword);
+        assert_eq!(item.socketed_items.len(), 3);
+    }
+
+    // 5. Hustle (Legend Sword, Runeword Shael+Ko+Eld)
+    {
+        let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s";
+        let bytes = fs::read(path).expect("Could not read Hustle fixture");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .expect("Hustle fixture must parse successfully");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.code.trim(), "72h");
+        assert!(item.header.is_runeword);
+        assert_eq!(item.socketed_items.len(), 3);
+    }
+}
+
