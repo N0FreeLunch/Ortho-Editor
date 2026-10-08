@@ -55,6 +55,61 @@ impl<'a> ItemEditor<'a> {
         self
     }
 
+    /// Empties all sockets, returning the removed items.
+    /// This reflects the Horadric Cube recipe (Hel Rune + Scroll of Town Portal).
+    pub fn remove_socketed_items(&mut self) -> Vec<Item> {
+        let removed = std::mem::take(&mut self.item.socketed_items);
+        self.item.sync_socket_payload();
+        self.item.bits.clear();
+        removed
+    }
+
+    /// Sets the ethereal status of the item.
+    pub fn set_ethereal(&mut self, is_ethereal: bool) -> &mut Self {
+        self.item.is_ethereal = is_ethereal;
+        self.item.header.is_ethereal = is_ethereal;
+        self.item.bits.clear();
+        self
+    }
+
+    /// Sets the identification status of the item.
+    pub fn set_identified(&mut self, is_identified: bool) -> &mut Self {
+        self.item.is_identified = is_identified;
+        self.item.header.is_identified = is_identified;
+        self.item.bits.clear();
+        self
+    }
+
+    /// Sets the item quality.
+    pub fn set_quality(&mut self, quality: crate::domain::item::ItemQuality) -> &mut Self {
+        self.item.quality = Some(quality);
+        self.item.header.quality = Some(quality);
+        self.item.bits.clear();
+        self
+    }
+
+    /// Appends a new property to the item.
+    pub fn add_property(&mut self, stat_id: u32, value: i32) -> &mut Self {
+        let cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id);
+        let name = cost.map(|c| c.name.to_string()).unwrap_or_else(|| format!("stat_{}", stat_id));
+        let raw_value = cost.map(|c| value.wrapping_add(c.save_add)).unwrap_or(value);
+        let prop = crate::domain::stats::ItemProperty {
+            stat_id,
+            raw_value,
+            param: 0,
+            name,
+            value,
+            range: crate::domain::item::ItemBitRange::default(),
+            is_opaque: false,
+            opaque_bits: None,
+            maturity: crate::domain::stats::StatMaturityTier::Verified,
+        };
+        self.item.properties.push(prop.clone());
+        self.item.stats.properties.push(prop);
+        self.item.bits.clear();
+        self
+    }
+
     /// Finalizes the mutation and returns the mutated item reference.
     /// This ensures any final synchronization contracts are met.
     pub fn commit(&mut self) -> &mut Item {
@@ -71,5 +126,72 @@ pub trait ItemEditorExt {
 impl ItemEditorExt for Item {
     fn edit(&mut self) -> ItemEditor<'_> {
         ItemEditor::new(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::item::{Item, ItemQuality};
+
+    #[test]
+    fn test_editor_defense_durability_mutation() {
+        let mut item = Item::empty_for_tests();
+        item.edit()
+            .set_defense(350)
+            .set_durability(45, 50)
+            .set_ethereal(true)
+            .commit();
+
+        assert_eq!(item.defense(), Some(350));
+        assert_eq!(item.current_durability(), Some(45));
+        assert_eq!(item.max_durability(), Some(50));
+        assert!(item.is_ethereal);
+    }
+
+    #[test]
+    fn test_editor_socket_insertion_and_removal() {
+        let mut parent = Item::empty_for_tests();
+        parent.code = "crs ".to_string(); // Crystal Sword
+        parent.edit().set_sockets(4).commit();
+
+        assert_eq!(parent.sockets, Some(4));
+        assert!(parent.header.is_socketed);
+
+        let mut rune1 = Item::empty_for_tests();
+        rune1.code = "r01 ".to_string(); // El Rune
+        let mut rune2 = Item::empty_for_tests();
+        rune2.code = "r02 ".to_string(); // Eld Rune
+
+        parent.edit()
+            .add_socketed_item(rune1)
+            .add_socketed_item(rune2)
+            .commit();
+
+        assert_eq!(parent.socketed_items.len(), 2);
+        assert_eq!(parent.num_socketed_items, 2);
+
+        // Remove socketed items (Cube recipe simulation)
+        let removed = parent.edit().remove_socketed_items();
+        assert_eq!(removed.len(), 2);
+        assert_eq!(parent.socketed_items.len(), 0);
+        assert_eq!(parent.num_socketed_items, 0);
+    }
+
+    #[test]
+    fn test_editor_property_mutation() {
+        let mut item = Item::empty_for_tests();
+        item.edit()
+            .add_property(0, 20) // Strength +20
+            .add_property(17, 150) // Enhanced Damage 150%
+            .commit();
+
+        assert_eq!(item.properties.len(), 2);
+        assert_eq!(item.properties[0].stat_id, 0);
+        assert_eq!(item.properties[0].value, 20);
+
+        // Update stat value
+        item.edit().set_stat(0, 30).commit();
+        assert_eq!(item.properties[0].value, 30);
     }
 }
