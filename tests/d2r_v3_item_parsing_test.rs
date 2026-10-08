@@ -2256,4 +2256,90 @@ fn d2r_v3_remaining_items_parsing_test() {
     }
 }
 
+#[test]
+fn test_tooltip_formatting_for_v3_fixtures() {
+        use d2r_core::engine::formatter::format_item;
+
+        let huffman = HuffmanTree::new();
+        // 1. Coldkill
+        {
+            let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Coldkill_9ha.d2s";
+            let bytes = fs::read(path).expect("Could not read Coldkill fixture");
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).expect("Coldkill must parse");
+            let item = &items[0];
+            let formatted_ko = format_item(item, "ko", 0, 80);
+            let formatted_en = format_item(item, "en", 0, 80);
+
+            println!("=== Coldkill (KO) ===");
+            println!("Name: {}", formatted_ko.name);
+            for p in &formatted_ko.properties {
+                println!("  - {}", p);
+            }
+            println!("=== Coldkill (EN) ===");
+            println!("Name: {}", formatted_en.name);
+            for p in &formatted_en.properties {
+                println!("  - {}", p);
+            }
+
+            assert!(!formatted_ko.name.is_empty());
+            assert!(!formatted_en.name.is_empty());
+        }
+
+        // 2. Hellcast
+        {
+            let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Hellcast_hxb.d2s";
+            let bytes = fs::read(path).expect("Could not read Hellcast fixture");
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).expect("Hellcast must parse");
+            let item = &items[0];
+            let formatted_ko = format_item(item, "ko", 0, 80);
+            println!("=== Hellcast (KO) ===");
+            println!("Name: {}", formatted_ko.name);
+            for p in &formatted_ko.properties {
+                println!("  - {}", p);
+            }
+        }
+
+        // 3. Djinn Slayer
+        {
+            let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_DjinnSlayer_9tw.d2s";
+            let bytes = fs::read(path).expect("Could not read Djinn Slayer fixture");
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).expect("Djinn Slayer must parse");
+            let item = &items[0];
+            let formatted_ko = format_item(item, "ko", 0, 80);
+            println!("=== Djinn Slayer (KO) ===");
+            println!("Name: {}", formatted_ko.name);
+            for p in &formatted_ko.properties {
+                println!("  - {}", p);
+            }
+        }
+
+        // 4. Kuko Shakaku
+        {
+            let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_KukoShakaku_8lb.d2s";
+            let bytes = fs::read(path).expect("Could not read Kuko Shakaku fixture");
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).expect("Kuko Shakaku must parse");
+            let item = &items[0];
+            let formatted_ko = format_item(item, "ko", 0, 80);
+            println!("=== Kuko Shakaku (KO) ===");
+            println!("Name: {}", formatted_ko.name);
+            for p in &formatted_ko.properties {
+                println!("  - {}", p);
+            }
+        }
+
+        // 5. Hustle (Runeword)
+        {
+            let path = "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s";
+            let bytes = fs::read(path).expect("Could not read Hustle fixture");
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).expect("Hustle must parse");
+            let item = &items[0];
+            let formatted_ko = format_item(item, "ko", 0, 80);
+            println!("=== Hustle (KO) ===");
+            println!("Name: {}", formatted_ko.name);
+            for p in &formatted_ko.properties {
+                println!("  - {}", p);
+            }
+        }
+    }
+
 

@@ -74,18 +74,10 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         }
     }
 
-    let mut properties: Vec<String> = item
-        .properties
-        .iter()
-        .map(|p| format_property(p, char_level, language))
-        .collect();
+    let mut properties = format_properties_list(&item.properties, char_level, language);
 
     if item.is_runeword {
-        properties.extend(
-            item.runeword_attributes
-                .iter()
-                .map(|p| format_property(p, char_level, language))
-        );
+        properties.extend(format_properties_list(&item.runeword_attributes, char_level, language));
     }
 
     let mut set_bonuses = Vec::new();
@@ -159,6 +151,165 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     }
 }
 
+pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip_indices = std::collections::HashSet::new();
+
+    let mut i = 0;
+    while i < props.len() {
+        if skip_indices.contains(&i) {
+            i += 1;
+            continue;
+        }
+
+        let p = &props[i];
+        if p.stat_id == 511 {
+            // Terminator 0x1FF: omit from user-facing tooltip
+            i += 1;
+            continue;
+        }
+
+        // 1. Enhanced Damage pairing (Stat 17 & 18)
+        if p.stat_id == 17 || p.stat_id == 18 {
+            let other_stat_id = if p.stat_id == 17 { 18 } else { 17 };
+            if let Some((other_idx, other_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == other_stat_id && !skip_indices.contains(idx)) {
+                if p.value == other_p.value {
+                    skip_indices.insert(other_idx);
+                    let val = p.value;
+                    let line = if language == "ko" {
+                        format!("+{}% 증가된 데미지", val)
+                    } else {
+                        format!("+{}% Enhanced Damage", val)
+                    };
+                    out.push(line);
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+
+        // 2. Fire Damage pairing (Stat 48 & 49)
+        if p.stat_id == 48 {
+            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 49 && !skip_indices.contains(idx)) {
+                skip_indices.insert(max_idx);
+                let min = p.value;
+                let max = max_p.value;
+                let line = if min == max {
+                    if language == "ko" {
+                        format!("+{} 파이어 데미지 추가", min)
+                    } else {
+                        format!("Adds {} fire damage", min)
+                    }
+                } else if language == "ko" {
+                    format!("{} - {} 파이어 데미지 추가", min, max)
+                } else {
+                    format!("Adds {}-{} fire damage", min, max)
+                };
+                out.push(line);
+                i += 1;
+                continue;
+            }
+        }
+
+        // 3. Lightning Damage pairing (Stat 50 & 51)
+        if p.stat_id == 50 {
+            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 51 && !skip_indices.contains(idx)) {
+                skip_indices.insert(max_idx);
+                let min = p.value;
+                let max = max_p.value;
+                let line = if min == max {
+                    if language == "ko" {
+                        format!("+{} 라이트닝 데미지 추가", min)
+                    } else {
+                        format!("Adds {} lightning damage", min)
+                    }
+                } else if language == "ko" {
+                    format!("{} - {} 라이트닝 데미지 추가", min, max)
+                } else {
+                    format!("Adds {}-{} lightning damage", min, max)
+                };
+                out.push(line);
+                i += 1;
+                continue;
+            }
+        }
+
+        // 4. Magic Damage pairing (Stat 52 & 53)
+        if p.stat_id == 52 {
+            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 53 && !skip_indices.contains(idx)) {
+                skip_indices.insert(max_idx);
+                let min = p.value;
+                let max = max_p.value;
+                let line = if min == max {
+                    if language == "ko" {
+                        format!("+{} 마법 데미지 추가", min)
+                    } else {
+                        format!("Adds {} magic damage", min)
+                    }
+                } else if language == "ko" {
+                    format!("{} - {} 마법 데미지 추가", min, max)
+                } else {
+                    format!("Adds {}-{} magic damage", min, max)
+                };
+                out.push(line);
+                i += 1;
+                continue;
+            }
+        }
+
+        // 5. Cold Damage pairing (Stat 54 & 55 & 56)
+        if p.stat_id == 54 {
+            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 55 && !skip_indices.contains(idx)) {
+                skip_indices.insert(max_idx);
+                let len_p = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 56 && !skip_indices.contains(idx));
+                let duration_sec = if let Some((len_idx, lp)) = len_p {
+                    skip_indices.insert(len_idx);
+                    lp.value / 25
+                } else {
+                    0
+                };
+                let min = p.value;
+                let max = max_p.value;
+                let base_range = if min == max {
+                    if language == "ko" {
+                        format!("+{} 콜드 데미지 추가", min)
+                    } else {
+                        format!("Adds {} cold damage", min)
+                    }
+                } else if language == "ko" {
+                    format!("{} - {} 콜드 데미지 추가", min, max)
+                } else {
+                    format!("Adds {}-{} cold damage", min, max)
+                };
+                let line = if duration_sec > 0 {
+                    if language == "ko" {
+                        format!("{} ({}초 동안 지속)", base_range, duration_sec)
+                    } else {
+                        format!("{} ({} sec duration)", base_range, duration_sec)
+                    }
+                } else {
+                    base_range
+                };
+                out.push(line);
+                i += 1;
+                continue;
+            }
+        }
+
+        // 6. Skip companion max stats if already consumed or orphan coldlength
+        if p.stat_id == 49 || p.stat_id == 51 || p.stat_id == 53 || p.stat_id == 55 || p.stat_id == 56 {
+            i += 1;
+            continue;
+        }
+
+        // Standard single property formatting
+        out.push(format_property(p, char_level, language));
+        i += 1;
+    }
+
+    out
+}
+
 pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> String {
     if prop.is_opaque {
         return if language == "ko" {
@@ -224,7 +375,17 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
     };
 
     match descfunc {
-        1 | 19 => f(format!("{} {}", signed_value, loc_str)),
+        1 | 19 => {
+            if stat_id == 158 && display_value > 0 {
+                if language == "ko" {
+                    format!("{} [레벨 {}]", loc_str, display_value)
+                } else {
+                    format!("{} [Level {}]", loc_str, display_value)
+                }
+            } else {
+                f(format!("{} {}", signed_value, loc_str))
+            }
+        }
         2 => f(format!("{}% {}", display_value, loc_str)),
         3 => f(format!("{} {}", display_value, loc_str)),
         4 | 8 => f(format!("{}% {}", signed_value, loc_str)),
