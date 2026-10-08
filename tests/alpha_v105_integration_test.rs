@@ -629,5 +629,62 @@ mod tests {
             equipped_unidentified
         );
     }
+
+    #[radar_test]
+    fn test_scan_crafted_items_in_corpus() {
+        use rayon::prelude::*;
+
+        let huffman = HuffmanTree::new();
+        let base_dir = "tests/fixtures/savegames/gameplay/normal";
+        let mut save_paths = Vec::new();
+
+        fn collect_d2s(dir: &std::path::Path, list: &mut Vec<std::path::PathBuf>) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        collect_d2s(&path, list);
+                    } else if path.extension().and_then(|s| s.to_str()) == Some("d2s") {
+                        list.push(path);
+                    }
+                }
+            }
+        }
+
+        collect_d2s(std::path::Path::new(base_dir), &mut save_paths);
+        save_paths.sort();
+
+        let crafted_results: Vec<(String, usize, String, Vec<String>)> = save_paths
+            .par_iter()
+            .flat_map(|path| {
+                let bytes = fs::read(path).expect("Read savegame failed");
+                let mut found = Vec::new();
+                if let Ok(items) = Item::read_player_items(&bytes, &huffman, true) {
+                    for (idx, it) in items.iter().enumerate() {
+                        if it.quality == Some(d2r_core::item::ItemQuality::Crafted) {
+                            let prop_descs: Vec<String> = it
+                                .properties
+                                .iter()
+                                .map(|p| format!("id={} val={}", p.stat_id, p.value))
+                                .collect();
+                            found.push((
+                                path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                idx,
+                                it.code.trim().to_string(),
+                                prop_descs,
+                            ));
+                        }
+                    }
+                }
+                found
+            })
+            .collect();
+
+        println!("=== Crafted Items Scan Census ===");
+        println!("Total crafted items found: {}", crafted_results.len());
+        for (file, idx, code, props) in &crafted_results {
+            println!("  [{}] idx={} code='{}' props: {:?}", file, idx, code, props);
+        }
+    }
 }
 
