@@ -2,8 +2,11 @@ use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::progression::Progression;
 use d2r_core::data::item_specs::get_base_item_spec;
-use d2r_core::engine::formatter::format_item;
+use d2r_core::data::set_items::SET_ITEMS;
+use d2r_core::domain::item::quality::ItemQuality;
+use d2r_core::engine::formatter::{format_item, FormattedSetBonus};
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
+use std::collections::HashMap;
 use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
 use d2r_core::verify::alpha_inventory_routing::{alpha_inventory_route, AlphaInventoryRoute};
 use serde_json::{json, Value};
@@ -218,11 +221,37 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
     let mut cube = Vec::new();
     let mut unknown = Vec::new();
     if let Ok(items) = Item::read_player_items(bytes, &huffman, alpha) {
+        // Aggregate set piece counts from equipped items to accurately resolve active set bonuses.
+        let mut set_piece_counts: HashMap<&'static str, usize> = HashMap::new();
+        for item in &items {
+            if item.is_residue() || item.code.trim().is_empty() {
+                continue;
+            }
+            if alpha_inventory_route(item, alpha) == AlphaInventoryRoute::Equipment
+                && item.quality == Some(ItemQuality::Set)
+                && item.is_identified
+            {
+                if let Some(id) = item.unique_id {
+                    if let Some(set_item) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
+                        *set_piece_counts.entry(set_item.set_id).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
         for (index, item) in items.iter().enumerate() {
             if item.is_residue() || item.code.trim().is_empty() {
                 continue;
             }
-            let mut data = item_json(index, item, level);
+            let active_set_count = if item.quality == Some(ItemQuality::Set) {
+                item.unique_id
+                    .and_then(|id| SET_ITEMS.iter().find(|s| s.id == id as u32))
+                    .and_then(|s| set_piece_counts.get(s.set_id).copied())
+                    .unwrap_or(1)
+            } else {
+                0
+            };
+            let mut data = item_json(index, item, level, active_set_count);
             let route = alpha_inventory_route(item, alpha);
             if route == AlphaInventoryRoute::Equipment {
                 data["slot_en"] = json!(equipment_slot(item.x, alpha));
@@ -261,17 +290,72 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
     }))
 }
 
-fn item_json(index: usize, item: &Item, level: u8) -> Value {
-    let ko = format_item(item, "ko", 0, level);
-    let en = format_item(item, "en", 0, level);
+fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> Value {
+    let ko = format_item(item, "ko", active_set_count, level);
+    let en = format_item(item, "en", active_set_count, level);
     let (name_en, name_ko) = item_localization(&item.code);
     let socketed_items = item.socketed_items.iter().enumerate().map(|(child_index, child)| {
         let child_ko = format_item(child, "ko", 0, level);
         let child_en = format_item(child, "en", 0, level);
         let (child_name_en, child_name_ko) = item_localization(&child.code);
-        json!({"index":child_index,"code":child.code.trim(),"name_en":child_name_en,"name_ko":child_name_ko,"quality":quality(child.header.quality),"properties":properties(&child.properties),"formatted_lines_ko":child_ko.properties,"formatted_lines_en":child_en.properties})
+        json!({
+            "index": child_index,
+            "code": child.code.trim(),
+            "name_en": child_name_en,
+            "name_ko": child_name_ko,
+            "quality": quality(child.header.quality),
+            "properties": properties(&child.properties),
+            "formatted_lines_ko": child_ko.properties,
+            "formatted_lines_en": child_en.properties,
+            "formatted_base_ko": child_ko.base_attributes,
+            "formatted_base_en": child_en.base_attributes,
+        })
     }).collect::<Vec<_>>();
-    json!({"index":index,"code":item.code.trim(),"name_en":name_en,"name_ko":name_ko,"type":d2r_core::inventory::get_item_category(&item.code),"quality":if item.header.is_runeword { "Runeword" } else { quality(item.header.quality) },"x":item.x,"y":item.y,"width":d2r_core::inventory::get_item_size(&item.code).0,"height":d2r_core::inventory::get_item_size(&item.code).1,"is_equipped":item.mode==1,"location":item.location,"properties":properties(&item.properties),"formatted_lines_ko":ko.properties,"formatted_lines_en":en.properties,"formatted_base_ko":ko.base_attributes,"formatted_base_en":en.base_attributes,"set_attributes":item.set_attributes.iter().map(|set| properties(set)).collect::<Vec<_>>(),"runeword_attributes":properties(&item.runeword_attributes),"socketed_items":socketed_items,"base_damage":base_damage(&item.code),"defense":item.defense,"max_durability":item.max_durability,"current_durability":item.current_durability,"quantity":item.quantity,"opaque_info":{"is_opaque":item.body.v105_7mgw_payload.is_some(),"bit_count":item.body.v105_7mgw_payload.as_ref().map(|bits|bits.len()).unwrap_or(0)}})
+    json!({
+        "index": index,
+        "code": item.code.trim(),
+        "name_en": name_en,
+        "name_ko": name_ko,
+        "type": d2r_core::inventory::get_item_category(&item.code),
+        "quality": if item.header.is_runeword { "Runeword" } else { quality(item.header.quality) },
+        "x": item.x,
+        "y": item.y,
+        "width": d2r_core::inventory::get_item_size(&item.code).0,
+        "height": d2r_core::inventory::get_item_size(&item.code).1,
+        "is_equipped": item.mode == 1,
+        "location": item.location,
+        "properties": properties(&item.properties),
+        "formatted_lines_ko": ko.properties,
+        "formatted_lines_en": en.properties,
+        "formatted_base_ko": ko.base_attributes,
+        "formatted_base_en": en.base_attributes,
+        "set_bonuses_ko": format_set_bonuses(&ko.set_bonuses),
+        "set_bonuses_en": format_set_bonuses(&en.set_bonuses),
+        "warnings_ko": ko.warnings,
+        "warnings_en": en.warnings,
+        "set_attributes": item.set_attributes.iter().map(|set| properties(set)).collect::<Vec<_>>(),
+        "runeword_attributes": properties(&item.runeword_attributes),
+        "socketed_items": socketed_items,
+        "base_damage": base_damage(&item.code),
+        "defense": item.defense,
+        "max_durability": item.max_durability,
+        "current_durability": item.current_durability,
+        "quantity": item.quantity,
+        "opaque_info": {
+            "is_opaque": item.body.v105_7mgw_payload.is_some(),
+            "bit_count": item.body.v105_7mgw_payload.as_ref().map(|bits| bits.len()).unwrap_or(0)
+        }
+    })
+}
+
+fn format_set_bonuses(bonuses: &[FormattedSetBonus]) -> Value {
+    json!(bonuses.iter().map(|bonus| {
+        json!({
+            "active": bonus.active,
+            "required_count": bonus.required_count,
+            "lines": bonus.lines,
+        })
+    }).collect::<Vec<_>>())
 }
 
 fn base_damage(code: &str) -> Value {
