@@ -66,8 +66,8 @@ mod tests {
 
         let authority = real_items
             .iter()
-            .find(|item| item.code.trim() == "wa2" && item.is_runeword)
-            .expect("authority base item (wa2) should be present");
+            .find(|item| item.code.trim() == "xrs" && item.is_runeword)
+            .expect("authority base item (xrs) should be present");
 
         let child_codes: Vec<&str> = authority
             .socketed_items
@@ -75,9 +75,10 @@ mod tests {
             .map(|item| item.code.trim())
             .collect();
 
-        assert!(
-            child_codes.is_empty(),
-            "wa2 should not expose nested socket children in the current truth contract"
+        assert_eq!(
+            child_codes,
+            vec!["r15", "r13", "r08"],
+            "Authority runeword in cuirass (xrs) must authentically contain Hel, Shael, and Ral runes"
         );
     }
 
@@ -102,20 +103,23 @@ mod tests {
         let top_level_codes: Vec<&str> = real_items.iter().map(|item| item.code.trim()).collect();
         assert_eq!(
             top_level_codes,
-            vec!["hp1", "hp1", "hp1", "hp1", "wa2"]
+            vec!["hp1", "hp1", "hp1", "hp1", "xrs"]
         );
 
         let authority = real_items
             .iter()
-            .find(|item| item.code.trim() == "wa2")
+            .find(|item| item.code.trim() == "xrs")
             .expect("authority base item should be present");
-        assert_eq!(authority.code.trim(), "wa2");
-        assert!(authority.socketed_items.is_empty());
+        assert_eq!(authority.code.trim(), "xrs");
+        assert_eq!(authority.socketed_items.len(), 3);
+        assert!(authority.header.is_runeword);
+        assert!(authority.header.is_socketed);
 
+        // Top level items must not contain detached child runes
         assert!(
             items
                 .iter()
-                .all(|item| !matches!(item.code.trim(), "r15" | "r13"))
+                .all(|item| !matches!(item.code.trim(), "r15" | "r13" | "r08"))
         );
     }
     #[test]
@@ -144,8 +148,8 @@ mod tests {
         let real_items: Vec<_> = items.iter().filter(|it| !it.is_residue()).collect();
         let authority = real_items
             .iter()
-            .find(|it| it.code.trim() == "wa2" && it.header.is_runeword)
-            .expect("wa2 item should be present");
+            .find(|it| it.code.trim() == "xrs" && it.header.is_runeword)
+            .expect("xrs authority item should be present");
 
         let actual_props: Vec<(u32, i32)> = authority
             .properties
@@ -153,28 +157,14 @@ mod tests {
             .map(|prop| (prop.stat_id, prop.value))
             .collect();
         let expected_props = vec![
-            (297, 193),
-            (260, 255),
-            (0, -31),
-            (0, -27),
-            (424, 0),
-            (384, 249),
-            (416, 18),
-            (0, -24),
-            (0, 8),
-            (320, 0),
-            (134, 0),
-            (112, 21),
-            (438, 4),
-            (0, -28),
-            (0, -12),
-            (160, 3),
-            (1, 462),
-            (283, 36),
+            (133, 13),
+            (281, 12),
+            (16, 31),
+            (385, 131),
         ];
 
-        assert_eq!(authority.code.trim(), "wa2");
-        assert!(authority.socketed_items.is_empty());
+        assert_eq!(authority.code.trim(), "xrs");
+        assert_eq!(authority.socketed_items.len(), 3);
         assert_eq!(actual_props, expected_props);
     }
 }

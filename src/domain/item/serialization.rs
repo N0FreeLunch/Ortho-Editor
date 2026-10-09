@@ -739,10 +739,10 @@ fn peek_item_header_at_with_base_and_gap_profile(
                 // Preserve the existing fallback sequence for the production scanner profile.
                 let fallback_gaps: Vec<usize> = match gap_profile {
                     AlphaScannerGapProfile::Extended => {
-                        vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56]
+                        vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 16, 24, 32, 40, 48, 50, 56]
                     }
                     AlphaScannerGapProfile::WitnessSubset => {
-                        vec![1, 6, 7, 8, 16, 24, 32, 40, 48, 50, 56]
+                        vec![1, 6, 7, 8, 12, 13, 14, 16, 24, 32, 40, 48, 50, 56]
                     }
                     AlphaScannerGapProfile::ExtendedExceptMask(mask) => {
                         let removable = [0usize, 2, 3, 4, 5];
@@ -2648,6 +2648,25 @@ impl Item {
                 if is_alpha_v105_authority_code(parse_code_hint_tmp) {
                     dynamic_limit = if parse_code_hint_tmp.trim() == "rhd" {
                         128
+                    } else if (flags_peek & 0x00000800) != 0 || (flags_peek & 0x04000000) != 0 {
+                        // Authority carrier with sockets: must find the next TRUE top-level item marker,
+                        // skipping socket runes and internal phantom markers within the carrier body.
+                        let mut next_real_top_marker = section_bits;
+                        for next_m in markers.iter().skip(i + 1) {
+                            if next_m.confidence >= 500 {
+                                let next_code = next_m.code.trim();
+                                let is_rune = next_code.len() == 3
+                                    && next_code.starts_with('r')
+                                    && next_code[1..].chars().all(|c| c.is_ascii_digit());
+                                let is_internal_phantom = next_m.offset < start + 512;
+                                if is_rune || is_internal_phantom {
+                                    continue;
+                                }
+                                next_real_top_marker = next_m.offset;
+                                break;
+                            }
+                        }
+                        next_real_top_marker.saturating_sub(start)
                     } else {
                         512
                     };
@@ -2849,54 +2868,7 @@ impl Item {
                         }
                     }
 
-                    if alpha_mode
-                        && (marker.code.trim() == "wa2"
-                            || final_item.code.trim() == "wa2"
-                            || final_item.body.code.trim() == "wa2")
-                    {
-                        for child in &mut final_item.socketed_items {
-                            let original_code = child.code.trim().to_string();
-                            if !original_code.contains('þ') {
-                                child.code = format!("{}þ", original_code);
-                                child.body.code = format!("{}þ", original_code);
-                            }
-                        }
-                    }
 
-                    if alpha_mode && marker.code.trim() == "xrs" {
-                        let make_socket_child = |code: &str| {
-                            let mut child = Item::default();
-                            child.code = code.to_string();
-                            child.body.code = code.to_string();
-                            child.mode = 6;
-                            child.header.mode = 6;
-                            child
-                        };
-
-                        match final_item.socketed_items.as_mut_slice() {
-                            [only] if only.code.trim() == "r08" => {
-                                *only = make_socket_child("r15");
-                                final_item
-                                    .socketed_items
-                                    .insert(0, make_socket_child("r15"));
-                                final_item.socketed_items.push(make_socket_child("r13"));
-                                final_item.num_socketed_items =
-                                    final_item.socketed_items.len() as u8;
-                            }
-                            [first, second] if second.code.trim() == "r08" => {
-                                if first.code.trim() != "r15" {
-                                    *first = make_socket_child("r15");
-                                }
-                                *second = make_socket_child("r13");
-                                final_item
-                                    .socketed_items
-                                    .insert(0, make_socket_child("r15"));
-                                final_item.num_socketed_items =
-                                    final_item.socketed_items.len() as u8;
-                            }
-                            _ => {}
-                        }
-                    }
 
                     if crate::item::item_trace_enabled()
                         && (marker.code.trim() == "xrs"
@@ -3004,7 +2976,7 @@ impl Item {
 
                         let is_authority_final =
                             alpha_mode && is_alpha_v105_authority_code(final_item.code.as_str());
-                        if is_authority_final {
+                        if is_authority_final && final_item.socketed_items.is_empty() {
                             consumed_bits = consumed_bits.min(512);
                         }
                     }
@@ -3415,96 +3387,7 @@ impl Item {
                 }
             }
 
-            let non_residue_indices: Vec<usize> = items
-                .iter()
-                .enumerate()
-                .filter(|(_, item)| !item.is_residue())
-                .map(|(idx, _)| idx)
-                .collect();
 
-            if non_residue_indices.len() == 6 {
-                let i4 = non_residue_indices[4];
-                let i5 = non_residue_indices[5];
-                if items[i4].code.trim() == "hp1"
-                    && items[i5].code.trim() == "xrs"
-                    && items[i4].range.end.saturating_sub(items[i4].range.start) == 90
-                    && items[i5].range.end.saturating_sub(items[i5].range.start) >= 700
-                    && items[i5].socketed_items.len() >= 1
-                {
-                    let mut authority_item = items[i4].clone();
-                    let mut tail_item = items[i5].clone();
-
-                    fn make_socket_child(code: &str) -> Item {
-                        let mut child = Item::default();
-                        child.code = code.to_string();
-                        child.body.code = code.to_string();
-                        child.mode = 6;
-                        child.header.mode = 6;
-                        child
-                    }
-
-                    let recovered_child = tail_item.socketed_items.get(0).cloned();
-                    let mut socketed_items = Vec::new();
-                    socketed_items.push(make_socket_child("r15"));
-                    if let Some(mut child) = recovered_child {
-                        child.code = "r15".to_string();
-                        child.body.code = "r15".to_string();
-                        child.mode = 6;
-                        child.header.mode = 6;
-                        socketed_items.push(child);
-                    } else {
-                        socketed_items.push(make_socket_child("r15"));
-                    }
-                    socketed_items.push(make_socket_child("r13"));
-
-                    authority_item.code = "xrs".to_string();
-                    authority_item.body.code = "xrs".to_string();
-                    authority_item.header.is_runeword = true;
-                    authority_item.header.is_socketed = true;
-                    authority_item.num_socketed_items = socketed_items.len() as u8;
-                    authority_item.socketed_items = socketed_items;
-                    authority_item.properties = tail_item.properties.clone();
-                    authority_item.stats.properties = tail_item.stats.properties.clone();
-                    authority_item.runeword_attributes = tail_item.runeword_attributes.clone();
-                    authority_item.set_attributes = tail_item.set_attributes.clone();
-
-                    tail_item.code = "wyws".to_string();
-                    tail_item.body.code = "wyws".to_string();
-                    tail_item.header.is_runeword = false;
-                    tail_item.header.is_socketed = false;
-                    tail_item.num_socketed_items = 0;
-                    tail_item.socketed_items.clear();
-
-                    items[i4] = authority_item;
-                    items[i5] = tail_item;
-                } else if items[i4].code.trim() == "xrs"
-                    && items[i5].code.trim() == "wyws"
-                    && items[i4].socketed_items.is_empty()
-                {
-                    let mut authority_item = items[i4].clone();
-
-                    fn make_socket_child(code: &str) -> Item {
-                        let mut child = Item::default();
-                        child.code = code.to_string();
-                        child.body.code = code.to_string();
-                        child.mode = 6;
-                        child.header.mode = 6;
-                        child
-                    }
-
-                    let mut socketed_items = Vec::new();
-                    socketed_items.push(make_socket_child("r15"));
-                    socketed_items.push(make_socket_child("r15"));
-                    socketed_items.push(make_socket_child("r13"));
-
-                    authority_item.header.is_runeword = true;
-                    authority_item.header.is_socketed = true;
-                    authority_item.num_socketed_items = socketed_items.len() as u8;
-                    authority_item.socketed_items = socketed_items;
-
-                    items[i4] = authority_item;
-                }
-            }
         }
 
         Ok(items)
@@ -3809,7 +3692,7 @@ impl Item {
         let abs_start_bit = Some(start_bit);
         let mut forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
         if let Some(code) = code_peek {
-            if matches!(code.trim(), "jav" | "buc" | "us g" | "xrs" | "c8xr" | "rhd") {
+            if matches!(code.trim(), "jav" | "buc" | "us g" | "c8xr" | "rhd") {
                 forced_compact = Some(true);
             }
         }
@@ -4750,7 +4633,7 @@ pub fn scan_socket_children(
                     || (alpha && is_socketable_rune && (mode == 6 || location == 6));
 
             if plausible {
-                if mode == 6 || location == 6 {
+                if mode == 6 || location == 6 || (alpha && is_socketable_rune) {
                     let mut limit = None;
                     let mut forced_compact = None;
                     let mut code_hint = None;
