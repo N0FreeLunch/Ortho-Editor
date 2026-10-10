@@ -4772,6 +4772,7 @@ struct D2rV3JewelryWidths;
 enum D2rV3StoredLayout {
     Jewelry,
     Armor,
+    EmptySocketArmor,
 }
 
 impl D2rV3JewelryWidths {
@@ -4868,6 +4869,15 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Armor)
     }
 
+    /// Rebuild identified Normal armor with positive capacity and no filled sockets.
+    /// This opt-in path preserves the existing non-socketed armor writer contract.
+    pub fn to_bits_d2r_v3_empty_socket_armor(
+        &self,
+        huffman: &HuffmanTree,
+    ) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::EmptySocketArmor)
+    }
+
     fn to_bits_d2r_v3_stored(
         &self,
         huffman: &HuffmanTree,
@@ -4883,6 +4893,8 @@ impl Item {
         let quality = header
             .quality
             .ok_or_else(|| invalid("Missing jewelry quality"))?;
+        let empty_socket_armor = layout == D2rV3StoredLayout::EmptySocketArmor;
+        let armor_layout = layout != D2rV3StoredLayout::Jewelry;
         let supported_kind = match layout {
             D2rV3StoredLayout::Jewelry => {
                 matches!(self.body.code.trim(), "rin" | "amu")
@@ -4895,10 +4907,14 @@ impl Item {
                             | ItemQuality::Rare
                     )
             }
-            D2rV3StoredLayout::Armor => {
+            D2rV3StoredLayout::Armor | D2rV3StoredLayout::EmptySocketArmor => {
                 item_template(self.body.code.trim())
                     .is_some_and(|template| template.is_armor && template.has_durability)
-                    && matches!(quality, ItemQuality::Normal | ItemQuality::High)
+                    && if empty_socket_armor {
+                        quality == ItemQuality::Normal
+                    } else {
+                        matches!(quality, ItemQuality::Normal | ItemQuality::High)
+                    }
             }
         };
         if auxiliary.save_version != 0x69
@@ -4907,7 +4923,7 @@ impl Item {
             || header.is_compact
             || !header.is_identified
             || header.is_ear
-            || header.is_socketed
+            || header.is_socketed != empty_socket_armor
             || header.is_personalized
             || header.is_runeword
             || matches!(header.mode, 3 | 5 | 6)
@@ -4919,9 +4935,19 @@ impl Item {
             return Err(invalid(match layout {
                 D2rV3StoredLayout::Jewelry => "Unsupported D2R v3 jewelry layout",
                 D2rV3StoredLayout::Armor => "Unsupported D2R v3 armor layout",
+                D2rV3StoredLayout::EmptySocketArmor => {
+                    "Unsupported D2R v3 empty-socket armor layout"
+                }
             }));
         }
-        if layout == D2rV3StoredLayout::Armor {
+        if empty_socket_armor
+            && (self.num_socketed_items != 0 || self.sockets.is_none_or(|capacity| capacity == 0))
+        {
+            return Err(invalid(
+                "Empty-socket armor requires positive capacity and no filled sockets",
+            ));
+        }
+        if armor_layout {
             if auxiliary.has_quantity
                 || self.quantity.is_some()
                 || self.body.quantity.is_some()
@@ -4977,7 +5003,7 @@ impl Item {
         }
         for (flag, expected) in [
             (4, true),
-            (11, false),
+            (11, empty_socket_armor),
             (16, false),
             (21, false),
             (24, false),
@@ -5119,7 +5145,7 @@ impl Item {
         for &word in &auxiliary.realm_data {
             d2r_v3_write_checked(&mut emitter, word as u64, 32, "realm word")?;
         }
-        if layout == D2rV3StoredLayout::Armor {
+        if armor_layout {
             // These are encoded body values, not logical scalar properties with SaveAdd.
             for (value, stat_id, name) in [
                 (self.body.defense, 31, "stored defense"),
@@ -5149,6 +5175,18 @@ impl Item {
             )?;
         } else if self.quantity.is_some() {
             return Err(invalid("Quantity exists without the D2R v3 presence flag"));
+        }
+        if empty_socket_armor {
+            d2r_v3_write_checked(
+                &mut emitter,
+                u64::from(
+                    self.sockets
+                        .ok_or_else(|| invalid("Missing socket capacity"))?,
+                ),
+                crate::domain::stats::stat_save_bits(194)
+                    .ok_or_else(|| invalid("Missing D2R v3 socket capacity width"))?,
+                "socket capacity",
+            )?;
         }
         if let Some(flags) = auxiliary.set_property_flags {
             for flag in flags {

@@ -2343,3 +2343,123 @@ fn test_tooltip_formatting_for_v3_fixtures() {
     }
 
 
+#[invariant_test]
+fn d2r_v3_empty_socket_armor_reconstruction_is_bit_exact() {
+    let path = "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s";
+    let (bytes, items) = read_d2r_v3_items(path);
+    let huffman = HuffmanTree::new();
+    for (start, end, code, capacity_start) in [(7328, 7496, "lea", 7477), (8592, 8760, "cap", 8740)]
+    {
+        let index = items
+            .iter()
+            .position(|item| item.range.start == start)
+            .unwrap();
+        let original = &items[index];
+        assert_eq!(original.range.end, end);
+        assert_eq!(original.code.trim(), code);
+        assert_eq!(original.sockets, Some(2));
+        assert_eq!(original.num_socketed_items, 0);
+        assert!(original.socketed_items.is_empty());
+        assert_eq!(
+            original
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .filled_sockets,
+            0
+        );
+        let width = d2r_core::domain::stats::stat_save_bits(194).unwrap();
+        assert_eq!(width, 4);
+        assert_eq!(
+            raw_little_endian(&source_bits(
+                &bytes,
+                capacity_start,
+                capacity_start + u64::from(width)
+            )),
+            2
+        );
+        let semantic = without_item_bit_cache(original);
+        assert_eq!(
+            semantic.to_bits_d2r_v3_armor(&huffman).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            semantic
+                .to_bits_d2r_v3_empty_socket_armor(&huffman)
+                .unwrap(),
+            source_bits(&bytes, start, end)
+        );
+        let mut changed = semantic;
+        changed.sockets = Some(1);
+        let emitted = changed.to_bits_d2r_v3_empty_socket_armor(&huffman).unwrap();
+        let mut patched = bytes.clone();
+        patch_raw_field(
+            &mut patched,
+            capacity_start,
+            capacity_start + u64::from(width),
+            1,
+        );
+        assert_eq!(emitted, source_bits(&patched, start, end));
+        let changed_bits: Vec<_> = (0..bytes.len() as u64 * 8)
+            .filter(|bit| {
+                source_bits(&bytes, *bit, *bit + 1) != source_bits(&patched, *bit, *bit + 1)
+            })
+            .collect();
+        assert_eq!(changed_bits, vec![capacity_start, capacity_start + 1]);
+        let reparsed = Item::read_player_items_d2r_v3(&patched, &huffman).unwrap();
+        assert_eq!(reparsed.len(), items.len());
+        for (position, actual) in reparsed.iter().enumerate() {
+            assert_eq!(actual.range, items[position].range);
+            let mut expected = items[position].clone();
+            if position == index {
+                expected.sockets = Some(1);
+            }
+            assert_stored_item_model(actual, &expected);
+        }
+    }
+}
+
+#[settled_contract_test]
+fn d2r_v3_empty_socket_armor_rejects_inconsistent_states() {
+    let (_, items) = read_d2r_v3_items("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s");
+    let huffman = HuffmanTree::new();
+    let changes: &[fn(&mut Item)] = &[
+        |item| item.sockets = None,
+        |item| item.sockets = Some(0),
+        |item| item.sockets = Some(1 << d2r_core::domain::stats::stat_save_bits(194).unwrap()),
+        |item| item.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 1,
+        |item| item.num_socketed_items = 1,
+        |item| item.socketed_items.push(Item::default()),
+        |item| item.header.is_socketed = false,
+        |item| item.header.flags ^= 1 << 11,
+        |item| item.header.quality = Some(ItemQuality::Magic),
+        |item| item.header.quality = Some(ItemQuality::High),
+        |item| item.quantity = Some(1),
+        |item| item.body.defense = None,
+        |item| item.header.is_identified = false,
+        |item| item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 4],
+        |item| item.properties[0].is_opaque = true,
+        |item| {
+            item.max_durability = Some(0);
+            item.body.max_durability = Some(0);
+        },
+    ];
+    for start in [7328, 8592] {
+        let original = items.iter().find(|item| item.range.start == start).unwrap();
+        for change in changes {
+            let mut bad = without_item_bit_cache(original);
+            change(&mut bad);
+            assert_eq!(
+                bad.to_bits_d2r_v3_empty_socket_armor(&huffman)
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::InvalidInput
+            );
+        }
+    }
+    let (_, controls) = read_d2r_v3_items(ARMOR_FIXTURE);
+    assert!(controls[4]
+        .to_bits_d2r_v3_empty_socket_armor(&huffman)
+        .is_err());
+}
