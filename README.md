@@ -106,7 +106,10 @@ Standalone features that do not require external game data assets.
 
 ### Data-Integrated Features (Requires `d2r-data`)
 
-These features use the sibling `d2r-data` repository to provide semantic context.
+These features use data schemas and models designed to interface with the sibling `d2r-data` module to provide semantic context.
+
+> [!NOTE]
+> To strictly respect intellectual property and protect proprietary game assets, the actual game data tables (`d2r-data`) are **not publicly distributed**. This project provides only the structural schemas, Rust structs, and data gateway interfaces. To utilize semantic features, users must supply and populate the private game values into these structures locally.
 
 - **Human-Readable Names**: Resolve internal codes and affix IDs to localized strings.
 - **Advanced Stat Resolution**: Interpret complex item properties using game-specific cost tables.
