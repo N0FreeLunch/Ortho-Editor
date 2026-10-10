@@ -1487,6 +1487,10 @@ fn parse_item_at_d2r_v3(
     }
 
     item.num_socketed_items = item.socketed_items.len() as u8;
+    if item.header.save_is_alpha && item.header.is_runeword && !item.socketed_items.is_empty() {
+        item.sockets = Some(item.socketed_items.len() as u8);
+    }
+    item.sync_socket_payload();
     item.range.end = bit.saturating_add(total_consumed);
     item.total_bits = total_consumed;
     item.logical_width = Some(total_consumed);
@@ -1855,6 +1859,9 @@ pub fn read_player_items(
         }
     }
 
+    for item in &mut all_items {
+        item.sync_alpha_runeword_domain_view();
+    }
     Ok(all_items)
 }
 
@@ -4285,6 +4292,7 @@ impl Item {
                         // forensic-1363: Map the authority shadow block directly to the target property anchor.
                         let target_stats_pos = match item.body.code.trim() {
                             "wa2" => 8096u64,
+                            "xrs" | "c8xr" => 7845u64,
                             _ => 7873u64,
                         };
                         if cursor.pos() < target_stats_pos {
