@@ -580,6 +580,13 @@ fn evaluate_item_against_template(
         report.identified_templated_items += 1;
     }
 
+    let owns_runeword_list = matches!(&template, MatchedTemplate::Runeword { .. });
+    let parsed_properties = if owns_runeword_list {
+        &item.runeword_attributes
+    } else {
+        &item.properties
+    };
+
     let (template_type, template_name, template_code, expected_stats, template_match_source): (
         &str,
         &str,
@@ -660,9 +667,9 @@ fn evaluate_item_against_template(
     );
 
     // Map parsed property IDs to effective standard stat IDs
-    let parsed_effective_stats: Vec<(u32, i32)> = item
-        .properties
+    let parsed_effective_stats: Vec<(u32, i32)> = parsed_properties
         .iter()
+        .filter(|property| !owns_runeword_list || property.stat_id != 511)
         .map(|p| (axiom.map_alpha_id(p.stat_id), p.value))
         .collect();
 
@@ -873,6 +880,135 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn observed_gameplay_runewords() -> Vec<(Item, &'static str, usize)> {
+        [
+            (include_bytes!("../../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s").as_slice(), "Runeword148", 4),
+            (include_bytes!("../../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Cure_xrn.d2s").as_slice(), "Runeword178", 5),
+            (include_bytes!("../../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s").as_slice(), "Runeword172", 4),
+        ]
+        .into_iter()
+        .map(|(bytes, name, count)| {
+            let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+            (items.into_iter().find(|item| item.is_runeword).unwrap(), name, count)
+        })
+        .collect()
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn runeword_observer_reads_owned_list_without_mutating_gameplay_items() {
+        for (item, name, count) in observed_gameplay_runewords() {
+            let before = item.clone();
+            let mut report = TemplateOracleReport::default();
+            evaluate_item_against_template(&mut report, Path::new("fixture.d2s"), 0, &item, false);
+            let row = &report.item_evaluations[0];
+            assert_eq!(row.template_name, name);
+            assert_eq!(
+                row.template_match_source,
+                TemplateMatchSource::RunewordSocketRecipe
+            );
+            assert_eq!(row.expected_stats_count, count);
+            assert_eq!(row.matched_stats_count, count);
+            assert!(row.missing_stat_ids.is_empty());
+            assert!(row.extra_parsed_stat_ids.is_empty());
+            assert!(row
+                .parsed_stats
+                .iter()
+                .all(|(id, _)| *id != 511 && *id != 317));
+            assert_eq!(report.value_in_range_stats, count);
+            assert_eq!(item, before);
+        }
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn runeword_observer_keeps_missing_extra_and_value_errors_visible() {
+        let (mut item, _, _) = observed_gameplay_runewords().remove(0);
+        let removed = item
+            .runeword_attributes
+            .iter()
+            .find(|p| p.stat_id == 93)
+            .unwrap()
+            .clone();
+        item.runeword_attributes.retain(|p| p.stat_id != 93);
+        item.properties.push(removed);
+        item.runeword_attributes
+            .iter_mut()
+            .find(|p| p.stat_id == 83)
+            .unwrap()
+            .value = 999;
+        let mut unknown =
+            d2r_core::item::ItemProperty::new(999, "unknown".into(), 0, 0, 1, Default::default());
+        unknown.is_opaque = true;
+        item.runeword_attributes.push(unknown);
+        item.runeword_attributes
+            .push(d2r_core::item::ItemProperty::new(
+                317,
+                "item_socket_child".into(),
+                0,
+                0,
+                0,
+                Default::default(),
+            ));
+        let before = item.clone();
+        let mut report = TemplateOracleReport::default();
+        evaluate_item_against_template(&mut report, Path::new("fixture.d2s"), 0, &item, false);
+        let row = &report.item_evaluations[0];
+        assert_eq!(row.missing_stat_ids, vec![93]);
+        assert_eq!(row.extra_parsed_stat_ids, vec![999, 317]);
+        assert_eq!(row.matched_stats_count, 3);
+        assert_eq!(report.value_in_range_stats, 2);
+        assert_eq!(item, before);
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn other_template_variants_keep_the_root_property_carrier() {
+        let unique = identifiable_unique();
+        let mut item = Item::default();
+        item.header.quality = Some(ItemQuality::Unique);
+        item.header.is_identified = true;
+        item.unique_id = Some(unique.id as u16);
+        item.code = unique.code.into();
+        item.properties.push(d2r_core::item::ItemProperty::new(
+            198,
+            "item_skillonhit".into(),
+            0,
+            0,
+            10,
+            Default::default(),
+        ));
+        item.runeword_attributes
+            .push(d2r_core::item::ItemProperty::new(
+                999,
+                "wrong_list".into(),
+                0,
+                0,
+                1,
+                Default::default(),
+            ));
+        for alpha in [false, true] {
+            if alpha {
+                item.header.quality = None;
+                item.unique_id = None;
+                item.code = "wa2".into();
+                item.header.is_runeword = true;
+                item.header.flags = 0x0000401f;
+            }
+            let before = item.clone();
+            let mut report = TemplateOracleReport::default();
+            evaluate_item_against_template(&mut report, Path::new("fixture.d2s"), 0, &item, alpha);
+            let row = &report.item_evaluations[0];
+            assert_eq!(
+                row.template_match_source,
+                if alpha {
+                    TemplateMatchSource::AlphaWitness
+                } else {
+                    TemplateMatchSource::UniqueId
+                }
+            );
+            assert_eq!(row.parsed_stats, vec![(198, 10)]);
+            assert_eq!(item, before);
+        }
+    }
+
 
     #[d2r_macros::settled_contract_test]
     fn runeword_recipe_template_reports_derived_identity_provenance() {
