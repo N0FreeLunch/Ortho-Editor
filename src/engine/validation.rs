@@ -97,7 +97,7 @@ fn lookup_runeword_rune_data(rw: &'static Runeword) -> Option<&'static runes::Ru
     runes::RUNES.iter().find(|entry| entry.name == rw.name)
 }
 
-fn runeword_display_name(rw: &'static Runeword) -> &'static str {
+pub fn runeword_display_name(rw: &'static Runeword) -> &'static str {
     if rw.id == 2 && rw.name.starts_with("Runeword") {
         return "Authority";
     }
@@ -140,13 +140,101 @@ fn runeword_expected_item_types(rw: &'static Runeword) -> Vec<&'static str> {
         .unwrap_or_default()
 }
 
-pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
-    if item.is_runeword {
-        if let Some(rw_id) = item.runeword_id {
-            return runewords::RUNEWORDS.iter()
-                .find(|rw| rw.id == rw_id as u32)
-                .map(ItemSpec::Runeword);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunewordMatchSource {
+    SavedId,
+    OrderedSocketRecipe,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedRuneword {
+    pub template: &'static Runeword,
+    pub source: RunewordMatchSource,
+}
+
+fn runeword_recipe_type_matches(
+    complete: bool,
+    allowed: &[&str],
+    excluded: &[&str],
+    item_types: &[&str],
+) -> bool {
+    complete
+        && allowed
+            .iter()
+            .any(|ty| !ty.is_empty() && item_types.contains(ty))
+        && !excluded
+            .iter()
+            .any(|ty| !ty.is_empty() && item_types.contains(ty))
+}
+
+fn unique_runeword_candidate(
+    mut candidates: impl Iterator<Item = &'static Runeword>,
+) -> Option<&'static Runeword> {
+    let first = candidates.next()?;
+    candidates.next().is_none().then_some(first)
+}
+
+/// Resolves a source identity without changing or decoding the saved raw ID.
+/// Exact IDs retain precedence so malformed known recipes remain detectable.
+pub fn resolve_runeword(item: &Item) -> Option<ResolvedRuneword> {
+    if !item.is_runeword && !item.header.is_runeword {
+        return None;
+    }
+    if let Some(raw_id) = item.runeword_id {
+        if let Some(template) = runewords::RUNEWORDS
+            .iter()
+            .find(|template| template.id == u32::from(raw_id))
+        {
+            return Some(ResolvedRuneword {
+                template,
+                source: RunewordMatchSource::SavedId,
+            });
         }
+    }
+    if !item.is_completely_parsed()
+        || item.socketed_items.is_empty()
+        || item.sockets.map(usize::from) != Some(item.socketed_items.len())
+        || usize::from(item.num_socketed_items) != item.socketed_items.len()
+        || !item
+            .socketed_items
+            .iter()
+            .all(|child| child.is_completely_parsed() && child.socketed_items.is_empty())
+    {
+        return None;
+    }
+    let actual_runes: Vec<_> = item
+        .socketed_items
+        .iter()
+        .map(|child| child.code.trim())
+        .collect();
+    let item_types = get_all_item_types(&item.code);
+    let candidates = runewords::RUNEWORDS.iter().filter(|template| {
+        if template.runes != actual_runes.as_slice() {
+            return false;
+        }
+        let Some(metadata) = lookup_runeword_rune_data(template) else {
+            return false;
+        };
+        let allowed = [
+            metadata.itype1,
+            metadata.itype2,
+            metadata.itype3,
+            metadata.itype4,
+            metadata.itype5,
+            metadata.itype6,
+        ];
+        let excluded = [metadata.etype1, metadata.etype2, metadata.etype3];
+        runeword_recipe_type_matches(metadata.complete, &allowed, &excluded, &item_types)
+    });
+    unique_runeword_candidate(candidates).map(|template| ResolvedRuneword {
+        template,
+        source: RunewordMatchSource::OrderedSocketRecipe,
+    })
+}
+
+pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
+    if item.is_runeword || item.header.is_runeword {
+        return resolve_runeword(item).map(|resolved| ItemSpec::Runeword(resolved.template));
     }
 
     match item.quality {
@@ -928,6 +1016,170 @@ pub fn get_all_item_types(item_code: &str) -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recipe_item(code: &str, recipe: &[&str]) -> Item {
+        let mut item = Item::default();
+        item.code = code.to_string();
+        item.is_runeword = true;
+        item.header.is_runeword = true;
+        item.runeword_id = Some(u16::MAX);
+        item.properties_complete = true;
+        item.sockets = Some(recipe.len() as u8);
+        item.num_socketed_items = recipe.len() as u8;
+        item.socketed_items = recipe
+            .iter()
+            .map(|code| {
+                let mut child = Item::default();
+                child.code = code.to_string();
+                child.is_compact = true;
+                child.properties_complete = true;
+                child
+            })
+            .collect();
+        item
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn runeword_recipe_identity_matches_complete_gameplay_items() {
+        for (bytes, key) in [
+            (include_bytes!("../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s").as_slice(), "Runeword148"),
+            (include_bytes!("../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Cure_xrn.d2s").as_slice(), "Runeword178"),
+            (include_bytes!("../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s").as_slice(), "Runeword172"),
+        ] {
+            let items = Item::read_player_items_d2r_v3(bytes, &crate::item::HuffmanTree::new()).unwrap();
+            let item = items.iter().find(|item| item.is_runeword).unwrap();
+            let before = item.clone();
+            let resolved = resolve_runeword(item).expect("complete unique source recipe");
+            assert_eq!(resolved.template.name, key);
+            assert_eq!(resolved.source, RunewordMatchSource::OrderedSocketRecipe);
+            match lookup_spec(item) {
+                Some(ItemSpec::Runeword(actual)) => assert_eq!(actual.name, key),
+                _ => panic!("all consumers must share the source recipe identity"),
+            }
+            assert_eq!(*item, before);
+        }
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn runeword_recipe_identity_rejects_incomplete_or_inconsistent_evidence() {
+        let base = recipe_item("uea", &["r13", "r10", "r20"]);
+        assert_eq!(
+            resolve_runeword(&base).unwrap().template.name,
+            "Runeword148"
+        );
+        let mut controls = Vec::new();
+        let mut reversed = base.clone();
+        reversed.socketed_items.reverse();
+        controls.push(reversed);
+        let mut short = base.clone();
+        short.socketed_items.pop();
+        controls.push(short);
+        let mut extra = base.clone();
+        extra.socketed_items.push(extra.socketed_items[0].clone());
+        controls.push(extra);
+        let mut wrong_child = base.clone();
+        wrong_child.socketed_items[0].code = "gcv".into();
+        controls.push(wrong_child);
+        let mut wrong_type = base.clone();
+        wrong_type.code = "hax".into();
+        controls.push(wrong_type);
+        let mut unknown_type = base.clone();
+        unknown_type.code = "unknown".into();
+        controls.push(unknown_type);
+        let mut incomplete = base.clone();
+        incomplete.properties_complete = false;
+        controls.push(incomplete);
+        let mut incomplete_child = base.clone();
+        incomplete_child.socketed_items[0].is_compact = false;
+        incomplete_child.socketed_items[0].properties_complete = false;
+        controls.push(incomplete_child);
+        let mut nested_child = base.clone();
+        nested_child.socketed_items[0]
+            .socketed_items
+            .push(base.socketed_items[1].clone());
+        controls.push(nested_child);
+        let mut socket_count = base.clone();
+        socket_count.sockets = Some(4);
+        controls.push(socket_count);
+        let mut missing_socket_count = base.clone();
+        missing_socket_count.sockets = None;
+        controls.push(missing_socket_count);
+        let mut declared = base.clone();
+        declared.num_socketed_items = 2;
+        controls.push(declared);
+        let mut unflagged = base.clone();
+        unflagged.is_runeword = false;
+        unflagged.header.is_runeword = false;
+        controls.push(unflagged);
+        for item in controls {
+            assert!(
+                resolve_runeword(&item).is_none(),
+                "unproven identity must remain unresolved: {item:?}"
+            );
+        }
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn runeword_recipe_identity_preserves_duplicates_and_type_discrimination() {
+        let recipe = ["r13", "r18", "r02"];
+        assert_eq!(
+            resolve_runeword(&recipe_item("hla", &recipe))
+                .unwrap()
+                .template
+                .name,
+            "Runeword171"
+        );
+        assert_eq!(
+            resolve_runeword(&recipe_item("72h", &recipe))
+                .unwrap()
+                .template
+                .name,
+            "Runeword172"
+        );
+        assert_eq!(
+            runeword_display_name(
+                resolve_runeword(&recipe_item("hla", &["r12", "r22", "r22"]))
+                    .unwrap()
+                    .template
+            ),
+            "Bone"
+        );
+        assert!(resolve_runeword(&recipe_item("hla", &["r12", "r22"])).is_none());
+        let template = &runewords::RUNEWORDS[0];
+        assert!(unique_runeword_candidate([template, template].into_iter()).is_none());
+        assert!(unique_runeword_candidate([].into_iter()).is_none());
+        assert!(runeword_recipe_type_matches(
+            true,
+            &["tors"],
+            &[],
+            &["armo", "tors"]
+        ));
+        assert!(!runeword_recipe_type_matches(
+            false,
+            &["tors"],
+            &[],
+            &["tors"]
+        ));
+        assert!(!runeword_recipe_type_matches(
+            true,
+            &["tors"],
+            &["tors"],
+            &["tors"]
+        ));
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn exact_runeword_id_keeps_precedence_over_a_different_valid_recipe() {
+        let mut item = recipe_item("uap", &["r13", "r10", "r20"]);
+        item.runeword_id = Some(32);
+        let resolved = resolve_runeword(&item).unwrap();
+        assert_eq!(resolved.source, RunewordMatchSource::SavedId);
+        assert_eq!(runeword_display_name(resolved.template), "Enigma");
+        assert!(check_runeword_legitimacy(&item)
+            .iter()
+            .any(|warning| warning.contains("incorrect rune sequence")));
+        assert_eq!(item.runeword_id, Some(32));
+    }
 
     #[test]
     fn test_get_all_item_types() {

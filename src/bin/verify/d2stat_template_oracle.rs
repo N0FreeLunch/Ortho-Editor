@@ -6,6 +6,7 @@ use d2r_core::data::generated::{
 use d2r_core::data::item_specs::{GemSpec, ItemStatRange, QualityItem, Runeword, SetItem, UniqueItem};
 use d2r_core::domain::item::{HuffmanTree, Item, ItemQuality};
 use d2r_core::domain::stats::axiom::StatsAxiom;
+use d2r_core::engine::validation::{resolve_runeword, RunewordMatchSource};
 use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -337,6 +338,7 @@ pub enum TemplateMatchSource {
     SetId,
     SetCodeFallback,
     RunewordId,
+    RunewordSocketRecipe,
     AlphaWitness,
     SuperiorComboId,
     GemCode,
@@ -490,13 +492,14 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
                 stats: ALPHA_V105_WA2_RUNEWORD_STATS,
             });
         }
-        if let Some(rw_id) = item.runeword_id {
-            if let Some(rw) = RUNEWORDS.iter().find(|rw| rw.id == rw_id as u32) {
-                return Some(MatchedTemplate::Runeword {
-                    template: rw,
-                    source: TemplateMatchSource::RunewordId,
-                });
-            }
+        if let Some(resolved) = resolve_runeword(item) {
+            return Some(MatchedTemplate::Runeword {
+                template: resolved.template,
+                source: match resolved.source {
+                    RunewordMatchSource::SavedId => TemplateMatchSource::RunewordId,
+                    RunewordMatchSource::OrderedSocketRecipe => TemplateMatchSource::RunewordSocketRecipe,
+                },
+            });
         }
     }
 
@@ -870,6 +873,35 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[d2r_macros::settled_contract_test]
+    fn runeword_recipe_template_reports_derived_identity_provenance() {
+        for (bytes, key) in [
+            (include_bytes!("../../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s").as_slice(), "Runeword148"),
+            (include_bytes!("../../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Cure_xrn.d2s").as_slice(), "Runeword178"),
+            (include_bytes!("../../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s").as_slice(), "Runeword172"),
+        ] {
+            let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+            let item = items.iter().find(|item| item.is_runeword).unwrap();
+            let before = item.clone();
+            match find_item_template(item, false) {
+                Some(MatchedTemplate::Runeword { template, source }) => {
+                    assert_eq!(template.name, key);
+                    assert_eq!(source, TemplateMatchSource::RunewordSocketRecipe);
+                }
+                _ => panic!("expected a unique derived recipe identity"),
+            }
+            assert_eq!(*item, before);
+        }
+        let mut authority = Item::default();
+        authority.code = "wa2".into();
+        authority.header.is_runeword = true;
+        authority.header.flags = 0x0000401f;
+        assert!(matches!(
+            find_item_template(&authority, true),
+            Some(MatchedTemplate::AlphaWitnessRuneword { .. })
+        ));
+    }
 
     #[d2r_macros::settled_contract_test]
     fn set_template_identity_uses_source_ids_without_a_row_shift() {

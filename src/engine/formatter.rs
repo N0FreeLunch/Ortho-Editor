@@ -3,13 +3,12 @@ use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::localization::LOCALIZATIONS;
 // use crate::data::monsters::MONSTER_TYPES;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
-use crate::data::runewords::RUNEWORDS;
 use crate::data::set_items::SET_ITEMS;
 use crate::data::sets::SET_BONUSES;
 use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
-use crate::engine::validation::validate_item;
+use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
 use crate::data::char_stats::CHAR_STATS;
@@ -687,14 +686,19 @@ fn format_template(template: &str, args: &[String]) -> String {
 
 pub fn resolve_item_name(item: &Item, language: &str) -> String {
     // 1. Runeword
-    if item.is_runeword {
-        if let Some(id) = item.runeword_id {
-            let name_id = (id & 0x7FF) as u32;
-            if let Some(rw) = RUNEWORDS.iter().find(|rw| rw.id == name_id) {
-                return get_loc(rw.name, language).to_string();
-            }
-            let key = format!("Runeword{}", name_id);
-            return get_loc(&key, language).to_string();
+    if item.is_runeword || item.header.is_runeword {
+        if let Some(resolved) = resolve_runeword(item) {
+            let source_name = runeword_display_name(resolved.template);
+            let localized = LOCALIZATIONS
+                .iter()
+                .find(|entry| entry.key == resolved.template.name && entry.en == source_name);
+            return localized
+                .map(|entry| if language == "ko" { entry.ko } else { entry.en })
+                .unwrap_or(source_name)
+                .to_string();
+        }
+        if let Some(raw_id) = item.runeword_id {
+            return format!("Runeword{raw_id}");
         }
     }
 
@@ -803,6 +807,26 @@ mod tests {
         )
     }
 
+
+    #[d2r_macros::settled_contract_test]
+    fn source_runeword_names_reject_conflicting_localization() {
+        for (bytes, expected) in [
+            (include_bytes!("../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s").as_slice(), "Treachery"),
+            (include_bytes!("../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Cure_xrn.d2s").as_slice(), "Cure"),
+            (include_bytes!("../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s").as_slice(), "Hustle (weapon)"),
+        ] {
+            let items = Item::read_player_items_d2r_v3(bytes, &crate::item::HuffmanTree::new()).unwrap();
+            let item = items.iter().find(|item| item.is_runeword).unwrap();
+            let before = item.clone();
+            assert_eq!(resolve_item_name(item, "en"), expected);
+            if expected == "Hustle (weapon)" { assert_eq!(resolve_item_name(item, "ko"), expected); }
+            assert_eq!(*item, before);
+        }
+        let mut unresolved = Item::default();
+        unresolved.is_runeword = true;
+        unresolved.runeword_id = Some(20653);
+        assert_eq!(resolve_item_name(&unresolved, "en"), "Runeword20653");
+    }
 
     #[d2r_macros::settled_contract_test]
     fn test_socket_placeholder_display_preserves_real_and_unrecognized_properties() {
