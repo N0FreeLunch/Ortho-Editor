@@ -167,8 +167,17 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         let p = &props[i];
-        if p.stat_id == 511 {
-            // Terminator 0x1FF: omit from user-facing tooltip
+        // Only the exact internal socket placeholder has no tooltip meaning.
+        let socket_placeholder = p.stat_id == 317
+            && p.name == "item_socket_child"
+            && p.param == 0
+            && p.raw_value == 0
+            && p.value == 0
+            && p.range == ItemBitRange::default()
+            && !p.is_opaque
+            && p.opaque_bits.is_none();
+        if p.stat_id == 511 || socket_placeholder {
+            // Omit the terminator and internal socket placeholder from tooltips.
             i += 1;
             continue;
         }
@@ -792,6 +801,118 @@ mod tests {
             value,
             ItemBitRange::default(),
         )
+    }
+
+
+    #[d2r_macros::settled_contract_test]
+    fn test_socket_placeholder_display_preserves_real_and_unrecognized_properties() {
+        let placeholder = ItemProperty::new(
+            317,
+            "item_socket_child".into(),
+            0,
+            0,
+            0,
+            ItemBitRange::default(),
+        );
+        let mut retained = vec![
+            ItemProperty::new(317, "burningmax".into(), 0, 0, 0, ItemBitRange::default()),
+            ItemProperty::new(317, "burningmax".into(), 0, 7, 7, ItemBitRange::default()),
+            ItemProperty::new(
+                320,
+                "item_socket_child".into(),
+                0,
+                0,
+                0,
+                ItemBitRange::default(),
+            ),
+            ItemProperty::new(
+                999,
+                "unrecognized_stat".into(),
+                0,
+                4,
+                4,
+                ItemBitRange::default(),
+            ),
+        ];
+        let mut nonzero = placeholder.clone();
+        nonzero.raw_value = 1;
+        retained.push(nonzero);
+        let mut valued = placeholder.clone();
+        valued.value = 1;
+        retained.push(valued);
+        let mut parameterized = placeholder.clone();
+        parameterized.param = 1;
+        retained.push(parameterized);
+        let mut recorded = placeholder.clone();
+        recorded.range = ItemBitRange { start: 8, end: 17 };
+        retained.push(recorded);
+        let mut opaque = placeholder.clone();
+        opaque.is_opaque = true;
+        opaque.opaque_bits = Some(vec![true, false]);
+        retained.push(opaque);
+        for language in ["en", "ko"] {
+            assert!(format_properties_list(&[placeholder.clone()], 99, language).is_empty());
+            for property in &retained {
+                assert_eq!(
+                    format_properties_list(&[property.clone()], 99, language).len(),
+                    1,
+                    "a real or unrecognized property must remain visible: {property:?}"
+                );
+            }
+            let expected = format_properties_list(&retained, 99, language);
+            let mut combined = retained.clone();
+            combined.insert(1, placeholder.clone());
+            assert_eq!(format_properties_list(&combined, 99, language), expected);
+        }
+    }
+
+    #[d2r_macros::settled_contract_test]
+    fn test_socket_placeholder_display_on_gameplay_runewords() {
+        let fixtures = [
+            include_bytes!(
+                "../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s"
+            )
+            .as_slice(),
+            include_bytes!(
+                "../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Cure_xrn.d2s"
+            )
+            .as_slice(),
+            include_bytes!(
+                "../../tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s"
+            )
+            .as_slice(),
+        ];
+        for bytes in fixtures {
+            let items =
+                Item::read_player_items_d2r_v3(bytes, &crate::item::HuffmanTree::new()).unwrap();
+            let runewords: Vec<_> = items.iter().filter(|item| item.is_runeword).collect();
+            assert_eq!(runewords.len(), 1);
+            let item = runewords[0];
+            assert!(item.is_completely_parsed());
+            assert_eq!(item.socketed_items.len(), 3);
+            let before = item.clone();
+            let markers: Vec<_> = item
+                .properties
+                .iter()
+                .filter(|property| property.name == "item_socket_child")
+                .cloned()
+                .collect();
+            assert_eq!(markers.len(), 3);
+            for language in ["en", "ko"] {
+                assert!(format_properties_list(&markers, 99, language).is_empty());
+                let displayed = format_item(item, language, 0, 99);
+                assert!(
+                    !displayed
+                        .properties
+                        .iter()
+                        .any(|line| line == "burningmax (value: 0)")
+                );
+            }
+            assert_eq!(
+                *item, before,
+                "formatting must preserve parsed bits, properties and children"
+            );
+        }
     }
 
     /// Canonical contract test for Alpha v105 formatter using the 'buc' (buckler) selector truth.
