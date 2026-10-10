@@ -1,15 +1,16 @@
-use d2r_core::domain::character::skills::parse_skill_section;
-use d2r_core::domain::progression::waypoint::WaypointSet;
-use d2r_core::domain::progression::Progression;
 use d2r_core::data::item_specs::get_base_item_spec;
 use d2r_core::data::set_items::SET_ITEMS;
+use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::item::quality::ItemQuality;
+use d2r_core::domain::item::stream::{ItemContainer, PlayerItemStream};
+use d2r_core::domain::item::ItemModule;
+use d2r_core::domain::progression::waypoint::WaypointSet;
+use d2r_core::domain::progression::Progression;
 use d2r_core::engine::formatter::{format_item, FormattedSetBonus};
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
-use std::collections::HashMap;
 use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
-use d2r_core::verify::alpha_inventory_routing::{alpha_inventory_route, AlphaInventoryRoute};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -71,6 +72,11 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             &mut stream,
             frontend_root().join("index.html"),
             "text/html; charset=utf-8",
+        ),
+        ("GET", "/item-model.mjs") => serve_file(
+            &mut stream,
+            frontend_root().join("item-model.mjs"),
+            "text/javascript; charset=utf-8",
         ),
         ("GET", path) if path.starts_with("/fixtures/") && !path.contains("..") => serve_file(
             &mut stream,
@@ -220,14 +226,12 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
     let mut stash = Vec::new();
     let mut cube = Vec::new();
     let mut unknown = Vec::new();
-    if let Ok(items) = Item::read_player_items(bytes, &huffman, alpha) {
+    let stream = PlayerItemStream::read(bytes, &huffman)?;
+    {
         // Aggregate set piece counts from equipped items to accurately resolve active set bonuses.
         let mut set_piece_counts: HashMap<&'static str, usize> = HashMap::new();
-        for item in &items {
-            if item.is_residue() || item.code.trim().is_empty() {
-                continue;
-            }
-            if alpha_inventory_route(item, alpha) == AlphaInventoryRoute::Equipment
+        for item in &stream.items {
+            if stream.placement(item).container == ItemContainer::Equipment
                 && item.quality == Some(ItemQuality::Set)
                 && item.is_identified
             {
@@ -239,10 +243,7 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
             }
         }
 
-        for (index, item) in items.iter().enumerate() {
-            if item.is_residue() || item.code.trim().is_empty() {
-                continue;
-            }
+        for (index, item) in stream.items.iter().enumerate() {
             let active_set_count = if item.quality == Some(ItemQuality::Set) {
                 item.unique_id
                     .and_then(|id| SET_ITEMS.iter().find(|s| s.id == id as u32))
@@ -252,21 +253,30 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
                 0
             };
             let mut data = item_json(index, item, level, active_set_count);
-            let route = alpha_inventory_route(item, alpha);
-            if route == AlphaInventoryRoute::Equipment {
-                data["slot_en"] = json!(equipment_slot(item.x, alpha));
+            let placement = stream.placement(item);
+            data["placement"] = json!(placement);
+            data["x"] = json!(placement.x);
+            data["y"] = json!(placement.y);
+            data["is_equipped"] = json!(placement.container == ItemContainer::Equipment);
+            if let Some(slot) = placement.equipment_slot {
+                data["slot_en"] = json!(slot);
             }
-            match route {
-                AlphaInventoryRoute::Equipment => equipment.push(data),
-                AlphaInventoryRoute::Belt => belt.push(data),
-                AlphaInventoryRoute::Inventory => inventory.push(data),
-                AlphaInventoryRoute::Cube => cube.push(data),
-                AlphaInventoryRoute::Stash => stash.push(data),
-                AlphaInventoryRoute::Unknown => unknown.push(data),
+            match placement.container {
+                ItemContainer::Equipment => equipment.push(data),
+                ItemContainer::Belt => belt.push(data),
+                ItemContainer::Inventory => inventory.push(data),
+                ItemContainer::Cube => cube.push(data),
+                ItemContainer::Stash => stash.push(data),
+                ItemContainer::Unknown => unknown.push(data),
             }
         }
     }
     Ok(json!({
+        "parser": {
+            "item_dialect": stream.dialect,
+            "player_item_count": stream.items.len(),
+            "diagnostics": stream.diagnostics,
+        },
         "character": {
             "name": save.header.char_name,
             "class": d2r_core::save::class_name(save.header.char_class),
@@ -293,29 +303,39 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
 fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> Value {
     let ko = format_item(item, "ko", active_set_count, level);
     let en = format_item(item, "en", active_set_count, level);
-    let (name_en, name_ko) = item_localization(&item.code);
-    let socketed_items = item.socketed_items.iter().enumerate().map(|(child_index, child)| {
-        let child_ko = format_item(child, "ko", 0, level);
-        let child_en = format_item(child, "en", 0, level);
-        let (child_name_en, child_name_ko) = item_localization(&child.code);
-        json!({
-            "index": child_index,
-            "code": child.code.trim(),
-            "name_en": child_name_en,
-            "name_ko": child_name_ko,
-            "quality": quality(child.header.quality),
-            "properties": properties(&child.properties),
-            "formatted_lines_ko": child_ko.properties,
-            "formatted_lines_en": child_en.properties,
-            "formatted_base_ko": child_ko.base_attributes,
-            "formatted_base_en": child_en.base_attributes,
-        })
-    }).collect::<Vec<_>>();
-    json!({
+    let socketed_items = item
+        .socketed_items
+        .iter()
+        .enumerate()
+        .map(|(child_index, child)| item_json(child_index, child, level, 0))
+        .collect::<Vec<_>>();
+    let mut opaque_bits = item.body.v105_7mgw_payload.as_ref().map_or(0, Vec::len);
+    let mut opaque_reasons = Vec::new();
+    for module in &item.modules {
+        match module {
+            ItemModule::Opaque(bits) | ItemModule::Residue(bits) => opaque_bits += bits.len(),
+            ItemModule::SemiOpaque { body_bits, reason } => {
+                opaque_bits += body_bits.len();
+                opaque_reasons.push(reason.as_str());
+            }
+            _ => {}
+        }
+    }
+    let has_opaque_properties = item
+        .properties
+        .iter()
+        .chain(item.set_attributes.iter().flatten())
+        .chain(item.runeword_attributes.iter())
+        .any(|property| property.is_opaque);
+    let is_opaque = item.is_opaque()
+        || item.is_semi_opaque()
+        || item.body.v105_7mgw_payload.is_some()
+        || has_opaque_properties;
+    let mut data = json!({
         "index": index,
         "code": item.code.trim(),
-        "name_en": name_en,
-        "name_ko": name_ko,
+        "name_en": en.name,
+        "name_ko": ko.name,
         "type": d2r_core::inventory::get_item_category(&item.code),
         "quality": if item.header.is_runeword { "Runeword" } else { quality(item.header.quality) },
         "x": item.x,
@@ -333,6 +353,8 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
         "set_bonuses_en": format_set_bonuses(&en.set_bonuses),
         "warnings_ko": ko.warnings,
         "warnings_en": en.warnings,
+        "detailed_warnings_ko": ko.detailed_warnings,
+        "detailed_warnings_en": en.detailed_warnings,
         "set_attributes": item.set_attributes.iter().map(|set| properties(set)).collect::<Vec<_>>(),
         "runeword_attributes": properties(&item.runeword_attributes),
         "socketed_items": socketed_items,
@@ -342,20 +364,38 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
         "current_durability": item.current_durability,
         "quantity": item.quantity,
         "opaque_info": {
-            "is_opaque": item.body.v105_7mgw_payload.is_some(),
-            "bit_count": item.body.v105_7mgw_payload.as_ref().map(|bits| bits.len()).unwrap_or(0)
+            "is_opaque": is_opaque,
+            "is_semi_opaque": item.is_semi_opaque(),
+            "bit_count": opaque_bits,
+            "reasons": opaque_reasons,
         }
-    })
+    });
+    data.as_object_mut().expect("item projection object").extend(
+        json!({
+            "mode": item.mode,
+            "page": item.page,
+            "raw_x": item.x,
+            "raw_y": item.y,
+            "is_identified": item.is_identified,
+            "unique_id": item.unique_id,
+            "raw_range": item.range,
+            "parse_status": if item.is_residue() { "residue" } else if is_opaque { "partial" } else { "parsed" },
+        }).as_object().expect("item provenance object").clone()
+    );
+    data
 }
 
 fn format_set_bonuses(bonuses: &[FormattedSetBonus]) -> Value {
-    json!(bonuses.iter().map(|bonus| {
-        json!({
-            "active": bonus.active,
-            "required_count": bonus.required_count,
-            "lines": bonus.lines,
+    json!(bonuses
+        .iter()
+        .map(|bonus| {
+            json!({
+                "active": bonus.active,
+                "required_count": bonus.required_count,
+                "lines": bonus.lines,
+            })
         })
-    }).collect::<Vec<_>>())
+        .collect::<Vec<_>>())
 }
 
 fn base_damage(code: &str) -> Value {
@@ -363,7 +403,8 @@ fn base_damage(code: &str) -> Value {
         return Value::Null;
     };
     let one_hand = (spec.max_dmg > 0).then(|| json!({"min": spec.min_dmg, "max": spec.max_dmg}));
-    let two_hand = (spec.max_dmg2h > 0).then(|| json!({"min": spec.min_dmg2h, "max": spec.max_dmg2h}));
+    let two_hand =
+        (spec.max_dmg2h > 0).then(|| json!({"min": spec.min_dmg2h, "max": spec.max_dmg2h}));
     if one_hand.is_none() && two_hand.is_none() {
         Value::Null
     } else {
@@ -372,7 +413,22 @@ fn base_damage(code: &str) -> Value {
 }
 
 fn properties(items: &[ItemProperty]) -> Vec<Value> {
-    items.iter().map(|item| json!({"stat_id":item.stat_id,"name":if item.name.trim().is_empty() { d2r_core::data::stat_costs::STAT_COSTS.iter().find(|stat| stat.id == item.stat_id).map(|stat| stat.name.to_string()).unwrap_or_else(|| format!("stat_{}", item.stat_id)) } else { item.name.clone() },"param":item.param,"raw_value":item.raw_value,"value":item.value})).collect()
+    items
+        .iter()
+        .map(|item| {
+            // Serialize the parser's complete property contract, including provenance
+            // and opaque state. Future fields no longer require a second allowlist.
+            let mut value = serde_json::to_value(item).expect("ItemProperty serialization");
+            if item.name.trim().is_empty() {
+                value["name"] = json!(d2r_core::data::stat_costs::STAT_COSTS
+                    .iter()
+                    .find(|stat| stat.id == item.stat_id)
+                    .map(|stat| stat.name.to_string())
+                    .unwrap_or_else(|| format!("stat_{}", item.stat_id)));
+            }
+            value
+        })
+        .collect()
 }
 
 fn quality(quality: Option<d2r_core::domain::item::quality::ItemQuality>) -> &'static str {
@@ -390,48 +446,126 @@ fn quality(quality: Option<d2r_core::domain::item::quality::ItemQuality>) -> &'s
     }
 }
 
-fn item_localization(code: &str) -> (String, String) {
-    let code = code.trim().to_lowercase();
-    if let Some(entry) = d2r_core::data::localization::LOCALIZATIONS
-        .iter()
-        .find(|entry| entry.key.to_lowercase() == code)
-    {
-        return (entry.en.to_string(), entry.ko.to_string());
-    }
-    let name = d2r_core::data::item_codes::ITEM_TEMPLATES
-        .iter()
-        .find(|entry| entry.code == code)
-        .map(|entry| entry.name)
-        .unwrap_or(code.as_str());
-    (name.to_string(), name.to_string())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
 
-fn equipment_slot(x: u8, alpha: bool) -> &'static str {
-    if alpha {
-        match x {
-            0 => "Armor",
-            1 => "Weapon1",
-            2 => "Weapon2",
-            3 => "Head",
-            _ => body_position_to_slot(x),
+    fn assert_projection(data: &Value, item: &Item, level: u8, set_count: usize) {
+        assert_eq!(data["code"], item.code.trim());
+        for (field, source) in [
+            ("properties", &item.properties),
+            ("runeword_attributes", &item.runeword_attributes),
+        ] {
+            for (actual, property) in data[field].as_array().unwrap().iter().zip(source) {
+                let expected = serde_json::to_value(property).unwrap();
+                for (key, value) in expected.as_object().unwrap() {
+                    if key != "name" || !property.name.trim().is_empty() {
+                        assert_eq!(&actual[key], value, "property field {key}");
+                    }
+                }
+            }
+            assert_eq!(data[field].as_array().unwrap().len(), source.len());
         }
-    } else {
-        body_position_to_slot(x)
+        assert_eq!(
+            data["set_attributes"],
+            json!(item
+                .set_attributes
+                .iter()
+                .map(|p| properties(p))
+                .collect::<Vec<_>>())
+        );
+        for language in ["ko", "en"] {
+            let formatted = format_item(item, language, set_count, level);
+            assert_eq!(data[format!("name_{language}")], formatted.name);
+            assert_eq!(
+                data[format!("formatted_lines_{language}")],
+                json!(formatted.properties)
+            );
+            assert_eq!(
+                data[format!("formatted_base_{language}")],
+                json!(formatted.base_attributes)
+            );
+            assert_eq!(
+                data[format!("warnings_{language}")],
+                json!(formatted.warnings)
+            );
+        }
+        assert_eq!(
+            data["socketed_items"].as_array().unwrap().len(),
+            item.socketed_items.len()
+        );
+        for (child_data, child) in data["socketed_items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(&item.socketed_items)
+        {
+            assert_projection(child_data, child, level, 0);
+        }
     }
-}
 
-fn body_position_to_slot(position: u8) -> &'static str {
-    match position {
-        1 => "Head",
-        2 => "Amulet",
-        3 => "Armor",
-        4 => "Weapon1",
-        5 => "Weapon2",
-        6 => "Ring1",
-        7 => "Ring2",
-        8 => "Belt",
-        9 => "Boots",
-        10 => "Gloves",
-        _ => "None",
+    #[settled_contract_test]
+    fn dashboard_projection_preserves_target_stream_and_formatter_contract() {
+        let bytes = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+        ))
+        .unwrap();
+        let stream = PlayerItemStream::read(&bytes, &HuffmanTree::new()).unwrap();
+        let payload = dashboard_payload(&bytes).unwrap();
+        assert_eq!(payload["parser"]["item_dialect"], "d2r-v3");
+        assert_eq!(payload["parser"]["player_item_count"], 43);
+        assert_eq!(payload["equipment"].as_array().unwrap().len(), 10);
+        assert!(payload["unknown"].as_array().unwrap().is_empty());
+        let all = ["equipment", "inventory", "belt", "stash", "cube", "unknown"]
+            .into_iter()
+            .flat_map(|key| payload[key].as_array().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(all.len(), stream.items.len());
+        let level = payload["character"]["level"].as_u64().unwrap() as u8;
+        for (index, item) in stream.items.iter().enumerate() {
+            let data = all.iter().find(|data| data["index"] == index).unwrap();
+            let set_count = if item.quality == Some(ItemQuality::Set) {
+                1
+            } else {
+                0
+            };
+            assert_projection(data, item, level, set_count);
+            assert_eq!(data["placement"], json!(stream.placement(item)));
+        }
+        for item in payload["belt"].as_array().unwrap() {
+            assert!(
+                d2r_core::verify::alpha_inventory_routing::is_belt_consumable(
+                    item["code"].as_str().unwrap()
+                )
+            );
+            assert!(item["x"].as_u64().unwrap() < 4 && item["y"].as_u64().unwrap() < 4);
+        }
+        assert!(dashboard_payload(&bytes[..7]).is_err());
+    }
+
+    #[settled_contract_test]
+    fn dashboard_projection_exposes_partial_state_in_socket_children() {
+        let mut child = Item {
+            code: "rin".into(),
+            ..Item::default()
+        };
+        child.modules.push(ItemModule::SemiOpaque {
+            body_bits: vec![true, false],
+            reason: "Unresolved tail".into(),
+        });
+        let parent = Item {
+            code: "cap".into(),
+            socketed_items: vec![child],
+            ..Item::default()
+        };
+        let data = item_json(0, &parent, 1, 0);
+        let child = &data["socketed_items"][0];
+        assert_eq!(child["parse_status"], "partial");
+        assert_eq!(child["opaque_info"]["is_opaque"], true);
+        assert_eq!(child["opaque_info"]["bit_count"], 2);
+        assert_eq!(child["opaque_info"]["reasons"][0], "Unresolved tail");
+        assert!(child["runeword_attributes"].is_array());
+        assert!(child["warnings_ko"].is_array());
     }
 }

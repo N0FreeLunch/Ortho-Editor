@@ -19,6 +19,14 @@
 //!    The physical laws of the game world always take precedence over verification heuristics.
 
 use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::verify::alpha_inventory_routing::{
+    AlphaInventoryRoute, alpha_inventory_candidate_route, is_belt_consumable,
+};
+
+// Alpha belt claims are checked before routing isolation, regardless of identification
+// or opacity. Non-consumables cannot occupy belt storage; preserve and report them.
+// This is evidence of an impossible parsed placement, not proof of its root cause.
+// Capacity, collisions, and D2R-v3 belt placement are outside this audit's coverage.
 
 /// The audit covers only the primary player list, not mercenary/corpse/golem lists.
 /// Slot compatibility is a partial diagnostic heuristic, not a complete gear oracle.
@@ -120,14 +128,16 @@ mod cli {
 
     fn print_help() {
         println!(
-            "d2save_equipped_invariant - D2R Equipped & Mercenary Item Identification Invariant Verifier"
+            "d2save_equipped_invariant - Primary equipped identification and Alpha belt invariant verifier"
         );
         println!();
         println!("USAGE:");
         println!("    d2save_equipped_invariant [OPTIONS]");
         println!();
         println!("OPTIONS:");
-        println!("    --dialect <NAME>        alpha (default) or d2r-v3; primary player list only");
+        println!(
+            "    --dialect <NAME>        alpha (default, includes belt kinds) or d2r-v3; primary list only"
+        );
         println!("    --fixture <PATH>        Verify a single .d2s save file (fast diagnosis)");
         println!(
             "    --corpus-dir <PATH>     Directory of saves to scan (default: tests/fixtures/savegames)"
@@ -149,6 +159,8 @@ pub enum InvariantClassification {
     FlagShiftAnomaly,
     /// Genuine hard violation where a valid equipped item is unidentified.
     TrueUnidentifiedViolation,
+    /// A raw Alpha belt claim contains an item that cannot be stored in a belt.
+    BeltItemMismatch,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,6 +192,8 @@ pub struct InvariantAuditReport {
     pub total_saves_checked: usize,
     pub total_items_checked: usize,
     pub total_equipped_checked: usize,
+    pub total_belt_checked: usize,
+    pub belt_item_mismatch_count: usize,
     pub total_anomalies: usize,
     pub phantom_header_drift_count: usize,
     pub slot_mismatch_phantom_drift_count: usize,
@@ -216,6 +230,7 @@ pub struct AuditFailure {
 struct FileAudit {
     items: usize,
     equipped: usize,
+    belt: usize,
     anomalies: Vec<EquippedAnomaly>,
     failure: Option<AuditFailure>,
 }
@@ -405,6 +420,34 @@ fn audit_file(path: &Path, huffman: &HuffmanTree, dialect: Dialect) -> FileAudit
     }
 }
 
+fn belt_anomaly(filename: &str, index: usize, item: &Item) -> Option<EquippedAnomaly> {
+    if alpha_inventory_candidate_route(item, true) != AlphaInventoryRoute::Belt
+        || is_belt_consumable(&item.code)
+    {
+        return None;
+    }
+    Some(EquippedAnomaly {
+        file: filename.into(),
+        item_index: index,
+        code: item.code.trim().into(),
+        version: item.version,
+        mode: item.mode,
+        location: item.location,
+        x: item.x,
+        y: item.y,
+        flags: format!("0x{:08x}", item.flags),
+        is_identified: item.is_identified,
+        is_compact: item.is_compact,
+        is_opaque: item.is_opaque() || item.is_semi_opaque(),
+        classification: InvariantClassification::BeltItemMismatch,
+        diagnosis: format!(
+            "Impossible Alpha belt claim for '{}'; preserve as unknown and inspect item {} and the preceding item boundary with d2item_inspect. Placement/identity interpretation may be wrong; this does not prove input corruption.",
+            item.code.trim(),
+            index
+        ),
+    })
+}
+
 fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialect) -> FileAudit {
     let filename = path
         .file_name()
@@ -414,6 +457,7 @@ fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialec
 
     let mut total_items = 0;
     let mut total_equipped = 0;
+    let mut total_belt = 0;
     let mut anomalies = Vec::new();
 
     let parsed = match dialect {
@@ -436,6 +480,14 @@ fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialec
     {
         total_items += items.len();
         for (idx, it) in items.iter().enumerate() {
+            if dialect == Dialect::Alpha
+                && alpha_inventory_candidate_route(it, true) == AlphaInventoryRoute::Belt
+            {
+                total_belt += 1;
+                if let Some(anomaly) = belt_anomaly(&filename, idx, it) {
+                    anomalies.push(anomaly);
+                }
+            }
             // In D2 save format, mode == 1 indicates an equipped item (body slot 1..=10).
             // mode == 0 with location == 1 means stored in player inventory (can be unidentified).
             let is_equipped = it.header.mode == 1 || it.mode == 1;
@@ -490,6 +542,7 @@ fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialec
     FileAudit {
         items: total_items,
         equipped: total_equipped,
+        belt: total_belt,
         anomalies,
         failure: None,
     }
@@ -539,6 +592,7 @@ fn main() {
 
     let mut total_items = 0;
     let mut total_equipped = 0;
+    let mut total_belt = 0;
     let mut all_anomalies = Vec::new();
     let mut total_saves_parsed = 0;
     let mut parse_failures = Vec::new();
@@ -552,6 +606,7 @@ fn main() {
         total_saves_parsed += 1;
         total_items += result.items;
         total_equipped += result.equipped;
+        total_belt += result.belt;
         for anom in result.anomalies {
             *affected_files_set.entry(anom.file.clone()).or_insert(0) += 1;
             all_anomalies.push(anom);
@@ -562,6 +617,7 @@ fn main() {
     let mut slot_mismatch_count = 0;
     let mut flag_shift_count = 0;
     let mut true_violation_count = 0;
+    let mut belt_mismatch_count = 0;
 
     for a in &all_anomalies {
         match a.classification {
@@ -569,13 +625,14 @@ fn main() {
             InvariantClassification::SlotMismatchPhantomDrift => slot_mismatch_count += 1,
             InvariantClassification::FlagShiftAnomaly => flag_shift_count += 1,
             InvariantClassification::TrueUnidentifiedViolation => true_violation_count += 1,
+            InvariantClassification::BeltItemMismatch => belt_mismatch_count += 1,
         }
     }
 
     let affected_files: Vec<String> = affected_files_set.into_keys().collect();
 
     let report = InvariantAuditReport {
-        schema_version: "d2save-equipped-primary/v1",
+        schema_version: "d2save-equipped-primary/v2",
         dialect: args.dialect,
         status: if !parse_failures.is_empty() {
             "error"
@@ -584,12 +641,14 @@ fn main() {
         } else {
             "ok"
         },
-        coverage_limit: "Primary player list identification and partial slot rules only; no mercenary/corpse/golem lists, complete slot oracle, game-load or fidelity proof.",
+        coverage_limit: "Primary player list identification and partial slot rules, plus Alpha raw belt item-kind claims; no D2R-v3 belt rules, belt capacity/collisions, mercenary/corpse/golem lists, complete slot oracle, game-load or fidelity proof.",
         total_saves_parsed,
         parse_failures,
         total_saves_checked: save_paths.len(),
         total_items_checked: total_items,
         total_equipped_checked: total_equipped,
+        total_belt_checked: total_belt,
+        belt_item_mismatch_count: belt_mismatch_count,
         total_anomalies: all_anomalies.len(),
         phantom_header_drift_count: phantom_count,
         slot_mismatch_phantom_drift_count: slot_mismatch_count,
@@ -624,6 +683,8 @@ fn main() {
     }
     println!("Total items:         {}", total_items);
     println!("Equipped items:      {}", total_equipped);
+    println!("Alpha belt claims:   {}", total_belt);
+    println!("Belt mismatches:     {}", belt_mismatch_count);
     println!("Total anomalies:     {}", all_anomalies.len());
     println!("Elapsed time:        {:.2?}", elapsed);
     println!("--------------------------------------------------------------------------------");
@@ -686,6 +747,10 @@ fn main() {
             "WARNING: Found {} TRUE unidentified equipped items!",
             true_violation_count
         );
+    } else if !all_anomalies.is_empty() {
+        println!(
+            "Radar Verdict: FAILED; impossible placements or flag anomalies require investigation."
+        );
     } else {
         println!(
             "Radar Verdict: ZERO true unidentified violations. Review reported drift anomalies and coverage limits."
@@ -698,6 +763,78 @@ fn main() {
 mod tests {
     use super::*;
     use d2r_macros::settled_contract_test;
+
+    #[settled_contract_test]
+    fn belt_audit_reports_identified_and_opaque_non_consumables() {
+        let mut item = Item {
+            code: "rin".into(),
+            ..Item::default()
+        };
+        item.mode = 2;
+        item.is_identified = true;
+        item.x = 3;
+        item.y = 1;
+        item.modules
+            .push(d2r_core::domain::item::entity::ItemModule::Opaque(vec![
+                true, false,
+            ]));
+        let anomaly =
+            belt_anomaly("test.d2s", 7, &item).expect("opaque belt mismatch must be reported");
+        assert!(anomaly.is_identified && anomaly.is_opaque);
+        assert_eq!((anomaly.item_index, anomaly.x, anomaly.y), (7, 3, 1));
+        assert!(matches!(
+            anomaly.classification,
+            InvariantClassification::BeltItemMismatch
+        ));
+        assert!(anomaly.diagnosis.contains("preserve as unknown"));
+        item.code = "isc".into();
+        assert!(belt_anomaly("test.d2s", 7, &item).is_none());
+        item.code = "rin".into();
+        item.mode = 1;
+        assert!(belt_anomaly("test.d2s", 7, &item).is_none());
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn druid_anya_belt_claims_are_isolated_without_losing_entities() {
+        use d2r_core::verify::alpha_inventory_routing::alpha_inventory_route;
+        let root = std::env::var_os("D2R_CORE_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        let bytes = fs::read(root.join(
+            "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+        ))
+        .unwrap();
+        let items = Item::read_player_items(&bytes, &HuffmanTree::new(), true).unwrap();
+        let visible: Vec<_> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| !item.is_residue() && !item.code.trim().is_empty())
+            .collect();
+        let mut before_belt = 0;
+        let mut after_belt = 0;
+        let mut mismatches = 0;
+        let mut unknown = 0;
+        for (index, item) in &visible {
+            before_belt += usize::from(
+                alpha_inventory_candidate_route(item, true) == AlphaInventoryRoute::Belt,
+            );
+            let route = alpha_inventory_route(item, true);
+            after_belt += usize::from(route == AlphaInventoryRoute::Belt);
+            unknown += usize::from(route == AlphaInventoryRoute::Unknown);
+            if let Some(anomaly) = belt_anomaly("TESTDRUID_Quest3_AnyaRescued.d2s", *index, item) {
+                mismatches += 1;
+                assert_eq!(route, AlphaInventoryRoute::Unknown);
+                assert_eq!(anomaly.item_index, *index);
+            }
+            if route == AlphaInventoryRoute::Belt {
+                assert!(is_belt_consumable(&item.code));
+            }
+        }
+        assert_eq!(
+            (visible.len(), before_belt, after_belt, mismatches, unknown),
+            (31, 18, 3, 15, 20)
+        );
+    }
 
     #[settled_contract_test]
     fn explicit_dialect_rejects_missing_and_unknown_values() {
@@ -725,7 +862,7 @@ mod tests {
         assert!(failure.hint.contains("--dialect d2r-v3"));
     }
 
-    #[test]
+    #[d2r_macros::hypothesis_test]
     fn rogue_stats_verify_fixture_seals_equipped_anomaly_classification() {
         let fixture = Path::new(
             "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
@@ -736,7 +873,28 @@ mod tests {
             audit.failure.is_none(),
             "the legacy fixture must actually parse"
         );
-        let anomalies = audit.anomalies;
+        // Added belt coverage must not change the original equipped classification.
+        assert_eq!(
+            audit
+                .anomalies
+                .iter()
+                .filter(|anomaly| matches!(
+                    anomaly.classification,
+                    InvariantClassification::BeltItemMismatch
+                ))
+                .count(),
+            14
+        );
+        let anomalies: Vec<_> = audit
+            .anomalies
+            .into_iter()
+            .filter(|anomaly| {
+                !matches!(
+                    anomaly.classification,
+                    InvariantClassification::BeltItemMismatch
+                )
+            })
+            .collect();
 
         assert!(
             !anomalies

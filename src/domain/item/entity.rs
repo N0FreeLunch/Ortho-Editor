@@ -553,6 +553,17 @@ impl Item {
             .iter()
             .any(|m| matches!(m, ItemModule::SemiOpaque { .. }))
     }
+    /// Returns true if the item has been fully parsed into semantic structures
+    /// without falling back to opaque bitstreams or leaving unfinished property parsing.
+    pub fn is_completely_parsed(&self) -> bool {
+        if self.is_opaque() || self.is_semi_opaque() {
+            return false;
+        }
+        if !self.is_compact && !self.properties_complete {
+            return false;
+        }
+        true
+    }
     pub fn is_residue(&self) -> bool {
         let trimmed = self
             .code

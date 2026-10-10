@@ -28,6 +28,7 @@ pub struct FormattedItem {
     pub properties: Vec<String>,
     pub set_bonuses: Vec<FormattedSetBonus>,
     pub warnings: Vec<String>,
+    pub detailed_warnings: Vec<crate::engine::validation::ValidationWarning>,
 }
 
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
@@ -138,7 +139,9 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         }
     }
 
-    let warnings = validate_item(item).map(|res| res.warnings).unwrap_or_default();
+    let validation = validate_item(item);
+    let warnings = validation.as_ref().map(|res| res.warnings.clone()).unwrap_or_default();
+    let detailed_warnings = validation.map(|res| res.detailed_warnings).unwrap_or_default();
 
     FormattedItem {
         name: strip_d2_color_codes(&resolve_item_name(item, language)),
@@ -148,6 +151,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         properties,
         set_bonuses,
         warnings,
+        detailed_warnings,
     }
 }
 
@@ -613,7 +617,7 @@ fn format_skill_charges(level: u32, skill: &str, cur: u32, max: u32, language: &
     if template.contains("%s") {
         format_template(template, &[level.to_string(), skill.to_string(), cur.to_string(), max.to_string()])
     } else {
-        // Korean pattern like "(%d/%d 회)" -> needs skill/level prefix
+        // Korean pattern like "(%d/%d `회`)" -> needs skill/level prefix
         let level_label = get_loc("ModStre10b", language);
         let charges_formatted = format_template(template, &[cur.to_string(), max.to_string()]);
         format!("{} {} {} {}", level_label, level, skill, charges_formatted)

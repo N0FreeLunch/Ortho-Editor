@@ -6,6 +6,35 @@ use crate::data::legitimacy::{SOCKET_RULES, calc_alvl, STAFFMOD_ENTRIES};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum WarningConfidenceTier {
+    /// 1. Hard Invariant: Absolute physical integrity violation (e.g., bit desync, ghost items)
+    HardInvariant,
+    /// 2. Settled Contract: Violation against fixed game templates (Unique, Set, Runeword specs)
+    SettledContract,
+    /// 3. Evolving Hypothesis: Observation divergence against evolving heuristic models (e.g. Rare defense rolling, alvl)
+    EvolvingHypothesis,
+    /// 4. Advisory: Pure informational advisory
+    Advisory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ValidationWarning {
+    pub message: String,
+    pub tier: WarningConfidenceTier,
+    pub category: &'static str,
+}
+
+impl ValidationWarning {
+    pub fn new(message: impl Into<String>, tier: WarningConfidenceTier, category: &'static str) -> Self {
+        Self {
+            message: message.into(),
+            tier,
+            category,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ValidationResult {
     pub spec_name: String,
@@ -13,6 +42,7 @@ pub struct ValidationResult {
     pub score: f32, // Overall perfection score
     pub stats: Vec<StatValidation>,
     pub warnings: Vec<String>,
+    pub detailed_warnings: Vec<ValidationWarning>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +171,12 @@ pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
 
 
 pub fn validate_item(item: &Item) -> Option<ValidationResult> {
+    // Harness Invariant Gate: Only fully parsed items qualify for legitimacy checks.
+    // Suppress warnings on partially parsed, opaque, or incomplete property bitstreams.
+    if !item.is_completely_parsed() {
+        return None;
+    }
+
     let mut result = if let Some(spec) = lookup_spec(item) {
         match spec {
             ItemSpec::Unique(unique_spec) => Some(validate_item_properties(
@@ -167,11 +203,17 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
                 let suffixes = item.suffixes();
 
                 if prefixes.is_empty() && suffixes.is_empty() {
-                    return None;
-                }
-
-                let item_types = get_all_item_types(&item.code);
-                let mut warnings = Vec::new();
+                    Some(ValidationResult {
+                        spec_name: format!("{:?}", item.quality.unwrap_or(ItemQuality::Normal)),
+                        is_perfect: true,
+                        score: 1.0,
+                        stats: Vec::new(),
+                        warnings: Vec::new(),
+                        detailed_warnings: Vec::new(),
+                    })
+                } else {
+                    let item_types = get_all_item_types(&item.code);
+                    let mut warnings = Vec::new();
 
                 for affix in prefixes.iter().chain(suffixes.iter()) {
                     if !is_affix_eligible_for(affix, &item_types) {
@@ -201,6 +243,7 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
                 );
                 res.warnings.extend(warnings);
                 Some(res)
+                }
             }
             _ => Some(ValidationResult {
                 spec_name: format!("{:?}", item.quality.unwrap_or(ItemQuality::Normal)),
@@ -208,17 +251,35 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
                 score: 1.0,
                 stats: Vec::new(),
                 warnings: Vec::new(),
+                detailed_warnings: Vec::new(),
             }),
         }
     };
 
     if let Some(ref mut res) = result {
         res.warnings.extend(check_socket_legitimacy(item));
-        res.warnings.extend(check_alvl_legitimacy(item));
-        res.warnings.extend(check_staffmod_legitimacy(item));
+
+        let alvl_warnings = check_alvl_legitimacy_detailed(item);
+        for w in &alvl_warnings {
+            res.warnings.push(w.message.clone());
+        }
+        res.detailed_warnings.extend(alvl_warnings);
+
+        let staffmod_warnings = check_staffmod_legitimacy_detailed(item);
+        for w in &staffmod_warnings {
+            res.warnings.push(w.message.clone());
+        }
+        res.detailed_warnings.extend(staffmod_warnings);
+
         res.warnings.extend(check_affix_group_legitimacy(item));
         res.warnings.extend(check_runeword_legitimacy(item));
-        res.warnings.extend(check_base_stat_legitimacy(item));
+        
+        let base_stat_warnings = check_base_stat_legitimacy_detailed(item);
+        for w in &base_stat_warnings {
+            res.warnings.push(w.message.clone());
+        }
+        res.detailed_warnings.extend(base_stat_warnings);
+
         res.warnings.extend(check_item_code_legitimacy(item));
     }
     result
@@ -233,7 +294,7 @@ pub fn check_item_code_legitimacy(item: &Item) -> Vec<String> {
     warnings
 }
 
-pub fn check_staffmod_legitimacy(item: &Item) -> Vec<String> {
+pub fn check_staffmod_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
 
     let ilvl = match item.level {
@@ -242,8 +303,19 @@ pub fn check_staffmod_legitimacy(item: &Item) -> Vec<String> {
     };
 
     let item_types = get_all_item_types(&item.code);
+    let prefixes = item.prefixes();
+    let suffixes = item.suffixes();
 
     for prop in &item.properties {
+        // If this property can be explained by any existing affix rolled on this item,
+        // it is an affix stat, NOT an automagic / staffmod violation!
+        let explained_by_affix = prefixes.iter().chain(suffixes.iter()).any(|affix| {
+            affix.stats.iter().any(|s| s.stat_id == prop.stat_id && s.param == prop.param)
+        });
+        if explained_by_affix {
+            continue;
+        }
+
         let mut possible_entries = Vec::new();
 
         for type_code in &item_types {
@@ -282,14 +354,32 @@ pub fn check_staffmod_legitimacy(item: &Item) -> Vec<String> {
                 .map(|s| s.name)
                 .unwrap_or("unknown");
 
-            warnings.push(format!(
-                "Property '{}' value {} requires ilvl {}, but item is ilvl {} (at bits {}..{})",
-                stat_name, prop.value, req_lvl, ilvl, prop.range.start, prop.range.end
+            // Automagic rules on complex items are evolving heuristics
+            let tier = if matches!(item.quality, Some(ItemQuality::Rare) | Some(ItemQuality::Magic) | Some(ItemQuality::Crafted)) {
+                WarningConfidenceTier::EvolvingHypothesis
+            } else {
+                WarningConfidenceTier::SettledContract
+            };
+
+            warnings.push(ValidationWarning::new(
+                format!(
+                    "Property '{}' value {} requires ilvl {}, but item is ilvl {} (at bits {}..{})",
+                    stat_name, prop.value, req_lvl, ilvl, prop.range.start, prop.range.end
+                ),
+                tier,
+                "staffmod_ilvl",
             ));
         }
     }
 
     warnings
+}
+
+pub fn check_staffmod_legitimacy(item: &Item) -> Vec<String> {
+    check_staffmod_legitimacy_detailed(item)
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
 }
 
 pub fn check_socket_legitimacy(item: &Item) -> Vec<String> {
@@ -328,7 +418,7 @@ pub fn check_socket_legitimacy(item: &Item) -> Vec<String> {
     warnings
 }
 
-pub fn check_alvl_legitimacy(item: &Item) -> Vec<String> {
+pub fn check_alvl_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
 
     let quality = match item.quality {
@@ -367,14 +457,25 @@ pub fn check_alvl_legitimacy(item: &Item) -> Vec<String> {
 
     for affix in item.prefixes().iter().chain(item.suffixes().iter()) {
         if affix.level > alvl as u32 {
-            warnings.push(format!(
-                "Affix '{}' (level {}) exceeds item aLvl {}",
-                affix.name, affix.level, alvl
+            warnings.push(ValidationWarning::new(
+                format!(
+                    "Affix '{}' (level {}) exceeds item aLvl {}",
+                    affix.name, affix.level, alvl
+                ),
+                WarningConfidenceTier::EvolvingHypothesis,
+                "affix_alvl",
             ));
         }
     }
 
     warnings
+}
+
+pub fn check_alvl_legitimacy(item: &Item) -> Vec<String> {
+    check_alvl_legitimacy_detailed(item)
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
 }
 
 pub fn check_affix_group_legitimacy(item: &Item) -> Vec<String> {
@@ -441,7 +542,7 @@ pub fn check_ethereal_legitimacy(item: &Item) -> Vec<String> {
     warnings
 }
 
-pub fn check_base_stat_legitimacy(item: &Item) -> Vec<String> {
+pub fn check_base_stat_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
     let trimmed = item.code.trim();
     let spec = if let Some(s) = BASE_ITEM_SPECS.iter().find(|s| s.code == trimmed) {
@@ -460,7 +561,6 @@ pub fn check_base_stat_legitimacy(item: &Item) -> Vec<String> {
         }
 
         let is_max_ac_plus_one = ed_percent > 0 || item.is_runeword || matches!(item.quality, Some(ItemQuality::Unique) | Some(ItemQuality::Set));
-        
         let eth_mul = if item.is_ethereal { 1.5 } else { 1.0 };
 
         if is_max_ac_plus_one {
@@ -468,20 +568,61 @@ pub fn check_base_stat_legitimacy(item: &Item) -> Vec<String> {
             let calc = ((base_ac * eth_mul).floor() * (100.0 + ed_percent as f32) / 100.0).floor() as i64 + flat_def as i64;
             let expected = calc.max(0) as u32;
             if actual_def != expected && (actual_def as i64 - expected as i64).abs() > 1 {
-                warnings.push(format!("Defense {} does not match expected {} (Superior/Unique Rule)", actual_def, expected));
+                // Fixed specs (Unique/Set/Runeword) are SettledContract; others are EvolvingHypothesis
+                let tier = if matches!(item.quality, Some(ItemQuality::Unique) | Some(ItemQuality::Set)) || item.is_runeword {
+                    WarningConfidenceTier::SettledContract
+                } else {
+                    WarningConfidenceTier::EvolvingHypothesis
+                };
+                warnings.push(ValidationWarning::new(
+                    format!("Defense {} does not match expected {} (Superior/Unique Rule)", actual_def, expected),
+                    tier,
+                    "defense_formula",
+                ));
             }
         } else {
             let min_calc = (spec.min_ac as f32 * eth_mul).floor() as i64 + flat_def as i64;
             let max_calc = (spec.max_ac as f32 * eth_mul).floor() as i64 + flat_def as i64;
             let min_expected = min_calc.max(0) as u32;
             let max_expected = max_calc.max(0) as u32;
+
             if actual_def < min_expected || actual_def > max_expected {
-                warnings.push(format!("Defense {} out of range {}-{}", actual_def, min_expected, max_expected));
+                // In D2, Rare/Magic/Crafted items can roll base defense with affixes or level bonuses
+                // that may not be fully captured without complete affix resolution.
+                // We classify this as EvolvingHypothesis rather than a hard violation.
+                let is_complex_quality = matches!(item.quality, Some(ItemQuality::Rare) | Some(ItemQuality::Magic) | Some(ItemQuality::Crafted));
+                let tier = if is_complex_quality {
+                    WarningConfidenceTier::EvolvingHypothesis
+                } else {
+                    WarningConfidenceTier::SettledContract
+                };
+
+                // Possibility Envelope for Rare/Magic: allow maximum possible prefix flat def (+60) before warning
+                let rare_envelope_max = if is_complex_quality {
+                    max_expected + 60
+                } else {
+                    max_expected
+                };
+
+                if actual_def < min_expected || actual_def > rare_envelope_max {
+                    warnings.push(ValidationWarning::new(
+                        format!("Defense {} out of range {}-{}", actual_def, min_expected, max_expected),
+                        tier,
+                        "defense_range",
+                    ));
+                }
             }
         }
     }
-    
+
     warnings
+}
+
+pub fn check_base_stat_legitimacy(item: &Item) -> Vec<String> {
+    check_base_stat_legitimacy_detailed(item)
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
 }
 pub fn check_runeword_legitimacy(item: &Item) -> Vec<String> {
     let mut warnings = Vec::new();
@@ -691,6 +832,7 @@ fn validate_item_properties(
         score,
         stats,
         warnings: Vec::new(),
+        detailed_warnings: Vec::new(),
     }
 }
 

@@ -10,6 +10,7 @@ pub mod cache;
 pub mod opaque_probe;
 pub mod geometry;
 pub mod fragment;
+pub mod stream;
 
 pub use quality::{ItemQuality, map_item_quality};
 pub use crate::domain::header::entity::ItemHeader;
