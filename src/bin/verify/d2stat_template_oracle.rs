@@ -466,12 +466,7 @@ fn find_item_template<'a>(item: &Item, alpha_mode: bool) -> Option<MatchedTempla
     // 2. Check Set template
     if item.header.quality == Some(ItemQuality::Set) {
         if let Some(uid) = item.unique_id {
-            // Expansion set items in SET_ITEMS are shifted by +1 due to line 62 in SetItems.txt (Thinking 4273)
-            let shifted_id = if uid >= 62 { (uid + 1) as u32 } else { uid as u32 };
-            let s = SET_ITEMS
-                .iter()
-                .find(|s| s.id == shifted_id)
-                .or_else(|| SET_ITEMS.iter().find(|s| s.id == uid as u32));
+            let s = SET_ITEMS.iter().find(|s| s.id == uid as u32);
             if let Some(s) = s {
                 return Some(MatchedTemplate::Set {
                     template: s,
@@ -876,6 +871,30 @@ fn main() {
 mod tests {
     use super::*;
 
+    #[d2r_macros::settled_contract_test]
+    fn set_template_identity_uses_source_ids_without_a_row_shift() {
+        assert!(!SET_ITEMS.is_empty());
+        for template in SET_ITEMS {
+            let mut item = Item::default();
+            item.header.quality = Some(ItemQuality::Set);
+            item.unique_id = Some(u16::try_from(template.id).expect("representable Set ID"));
+            item.code = template.code.to_string();
+            for alpha_mode in [false, true] {
+                match find_item_template(&item, alpha_mode) {
+                    Some(MatchedTemplate::Set {
+                        template: actual,
+                        source,
+                    }) => {
+                        assert_eq!(source, TemplateMatchSource::SetId);
+                        assert_eq!(actual.id, template.id);
+                        assert_eq!(actual.index, template.index);
+                        assert_eq!(actual.code, template.code);
+                    }
+                    _ => panic!("Set ID {} must resolve its own template", template.id),
+                }
+            }
+        }
+    }
     fn identifiable_unique() -> &'static UniqueItem {
         UNIQUE_ITEMS
             .iter()
