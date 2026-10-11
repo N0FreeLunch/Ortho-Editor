@@ -684,6 +684,17 @@ fn format_template(template: &str, args: &[String]) -> String {
     out
 }
 
+fn rare_name_key(raw_id: u8) -> Option<&'static str> {
+    let index = usize::from(raw_id).checked_sub(1)?;
+    // Rare names share a one-based pool with all suffix rows before prefix rows.
+    let key = if index < RARE_SUFFIXES.len() {
+        RARE_SUFFIXES.get(index)
+    } else {
+        RARE_PREFIXES.get(index - RARE_SUFFIXES.len())
+    }?;
+    (!key.is_empty()).then_some(*key)
+}
+
 pub fn resolve_item_name(item: &Item, language: &str) -> String {
     // 1. Runeword
     if item.is_runeword || item.header.is_runeword {
@@ -724,18 +735,17 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
     if (item.quality == Some(ItemQuality::Rare) || item.quality == Some(ItemQuality::Crafted))
         && item.is_identified
     {
-        if let (Some(pref), Some(suff)) = (item.rare_name_1, item.rare_name_2) {
-            let p = RARE_PREFIXES.get(pref as usize).copied().unwrap_or("");
-            let s = RARE_SUFFIXES.get(suff as usize).copied().unwrap_or("");
-
+        if let (Some(p), Some(s)) = (
+            item.rare_name_1.and_then(rare_name_key),
+            item.rare_name_2.and_then(rare_name_key),
+        ) {
             let p_loc = get_loc(p, language);
             let s_loc = get_loc(s, language);
-
-            if language == "ko" {
-                return format!("{}{}", p_loc, s_loc);
+            return if language == "ko" {
+                format!("{p_loc}{s_loc}")
             } else {
-                return format!("{} {}", p_loc, s_loc);
-            }
+                format!("{p_loc} {s_loc}")
+            };
         }
     }
 
@@ -1205,6 +1215,91 @@ mod zero_affix_sentinel_tests {
                 clean.range = Default::default();
                 assert_eq!(clean.to_bits_d2r_v3_jewelry(&huffman).unwrap(), expected);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod rare_name_identity_tests {
+    use super::*;
+    use crate::item::HuffmanTree;
+    use d2r_macros::{invariant_test, settled_contract_test};
+
+    #[settled_contract_test]
+    fn pooled_ids_are_one_based_suffix_first_with_checked_bounds() {
+        assert_eq!(rare_name_key(0), None);
+        assert_eq!(rare_name_key(1), Some(RARE_SUFFIXES[0]));
+        let suffix_count = u8::try_from(RARE_SUFFIXES.len()).unwrap();
+        let total = u8::try_from(RARE_SUFFIXES.len() + RARE_PREFIXES.len()).unwrap();
+        assert_eq!(rare_name_key(suffix_count), RARE_SUFFIXES.last().copied());
+        assert_eq!(rare_name_key(suffix_count + 1), Some(RARE_PREFIXES[0]));
+        assert_eq!(rare_name_key(total), RARE_PREFIXES.last().copied());
+        assert_eq!(rare_name_key(total + 1), None);
+        assert_eq!(rare_name_key(u8::MAX), None);
+    }
+
+    #[settled_contract_test]
+    fn crafted_and_rare_names_preserve_hidden_and_invalid_id_policy() {
+        let mut item = Item::default();
+        item.code = "rin".into();
+        item.rare_name_1 = Some(169);
+        item.rare_name_2 = Some(94);
+        for quality in [ItemQuality::Rare, ItemQuality::Crafted] {
+            item.quality = Some(quality);
+            item.is_identified = true;
+            let original = item.clone();
+            assert_eq!(resolve_item_name(&item, "en"), "Storm Grip");
+            assert_eq!(resolve_item_name(&item, "ko"), "스톰그립");
+            assert_eq!(item, original);
+            item.is_identified = false;
+            assert_eq!(resolve_item_name(&item, "en"), "Ring");
+            item.is_identified = true;
+            for (first, second) in [
+                (Some(0), Some(94)),
+                (Some(169), Some(255)),
+                (None, Some(94)),
+            ] {
+                item.rare_name_1 = first;
+                item.rare_name_2 = second;
+                assert_eq!(resolve_item_name(&item, "en"), "Ring");
+            }
+            item.rare_name_1 = Some(169);
+            item.rare_name_2 = Some(94);
+        }
+    }
+
+    #[invariant_test]
+    fn actual_rare_names_match_original_wire_ids_without_mutating_items() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        assert_eq!(items.len(), 39);
+        for (index, first, second, first_bit, en, ko) in [
+            (5, 187, 68, 8622, "Dire Visor", "다이어바이저"),
+            (6, 168, 110, 8943, "Shadow Slippers", "섀도우슬리퍼"),
+            (12, 169, 94, 10260, "Storm Grip", "스톰그립"),
+            (14, 172, 124, 10710, "Stone Eye", "스톤아이"),
+            (37, 170, 24, 15096, "Rune Bane", "룬베인"),
+        ] {
+            let read_byte = |start: usize| {
+                (0..8).fold(0u8, |value, shift| {
+                    value | (((bytes[(start + shift) / 8] >> ((start + shift) % 8)) & 1) << shift)
+                })
+            };
+            assert_eq!(read_byte(first_bit), first);
+            assert_eq!(read_byte(first_bit + 8), second);
+            let item = &items[index];
+            let original = item.clone();
+            assert!(item.is_identified);
+            assert_eq!(item.quality, Some(ItemQuality::Rare));
+            assert_eq!(
+                (item.rare_name_1, item.rare_name_2),
+                (Some(first), Some(second))
+            );
+            assert_eq!(resolve_item_name(item, "en"), en);
+            assert_eq!(resolve_item_name(item, "ko"), ko);
+            assert_eq!(*item, original);
         }
     }
 }
