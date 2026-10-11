@@ -4367,6 +4367,9 @@ impl Item {
             };
             let (mut props, complete, term, _v5_extra, _unused_bits, shadow_bits, nested_items) =
                 stats_result;
+            let mut concealed_stats =
+                (d2r_v3_save_version == Some(0x69) && !item.header.is_identified)
+                    .then(Box::<ItemStats>::default);
 
             if d2r_v3_mode {
                 let quality_val = item.header.quality.unwrap_or(ItemQuality::Normal);
@@ -4380,7 +4383,11 @@ impl Item {
                 trim_d2r_v3_property_terminator(cursor, &mut props)?;
             }
             if d2r_v3_mode && !item.header.is_identified {
-                props.clear();
+                if let Some(hidden) = concealed_stats.as_mut() {
+                    hidden.properties = std::mem::take(&mut props);
+                } else {
+                    props.clear();
+                }
             }
 
             item.properties = props.clone();
@@ -4419,7 +4426,11 @@ impl Item {
                         trim_d2r_v3_property_terminator(cursor, &mut set_props)?;
                     }
                     if !item.header.is_identified {
-                        set_props.clear();
+                        if let Some(hidden) = concealed_stats.as_mut() {
+                            hidden.set_attributes.push(std::mem::take(&mut set_props));
+                        } else {
+                            set_props.clear();
+                        }
                     }
                     item.set_attributes.push(set_props);
                 }
@@ -4447,9 +4458,25 @@ impl Item {
                         trim_d2r_v3_property_terminator(cursor, &mut runeword_props)?;
                     }
                     if !item.header.is_identified {
-                        runeword_props.clear();
+                        if let Some(hidden) = concealed_stats.as_mut() {
+                            hidden.runeword_attributes = std::mem::take(&mut runeword_props);
+                        } else {
+                            runeword_props.clear();
+                        }
                     }
                     item.runeword_attributes = runeword_props;
+                }
+
+                if let Some(hidden) = concealed_stats {
+                    let auxiliary = item.body.d2r_v3_auxiliary.as_mut().ok_or_else(|| {
+                        cursor.fail(ParsingError::UnexpectedValue {
+                            field: "D2R v105 concealed property carrier".to_string(),
+                            value: "missing full-item auxiliary".to_string(),
+                            reason: "Concealed decoded stats require their explicit dialect owner"
+                                .to_string(),
+                        })
+                    })?;
+                    auxiliary.concealed_stats = Some(hidden);
                 }
 
                 let chronicle = crate::domain::item::entity::read_d2r_v3_chronicle(
@@ -5141,6 +5168,7 @@ impl Item {
         };
         if auxiliary.save_version != 0x69
             || auxiliary.quest_difficulty.is_some()
+            || auxiliary.concealed_stats.is_some()
             || header.save_is_alpha
             || !supported_kind
             || header.is_compact
@@ -6683,5 +6711,208 @@ mod chronicle_codec_tests {
                 emitted
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod concealed_stats_retention_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    const ACT4: &str = "tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s";
+    const TREACHERY: &str =
+        "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Treachery_uea.d2s";
+
+    fn synthetic_socket(property: &ItemProperty) -> bool {
+        property.stat_id == 317
+            && property.name == "item_socket_child"
+            && property.param == 0
+            && property.raw_value == 0
+            && property.value == 0
+            && property.range == Default::default()
+    }
+
+    fn raw_bits(bytes: &[u8], start: u64, width: u64) -> u32 {
+        (0..width).fold(0, |value, bit| {
+            value
+                | (u32::from(bytes[(start + bit) as usize / 8] & (1 << ((start + bit) % 8)) != 0)
+                    << bit)
+        })
+    }
+
+    #[settled_contract_test]
+    fn actual_unidentified_stats_keep_typed_values_without_public_exposure() {
+        let bytes = std::fs::read(ACT4).unwrap();
+        let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
+        assert_eq!(items.len(), 39);
+        let mut concealed_count = 0;
+        let mut decoded_count = 0;
+        for item in &items {
+            if item.is_compact {
+                assert!(
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_ref()
+                        .is_none_or(|auxiliary| auxiliary.concealed_stats.is_none())
+                );
+                continue;
+            }
+            let auxiliary = item.body.d2r_v3_auxiliary.as_ref().unwrap();
+            if item.is_identified {
+                assert!(auxiliary.concealed_stats.is_none());
+                continue;
+            }
+            let hidden = auxiliary
+                .concealed_stats
+                .as_deref()
+                .expect("Unidentified physical stats need a typed owner");
+            concealed_count += 1;
+            decoded_count += hidden
+                .properties
+                .iter()
+                .filter(|p| p.stat_id != 511)
+                .count();
+            assert!(item.properties.is_empty());
+            assert!(item.stats.properties.is_empty());
+        }
+        assert_eq!(concealed_count, 6);
+        assert_eq!(decoded_count, 41);
+        for (index, id, value, start, width, save_add) in
+            [(32, 16, 29, 13708, 9, 0), (35, 31, 40, 14715, 11, 10)]
+        {
+            let hidden = items[index]
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .concealed_stats
+                .as_deref()
+                .unwrap();
+            let property = hidden.properties.iter().find(|p| p.stat_id == id).unwrap();
+            assert_eq!((property.param, property.value), (0, value));
+            assert_eq!(property.range.start, start);
+            assert_eq!(raw_bits(&bytes, start, 9), id);
+            assert_eq!(raw_bits(&bytes, start + 9, width) as i32 - save_add, value);
+        }
+        assert!(
+            crate::domain::item::entity::D2rV3AuxiliaryData::default()
+                .concealed_stats
+                .is_none()
+        );
+    }
+
+    #[settled_contract_test]
+    fn controlled_set_and_runeword_lists_keep_physical_ownership() {
+        let tree = HuffmanTree::new();
+        for (kind, input) in [("set", ACT4), ("runeword", TREACHERY)] {
+            let bytes = std::fs::read(input).unwrap();
+            let original = Item::read_player_items_d2r_v3(&bytes, &tree).unwrap();
+            let index = original
+                .iter()
+                .position(|item| {
+                    if kind == "set" {
+                        item.quality == Some(ItemQuality::Set) && item.unique_id == Some(4)
+                    } else {
+                        item.is_runeword
+                    }
+                })
+                .unwrap();
+            let item = &original[index];
+            assert!(item.is_identified);
+            let expected = ItemStats {
+                properties: item
+                    .properties
+                    .iter()
+                    .filter(|p| !synthetic_socket(p))
+                    .cloned()
+                    .collect(),
+                set_attributes: item.set_attributes.clone(),
+                runeword_attributes: item.runeword_attributes.clone(),
+            };
+            let public_sockets: Vec<_> = item
+                .properties
+                .iter()
+                .filter(|p| synthetic_socket(p))
+                .cloned()
+                .collect();
+            let mut changed = bytes.clone();
+            let bit = item.range.start + 4;
+            changed[bit as usize / 8] &= !(1 << (bit % 8));
+            assert_eq!(
+                bytes.iter().zip(&changed).filter(|(a, b)| a != b).count(),
+                1
+            );
+            let modified = Item::read_player_items_d2r_v3(&changed, &tree).unwrap();
+            assert_eq!(modified.len(), original.len());
+            for (before, after) in original.iter().zip(&modified) {
+                assert_eq!(before.range, after.range);
+                assert_eq!(before.code, after.code);
+                assert_eq!(before.quality, after.quality);
+                assert_eq!(before.unique_id, after.unique_id);
+            }
+            let hidden_item = &modified[index];
+            assert!(!hidden_item.is_identified);
+            assert_eq!(hidden_item.properties, public_sockets);
+            assert_eq!(hidden_item.stats.properties, hidden_item.properties);
+            assert!(hidden_item.set_attributes.iter().all(Vec::is_empty));
+            assert!(hidden_item.runeword_attributes.is_empty());
+            assert_eq!(
+                hidden_item
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_ref()
+                    .unwrap()
+                    .concealed_stats
+                    .as_deref(),
+                Some(&expected)
+            );
+            if kind == "set" {
+                assert_eq!(
+                    (
+                        expected.set_attributes[0][0].stat_id,
+                        expected.set_attributes[0][0].value
+                    ),
+                    (214, 20)
+                );
+            } else {
+                assert_eq!(expected.runeword_attributes.len(), 5);
+                assert_eq!(hidden_item.socketed_items.len(), 3);
+                assert_eq!(hidden_item.properties.len(), 3);
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn identified_inverse_rejects_any_concealed_carrier_without_dropping_it() {
+        let bytes = std::fs::read(ACT4).unwrap();
+        let tree = HuffmanTree::new();
+        let items = Item::read_player_items_d2r_v3(&bytes, &tree).unwrap();
+        let item = items
+            .iter()
+            .find(|item| {
+                matches!(item.code.trim(), "rin" | "amu")
+                    && item.to_bits_d2r_v3_jewelry(&tree).is_ok()
+            })
+            .unwrap();
+        let expected: Vec<_> = (item.range.start..item.range.end)
+            .map(|bit| bytes[bit as usize / 8] & (1 << (bit % 8)) != 0)
+            .collect();
+        let mut clean = item.clone();
+        clean.bits.clear();
+        clean.segments.clear();
+        clean.range = Default::default();
+        assert_eq!(clean.to_bits_d2r_v3_jewelry(&tree).unwrap(), expected);
+        clean
+            .body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .concealed_stats = Some(Box::default());
+        let copy = clean.clone();
+        assert_eq!(
+            clean.to_bits_d2r_v3_jewelry(&tree).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(clean, copy);
     }
 }

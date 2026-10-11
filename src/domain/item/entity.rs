@@ -242,6 +242,8 @@ pub struct D2rV3AuxiliaryData {
     pub set_property_flags: Option<[bool; 5]>,
     pub realm_data: Vec<u32>,
     pub has_quantity: bool,
+    /// Decoded v105 options retained without exposing unidentified public properties.
+    pub concealed_stats: Option<Box<ItemStats>>,
     pub chronicle: Option<D2rV3ChronicleData>,
     pub advanced_stash_quantity: Option<u8>,
     pub alignment_padding: Option<Vec<bool>>,
