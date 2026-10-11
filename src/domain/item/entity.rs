@@ -164,6 +164,8 @@ pub struct CursedItemData {
 pub struct D2rV3AuxiliaryData {
     pub save_version: u32,
     pub stored_in: Option<u8>,
+    /// Logical stat 356 value for source-conditioned v105 compact quest items.
+    pub quest_difficulty: Option<u32>,
     pub filled_sockets: u8,
     /// Presence flags in read order; absence means this layout has no Set mask.
     pub set_property_flags: Option<[bool; 5]>,
@@ -2628,38 +2630,89 @@ pub fn consume_d2r_v3_compact_tail<R: BitRead>(
     code: &str,
     is_ear: bool,
 ) -> ParsingResult<()> {
-    if is_ear {
-        return Ok(());
-    }
+    read_d2r_v3_compact_tail(cursor, save_version, code, is_ear).map(|_| ())
+}
 
-    let has_realm_data = cursor.read_bit()?;
-    if has_realm_data {
-        let realm_data_count = if save_version > 96 {
+/// Retains the source-conditioned compact quest fields of the verified v105 dialect.
+/// Other compact layouts preserve the existing consumption-only contract.
+pub fn read_d2r_v3_compact_tail<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    save_version: u32,
+    code: &str,
+    is_ear: bool,
+) -> ParsingResult<Option<D2rV3AuxiliaryData>> {
+    if is_ear {
+        return Ok(None);
+    }
+    let is_quest = save_version == 0x69
+        && crate::domain::item::serialization::item_template(code.trim())
+            .is_some_and(|template| template.has_quest_difficulty);
+    let mut auxiliary = D2rV3AuxiliaryData {
+        save_version,
+        ..Default::default()
+    };
+    if is_quest {
+        cursor.push_context("D2rV3CompactQuest:Difficulty");
+        let width = crate::domain::stats::stat_save_bits(356)
+            .filter(|&width| width > 0 && width <= 32)
+            .ok_or_else(|| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 quest difficulty metadata".to_string(),
+                    value: "missing or unsupported width".to_string(),
+                    reason: "Stat 356 must declare a supported save width".to_string(),
+                })
+            })?;
+        let add = crate::domain::stats::stat_save_add(356).ok_or_else(|| {
+            cursor.fail(ParsingError::UnexpectedValue {
+                field: "D2R v3 quest difficulty metadata".to_string(),
+                value: "missing SaveAdd".to_string(),
+                reason: "Stat 356 must declare its save bias".to_string(),
+            })
+        })?;
+        let raw = cursor.read_bits::<u32>(width)?;
+        auxiliary.quest_difficulty =
+            Some(u32::try_from(i64::from(raw) - i64::from(add)).map_err(|_| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 quest difficulty".to_string(),
+                    value: raw.to_string(),
+                    reason: "The biased source value cannot represent an unsigned difficulty"
+                        .to_string(),
+                })
+            })?);
+        cursor.end_segment();
+        cursor.push_context("D2rV3CompactQuest:Realm");
+    }
+    if cursor.read_bit()? {
+        let count = if save_version > 96 {
             4
         } else if save_version > 93 {
             3
         } else {
             2
         };
-        cursor.skip_and_record(realm_data_count * 32)?;
-    }
-
-    if save_version <= 99 {
-        return Ok(());
-    }
-
-    if save_version <= 101 {
-        let is_stackable = crate::domain::item::serialization::item_template(code)
-            .map(|template| template.is_stackable)
-            .unwrap_or(false);
-        if is_stackable {
-            cursor.skip_and_record(8)?;
+        for _ in 0..count {
+            auxiliary.realm_data.push(cursor.read_bits::<u32>(32)?);
         }
-    } else if cursor.read_bit()? {
-        cursor.skip_and_record(8)?;
     }
-
-    Ok(())
+    if is_quest {
+        cursor.end_segment();
+        cursor.push_context("D2rV3CompactQuest:StashQuantity");
+    }
+    if save_version > 99 {
+        let present = if save_version <= 101 {
+            crate::domain::item::serialization::item_template(code)
+                .is_some_and(|template| template.is_stackable)
+        } else {
+            cursor.read_bit()?
+        };
+        if present {
+            auxiliary.advanced_stash_quantity = Some(cursor.read_bits::<u8>(8)?);
+        }
+    }
+    if is_quest {
+        cursor.end_segment();
+    }
+    Ok(is_quest.then_some(auxiliary))
 }
 
 pub fn parse_item_header<R: BitRead>(

@@ -3974,14 +3974,17 @@ impl Item {
             }
         };
         let is_d2r_v3_compact = d2r_v3_save_version.is_some() && header.is_compact;
-        if let Some(save_version) = d2r_v3_save_version.filter(|_| header.is_compact) {
-            crate::domain::item::entity::consume_d2r_v3_compact_tail(
-                cursor,
-                save_version,
-                &body.code,
-                header.is_ear,
-            )?;
-        }
+        let compact_auxiliary =
+            if let Some(save_version) = d2r_v3_save_version.filter(|_| header.is_compact) {
+                crate::domain::item::entity::read_d2r_v3_compact_tail(
+                    cursor,
+                    save_version,
+                    &body.code,
+                    header.is_ear,
+                )?
+            } else {
+                None
+            };
         if header.save_is_alpha {
             let reg = crate::domain::forensic::registry::get_registry();
             if body.code.trim().is_empty() {
@@ -4087,7 +4090,10 @@ impl Item {
         let ext_axiom = axiom.clone();
 
         let ext_data = if is_d2r_v3_compact {
-            crate::domain::item::entity::ExtendedStatsData::default()
+            crate::domain::item::entity::ExtendedStatsData {
+                d2r_v3_auxiliary: compact_auxiliary,
+                ..Default::default()
+            }
         } else if let Some(save_version) = d2r_v3_save_version {
             crate::domain::item::entity::ExtendedStatsData::read_d2r_v3_from_cursor(
                 cursor,
@@ -4855,6 +4861,159 @@ fn d2r_v3_write_scalar_list(
 }
 
 impl Item {
+    /// Rebuild a stored v105 compact quest item from its source-owned field values.
+    /// Whole-item bits, ranges and segment caches are never emission inputs.
+    pub fn to_bits_d2r_v3_compact_quest(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+        let auxiliary = self
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .ok_or_else(|| invalid("Missing explicit D2R v3 compact quest provenance"))?;
+        let header = &self.header;
+        if auxiliary.save_version != 0x69
+            || header.save_is_alpha
+            || !header.is_compact
+            || header.is_ear
+            || header.is_socketed
+            || header.is_personalized
+            || header.is_runeword
+            || matches!(header.mode, 3 | 5 | 6)
+            || !item_template(self.body.code.trim())
+                .is_some_and(|template| template.has_quest_difficulty)
+            || self.code.trim() != self.body.code.trim()
+            || auxiliary.filled_sockets != 0
+            || auxiliary.set_property_flags.is_some()
+            || auxiliary.has_quantity
+            || !matches!(auxiliary.realm_data.len(), 0 | 4)
+            || self.num_socketed_items != 0
+            || !self.socketed_items.is_empty()
+            || !self.modules.is_empty()
+            || !self.properties.is_empty()
+            || !self.set_attributes.is_empty()
+            || !self.runeword_attributes.is_empty()
+            || !self.stats.properties.is_empty()
+            || !self.stats.set_attributes.is_empty()
+            || !self.stats.runeword_attributes.is_empty()
+            || self.set_list_count != 0
+            || self.sockets.is_some()
+            || header.id.is_some()
+            || header.level.is_some()
+            || header.quality.is_some()
+            || self.defense.is_some()
+            || self.body.defense.is_some()
+            || self.max_durability.is_some()
+            || self.body.max_durability.is_some()
+            || self.current_durability.is_some()
+            || self.body.current_durability.is_some()
+            || self.quantity.is_some()
+            || self.body.quantity.is_some()
+            || self.ear_class.is_some()
+            || self.ear_level.is_some()
+            || self.ear_player_name.is_some()
+            || self.personalized_player_name.is_some()
+            || self.has_multiple_graphics
+            || self.multi_graphics_bits.is_some()
+            || self.has_class_specific_data
+            || self.class_specific_bits.is_some()
+            || self.low_high_graphic_bits.is_some()
+            || self.magic_prefix.is_some()
+            || self.magic_suffix.is_some()
+            || self.rare_name_1.is_some()
+            || self.rare_name_2.is_some()
+            || self.rare_affixes.iter().any(Option::is_some)
+            || self.unique_id.is_some()
+            || self.runeword_id.is_some()
+            || self.runeword_level.is_some()
+            || self.timestamp_flag
+            || self.tbk_ibk_teleport.is_some()
+            || header.has_checksum
+            || header.alpha_checksum.is_some()
+            || header.alpha_quality_raw.is_some()
+            || header.alpha_v5_runeword_extra.is_some()
+            || header.alpha_unique_id_raw.is_some()
+        {
+            return Err(invalid("Unsupported D2R v3 compact quest state"));
+        }
+        for (flag, expected) in [
+            (4, header.is_identified),
+            (11, false),
+            (16, false),
+            (21, true),
+            (22, header.is_ethereal),
+            (24, false),
+            (26, false),
+        ] {
+            if (header.flags & (1 << flag) != 0) != expected {
+                return Err(invalid("Compact quest header flags and fields disagree"));
+            }
+        }
+        if self.body.mode != header.mode
+            || self.body.location != header.location
+            || self.body.x != header.x
+            || self.body.y != header.y
+            || self.body.page != header.page
+        {
+            return Err(invalid("Compact quest placement aliases disagree"));
+        }
+        let stored_in = auxiliary
+            .stored_in
+            .ok_or_else(|| invalid("Missing compact quest stored-in field"))?;
+        if stored_in.saturating_sub(1) != header.page {
+            return Err(invalid("Compact quest stored-in field and page disagree"));
+        }
+        let (extended_version, version_low) = match header.version {
+            0..=3 => (false, header.version),
+            99..=102 => (true, header.version - 99),
+            _ => return Err(invalid("Unsupported compact quest item version")),
+        };
+        let difficulty = auxiliary
+            .quest_difficulty
+            .ok_or_else(|| invalid("Missing source-required quest difficulty"))?;
+        let width = crate::domain::stats::stat_save_bits(356)
+            .filter(|&width| width > 0 && width <= 32)
+            .ok_or_else(|| invalid("Missing or unsupported quest difficulty save width"))?;
+        let add = crate::domain::stats::stat_save_add(356)
+            .ok_or_else(|| invalid("Missing quest difficulty save bias"))?;
+        let raw = u64::try_from(i64::from(difficulty) + i64::from(add))
+            .map_err(|_| invalid("Negative encoded quest difficulty"))?;
+        let mut emitter = BitEmitter::new();
+        use D2rV3JewelryWidths as W;
+        d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
+        emitter.write_bit(extended_version)?;
+        d2r_v3_write_checked(&mut emitter, version_low as u64, W::VERSION_LOW, "version")?;
+        d2r_v3_write_checked(&mut emitter, header.mode as u64, W::MODE, "mode")?;
+        for (value, name) in [
+            (header.location, "location"),
+            (header.x, "column"),
+            (header.y, "row"),
+        ] {
+            d2r_v3_write_checked(&mut emitter, value as u64, W::POSITION, name)?;
+        }
+        d2r_v3_write_checked(&mut emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
+        emitter.extend_bits(huffman.encode(&format!("{} ", self.body.code.trim()))?)?;
+        d2r_v3_write_checked(&mut emitter, raw, width, "quest difficulty")?;
+        emitter.write_bit(!auxiliary.realm_data.is_empty())?;
+        for word in &auxiliary.realm_data {
+            emitter.write_bits(*word, 32)?;
+        }
+        emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
+        if let Some(quantity) = auxiliary.advanced_stash_quantity {
+            emitter.write_bits(quantity as u32, W::STASH_QUANTITY)?;
+        }
+        let padding = auxiliary
+            .alignment_padding
+            .as_ref()
+            .ok_or_else(|| invalid("Missing independently captured compact quest padding"))?;
+        if padding.len() != ((8 - emitter.written_bits() % 8) % 8) as usize {
+            return Err(invalid(
+                "Compact quest padding does not match the rebuilt grammar",
+            ));
+        }
+        emitter.extend_bits(padding.iter().copied())?;
+        Ok(emitter.into_bits())
+    }
+
     /// Rebuild identified, non-socketed D2R v3 jewelry from semantic fields.
     /// This opt-in writer never reads whole-item raw bits, segments or offsets.
     /// Unsupported layouts fail instead of falling back to the generic dialect.
@@ -4918,6 +5077,7 @@ impl Item {
             }
         };
         if auxiliary.save_version != 0x69
+            || auxiliary.quest_difficulty.is_some()
             || header.save_is_alpha
             || !supported_kind
             || header.is_compact
@@ -5780,5 +5940,312 @@ mod tests {
         assert_eq!(carrier_fail.start_bit, 0);
         assert!(carrier_fail.final_bit > 0);
         assert!(!carrier_fail.segments.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod compact_quest_codec_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+
+    fn fixture(name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "tests/fixtures/savegames/gameplay/normal/act1/{name}.d2s"
+            )),
+        )
+        .unwrap()
+    }
+
+    fn source_bits(bytes: &[u8], start: u64, len: u64) -> Vec<bool> {
+        (start..start + len)
+            .map(|p| bytes[p as usize / 8] & (1 << (p % 8)) != 0)
+            .collect()
+    }
+
+    fn put_bits(bytes: &mut [u8], start: u64, bits: &[bool]) {
+        for (i, &value) in bits.iter().enumerate() {
+            let p = start as usize + i;
+            let mask = 1 << (p % 8);
+            bytes[p / 8] = (bytes[p / 8] & !mask) | if value { mask } else { 0 };
+        }
+    }
+
+    fn without_caches(item: &Item) -> Item {
+        let mut value = item.clone();
+        value.bits.clear();
+        value.segments.clear();
+        value.range = Default::default();
+        value.total_bits = 1;
+        value.logical_width = Some(1);
+        value.expected_start_bit = u64::MAX;
+        value.gap_bits = vec![true; 17];
+        value.body.alpha_code_bits = vec![true; 19];
+        value
+    }
+
+    #[invariant_test]
+    fn registered_quest_spans_and_difficulty_pwp_are_exact() {
+        let huffman = HuffmanTree::new();
+        for (name, count, index, code, start, code_end, end) in [
+            (
+                "TESTDRUID_Quest3_ScrollObtained_PreAkara",
+                24,
+                11,
+                "bks",
+                8824,
+                8893,
+                8904,
+            ),
+            (
+                "TESTDRUID_Quest3_ScrollObtained_PostAkara",
+                28,
+                25,
+                "bkd",
+                11360,
+                11431,
+                11440,
+            ),
+        ] {
+            let bytes = fixture(name);
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).unwrap();
+            assert_eq!(items.len(), count);
+            let item = &items[index];
+            assert_eq!(item.code.trim(), code);
+            assert_eq!((item.range.start, item.range.end), (start, end));
+            let auxiliary = item.body.d2r_v3_auxiliary.as_ref().unwrap();
+            assert_eq!(auxiliary.quest_difficulty, Some(0));
+            assert!(auxiliary.realm_data.is_empty());
+            assert_eq!(auxiliary.advanced_stash_quantity, None);
+            let original = source_bits(&bytes, start, end - start);
+            assert_eq!(
+                without_caches(item)
+                    .to_bits_d2r_v3_compact_quest(&huffman)
+                    .unwrap(),
+                original
+            );
+            assert!(item.to_bits_d2r_v3_jewelry(&huffman).is_err());
+            assert!(item.to_bits_d2r_v3_armor(&huffman).is_err());
+            for difficulty in 1..=3 {
+                let mut changed = without_caches(item);
+                changed
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_mut()
+                    .unwrap()
+                    .quest_difficulty = Some(difficulty);
+                let encoded = changed.to_bits_d2r_v3_compact_quest(&huffman).unwrap();
+                assert_eq!(encoded.len(), original.len());
+                let changed_offsets: Vec<_> = encoded
+                    .iter()
+                    .zip(&original)
+                    .enumerate()
+                    .filter_map(|(i, (a, b))| (a != b).then_some(start + i as u64))
+                    .collect();
+                let predicted: Vec<_> = (0..2)
+                    .filter_map(|i| ((difficulty >> i) & 1 != 0).then_some(code_end + i))
+                    .collect();
+                assert_eq!(changed_offsets, predicted);
+                let mut patched = bytes.clone();
+                put_bits(&mut patched, start, &encoded);
+                assert_eq!(
+                    source_bits(&patched, 0, start),
+                    source_bits(&bytes, 0, start)
+                );
+                assert_eq!(
+                    source_bits(&patched, end, bytes.len() as u64 * 8 - end),
+                    source_bits(&bytes, end, bytes.len() as u64 * 8 - end)
+                );
+                let reparsed = Item::read_player_items_d2r_v3(&patched, &huffman).unwrap();
+                assert_eq!(reparsed.len(), items.len());
+                assert_eq!(
+                    reparsed[index]
+                        .body
+                        .d2r_v3_auxiliary
+                        .as_ref()
+                        .unwrap()
+                        .quest_difficulty,
+                    Some(difficulty)
+                );
+                assert_eq!(
+                    (reparsed[index].range.start, reparsed[index].range.end),
+                    (start, end)
+                );
+                assert_eq!(
+                    without_caches(&reparsed[index])
+                        .to_bits_d2r_v3_compact_quest(&huffman)
+                        .unwrap(),
+                    encoded
+                );
+                for (i, (before, after)) in items.iter().zip(&reparsed).enumerate() {
+                    if i != index {
+                        assert_eq!(before, after, "following model changed at {i}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn append_unsigned(bits: &mut Vec<bool>, value: u32, width: u32) {
+        bits.extend((0..width).map(|i| (value >> i) & 1 != 0));
+    }
+
+    #[invariant_test]
+    fn independent_nonzero_and_present_zero_tail_controls_round_trip() {
+        let huffman = HuffmanTree::new();
+        let bytes = fixture("TESTDRUID_Quest3_ScrollObtained_PreAkara");
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman).unwrap();
+        let item = &items[11];
+        for (words, stash) in [
+            ([0x12345679, 0x89abcdef, 0x0f1e2d3c, 0xa5c36987], 173),
+            ([0; 4], 0),
+        ] {
+            let mut changed = without_caches(item);
+            let aux = changed.body.d2r_v3_auxiliary.as_mut().unwrap();
+            aux.quest_difficulty = Some(2);
+            aux.realm_data = words.to_vec();
+            aux.advanced_stash_quantity = Some(stash);
+            let encoded = changed.to_bits_d2r_v3_compact_quest(&huffman).unwrap();
+            let mut expected = source_bits(&bytes, 8824, 69);
+            append_unsigned(&mut expected, 2, 2);
+            expected.push(true);
+            for word in words {
+                append_unsigned(&mut expected, word, 32);
+            }
+            expected.push(true);
+            append_unsigned(&mut expected, stash as u32, 8);
+            expected.extend(source_bits(&bytes, 8897, 7));
+            assert_eq!(encoded, expected);
+            assert_eq!(encoded.len(), 216);
+            let mut list = vec![b'J', b'M', 1, 0];
+            list.resize(4 + encoded.len() / 8, 0);
+            put_bits(&mut list, 32, &expected);
+            let decoded = Item::read_counted_list_d2r_v3(&list, 0, &huffman, 0x69).unwrap();
+            assert_eq!(decoded.len(), 1);
+            let aux = decoded[0].body.d2r_v3_auxiliary.as_ref().unwrap();
+            assert_eq!(aux.quest_difficulty, Some(2));
+            assert_eq!(aux.realm_data, words);
+            assert_eq!(aux.advanced_stash_quantity, Some(stash));
+            assert_eq!(decoded[0].range.end, list.len() as u64 * 8);
+            assert_eq!(
+                without_caches(&decoded[0])
+                    .to_bits_d2r_v3_compact_quest(&huffman)
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[settled_contract_test]
+    fn unsupported_compact_quest_states_are_typed_rejections() {
+        let huffman = HuffmanTree::new();
+        let bytes = fixture("TESTDRUID_Quest3_ScrollObtained_PreAkara");
+        let original = Item::read_player_items_d2r_v3(&bytes, &huffman)
+            .unwrap()
+            .remove(11);
+        for case in 0..29 {
+            let mut item = original.clone();
+            match case {
+                0 => item.body.d2r_v3_auxiliary = None,
+                1 => item.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = 104,
+                2 => item.header.save_is_alpha = true,
+                3 => item.header.is_compact = false,
+                4 => item.header.is_ear = true,
+                5 => item.header.is_socketed = true,
+                6 => item.header.is_personalized = true,
+                7 => item.header.is_runeword = true,
+                8 => item.header.flags ^= 1 << 21,
+                9 => item.header.mode = 3,
+                10 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .quest_difficulty = None
+                }
+                11 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .quest_difficulty = Some(4)
+                }
+                12 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .quest_difficulty = Some(u32::MAX)
+                }
+                13 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0],
+                14 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 3],
+                15 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 5],
+                16 => item.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true,
+                17 => item.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 1,
+                18 => item.body.d2r_v3_auxiliary.as_mut().unwrap().stored_in = None,
+                19 => item.body.d2r_v3_auxiliary.as_mut().unwrap().stored_in = Some(7),
+                20 => {
+                    item.header.x = 16;
+                    item.body.x = 16;
+                }
+                21 => item.header.version = 103,
+                22 => item.code = "bkd".to_string(),
+                23 => {
+                    item.code = "box".to_string();
+                    item.body.code = "box ".to_string();
+                }
+                24 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .set_property_flags = Some([false; 5])
+                }
+                25 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .alignment_padding = None
+                }
+                26 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .alignment_padding = Some(vec![])
+                }
+                27 => item.defense = Some(1),
+                28 => item.header.quality = Some(ItemQuality::Normal),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                item.to_bits_d2r_v3_compact_quest(&huffman)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput,
+                "case {case}"
+            );
+        }
+    }
+
+    #[settled_contract_test]
+    fn nonquest_and_other_version_tails_keep_the_previous_contract() {
+        let bytes = fixture("TESTDRUID_Quest3_ScrollObtained_PreAkara");
+        for (code, version) in [("box", 105), ("bks", 104)] {
+            let mut cursor = BitCursor::from_raw_at(&bytes, 8893);
+            let data = crate::domain::item::entity::read_d2r_v3_compact_tail(
+                &mut cursor,
+                version,
+                code,
+                false,
+            )
+            .unwrap();
+            assert_eq!(data, None);
+            assert_eq!(cursor.pos(), 8895);
+        }
+        let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
+        assert_eq!(items[10].code.trim(), "mp1");
+        assert_eq!(items[10].body.d2r_v3_auxiliary, None);
     }
 }
