@@ -4386,7 +4386,8 @@ impl Item {
             item.properties = props.clone();
             item.stats.properties = props;
             item.properties_complete = complete;
-            item.terminator_bit = term;
+            // The explicit v3 grammar ends at the 9-bit marker, without a terminal bit.
+            item.terminator_bit = if d2r_v3_mode { false } else { term };
             item.body.alpha_shadow_skip_bits = shadow_bits;
             item.socketed_items = nested_items;
 
@@ -4451,6 +4452,23 @@ impl Item {
                     item.runeword_attributes = runeword_props;
                 }
 
+                let chronicle = crate::domain::item::entity::read_d2r_v3_chronicle(
+                    cursor,
+                    save_version,
+                    item.header.flags,
+                    item.header.is_compact,
+                )?;
+                if let Some(chronicle) = chronicle {
+                    let auxiliary = item.body.d2r_v3_auxiliary.as_mut().ok_or_else(|| {
+                        cursor.fail(ParsingError::UnexpectedValue {
+                            field: "D2R v105 Chronicle carrier".to_string(),
+                            value: "missing full-item auxiliary".to_string(),
+                            reason: "Decoded Chronicle fields must retain their dialect owner"
+                                .to_string(),
+                        })
+                    })?;
+                    auxiliary.chronicle = Some(chronicle);
+                }
                 if save_version > 101 {
                     if cursor.read_bit()? {
                         let stack_size = cursor.read_bits::<u8>(8)?;
@@ -4860,6 +4878,50 @@ fn d2r_v3_write_scalar_list(
     emitter.write_bits(W::TERMINATOR, W::STAT_ID)
 }
 
+impl crate::domain::item::entity::D2rV3AuxiliaryData {
+    /// Reconstruct only the source-bound Chronicle payload from typed field values.
+    /// Stash presence and byte padding belong to the surrounding item grammar.
+    pub fn to_bits_d2r_v3_chronicle(
+        &self,
+        flags: u32,
+        compact_item: bool,
+    ) -> io::Result<Vec<bool>> {
+        use crate::domain::item::entity::D2rV3ChronicleLayout as W;
+        let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+        if !W::is_present(self.save_version, flags, compact_item) {
+            return if self.chronicle.is_some() {
+                Err(invalid(
+                    "Chronicle fields exist outside the v105 full-item presence contract",
+                ))
+            } else {
+                Ok(Vec::new())
+            };
+        }
+        let chronicle = self
+            .chronicle
+            .as_ref()
+            .ok_or_else(|| invalid("Missing source-required Chronicle fields"))?;
+        let compact = flags & W::COMPACT_FLAG != 0;
+        if chronicle.recipients.len() > W::MAX_RECIPIENTS
+            || (compact && (chronicle.timestamp.is_some() || chronicle.recipients.len() != 1))
+            || (!compact && chronicle.timestamp.is_none())
+        {
+            return Err(invalid(
+                "Chronicle form, timestamp and recipient count disagree",
+            ));
+        }
+        let mut emitter = BitEmitter::new();
+        emitter.write_bits(u32::from(chronicle.source_id), W::SOURCE_ID)?;
+        if let Some(timestamp) = chronicle.timestamp {
+            emitter.write_bits(timestamp, W::TIMESTAMP)?;
+            emitter.write_bits(chronicle.recipients.len() as u32, W::COUNT)?;
+        }
+        for recipient in &chronicle.recipients {
+            emitter.write_bits_u64(*recipient, W::RECIPIENT)?;
+        }
+        Ok(emitter.into_bits())
+    }
+}
 impl Item {
     /// Rebuild a stored v105 compact quest item from its source-owned field values.
     /// Whole-item bits, ranges and segment caches are never emission inputs.
@@ -4884,6 +4946,7 @@ impl Item {
             || self.code.trim() != self.body.code.trim()
             || auxiliary.filled_sockets != 0
             || auxiliary.set_property_flags.is_some()
+            || auxiliary.chronicle.is_some()
             || auxiliary.has_quantity
             || !matches!(auxiliary.realm_data.len(), 0 | 4)
             || self.num_socketed_items != 0
@@ -5366,6 +5429,9 @@ impl Item {
         for properties in &self.set_attributes {
             d2r_v3_write_scalar_list(&mut emitter, properties)?;
         }
+        emitter.extend_bits(
+            auxiliary.to_bits_d2r_v3_chronicle(header.flags, header.is_compact)?,
+        )?;
         emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
         if let Some(quantity) = auxiliary.advanced_stash_quantity {
             d2r_v3_write_checked(
@@ -6247,5 +6313,375 @@ mod compact_quest_codec_tests {
         let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
         assert_eq!(items[10].code.trim(), "mp1");
         assert_eq!(items[10].body.d2r_v3_auxiliary, None);
+    }
+}
+
+#[cfg(test)]
+mod chronicle_codec_tests {
+    use super::*;
+    use crate::domain::item::entity::{
+        D2rV3AuxiliaryData, D2rV3ChronicleData, read_d2r_v3_chronicle,
+    };
+    use d2r_macros::{invariant_test, settled_contract_test};
+
+    fn fixture(relative: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/savegames/gameplay/normal")
+                .join(relative),
+        )
+        .unwrap()
+    }
+
+    fn bits(bytes: &[u8], start: u64, end: u64) -> Vec<bool> {
+        (start..end)
+            .map(|p| bytes[p as usize / 8] & (1 << (p % 8)) != 0)
+            .collect()
+    }
+
+    fn append(bits: &mut Vec<bool>, value: u64, width: u32) {
+        bits.extend((0..width).map(|i| value & (1u64 << i) != 0));
+    }
+
+    fn pack(bits: &[bool]) -> Vec<u8> {
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (i, &bit) in bits.iter().enumerate() {
+            if bit {
+                bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        bytes
+    }
+
+    fn normalized(items: &[Item]) -> String {
+        let mut items = items.to_vec();
+        for item in &mut items {
+            item.bits.clear();
+            item.segments.clear();
+        }
+        format!("{items:?}")
+    }
+
+    #[invariant_test]
+    fn registered_chronicle_payloads_are_exact_and_mutations_are_local() {
+        let huffman = HuffmanTree::new();
+        for (file, count, index, start, end, source_id, timestamp) in [
+            (
+                "act1/TESTDRUID_PostWarriv_Act1.d2s",
+                41,
+                25,
+                11276,
+                11328,
+                2878,
+                29606024,
+            ),
+            (
+                "act1/TESTDRUID_Quest4_CountessKilled.d2s",
+                44,
+                28,
+                11685,
+                11737,
+                2990,
+                29605998,
+            ),
+            (
+                "act2/TESTDRUID_Q1_RadamentKilled.d2s",
+                43,
+                19,
+                10724,
+                10776,
+                2878,
+                29606024,
+            ),
+        ] {
+            let bytes = fixture(file);
+            let items = Item::read_player_items_d2r_v3(&bytes, &huffman).unwrap();
+            assert_eq!(items.len(), count);
+            let auxiliary = items[index].body.d2r_v3_auxiliary.as_ref().unwrap();
+            assert_eq!(
+                auxiliary.chronicle,
+                Some(D2rV3ChronicleData {
+                    source_id,
+                    timestamp: Some(timestamp),
+                    recipients: Vec::new(),
+                })
+            );
+            assert_eq!(auxiliary.advanced_stash_quantity, None);
+            let original = bits(&bytes, start, end);
+            assert_eq!(
+                auxiliary
+                    .to_bits_d2r_v3_chronicle(items[index].header.flags, false)
+                    .unwrap(),
+                original
+            );
+            for timestamp_change in [false, true] {
+                let mut expected = items.clone();
+                let changed_aux = expected[index].body.d2r_v3_auxiliary.as_mut().unwrap();
+                let value = changed_aux.chronicle.as_mut().unwrap();
+                if timestamp_change {
+                    value.timestamp = Some(timestamp ^ 1);
+                } else {
+                    value.source_id ^= 1;
+                }
+                let emitted = changed_aux
+                    .to_bits_d2r_v3_chronicle(items[index].header.flags, false)
+                    .unwrap();
+                assert_eq!(emitted.len(), original.len());
+                let mut changed_bytes = bytes.clone();
+                for (i, &value) in emitted.iter().enumerate() {
+                    let p = start as usize + i;
+                    let mask = 1 << (p % 8);
+                    changed_bytes[p / 8] =
+                        (changed_bytes[p / 8] & !mask) | if value { mask } else { 0 };
+                }
+                assert_eq!(
+                    bytes
+                        .iter()
+                        .zip(&changed_bytes)
+                        .map(|(a, b)| (a ^ b).count_ones())
+                        .sum::<u32>(),
+                    1
+                );
+                let reparsed = Item::read_player_items_d2r_v3(&changed_bytes, &huffman).unwrap();
+                assert_eq!(normalized(&reparsed), normalized(&expected));
+                assert_eq!(
+                    reparsed[index]
+                        .body
+                        .d2r_v3_auxiliary
+                        .as_ref()
+                        .unwrap()
+                        .to_bits_d2r_v3_chronicle(reparsed[index].header.flags, false)
+                        .unwrap(),
+                    emitted
+                );
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn independent_forms_preserve_upper_u64_stash_and_public_leaf_boundaries() {
+        let source = fixture("act1/TESTDRUID_PostWarriv_Act1.d2s");
+        for (compact, count) in [(false, 0), (false, 1), (false, 2), (false, 8), (true, 1)] {
+            for stash in [None, Some(0u8), Some(173u8)] {
+                let flags = 0x10800000 | if compact { 1 << 29 } else { 0 };
+                let recipients: Vec<u64> = (0..count).map(|i| 0xa5c3698789abcdef + i).collect();
+                let expected = D2rV3ChronicleData {
+                    source_id: 0x79b5,
+                    timestamp: (!compact).then_some(0x12345679),
+                    recipients,
+                };
+                let mut payload = Vec::new();
+                append(&mut payload, u64::from(expected.source_id), 16);
+                if let Some(timestamp) = expected.timestamp {
+                    append(&mut payload, u64::from(timestamp), 32);
+                    append(&mut payload, count, 4);
+                }
+                for value in &expected.recipients {
+                    append(&mut payload, *value, 64);
+                }
+                let mut bytes = pack(&payload);
+                let mut cursor = BitCursor::from_raw_at(&bytes, 0);
+                assert_eq!(
+                    read_d2r_v3_chronicle(&mut cursor, 105, flags, false).unwrap(),
+                    Some(expected.clone())
+                );
+                assert_eq!(cursor.pos(), payload.len() as u64);
+                let auxiliary = D2rV3AuxiliaryData {
+                    save_version: 105,
+                    chronicle: Some(expected.clone()),
+                    ..Default::default()
+                };
+                assert_eq!(
+                    auxiliary.to_bits_d2r_v3_chronicle(flags, false).unwrap(),
+                    payload
+                );
+                bytes.pop();
+                assert!(
+                    read_d2r_v3_chronicle(
+                        &mut BitCursor::from_raw_at(&bytes, 0),
+                        105,
+                        flags,
+                        false
+                    )
+                    .is_err()
+                );
+                let mut item_bits = bits(&source, 11008, 11276);
+                for (i, value) in item_bits.iter_mut().take(32).enumerate() {
+                    *value = flags & (1 << i) != 0;
+                }
+                item_bits.extend(payload);
+                append(&mut item_bits, u64::from(stash.is_some()), 1);
+                if let Some(value) = stash {
+                    append(&mut item_bits, u64::from(value), 8);
+                }
+                let expected_unaligned = item_bits.len() as u64;
+                while item_bits.len() % 8 != 0 {
+                    item_bits.push(false);
+                }
+                let item_bytes = pack(&item_bits);
+                let mut cursor = BitCursor::from_raw_at(&item_bytes, 0);
+                let item = Item::from_reader_with_context_d2r_v3(
+                    &mut cursor,
+                    &HuffmanTree::new(),
+                    Some((&item_bytes, 0)),
+                    0,
+                    105,
+                )
+                .unwrap();
+                let auxiliary = item.body.d2r_v3_auxiliary.as_ref().unwrap();
+                assert_eq!(auxiliary.chronicle, Some(expected));
+                assert_eq!(auxiliary.advanced_stash_quantity, stash);
+                assert_eq!(cursor.pos(), expected_unaligned);
+                cursor.byte_align().unwrap();
+                assert_eq!(cursor.pos(), item_bits.len() as u64);
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn inactive_forms_and_invalid_states_do_not_discard_fields() {
+        let flags = 1 << 28;
+        for (version, raw_flags, compact_item) in
+            [(104, flags, false), (105, 0, false), (105, flags, true)]
+        {
+            let bytes = [];
+            let mut cursor = BitCursor::from_raw_at(&bytes, 0);
+            assert_eq!(
+                read_d2r_v3_chronicle(&mut cursor, version, raw_flags, compact_item).unwrap(),
+                None
+            );
+            assert_eq!(cursor.pos(), 0);
+        }
+        for count in 9..=15 {
+            let mut raw = Vec::new();
+            append(&mut raw, 1, 16);
+            append(&mut raw, 2, 32);
+            append(&mut raw, count, 4);
+            let bytes = pack(&raw);
+            let mut cursor = BitCursor::from_raw_at(&bytes, 0);
+            let error = read_d2r_v3_chronicle(&mut cursor, 105, flags, false).unwrap_err();
+            assert!(error.to_string().contains("Chronicle recipient count"));
+            assert_eq!(cursor.pos(), 52);
+        }
+        let valid = D2rV3ChronicleData {
+            source_id: 1,
+            timestamp: Some(2),
+            recipients: vec![],
+        };
+        for (version, raw_flags, compact_item, value) in [
+            (104, flags, false, Some(valid.clone())),
+            (105, 0, false, Some(valid.clone())),
+            (105, flags, true, Some(valid.clone())),
+            (105, flags, false, None),
+            (105, flags | (1 << 29), false, Some(valid.clone())),
+            (
+                105,
+                flags,
+                false,
+                Some(D2rV3ChronicleData {
+                    timestamp: None,
+                    ..valid.clone()
+                }),
+            ),
+            (
+                105,
+                flags,
+                false,
+                Some(D2rV3ChronicleData {
+                    recipients: vec![0; 9],
+                    ..valid.clone()
+                }),
+            ),
+            (
+                105,
+                flags | (1 << 29),
+                false,
+                Some(D2rV3ChronicleData {
+                    timestamp: None,
+                    recipients: vec![],
+                    ..valid.clone()
+                }),
+            ),
+            (
+                105,
+                flags | (1 << 29),
+                false,
+                Some(D2rV3ChronicleData {
+                    timestamp: None,
+                    recipients: vec![1, 2],
+                    ..valid.clone()
+                }),
+            ),
+        ] {
+            let auxiliary = D2rV3AuxiliaryData {
+                save_version: version,
+                chronicle: value,
+                ..Default::default()
+            };
+            assert_eq!(
+                auxiliary
+                    .to_bits_d2r_v3_chronicle(raw_flags, compact_item)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        let bytes = fixture("act1/TESTDRUID_Quest3_ScrollObtained_PreAkara.d2s");
+        let mut items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
+        assert_eq!(items.len(), 24);
+        items[11].body.d2r_v3_auxiliary.as_mut().unwrap().chronicle = Some(valid);
+        assert!(
+            items[11]
+                .to_bits_d2r_v3_compact_quest(&HuffmanTree::new())
+                .is_err()
+        );
+    }
+    #[invariant_test]
+    fn supported_jewelry_inverse_keeps_chronicle_before_stash() {
+        let bytes = fixture("act1/TESTDRUID_PostWarriv_Act1.d2s");
+        let huffman = HuffmanTree::new();
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman).unwrap();
+        let original = &items[12];
+        assert_eq!(original.code.trim(), "rin");
+        assert_eq!(
+            original.to_bits_d2r_v3_jewelry(&huffman).unwrap(),
+            bits(&bytes, original.range.start, original.range.end)
+        );
+        for compact in [false, true] {
+            let mut changed = original.clone();
+            changed.bits.clear();
+            changed.segments.clear();
+            changed.range = Default::default();
+            changed.header.flags |= 1 << 28;
+            if compact {
+                changed.header.flags |= 1 << 29;
+            }
+            let auxiliary = changed.body.d2r_v3_auxiliary.as_mut().unwrap();
+            let old_padding = auxiliary.alignment_padding.as_ref().unwrap().len();
+            auxiliary.chronicle = Some(D2rV3ChronicleData {
+                source_id: 0x79b5,
+                timestamp: (!compact).then_some(0x12345679),
+                recipients: vec![0xfedcba9876543210],
+            });
+            auxiliary.advanced_stash_quantity = Some(173);
+            let added_payload = if compact { 80 } else { 116 };
+            auxiliary.alignment_padding =
+                Some(vec![true; (old_padding + 8 - added_payload % 8) % 8]);
+            let expected = auxiliary.clone();
+            let emitted = changed.to_bits_d2r_v3_jewelry(&huffman).unwrap();
+            let mut wrapped = vec![b'J', b'M', 1, 0];
+            wrapped.extend(pack(&emitted));
+            let reparsed = Item::read_counted_list_d2r_v3(&wrapped, 0, &huffman, 105).unwrap();
+            assert_eq!(reparsed.len(), 1);
+            assert_eq!(
+                reparsed[0].body.d2r_v3_auxiliary.as_ref().unwrap(),
+                &expected
+            );
+            assert_eq!(reparsed[0].range.end, wrapped.len() as u64 * 8);
+            assert_eq!(
+                reparsed[0].to_bits_d2r_v3_jewelry(&huffman).unwrap(),
+                emitted
+            );
+        }
     }
 }
