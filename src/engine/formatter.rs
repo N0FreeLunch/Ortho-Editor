@@ -742,7 +742,7 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
     // 5. Magic
     if item.quality == Some(ItemQuality::Magic) && item.is_identified {
         let mut name = String::new();
-        if let Some(id) = item.magic_prefix {
+        if let Some(id) = item.magic_prefix.filter(|&id| id != 0) {
             if let Some(affix) = PREFIXES.iter().find(|a| a.id == id as u32) {
                 name.push_str(get_loc(affix.name, language));
             }
@@ -759,7 +759,7 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
         }
         name.push_str(base_name);
 
-        if let Some(id) = item.magic_suffix {
+        if let Some(id) = item.magic_suffix.filter(|&id| id != 0) {
             if let Some(affix) = SUFFIXES.iter().find(|a| a.id == id as u32) {
                 let s_loc = get_loc(affix.name, language);
                 if language != "ko" {
@@ -1126,5 +1126,85 @@ mod tests {
         assert_eq!(strip_d2_color_codes("ÿc1Redÿc0White"), "RedWhite");
         assert_eq!(strip_d2_color_codes("ÿcUUnique"), "Unique");
         assert_eq!(strip_d2_color_codes("Normal"), "Normal");
+    }
+}
+
+#[cfg(test)]
+mod zero_affix_sentinel_tests {
+    use super::*;
+    use crate::item::HuffmanTree;
+    use d2r_macros::{invariant_test, settled_contract_test};
+
+    #[settled_contract_test]
+    fn zero_is_absent_without_erasing_real_nonzero_affixes() {
+        let mut item = Item::default();
+        item.code = "rin".into();
+        item.quality = Some(ItemQuality::Magic);
+        item.is_identified = true;
+        item.magic_prefix = Some(0);
+        item.magic_suffix = Some(0);
+        let original = item.clone();
+        assert!(item.prefixes().is_empty());
+        assert!(item.suffixes().is_empty());
+        assert_eq!(resolve_item_name(&item, "en"), "Ring");
+        assert_eq!(item, original);
+        item.magic_suffix = Some(115);
+        assert_eq!(item.suffixes()[0].id, 115);
+        assert_eq!(resolve_item_name(&item, "en"), "Ring of Health");
+        item.magic_suffix = None;
+        item.magic_prefix = None;
+        assert_eq!(resolve_item_name(&item, "en"), "Ring");
+        item.quality = Some(ItemQuality::Rare);
+        item.rare_affixes = [Some(0), Some(0), Some(213), Some(115), None, None];
+        let original = item.clone();
+        assert_eq!(
+            item.prefixes().iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![213]
+        );
+        assert_eq!(
+            item.suffixes().iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![115]
+        );
+        assert_eq!(item, original);
+    }
+
+    #[invariant_test]
+    fn actual_names_and_raw_zero_jewelry_bits_preserve_ownership() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_PostWarriv_Act1.d2s"
+        );
+        let huffman = HuffmanTree::new();
+        let items = Item::read_player_items_d2r_v3(bytes, &huffman).unwrap();
+        assert_eq!(items.len(), 41);
+        for (index, prefix, suffix, expected) in [
+            (10, 213, 0, "Rugged Belt"),
+            (19, 409, 0, "Beryl Ring"),
+            (24, 0, 115, "Amulet of Health"),
+            (12, 0, 174, "Ring of the Apprentice"),
+        ] {
+            let item = &items[index];
+            let original = item.clone();
+            assert_eq!(item.magic_prefix, Some(prefix));
+            assert_eq!(item.magic_suffix, Some(suffix));
+            assert_eq!(resolve_item_name(item, "en"), expected);
+            let formatted = format_item(item, "en", 0, 40);
+            assert!(!formatted.warnings.iter().any(|w| w.contains("(id:0)")));
+            if suffix == 0 {
+                assert!(item.suffixes().is_empty());
+            } else {
+                assert_eq!(item.suffixes()[0].id, u32::from(suffix));
+            }
+            assert_eq!(*item, original);
+            if index != 10 {
+                let expected: Vec<_> = (item.range.start..item.range.end)
+                    .map(|p| bytes[p as usize / 8] & (1 << (p % 8)) != 0)
+                    .collect();
+                let mut clean = item.clone();
+                clean.bits.clear();
+                clean.segments.clear();
+                clean.range = Default::default();
+                assert_eq!(clean.to_bits_d2r_v3_jewelry(&huffman).unwrap(), expected);
+            }
+        }
     }
 }
