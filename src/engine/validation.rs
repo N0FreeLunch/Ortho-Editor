@@ -393,8 +393,22 @@ pub fn check_staffmod_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning>
     let item_types = get_all_item_types(&item.code);
     let prefixes = item.prefixes();
     let suffixes = item.suffixes();
+    let unique_template = match lookup_spec(item) {
+        Some(ItemSpec::Unique(template)) if template.code == item.code.trim() => Some(template),
+        _ => None,
+    };
 
     for prop in &item.properties {
+        if unique_template.is_some_and(|template| {
+            template.stats.iter().any(|stat| {
+                stat.stat_id == prop.stat_id
+                    && stat.param == prop.param
+                    && prop.value >= stat.min
+                    && prop.value <= stat.max
+            })
+        }) {
+            continue;
+        }
         // If this property can be explained by any existing affix rolled on this item,
         // it is an affix stat, NOT an automagic / staffmod violation!
         let explained_by_affix = prefixes.iter().chain(suffixes.iter()).any(|affix| {
@@ -1243,5 +1257,100 @@ mod tests {
         item.defense = Some(900);
         let warnings = check_base_stat_legitimacy(&item);
         assert!(warnings.iter().any(|w| w.contains("Defense 900 does not match expected 905")));
+    }
+}
+
+#[cfg(test)]
+mod unique_template_staffmod_tests {
+    use super::*;
+    use crate::engine::formatter::format_item;
+    use crate::item::HuffmanTree;
+    use d2r_macros::settled_contract_test;
+
+    fn snakecord_property() -> Item {
+        let mut item = Item::default();
+        item.code = "vbl ".into();
+        item.quality = Some(ItemQuality::Unique);
+        item.unique_id = Some(113);
+        item.level = Some(22);
+        item.properties.push(ItemProperty::new(
+            45,
+            "poisonresist".into(),
+            0,
+            0,
+            25,
+            ItemBitRange::default(),
+        ));
+        item
+    }
+
+    #[settled_contract_test]
+    fn unique_ownership_requires_identity_code_and_property_range() {
+        let item = snakecord_property();
+        let original = item.clone();
+        assert!(check_staffmod_legitimacy_detailed(&item).is_empty());
+        assert_eq!(item, original);
+
+        for name in [
+            "wrong_value24",
+            "missing_id",
+            "wrong_id103",
+            "wrong_code_lbl",
+            "magic_quality",
+            "set_quality",
+        ] {
+            let mut control = item.clone();
+            match name {
+                "wrong_value24" => control.properties[0].value = 24,
+                "missing_id" => control.unique_id = None,
+                "wrong_id103" => control.unique_id = Some(103),
+                "wrong_code_lbl" => control.code = "lbl ".into(),
+                "magic_quality" => control.quality = Some(ItemQuality::Magic),
+                "set_quality" => control.quality = Some(ItemQuality::Set),
+                _ => unreachable!(),
+            }
+            let original = control.clone();
+            let warnings = check_staffmod_legitimacy_detailed(&control);
+            assert_eq!(warnings.len(), 1, "{name}: {warnings:?}");
+            assert_eq!(warnings[0].category, "staffmod_ilvl", "{name}");
+            assert!(warnings[0].message.contains("poisonresist"), "{name}");
+            assert_eq!(control, original);
+        }
+    }
+
+    #[settled_contract_test]
+    fn actual_unique_property_owner_keeps_item_and_other_validation() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let item = items
+            .iter()
+            .find(|item| item.quality == Some(ItemQuality::Unique) && item.unique_id == Some(113))
+            .unwrap();
+        assert_eq!(item.code.trim(), "vbl");
+        assert_eq!(item.level, Some(22));
+        assert!(
+            item.properties.iter().any(|property| property.stat_id == 45
+                && property.param == 0
+                && property.value == 25)
+        );
+        let original = item.clone();
+        assert!(check_staffmod_legitimacy_detailed(item).is_empty());
+        let expected_base_warnings = check_base_stat_legitimacy_detailed(item);
+        let formatted = format_item(item, "en", 0, 26);
+        assert!(
+            !formatted
+                .detailed_warnings
+                .iter()
+                .any(|warning| warning.category == "staffmod_ilvl")
+        );
+        let base_warnings: Vec<_> = formatted
+            .detailed_warnings
+            .into_iter()
+            .filter(|warning| matches!(warning.category, "defense_formula" | "defense_range"))
+            .collect();
+        assert_eq!(base_warnings, expected_base_warnings);
+        assert_eq!(*item, original);
     }
 }
