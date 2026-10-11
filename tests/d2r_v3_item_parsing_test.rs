@@ -217,8 +217,10 @@ fn patch_raw_field(bytes: &mut [u8], start: u64, end: u64, value: u32) {
 fn change_stored_armor(item: &mut Item, field: &str, raw: u32) {
     match field {
         "defense" => {
-            item.body.defense = Some(raw);
-            item.defense = Some(raw);
+            let save_add = d2r_core::domain::stats::stat_save_add(31).unwrap();
+            let logical = u32::try_from(i64::from(raw) - i64::from(save_add)).unwrap();
+            item.body.defense = Some(logical);
+            item.defense = Some(logical);
         }
         "maximum" => {
             item.body.max_durability = Some(raw);
@@ -2462,4 +2464,159 @@ fn d2r_v3_empty_socket_armor_rejects_inconsistent_states() {
     assert!(controls[4]
         .to_bits_d2r_v3_empty_socket_armor(&huffman)
         .is_err());
+}
+
+#[settled_contract_test]
+fn d2r_v3_defense_normal_gameplay_values_are_logical() {
+    for (path, start, code, defense) in [
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+            7328,
+            "lea",
+            16,
+        ),
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+            8592,
+            "cap",
+            5,
+        ),
+        (
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
+            7880,
+            "buc",
+            5,
+        ),
+    ] {
+        let (_, items) = read_d2r_v3_items(path);
+        let item = items.iter().find(|item| item.range.start == start).unwrap();
+        assert_eq!(item.code.trim(), code);
+        assert_eq!(item.quality, Some(ItemQuality::Normal));
+        assert!(!item.is_ethereal);
+        assert_eq!(item.defense, Some(defense));
+        assert_eq!(item.body.defense, Some(defense));
+        assert_eq!(item.defense(), Some(defense));
+        assert!(
+            !d2r_core::engine::validation::check_base_stat_legitimacy(item)
+                .iter()
+                .any(|warning| warning.contains("Defense"))
+        );
+    }
+}
+
+#[invariant_test]
+fn d2r_v3_defense_setter_reconstructs_bias_and_rejects_overflow() {
+    let (bytes, items) = read_d2r_v3_items(ARMOR_FIXTURE);
+    let huffman = HuffmanTree::new();
+    let bias = d2r_core::data::stat_costs::STAT_COSTS
+        .iter()
+        .find(|s| s.id == 31)
+        .unwrap()
+        .save_add;
+    assert_eq!(bias, 10);
+    for (index, field_start, field_end, original_logical) in
+        [(4, 7799, 7810, 24), (7, 8361, 8372, 4)]
+    {
+        let original = &items[index];
+        assert_eq!(original.defense(), Some(original_logical));
+        let semantic = without_item_bit_cache(original);
+        assert_eq!(
+            semantic.to_bits_d2r_v3_armor(&huffman).unwrap(),
+            source_bits(&bytes, original.range.start, original.range.end)
+        );
+        for (logical, raw) in [
+            (0, 10),
+            (original_logical + 1, original_logical + 11),
+            (2037, 2047),
+        ] {
+            let mut changed = original.clone();
+            changed.set_defense(Some(logical));
+            assert!(changed.bits.is_empty());
+            assert_eq!(changed.body.defense, Some(logical));
+            assert_eq!(changed.defense, Some(logical));
+            let changed = without_item_bit_cache(&changed);
+            let actual = changed.to_bits_d2r_v3_armor(&huffman).unwrap();
+            let mut patched = bytes.clone();
+            patch_raw_field(&mut patched, field_start, field_end, raw);
+            assert_eq!(
+                actual,
+                source_bits(&patched, original.range.start, original.range.end)
+            );
+            let (reparsed, end) = read_stored_leaf(&patched, original.range.start, index);
+            assert_eq!(end, original.range.end);
+            assert_eq!(reparsed.defense(), Some(logical));
+            let (next, next_end) = read_stored_leaf(&patched, end, index + 1);
+            assert_eq!(next_end, items[index + 1].range.end);
+            assert_stored_item_model(&next, &items[index + 1]);
+        }
+        for logical in [2038, u32::MAX] {
+            let mut invalid = semantic.clone();
+            invalid.set_defense(Some(logical));
+            assert_eq!(
+                invalid.to_bits_d2r_v3_armor(&huffman).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidInput
+            );
+        }
+        let mut bad = bytes.clone();
+        patch_raw_field(&mut bad, field_start, field_end, 9);
+        let mut reader = BitReader::endian(Cursor::new(&bad), LittleEndian);
+        reader
+            .skip(u32::try_from(original.range.start).unwrap())
+            .unwrap();
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_pos(original.range.start);
+        cursor.base_pos = 0;
+        let failure = Item::from_reader_with_context_d2r_v3(
+            &mut cursor,
+            &huffman,
+            Some((&bad, original.range.start)),
+            index,
+            0x69,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(failure.error, d2r_core::error::ParsingError::UnexpectedValue { ref field, .. } if field == "D2R v3 armor defense")
+        );
+    }
+}
+
+#[invariant_test]
+fn d2r_v3_defense_generic_writer_uses_explicit_provenance() {
+    let (_, items) = read_d2r_v3_items(ARMOR_FIXTURE);
+    let huffman = HuffmanTree::new();
+    let original = without_item_bit_cache(&items[4]);
+    assert_eq!(original.defense(), Some(24));
+    let (bits, phases) = original
+        .to_bits_with_phase_trace(4, &huffman, false)
+        .unwrap();
+    let phase = phases
+        .iter()
+        .find(|p| p.label == "non_summary_pre_property_metadata")
+        .unwrap();
+    let widths = d2r_core::domain::forensic::v105::V105PropertyWidthAxiom::default();
+    let trailing = widths.stat_bits(73) + widths.stat_bits(72) + 1;
+    let end = phase.end as usize - trailing as usize;
+    let start = end - 11;
+    assert_eq!(raw_little_endian(&bits[start..end]), 34);
+    let mut changed = original.clone();
+    changed.set_defense(Some(25));
+    let actual = changed.to_bits(4, &huffman, false).unwrap();
+    assert_eq!(actual.len(), bits.len());
+    assert_eq!(&actual[..start], &bits[..start]);
+    assert_eq!(&actual[end..], &bits[end..]);
+    assert_eq!(raw_little_endian(&actual[start..end]), 35);
+    let mut legacy = original.clone();
+    legacy.body.d2r_v3_auxiliary = None;
+    legacy.set_defense(Some(34));
+    assert_eq!(legacy.to_bits(4, &huffman, false).unwrap(), bits);
+    legacy.set_defense(Some(35));
+    assert_eq!(legacy.to_bits(4, &huffman, false).unwrap(), actual);
+    for value in [2038, u32::MAX] {
+        let mut overflow = original.clone();
+        overflow.set_defense(Some(value));
+        assert_eq!(
+            overflow.to_bits(4, &huffman, false).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+    }
 }

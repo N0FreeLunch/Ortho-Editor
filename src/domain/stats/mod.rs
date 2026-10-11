@@ -24,6 +24,13 @@ pub fn lookup_alpha_map_by_effective(effective_id: u32) -> Option<MappingInfo> {
     reg.mappings.values().find(|m| m.effective_id == effective_id).cloned()
 }
 
+pub fn stat_save_add(stat_id: u32) -> Option<i32> {
+    STAT_COSTS
+        .iter()
+        .find(|stat| stat.id == stat_id)
+        .map(|stat| stat.save_add)
+}
+
 pub fn stat_save_bits(stat_id: u32) -> Option<u32> {
     STAT_COSTS
         .iter()

@@ -2168,7 +2168,30 @@ impl Item {
                     (false, false, false)
                 };
                 if reads_def && s_axiom.reads_defense() {
-                    emitter.write_bits(self.defense.unwrap_or(0), 11)?;
+                    if !alpha_mode
+                        && !self.header.save_is_alpha
+                        && self.body.d2r_v3_auxiliary.is_some()
+                    {
+                        let invalid = |reason| io::Error::new(io::ErrorKind::InvalidInput, reason);
+                        let logical = self
+                            .defense
+                            .ok_or_else(|| invalid("Missing logical D2R v3 defense"))?;
+                        let save_add = crate::domain::stats::stat_save_add(31)
+                            .ok_or_else(|| invalid("Missing D2R v3 defense SaveAdd"))?;
+                        let width = crate::domain::stats::stat_save_bits(31)
+                            .ok_or_else(|| invalid("Missing D2R v3 defense width"))?;
+                        let stored = u32::try_from(i64::from(logical) + i64::from(save_add))
+                            .map_err(|_| invalid("D2R v3 defense encoding overflow"))?;
+                        if width == 0
+                            || width > 32
+                            || (width < 32 && u64::from(stored) >= 1_u64 << width)
+                        {
+                            return Err(invalid("D2R v3 defense exceeds its stored width"));
+                        }
+                        emitter.write_bits(stored, width)?;
+                    } else {
+                        emitter.write_bits(self.defense.unwrap_or(0), 11)?;
+                    }
                 }
                 if reads_dur && s_axiom.reads_durability() {
                     let m_dur = self.max_durability.unwrap_or(0);
@@ -3769,7 +3792,23 @@ impl ExtendedStatsData {
 
         if template.is_armor {
             let width = d2r_v3_stat_width(cursor, 31)?;
-            data.defense = Some(cursor.read_bits::<u32>(width)?);
+            let raw = cursor.read_bits::<u32>(width)?;
+            let save_add = crate::domain::stats::stat_save_add(31).ok_or_else(|| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 armor defense".to_string(),
+                    value: raw.to_string(),
+                    reason: "Missing defense SaveAdd metadata".to_string(),
+                })
+            })?;
+            let logical = i64::from(raw) - i64::from(save_add);
+            data.defense = Some(u32::try_from(logical).map_err(|_| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 armor defense".to_string(),
+                    value: raw.to_string(),
+                    reason: "Stored defense minus SaveAdd is outside the logical u32 range"
+                        .to_string(),
+                })
+            })?);
         }
         if template.has_durability || template.is_weapon {
             let max_width = d2r_v3_stat_width(cursor, 73)?;

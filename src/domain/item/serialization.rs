@@ -5146,9 +5146,8 @@ impl Item {
             d2r_v3_write_checked(&mut emitter, word as u64, 32, "realm word")?;
         }
         if armor_layout {
-            // These are encoded body values, not logical scalar properties with SaveAdd.
             for (value, stat_id, name) in [
-                (self.body.defense, 31, "stored defense"),
+                (self.body.defense, 31, "logical defense"),
                 (self.body.max_durability, 73, "stored maximum durability"),
                 (
                     self.body.current_durability,
@@ -5156,9 +5155,19 @@ impl Item {
                     "stored current durability",
                 ),
             ] {
+                let value = value.ok_or_else(|| invalid("Missing D2R v3 armor body field"))?;
+                // Defense is logical; durability retains its encoded body representation.
+                let stored = if stat_id == 31 {
+                    let save_add = crate::domain::stats::stat_save_add(stat_id)
+                        .ok_or_else(|| invalid("Missing D2R v3 defense SaveAdd"))?;
+                    u64::try_from(i64::from(value) + i64::from(save_add))
+                        .map_err(|_| invalid("D2R v3 defense encoding underflow"))?
+                } else {
+                    u64::from(value)
+                };
                 d2r_v3_write_checked(
                     &mut emitter,
-                    value.ok_or_else(|| invalid("Missing D2R v3 armor body field"))? as u64,
+                    stored,
                     crate::domain::stats::stat_save_bits(stat_id)
                         .ok_or_else(|| invalid("Missing D2R v3 armor body width"))?,
                     name,
