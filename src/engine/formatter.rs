@@ -346,6 +346,15 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
             }
         }
 
+        // Combine only a complete qualified poison rate/duration group.
+        if p.stat_id == 57
+            && let Some(line) = format_poison_triplet(&props[i..], language)
+        {
+            out.push(line);
+            i += 3;
+            continue;
+        }
+
         // 6. Skip companion max stats if already consumed or orphan coldlength
         if p.stat_id == 49 || p.stat_id == 51 || p.stat_id == 53 || p.stat_id == 55 || p.stat_id == 56 {
             i += 1;
@@ -358,6 +367,41 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
     }
 
     out
+}
+
+fn format_poison_triplet(props: &[ItemProperty], language: &str) -> Option<String> {
+    use crate::domain::stats::entity::StatMaturityTier;
+
+    let group = props.get(..3)?;
+    if group.iter().map(|p| p.stat_id).ne([57, 58, 59])
+        || group.iter().any(|p| {
+            p.param != 0
+                || p.is_opaque
+                || p.opaque_bits.is_some()
+                || p.maturity != StatMaturityTier::Verified
+                || p.value < 0
+        })
+        || group[0].value > group[1].value
+        || group[2].value == 0
+    {
+        return None;
+    }
+
+    // Poison rates are damage/256 per frame; duration uses 25 frames/second.
+    // Truncate totals before choosing the equal-damage or range template.
+    let frames = i64::from(group[2].value);
+    let min = i64::from(group[0].value).checked_mul(frames)? / 256;
+    let max = i64::from(group[1].value).checked_mul(frames)? / 256;
+    let seconds = (frames / 25).to_string();
+    let (key, args) = if min == max {
+        ("strModPoisonDamage", vec![min.to_string(), seconds])
+    } else {
+        (
+            "strModPoisonDamageRange",
+            vec![min.to_string(), max.to_string(), seconds],
+        )
+    };
+    Some(format_template(get_loc(key, language), &args))
 }
 
 pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> String {
@@ -1339,5 +1383,220 @@ mod rare_name_identity_tests {
             assert_eq!(resolve_item_name(item, "ko"), ko);
             assert_eq!(*item, original);
         }
+    }
+}
+
+#[cfg(test)]
+mod poison_display_tests {
+    use super::*;
+    use crate::domain::stats::entity::StatMaturityTier;
+    use crate::item::HuffmanTree;
+    use d2r_macros::settled_contract_test;
+
+    fn property(id: u32, value: i32) -> ItemProperty {
+        let name = match id {
+            57 => "poisonmindam",
+            58 => "poisonmaxdam",
+            59 => "poisonlength",
+            _ => "unrelated",
+        };
+        ItemProperty::new(id, name.into(), 0, value, value, ItemBitRange::default())
+    }
+
+    fn triplet(min: i32, max: i32, frames: i32) -> Vec<ItemProperty> {
+        vec![property(57, min), property(58, max), property(59, frames)]
+    }
+
+    #[settled_contract_test]
+    fn actual_magic_jewel_renders_damage_and_seconds_without_mutating_items() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let original = items.clone();
+        let jewel = &items[8].socketed_items[1];
+        assert_eq!(jewel.code.trim(), "jew");
+        assert_eq!(jewel.quality, Some(ItemQuality::Magic));
+        assert_eq!(
+            jewel.properties[..3]
+                .iter()
+                .map(|p| p.value)
+                .collect::<Vec<_>>(),
+            [103, 103, 50]
+        );
+        assert_eq!(
+            format_item(jewel, "en", 0, 7).properties,
+            ["+20 poison damage over 2 seconds"]
+        );
+        assert_eq!(
+            format_item(jewel, "ko", 0, 7).properties,
+            ["+20 포이즌 데미지 (2 초 이상)"]
+        );
+        assert_eq!(items, original);
+    }
+
+    #[settled_contract_test]
+    fn actual_unique_belt_and_rare_jewel_keep_surrounding_options() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act3/TESTDRUID_Q6_DuranceOfHateEntry.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let original = items.clone();
+        assert_eq!(items[11].code.trim(), "vbl");
+        assert_eq!(items[11].quality, Some(ItemQuality::Unique));
+        assert_eq!(
+            format_item(&items[11], "en", 0, 99).properties,
+            [
+                "+29% Enhanced Defense",
+                "+10 Defense",
+                "Poison Resist +25%",
+                "+11 poison damage over 3 seconds",
+                "Replenish Life +5",
+                "Poison Length Reduced by 50%",
+            ]
+        );
+        assert_eq!(
+            format_item(&items[11], "ko", 0, 99).properties,
+            [
+                "+29 방어 상승",
+                "+10 방어",
+                "+25 포이즌 저항력",
+                "+11 포이즌 데미지 (3 초 이상)",
+                "+5 라이프 회복",
+                "+50 중독 시간 감소",
+            ]
+        );
+        assert_eq!(items[14].quality, Some(ItemQuality::Rare));
+        assert_eq!(
+            format_item(&items[14], "en", 0, 99).properties,
+            [
+                "+7 to Life",
+                "+6 Defense",
+                "+20 poison damage over 2 seconds",
+                "Requirements -15%",
+            ]
+        );
+        assert_eq!(
+            format_item(&items[14], "ko", 0, 99).properties,
+            [
+                "+7 라이프",
+                "+6 방어",
+                "+20 포이즌 데미지 (2 초 이상)",
+                "-15 착용 가능 요구치",
+            ]
+        );
+        assert_eq!(items, original);
+    }
+
+    #[settled_contract_test]
+    fn independent_poison_example_and_converted_equal_values_select_templates() {
+        // Trevin's original example: 30/60 rates over 75 frames yields 8/17 over 3 seconds.
+        // https://user.xmission.com/~trevin/DiabloIIv1.09_Magic_Properties.shtml
+        let props = triplet(30, 60, 75);
+        let original = props.clone();
+        assert_eq!(
+            format_properties_list(&props, 1, "en"),
+            ["Adds 8-17 poison damage over 3 seconds"]
+        );
+        assert_eq!(
+            format_properties_list(&props, 1, "ko"),
+            ["8 - 17 포이즌 데미지 추가 (3 초 이상)"]
+        );
+        assert_eq!(props, original);
+        assert_eq!(
+            format_properties_list(&triplet(1, 2, 1), 1, "en"),
+            ["+0 poison damage over 0 seconds"]
+        );
+    }
+
+    #[settled_contract_test]
+    fn incomplete_or_unqualified_groups_retain_every_individual_field() {
+        let complete = triplet(103, 103, 50);
+        let mut cases = vec![
+            complete[..1].to_vec(),
+            complete[..2].to_vec(),
+            complete[1..].to_vec(),
+        ];
+        let mut reordered = complete.clone();
+        reordered.swap(1, 2);
+        cases.push(reordered);
+        for index in 0..3 {
+            let mut param = complete.clone();
+            param[index].param = 1;
+            cases.push(param);
+            let mut opaque = complete.clone();
+            opaque[index].is_opaque = true;
+            cases.push(opaque);
+            let mut bits = complete.clone();
+            bits[index].opaque_bits = Some(vec![true]);
+            cases.push(bits);
+            for tier in [StatMaturityTier::Inferred, StatMaturityTier::Speculative] {
+                let mut unverified = complete.clone();
+                unverified[index].maturity = tier;
+                cases.push(unverified);
+            }
+        }
+        cases.extend([
+            triplet(-1, 103, 50),
+            triplet(103, -1, 50),
+            triplet(103, 103, -1),
+            triplet(104, 103, 50),
+            triplet(103, 103, 0),
+        ]);
+        for props in cases {
+            let original = props.clone();
+            for lang in ["en", "ko"] {
+                let individual: Vec<_> =
+                    props.iter().map(|p| format_property(p, 1, lang)).collect();
+                assert_eq!(format_properties_list(&props, 1, lang), individual);
+            }
+            assert_eq!(props, original);
+        }
+    }
+
+    #[settled_contract_test]
+    fn damage_and_time_truncate_and_wide_products_do_not_overflow_i32() {
+        for (min, max, frames, expected) in [
+            (40, 40, 75, "+11 poison damage over 3 seconds"),
+            (257, 257, 26, "+26 poison damage over 1 seconds"),
+            (10, 10, 24, "+0 poison damage over 0 seconds"),
+            (
+                2_000_000_000,
+                2_000_000_000,
+                500,
+                "+3906250000 poison damage over 20 seconds",
+            ),
+        ] {
+            let props = triplet(min, max, frames);
+            let original = props.clone();
+            assert_eq!(format_properties_list(&props, 1, "en"), [expected]);
+            assert_eq!(props, original);
+        }
+    }
+
+    #[settled_contract_test]
+    fn multiple_groups_keep_unrelated_order_and_exact_socket_marker_policy() {
+        let unrelated = property(45, 13);
+        let mut real_stat = property(317, 1);
+        real_stat.name = "real_stat_317".into();
+        real_stat.range = ItemBitRange { start: 10, end: 20 };
+        let mut marker = property(317, 0);
+        marker.name = "item_socket_child".into();
+        let mut props = vec![unrelated.clone()];
+        props.extend(triplet(103, 103, 50));
+        props.push(real_stat.clone());
+        props.extend(triplet(30, 60, 75));
+        props.extend([marker, property(511, 0)]);
+        let original = props.clone();
+        assert_eq!(
+            format_properties_list(&props, 1, "en"),
+            [
+                format_property(&unrelated, 1, "en"),
+                "+20 poison damage over 2 seconds".into(),
+                format_property(&real_stat, 1, "en"),
+                "Adds 8-17 poison damage over 3 seconds".into(),
+            ]
+        );
+        assert_eq!(props, original);
     }
 }
