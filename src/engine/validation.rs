@@ -645,6 +645,9 @@ pub fn check_ethereal_legitimacy(item: &Item) -> Vec<String> {
 }
 
 pub fn check_base_stat_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning> {
+    if crate::engine::defense::is_explicit_v105(item) {
+        return crate::engine::defense::stored_defense_warnings(item);
+    }
     let mut warnings = Vec::new();
     let trimmed = item.code.trim();
     let spec = if let Some(s) = BASE_ITEM_SPECS.iter().find(|s| s.code == trimmed) {

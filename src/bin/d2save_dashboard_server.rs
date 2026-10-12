@@ -6,11 +6,11 @@ use d2r_core::domain::item::stream::{ItemContainer, PlayerItemStream};
 use d2r_core::domain::item::ItemModule;
 use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::progression::Progression;
+use d2r_core::engine::defense::equipped_set_piece_counts;
 use d2r_core::engine::formatter::{format_item, FormattedSetBonus};
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
 use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -228,32 +228,23 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
     let mut unknown = Vec::new();
     let stream = PlayerItemStream::read(bytes, &huffman)?;
     {
-        // Aggregate set piece counts from equipped items to accurately resolve active set bonuses.
-        let mut set_piece_counts: HashMap<&'static str, usize> = HashMap::new();
-        for item in &stream.items {
-            if stream.placement(item).container == ItemContainer::Equipment
-                && item.quality == Some(ItemQuality::Set)
-                && item.is_identified
-            {
-                if let Some(id) = item.unique_id {
-                    if let Some(set_item) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
-                        *set_piece_counts.entry(set_item.set_id).or_insert(0) += 1;
-                    }
-                }
-            }
-        }
+        let set_piece_counts = equipped_set_piece_counts(stream.items.iter().filter(|item| {
+            stream.placement(item).container == ItemContainer::Equipment
+        }));
 
         for (index, item) in stream.items.iter().enumerate() {
-            let active_set_count = if item.quality == Some(ItemQuality::Set) {
+            let placement = stream.placement(item);
+            let active_set_count = if placement.container == ItemContainer::Equipment
+                && item.quality == Some(ItemQuality::Set)
+            {
                 item.unique_id
                     .and_then(|id| SET_ITEMS.iter().find(|s| s.id == id as u32))
                     .and_then(|s| set_piece_counts.get(s.set_id).copied())
-                    .unwrap_or(1)
+                    .unwrap_or(0)
             } else {
                 0
             };
             let mut data = item_json(index, item, level, active_set_count);
-            let placement = stream.placement(item);
             data["placement"] = json!(placement);
             data["x"] = json!(placement.x);
             data["y"] = json!(placement.y);

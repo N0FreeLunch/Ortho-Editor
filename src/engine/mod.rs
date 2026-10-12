@@ -1,3 +1,4 @@
+pub mod defense;
 pub mod formatter;
 pub mod validation;
 pub mod checksum;

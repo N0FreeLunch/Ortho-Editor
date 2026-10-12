@@ -8,6 +8,7 @@ use crate::data::sets::SET_BONUSES;
 use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
+use crate::engine::defense::{DefenseDisplay, displayed_defense};
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
@@ -32,13 +33,23 @@ pub struct FormattedItem {
 
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
     let mut base_attributes = Vec::new();
+    let mut defense_advisory = None;
 
-    if let Some(def) = item.defense() {
-        let label = get_loc("ItemStats1h", language);
-        if label.contains('%') {
-            base_attributes.push(format_template(label, &[def.to_string()]));
-        } else {
-            base_attributes.push(format!("{} {}", label, def));
+    if let Some(display) = displayed_defense(item, active_set_count, char_level) {
+        match display {
+            DefenseDisplay::Final(def) => {
+                let label = get_loc("ItemStats1h", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[def.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {}", label, def));
+                }
+            }
+            DefenseDisplay::BaseOnly { value, reason } => {
+                let label = if language == "ko" { "기본 방어력" } else { "Base Defense" };
+                base_attributes.push(format!("{label}: {value}"));
+                defense_advisory = Some(reason);
+            }
         }
     }
 
@@ -139,8 +150,17 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     }
 
     let validation = validate_item(item);
-    let warnings = validation.as_ref().map(|res| res.warnings.clone()).unwrap_or_default();
-    let detailed_warnings = validation.map(|res| res.detailed_warnings).unwrap_or_default();
+    let mut warnings = validation.as_ref().map(|res| res.warnings.clone()).unwrap_or_default();
+    let mut detailed_warnings = validation.map(|res| res.detailed_warnings).unwrap_or_default();
+    if let Some(reason) = defense_advisory {
+        let warning = crate::engine::validation::ValidationWarning::new(
+            reason.message().to_string(),
+            crate::engine::validation::WarningConfidenceTier::Advisory,
+            "defense_context",
+        );
+        warnings.push(warning.message.clone());
+        detailed_warnings.push(warning);
+    }
 
     FormattedItem {
         name: strip_d2_color_codes(&resolve_item_name(item, language)),
