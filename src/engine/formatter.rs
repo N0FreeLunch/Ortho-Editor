@@ -55,12 +55,11 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
 
     if let (Some(cur), Some(max)) = (item.current_durability(), item.max_durability()) {
         if max > 0 {
-            let label = get_loc("ItemStats1d", language);
-            let val_str = format!("{} / {}", cur, max);
+            let label = get_loc("ItemStats1d", language).trim();
             if label.contains('%') {
-                base_attributes.push(format_template(label, &[val_str]));
+                base_attributes.push(format_template(label, &[cur.to_string(), max.to_string()]));
             } else {
-                base_attributes.push(format!("{} {}", label, val_str));
+                base_attributes.push(format!("{label} {cur} / {max}"));
             }
         }
     }
@@ -80,8 +79,12 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
 
     if let Some(s) = item.sockets {
         if s > 0 {
-            let label = get_loc("Socketable", language);
-            base_attributes.push(label.replace("%d", &s.to_string()));
+            let label = get_loc("Socketable", language).trim();
+            if label.contains('%') {
+                base_attributes.push(format_template(label, &[s.to_string()]));
+            } else {
+                base_attributes.push(format!("{label} ({s})"));
+            }
         }
     }
 
@@ -1843,5 +1846,146 @@ mod damage_channel_display_tests {
                 "Unknown Stat 999 (value: 3)"
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod base_field_display_tests {
+    use super::*;
+    use crate::item::HuffmanTree;
+    use d2r_macros::settled_contract_test;
+
+    fn plain() -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = "cap ".into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    #[settled_contract_test]
+    fn actual_cap_binds_original_current_maximum_and_capacity_separately() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let snapshot = items.clone();
+        let cap = &items[8];
+        assert_eq!(
+            (cap.current_durability(), cap.max_durability(), cap.sockets),
+            (Some(9), Some(12), Some(2))
+        );
+        assert_eq!(
+            format_item(cap, "en", 0, 10).base_attributes,
+            ["Defense: 5", "Durability: 9 of 12", "Socketed (2)"]
+        );
+        assert_eq!(
+            format_item(cap, "ko", 0, 10).base_attributes,
+            ["방어: 5", "내구력: 9 / 12", "소켓 아이템 (2)"]
+        );
+        assert_eq!(items, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn durability_arguments_keep_broken_full_and_distinct_values() {
+        for (current, maximum) in [(0, 12), (12, 12), (5, 123)] {
+            let mut item = plain();
+            item.body.current_durability = Some(current);
+            item.body.max_durability = Some(maximum);
+            let snapshot = item.clone();
+            assert_eq!(
+                format_item(&item, "en", 0, 7).base_attributes,
+                [format!("Durability: {current} of {maximum}")]
+            );
+            assert_eq!(
+                format_item(&item, "ko", 0, 7).base_attributes,
+                [format!("내구력: {current} / {maximum}")]
+            );
+            assert_eq!(item, snapshot);
+        }
+    }
+
+    #[settled_contract_test]
+    fn socket_capacity_does_not_use_filled_child_count() {
+        for capacity in 1..=6 {
+            let mut item = plain();
+            item.sockets = Some(capacity);
+            assert!(item.socketed_items.is_empty());
+            let snapshot = item.clone();
+            assert_eq!(
+                format_item(&item, "en", 0, 7).base_attributes,
+                [format!("Socketed ({capacity})")]
+            );
+            assert_eq!(
+                format_item(&item, "ko", 0, 7).base_attributes,
+                [format!("소켓 아이템 ({capacity})")]
+            );
+            assert_eq!(item, snapshot);
+        }
+    }
+
+    #[settled_contract_test]
+    fn absent_or_zero_base_fields_keep_existing_omission_conditions() {
+        for (current, maximum) in [
+            (None, None),
+            (Some(5), None),
+            (None, Some(12)),
+            (Some(0), Some(0)),
+            (None, Some(0)),
+        ] {
+            for capacity in [None, Some(0)] {
+                let mut item = plain();
+                item.body.current_durability = current;
+                item.body.max_durability = maximum;
+                item.sockets = capacity;
+                for lang in ["en", "ko"] {
+                    assert!(format_item(&item, lang, 0, 7).base_attributes.is_empty());
+                }
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn base_numeric_values_render_without_arithmetic_or_truncation() {
+        let mut item = plain();
+        item.body.current_durability = Some(u32::MAX);
+        item.body.max_durability = Some(u32::MAX);
+        let snapshot = item.clone();
+        assert_eq!(
+            format_item(&item, "en", 0, 7).base_attributes,
+            ["Durability: 4294967295 of 4294967295"]
+        );
+        assert_eq!(
+            format_item(&item, "ko", 0, 7).base_attributes,
+            ["내구력: 4294967295 / 4294967295"]
+        );
+        assert_eq!(item, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn base_rendering_keeps_property_lines_names_and_original_models() {
+        let mut item = plain();
+        item.body.current_durability = Some(9);
+        item.body.max_durability = Some(12);
+        item.sockets = Some(2);
+        item.properties.push(ItemProperty::new(
+            0,
+            "strength".into(),
+            0,
+            35,
+            3,
+            ItemBitRange::default(),
+        ));
+        let snapshot = item.clone();
+        let en = format_item(&item, "en", 0, 7);
+        assert_eq!(en.name, "Cap");
+        assert_eq!(en.properties, ["+3 to Strength"]);
+        let ko = format_item(&item, "ko", 0, 7);
+        assert_eq!(
+            ko.properties,
+            format_properties_list(&snapshot.properties, 7, "ko")
+        );
+        assert_eq!(item, snapshot);
     }
 }
