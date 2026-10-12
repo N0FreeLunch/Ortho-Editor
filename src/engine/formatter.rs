@@ -85,11 +85,19 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         }
     }
 
-    let mut properties = format_properties_list(&item.properties, char_level, language);
-
-    if item.is_runeword {
-        properties.extend(format_properties_list(&item.runeword_attributes, char_level, language));
-    }
+    let (projected, socket_advisory) = match crate::engine::socket_effects::project(item) {
+        Ok(projected) => (projected, None),
+        Err(reason) => (None, Some(reason)),
+    };
+    let properties = if let Some(projected) = projected {
+        format_properties_list(&projected, char_level, language)
+    } else {
+        let mut lines = format_properties_list(&item.properties, char_level, language);
+        if item.is_runeword {
+            lines.extend(format_properties_list(&item.runeword_attributes, char_level, language));
+        }
+        lines
+    };
 
     let mut set_bonuses = Vec::new();
     if item.quality == Some(ItemQuality::Set) && item.is_identified {
@@ -157,6 +165,16 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
             reason.message().to_string(),
             crate::engine::validation::WarningConfidenceTier::Advisory,
             "defense_context",
+        );
+        warnings.push(warning.message.clone());
+        detailed_warnings.push(warning);
+    }
+
+    if let Some(reason) = socket_advisory {
+        let warning = crate::engine::validation::ValidationWarning::new(
+            reason.message().to_string(),
+            crate::engine::validation::WarningConfidenceTier::Advisory,
+            "socket_context",
         );
         warnings.push(warning.message.clone());
         detailed_warnings.push(warning);
