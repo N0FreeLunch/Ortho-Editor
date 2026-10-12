@@ -219,6 +219,16 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
             continue;
         }
 
+        // Matching damage channels are one displayed modifier; retain every stored field.
+        if matches!(p.stat_id, 21 | 22)
+            && let Some(indices) = damage_companion_indices(props, i)
+        {
+            skip_indices.extend(indices);
+            out.push(format_property(p, char_level, language));
+            i += 1;
+            continue;
+        }
+
         // 1. Enhanced Damage pairing (Stat 17 & 18)
         if p.stat_id == 17 || p.stat_id == 18 {
             let other_stat_id = if p.stat_id == 17 { 18 } else { 17 };
@@ -367,6 +377,44 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
     }
 
     out
+}
+
+fn damage_companion_indices(props: &[ItemProperty], primary: usize) -> Option<Vec<usize>> {
+    use crate::domain::stats::entity::StatMaturityTier;
+
+    let anchor = props.get(primary)?;
+    let family = match anchor.stat_id {
+        21 => [21, 23, 159],
+        22 => [22, 24, 160],
+        _ => return None,
+    };
+    let members: Vec<_> = props
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| family.contains(&p.stat_id))
+        .collect();
+    if !(2..=3).contains(&members.len()) || members.first()?.0 != primary || anchor.value <= 0 {
+        return None;
+    }
+    let mut ids = std::collections::HashSet::new();
+    if members.iter().any(|(_, p)| {
+        !ids.insert(p.stat_id)
+            || p.param != 0
+            || p.is_opaque
+            || p.opaque_bits.is_some()
+            || p.maturity != StatMaturityTier::Verified
+            || p.value != anchor.value
+            || p.raw_value != p.value
+    }) {
+        return None;
+    }
+    Some(
+        members
+            .into_iter()
+            .skip(1)
+            .map(|(index, _)| index)
+            .collect(),
+    )
 }
 
 fn format_poison_triplet(props: &[ItemProperty], language: &str) -> Option<String> {
@@ -1598,5 +1646,202 @@ mod poison_display_tests {
             ]
         );
         assert_eq!(props, original);
+    }
+}
+
+#[cfg(test)]
+mod damage_channel_display_tests {
+    use super::*;
+    use crate::domain::stats::entity::StatMaturityTier;
+    use crate::item::HuffmanTree;
+    use d2r_macros::settled_contract_test;
+
+    fn property(id: u32, value: i32) -> ItemProperty {
+        let name = match id {
+            21 => "mindamage",
+            23 => "secondary_mindamage",
+            159 => "item_throw_mindamage",
+            22 => "maxdamage",
+            24 => "secondary_maxdamage",
+            160 => "item_throw_maxdamage",
+            _ => "unrelated",
+        };
+        ItemProperty::new(id, name.into(), 0, value, value, ItemBitRange::default())
+    }
+
+    fn unchanged_fallback(props: &[ItemProperty]) {
+        let snapshot = props.to_vec();
+        for lang in ["en", "ko"] {
+            let expected: Vec<_> = props.iter().map(|p| format_property(p, 7, lang)).collect();
+            assert_eq!(format_properties_list(props, 7, lang), expected);
+        }
+        assert_eq!(props, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn actual_jewel_preserves_interleaved_resistance_and_all_item_fields() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let snapshot = items.clone();
+        let jewel = &items[8].socketed_items[0];
+        assert_eq!(
+            jewel
+                .properties
+                .iter()
+                .map(|p| p.stat_id)
+                .collect::<Vec<_>>(),
+            [21, 23, 45, 159, 511]
+        );
+        assert_eq!(
+            format_item(jewel, "en", 0, 7).properties,
+            ["+3 to Minimum Damage", "Poison Resist +13%"]
+        );
+        assert_eq!(
+            format_item(jewel, "ko", 0, 7).properties,
+            ["+3 최소 데미지", "+13 포이즌 저항력"]
+        );
+        assert_eq!(items, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn actual_javelin_pair_does_not_require_a_secondary_damage_channel() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest1_DenOfEvil_Done_PreAkara.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let snapshot = items.clone();
+        let jav = items
+            .iter()
+            .find(|item| {
+                item.code.trim() == "jav" && item.properties.iter().any(|p| p.stat_id == 160)
+            })
+            .unwrap();
+        assert!(!jav.properties.iter().any(|p| p.stat_id == 24));
+        assert_eq!(
+            format_item(jav, "en", 0, 7).properties,
+            ["+1 to Attack Rating", "+1 to Maximum Damage"]
+        );
+        assert_eq!(
+            format_item(jav, "ko", 0, 7).properties,
+            ["+1 공격등급", "+1 최대 데미지"]
+        );
+        assert_eq!(items, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn both_damage_families_keep_their_primary_order_and_unrelated_lines() {
+        let props = vec![
+            property(21, 5),
+            property(22, 1),
+            property(23, 5),
+            property(24, 1),
+            property(39, 8),
+            property(159, 5),
+            property(160, 1),
+        ];
+        let snapshot = props.clone();
+        assert_eq!(
+            format_properties_list(&props, 7, "en"),
+            [
+                "+5 to Minimum Damage",
+                "+1 to Maximum Damage",
+                "Fire Resist +8%"
+            ]
+        );
+        assert_eq!(
+            format_properties_list(&props, 7, "ko"),
+            ["+5 최소 데미지", "+1 최대 데미지", "+8 파이어 저항력"]
+        );
+        assert_eq!(props, snapshot);
+        assert_eq!(
+            format_properties_list(&[property(21, 3), property(23, 3)], 7, "en"),
+            ["+3 to Minimum Damage"]
+        );
+    }
+
+    #[settled_contract_test]
+    fn mismatched_nonpositive_raw_or_parameter_fields_keep_the_whole_family() {
+        for family in [[21, 23, 159], [22, 24, 160]] {
+            for position in 0..3 {
+                let props: Vec<_> = family.map(|id| property(id, 3)).into();
+                for value in [0, -1, 4] {
+                    let mut changed = props.clone();
+                    changed[position].value = value;
+                    changed[position].raw_value = value;
+                    unchanged_fallback(&changed);
+                }
+                let mut changed = props.clone();
+                changed[position].raw_value = 4;
+                unchanged_fallback(&changed);
+                changed = props;
+                changed[position].param = 1;
+                unchanged_fallback(&changed);
+            }
+            unchanged_fallback(&family.map(|id| property(id, 0)));
+            unchanged_fallback(&family.map(|id| property(id, -1)));
+        }
+    }
+
+    #[settled_contract_test]
+    fn opaque_or_nonverified_members_cannot_hide_other_damage_channels() {
+        for family in [[21, 23, 159], [22, 24, 160]] {
+            for position in 0..3 {
+                for maturity in [StatMaturityTier::Inferred, StatMaturityTier::Speculative] {
+                    let mut props = family.map(|id| property(id, 3));
+                    props[position].maturity = maturity;
+                    unchanged_fallback(&props);
+                }
+                let mut props = family.map(|id| property(id, 3));
+                props[position].is_opaque = true;
+                unchanged_fallback(&props);
+                props[position].is_opaque = false;
+                props[position].opaque_bits = Some(vec![true]);
+                unchanged_fallback(&props);
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn ambiguous_or_reordered_families_and_unrelated_duplicates_stay_visible() {
+        for family in [[21, 23, 159], [22, 24, 160]] {
+            unchanged_fallback(&[property(family[0], 3)]);
+            unchanged_fallback(&[property(family[1], 3), property(family[2], 3)]);
+            unchanged_fallback(&[
+                property(family[1], 3),
+                property(family[0], 3),
+                property(family[2], 3),
+            ]);
+            unchanged_fallback(&[
+                property(family[0], 3),
+                property(family[1], 3),
+                property(family[1], 3),
+            ]);
+            unchanged_fallback(&[
+                property(family[0], 3),
+                property(family[0], 3),
+                property(family[1], 3),
+            ]);
+        }
+        let mut marker = property(317, 0);
+        marker.name = "item_socket_child".into();
+        let props = vec![
+            property(999, 3),
+            property(21, 3),
+            property(23, 3),
+            property(999, 3),
+            property(159, 3),
+            marker,
+            property(511, 0),
+        ];
+        assert_eq!(
+            format_properties_list(&props, 7, "en"),
+            [
+                "Unknown Stat 999 (value: 3)",
+                "+3 to Minimum Damage",
+                "Unknown Stat 999 (value: 3)"
+            ]
+        );
     }
 }
