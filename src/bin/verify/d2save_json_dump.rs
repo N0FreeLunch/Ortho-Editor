@@ -1,12 +1,10 @@
-use d2r_core::data::stat_costs::STAT_COSTS;
 use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter};
+use d2r_core::domain::item::stream::{ItemContainer, PlayerItemStream};
 use d2r_core::domain::progression::Progression;
 use d2r_core::domain::progression::waypoint::WaypointSet;
-use d2r_core::domain::stats::stat_save_bits;
-use d2r_core::item::{HuffmanTree, Item, ItemProperty};
+use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
-use d2r_core::verify::alpha_inventory_routing::{AlphaInventoryRoute, alpha_inventory_route};
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -217,136 +215,9 @@ fn main() {
         "equipped_items": merc_equipped_items
     });
 
-    // Parse player items to build equipment, inventory, belt, stash, and cube lists
-    let mut equipment_json = Vec::new();
-    let mut inventory_json = Vec::new();
-    let mut unknown_json = Vec::new();
-    let mut belt_json = Vec::new();
-    let mut stash_json = Vec::new();
-    let mut cube_json = Vec::new();
-
-    if let Ok(items) = Item::read_player_items(&bytes, &huffman, is_alpha) {
-        for (i, item) in items.iter().enumerate() {
-            // Filter out residue and structural summary items (like ks d, b7ts)
-            let trimmed_code = item.code.trim();
-            if item.is_residue()
-                || trimmed_code.is_empty()
-                || trimmed_code == "ks d"
-                || trimmed_code == "b7ts"
-            {
-                continue;
-            }
-
-            let (name_en, name_ko) = get_item_localization(&item.code);
-            let (width, height) = d2r_core::inventory::get_item_size(&item.code);
-            let q_str = if item.header.is_runeword {
-                "Runeword"
-            } else {
-                quality_to_str(item.header.quality)
-            };
-
-            let mut socket_json = Vec::new();
-            for (si, s_item) in item.socketed_items.iter().enumerate() {
-                let (s_name_en, s_name_ko) = get_item_localization(&s_item.code);
-                let s_fmt_ko = d2r_core::engine::formatter::format_item(s_item, "ko", 0, level as u8);
-                let s_fmt_en = d2r_core::engine::formatter::format_item(s_item, "en", 0, level as u8);
-                socket_json.push(json!({
-                    "index": si,
-                    "code": s_item.code.trim(),
-                    "name_en": s_name_en,
-                    "name_ko": s_name_ko,
-                    "quality": quality_to_str(s_item.header.quality),
-                    "properties": serialize_item_properties(&s_item.properties),
-                    "formatted_lines_ko": s_fmt_ko.properties,
-                    "formatted_lines_en": s_fmt_en.properties,
-                }));
-            }
-
-            let mut props_json = serialize_item_properties(&item.properties);
-            if props_json.is_empty() {
-                if let Some(payload) = &item.body.v105_7mgw_payload {
-                    let decoded = decode_opaque_bits_properties(payload);
-                    if !decoded.is_empty() {
-                        props_json = decoded;
-                    }
-                }
-            }
-
-            let fmt_ko = d2r_core::engine::formatter::format_item(item, "ko", 0, level as u8);
-            let fmt_en = d2r_core::engine::formatter::format_item(item, "en", 0, level as u8);
-
-            let item_data = json!({
-                "index": i,
-                "code": item.code.trim(),
-                "name_en": name_en,
-                "name_ko": name_ko,
-                "type": d2r_core::inventory::get_item_category(&item.code),
-                "quality": q_str,
-                "x": item.x,
-                "y": item.y,
-                "width": width,
-                "height": height,
-                "is_equipped": item.mode == 1,
-                "location": item.location,
-                "socketed_items": socket_json,
-                "properties": props_json,
-                "formatted_lines_ko": fmt_ko.properties,
-                "formatted_lines_en": fmt_en.properties,
-                "formatted_base_ko": fmt_ko.base_attributes,
-                "formatted_base_en": fmt_en.base_attributes,
-                "set_attributes": item.set_attributes.iter().map(|set_props| serialize_item_properties(set_props)).collect::<Vec<_>>(),
-                "runeword_attributes": serialize_item_properties(&item.runeword_attributes),
-                "opaque_info": json!({
-                    "is_opaque": item.body.v105_7mgw_payload.is_some(),
-                    "bit_count": item.body.v105_7mgw_payload.as_ref().map(|b| b.len()).unwrap_or(0)
-                }),
-                "option_fidelity": json!({
-                    "coverage_percent": item.detailed_option_fidelity().coverage_percent,
-                    "validity_percent": item.detailed_option_fidelity().validity_percent,
-                    "composite_score": item.detailed_option_fidelity().composite_fidelity_score,
-                }),
-                "defense": item.defense,
-                "max_durability": item.max_durability,
-                "current_durability": item.current_durability,
-                "quantity": item.quantity,
-            });
-
-            match alpha_inventory_route(item, is_alpha) {
-                AlphaInventoryRoute::Equipment => {
-                    let mut eq_data = item_data.clone();
-                    // Alpha v105 heuristic: 0=Armor, 1=Weapon1 observed in fixtures
-                    let slot_name = if is_alpha {
-                        match item.x {
-                            0 => "Armor",
-                            1 => "Weapon1",
-                            2 => "Weapon2",
-                            3 => "Head",
-                            _ => body_position_to_slot(item.x),
-                        }
-                    } else {
-                        body_position_to_slot(item.x)
-                    };
-                    eq_data["slot_en"] = json!(slot_name);
-                    equipment_json.push(eq_data);
-                }
-                AlphaInventoryRoute::Belt => {
-                    belt_json.push(item_data);
-                }
-                AlphaInventoryRoute::Inventory => {
-                    inventory_json.push(item_data);
-                }
-                AlphaInventoryRoute::Unknown => {
-                    unknown_json.push(item_data);
-                }
-                AlphaInventoryRoute::Stash => {
-                    stash_json.push(item_data);
-                }
-                AlphaInventoryRoute::Cube => {
-                    cube_json.push(item_data);
-                }
-            }
-        }
-    }
+    let player_stream =
+        PlayerItemStream::read(&bytes, &huffman).expect("Failed to parse player item stream");
+    let player_items = player_item_payloads(&player_stream, level as u8);
 
     // Map entire payload to match index.html expected format
     let payload = json!({
@@ -378,12 +249,13 @@ fn main() {
         "skills": skills_json,
         "waypoints": waypoints_json,
         "quests": quests_json,
-        "equipment": equipment_json,
-        "inventory": inventory_json,
-        "unknown": unknown_json,
-        "belt": belt_json,
-        "stash": stash_json,
-        "cube": cube_json,
+        "equipment": player_items["equipment"],
+        "inventory": player_items["inventory"],
+        "unknown": player_items["unknown"],
+        "belt": player_items["belt"],
+        "stash": player_items["stash"],
+        "cube": player_items["cube"],
+        "player_item_stream": player_items["player_item_stream"],
         "mercenary": merc_json
     });
 
@@ -395,6 +267,127 @@ fn main() {
     }
     fs::write(&output_path, out_str).expect("Failed to write output JSON");
     println!("Successfully dumped save game JSON to {}", output_path);
+}
+
+fn player_item_payloads(stream: &PlayerItemStream, level: u8) -> serde_json::Value {
+    // Parse player items to build equipment, inventory, belt, stash, and cube lists
+    let mut equipment_json = Vec::new();
+    let mut inventory_json = Vec::new();
+    let mut unknown_json = Vec::new();
+    let mut belt_json = Vec::new();
+    let mut stash_json = Vec::new();
+    let mut cube_json = Vec::new();
+
+    for (i, item) in stream.items.iter().enumerate() {
+        let placement = stream.placement(item);
+        let (name_en, name_ko) = get_item_localization(&item.code);
+        let (width, height) = d2r_core::inventory::get_item_size(&item.code);
+        let q_str = if item.header.is_runeword {
+            "Runeword"
+        } else {
+            quality_to_str(item.header.quality)
+        };
+
+        let mut socket_json = Vec::new();
+        for (si, s_item) in item.socketed_items.iter().enumerate() {
+            let (s_name_en, s_name_ko) = get_item_localization(&s_item.code);
+            let s_fmt_ko = d2r_core::engine::formatter::format_item(s_item, "ko", 0, level as u8);
+            let s_fmt_en = d2r_core::engine::formatter::format_item(s_item, "en", 0, level as u8);
+            socket_json.push(json!({
+                "index": si,
+                "code": s_item.code.trim(),
+                "name_en": s_name_en,
+                "name_ko": s_name_ko,
+                "quality": quality_to_str(s_item.header.quality),
+                "properties": serialize_item_properties(&s_item.properties),
+                "formatted_lines_ko": s_fmt_ko.properties,
+                "formatted_lines_en": s_fmt_en.properties,
+            }));
+        }
+
+        let mut props_json = serialize_item_properties(&item.properties);
+        if props_json.is_empty() {
+            if let Some(payload) = &item.body.v105_7mgw_payload {
+                let decoded = decode_opaque_bits_properties(payload);
+                if !decoded.is_empty() {
+                    props_json = decoded;
+                }
+            }
+        }
+
+        let fmt_ko = d2r_core::engine::formatter::format_item(item, "ko", 0, level as u8);
+        let fmt_en = d2r_core::engine::formatter::format_item(item, "en", 0, level as u8);
+
+        let item_data = json!({
+            "index": i,
+            "code": item.code.trim(),
+            "name_en": name_en,
+            "name_ko": name_ko,
+            "type": d2r_core::inventory::get_item_category(&item.code),
+            "quality": q_str,
+            "x": placement.x,
+            "y": placement.y,
+            "width": width,
+            "height": height,
+            "is_equipped": placement.container == ItemContainer::Equipment,
+            "location": item.location,
+            "parsing": {
+                "is_compact": item.is_compact,
+                "is_opaque": item.is_opaque(),
+                "is_semi_opaque": item.is_semi_opaque(),
+                "properties_complete": item.properties_complete,
+                "property_status": if item.is_compact { "not_applicable" } else if item.properties_complete { "complete" } else { "incomplete" },
+                "source_range": { "start": item.range.start, "end": item.range.end },
+                "placement_diagnostic": placement.diagnostic,
+            },
+            "socketed_items": socket_json,
+            "properties": props_json,
+            "formatted_lines_ko": fmt_ko.properties,
+            "formatted_lines_en": fmt_en.properties,
+            "formatted_base_ko": fmt_ko.base_attributes,
+            "formatted_base_en": fmt_en.base_attributes,
+            "set_attributes": item.set_attributes.iter().map(|set_props| serialize_item_properties(set_props)).collect::<Vec<_>>(),
+            "runeword_attributes": serialize_item_properties(&item.runeword_attributes),
+            "opaque_info": json!({
+                "is_opaque": item.body.v105_7mgw_payload.is_some(),
+                "bit_count": item.body.v105_7mgw_payload.as_ref().map(|b| b.len()).unwrap_or(0)
+            }),
+            "option_fidelity": json!({
+                "coverage_percent": item.detailed_option_fidelity().coverage_percent,
+                "validity_percent": item.detailed_option_fidelity().validity_percent,
+                "composite_score": item.detailed_option_fidelity().composite_fidelity_score,
+            }),
+            "defense": item.defense,
+            "max_durability": item.max_durability,
+            "current_durability": item.current_durability,
+            "quantity": item.quantity,
+        });
+
+        match placement.container {
+            ItemContainer::Equipment => {
+                let mut eq_data = item_data;
+                eq_data["slot_en"] = json!(placement.equipment_slot.unwrap_or("Unknown"));
+                equipment_json.push(eq_data);
+            }
+            ItemContainer::Belt => belt_json.push(item_data),
+            ItemContainer::Inventory => inventory_json.push(item_data),
+            ItemContainer::Unknown => unknown_json.push(item_data),
+            ItemContainer::Stash => stash_json.push(item_data),
+            ItemContainer::Cube => cube_json.push(item_data),
+        }
+    }
+    let exported_count = equipment_json.len()
+        + inventory_json.len()
+        + belt_json.len()
+        + stash_json.len()
+        + cube_json.len()
+        + unknown_json.len();
+    json!({
+        "equipment": equipment_json, "inventory": inventory_json, "belt": belt_json,
+        "stash": stash_json, "cube": cube_json, "unknown": unknown_json,
+        "player_item_stream": { "dialect": stream.dialect, "diagnostics": stream.diagnostics,
+            "parsed_count": stream.items.len(), "exported_count": exported_count }
+    })
 }
 
 fn parse_mercenary_equipped_items(
@@ -576,23 +569,6 @@ fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
     bytes.windows(2).position(|window| window == marker)
 }
 
-// Helper: map body slot index to EN slot name string
-fn body_position_to_slot(pos: u8) -> &'static str {
-    match pos {
-        1 => "Head",
-        2 => "Amulet",
-        3 => "Armor",
-        4 => "Weapon1",
-        5 => "Weapon2",
-        6 => "Ring1",
-        7 => "Ring2",
-        8 => "Belt",
-        9 => "Boots",
-        10 => "Gloves",
-        _ => "None",
-    }
-}
-
 // Helper: get standard quality string representation
 fn quality_to_str(q: Option<d2r_core::domain::item::quality::ItemQuality>) -> &'static str {
     use d2r_core::domain::item::quality::ItemQuality;
@@ -679,7 +655,10 @@ fn decode_opaque_bits_properties(bits: &[bool]) -> Vec<serde_json::Value> {
             }
         }
 
-        if let Some(stat) = d2r_core::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id) {
+        if let Some(stat) = d2r_core::data::stat_costs::STAT_COSTS
+            .iter()
+            .find(|s| s.id == stat_id)
+        {
             results.push(json!({
                 "stat_id": stat_id,
                 "name": stat.name.to_string(),
@@ -699,4 +678,87 @@ fn decode_opaque_bits_properties(bits: &[bool]) -> Vec<serde_json::Value> {
         bit_pos += 18;
     }
     results
+}
+
+#[cfg(test)]
+mod player_export_tests {
+    use super::*;
+    use d2r_core::domain::item::stream::ItemStreamDialect;
+    use d2r_macros::settled_contract_test;
+
+    fn fixture(relative: &str) -> PlayerItemStream {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/savegames")
+            .join(relative);
+        PlayerItemStream::read(&fs::read(path).unwrap(), &HuffmanTree::new()).unwrap()
+    }
+
+    #[settled_contract_test]
+    fn fresh_start_exports_real_equipment_and_compact_property_status() {
+        let stream = fixture("gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s");
+        assert_eq!(stream.dialect, ItemStreamDialect::D2rV3);
+        let payload = player_item_payloads(&stream, 1);
+        assert_eq!(payload["player_item_stream"]["parsed_count"], 8);
+        assert_eq!(payload["player_item_stream"]["exported_count"], 8);
+        let equipment = payload["equipment"].as_array().unwrap();
+        assert_eq!(equipment.len(), 2);
+        assert_eq!(equipment[0]["code"], "ktr");
+        assert_eq!(equipment[0]["slot_en"], "Weapon1");
+        assert_eq!(equipment[0]["parsing"]["source_range"]["start"], 7728);
+        assert_eq!(equipment[1]["code"], "buc");
+        assert_eq!(equipment[1]["slot_en"], "Weapon2");
+        assert_eq!(equipment[1]["parsing"]["source_range"]["end"], 8040);
+        for item in payload["belt"].as_array().unwrap() {
+            assert_eq!(item["code"], "hp1");
+            assert_eq!(item["parsing"]["property_status"], "not_applicable");
+        }
+        assert_eq!(payload["inventory"].as_array().unwrap().len(), 2);
+    }
+
+    #[settled_contract_test]
+    fn scrolls_are_inventory_items_and_belt_coordinates_are_normalized() {
+        let stream = fixture("original/amazon_10_scrolls.d2s");
+        let payload = player_item_payloads(&stream, 1);
+        let inventory = payload["inventory"].as_array().unwrap();
+        assert_eq!(
+            inventory
+                .iter()
+                .filter(|item| item["code"] == "tsc")
+                .count(),
+            10
+        );
+        assert_eq!(payload["belt"].as_array().unwrap().len(), 4);
+        for (index, item) in payload["belt"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(item["x"], index);
+            assert_eq!(item["y"], 0);
+        }
+        assert_eq!(payload["player_item_stream"]["exported_count"], 16);
+    }
+
+    #[settled_contract_test]
+    fn recovery_diagnostics_and_unresolved_entities_are_never_silently_omitted() {
+        let mut summary = Item::empty_for_tests();
+        summary.code = "ks d".to_string();
+        summary.body.code = summary.code.clone();
+        summary.header.mode = 3;
+        summary.header.location = 15;
+        let stream = PlayerItemStream {
+            dialect: ItemStreamDialect::Alpha,
+            diagnostics: vec![
+                "D2R v3 candidate rejected; using Alpha recovery: controlled".to_string(),
+            ],
+            items: vec![Item::empty_for_tests(), summary],
+        };
+        let payload = player_item_payloads(&stream, 1);
+        assert_eq!(payload["unknown"].as_array().unwrap().len(), 2);
+        assert_eq!(payload["player_item_stream"]["exported_count"], 2);
+        assert_eq!(
+            payload["player_item_stream"]["diagnostics"][0],
+            stream.diagnostics[0]
+        );
+        assert_eq!(
+            payload["unknown"][0]["parsing"]["placement_diagnostic"],
+            "Unresolved item fragment"
+        );
+    }
 }
