@@ -34,6 +34,7 @@ pub struct FormattedItem {
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
     let mut base_attributes = Vec::new();
     let mut defense_advisory = None;
+    let mut quantity_advisory = false;
 
     if let Some(display) = displayed_defense(item, active_set_count, char_level) {
         match display {
@@ -65,11 +66,14 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     }
 
     if let Some(qty) = item.quantity() {
-        let label = get_loc("ItemStats1i", language);
+        let capacity = qualified_quantity_capacity(item, qty, active_set_count);
+        quantity_advisory = capacity.is_none();
+        let maximum = capacity.map_or_else(|| "?".to_string(), |value| value.to_string());
+        let label = get_loc("ItemStats1i", language).trim();
         if label.contains('%') {
-            base_attributes.push(format_template(label, &[qty.to_string()]));
+            base_attributes.push(format_template(label, &[qty.to_string(), maximum]));
         } else {
-            base_attributes.push(format!("{} {}", label, qty));
+            base_attributes.push(format!("{label} {qty} / {maximum}"));
         }
     }
 
@@ -163,6 +167,16 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     let validation = validate_item(item);
     let mut warnings = validation.as_ref().map(|res| res.warnings.clone()).unwrap_or_default();
     let mut detailed_warnings = validation.map(|res| res.detailed_warnings).unwrap_or_default();
+    if quantity_advisory {
+        let warning = crate::engine::validation::ValidationWarning::new(
+            "The maximum stack size cannot be determined from the available item data.",
+            crate::engine::validation::WarningConfidenceTier::Advisory,
+            "quantity_context",
+        );
+        warnings.push(warning.message.clone());
+        detailed_warnings.push(warning);
+    }
+
     if let Some(reason) = defense_advisory {
         let warning = crate::engine::validation::ValidationWarning::new(
             reason.message().to_string(),
@@ -1987,5 +2001,326 @@ mod base_field_display_tests {
             format_properties_list(&snapshot.properties, 7, "ko")
         );
         assert_eq!(item, snapshot);
+    }
+}
+
+fn qualified_quantity_capacity(item: &Item, quantity: u32, active_set_count: usize) -> Option<u32> {
+    const QUANTITY_MAX: u32 = (1 << 9) - 1;
+    if item.header.save_is_alpha || quantity > QUANTITY_MAX {
+        return None;
+    }
+    let template = ITEM_TEMPLATES
+        .iter()
+        .find(|template| template.code == item.code.trim())?;
+    if !template.is_stackable {
+        return None;
+    }
+    let base = template
+        .max_stack
+        .filter(|value| (1..=QUANTITY_MAX).contains(value))?;
+    if item.header.is_socketed
+        || item.sockets.is_some_and(|value| value > 0)
+        || !item.socketed_items.is_empty()
+    {
+        return None;
+    }
+    let unsafe_capacity = |property: &ItemProperty| {
+        property.stat_id == 254 || property.is_opaque || property.opaque_bits.is_some()
+    };
+    if !item.is_identified {
+        let visible_unsafe = item
+            .properties
+            .iter()
+            .chain(item.runeword_attributes.iter())
+            .chain(item.set_attributes.iter().flatten())
+            .any(unsafe_capacity);
+        let concealed_unsafe = item
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .and_then(|auxiliary| auxiliary.concealed_stats.as_ref())
+            .is_some_and(|stats| {
+                stats
+                    .properties
+                    .iter()
+                    .chain(stats.runeword_attributes.iter())
+                    .chain(stats.set_attributes.iter().flatten())
+                    .any(unsafe_capacity)
+            });
+        return (!visible_unsafe && !concealed_unsafe).then_some(base);
+    }
+    if (!item.is_runeword && item.runeword_attributes.iter().any(unsafe_capacity))
+        || (active_set_count > 1 && item.set_attributes.iter().flatten().any(unsafe_capacity))
+    {
+        return None;
+    }
+    let mut capacity = i64::from(base);
+    for property in item
+        .properties
+        .iter()
+        .chain(item.runeword_attributes.iter().filter(|_| item.is_runeword))
+    {
+        if property.is_opaque || property.opaque_bits.is_some() {
+            return None;
+        }
+        if property.stat_id == 254 {
+            if !property.is_verified()
+                || property.param != 0
+                || property.raw_value != property.value
+                || !(0..=255).contains(&property.value)
+            {
+                return None;
+            }
+            capacity = capacity.checked_add(i64::from(property.value))?;
+        }
+    }
+    u32::try_from(capacity.min(i64::from(QUANTITY_MAX))).ok()
+}
+
+#[cfg(test)]
+mod quantity_display_tests {
+    use super::{format_item, format_properties_list};
+    use crate::domain::item::entity::D2rV3AuxiliaryData;
+    use crate::domain::item::stream::PlayerItemStream;
+    use crate::domain::stats::{ItemStats, StatMaturityTier};
+    use crate::item::{HuffmanTree, Item, ItemBitRange, ItemProperty, ItemQuality};
+    use d2r_macros::settled_contract_test;
+
+    fn plain() -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = "jav ".into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item.body.quantity = Some(1);
+        item
+    }
+
+    fn extra(value: i32) -> ItemProperty {
+        ItemProperty::new(
+            254,
+            "item_extra_stack".into(),
+            0,
+            value,
+            value,
+            ItemBitRange::default(),
+        )
+    }
+
+    fn unknown(item: &Item, active: usize) {
+        let snapshot = item.clone();
+        let output = format_item(item, "en", active, 10);
+        assert!(
+            output
+                .base_attributes
+                .iter()
+                .any(|line| line.ends_with(" of ?"))
+        );
+        assert_eq!(
+            output
+                .detailed_warnings
+                .iter()
+                .filter(|warning| warning.category == "quantity_context")
+                .count(),
+            1
+        );
+        assert_eq!(*item, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn actual_quantities_bind_to_current_source_capacities() {
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s");
+        let bytes = std::fs::read(file).unwrap();
+        let stream = PlayerItemStream::read(&bytes, &HuffmanTree::new()).unwrap();
+        let snapshot = stream.items.clone();
+        for (code, current, maximum) in [
+            ("key", 4, 12),
+            ("gpl", 3, 25),
+            ("ibk", 10, 20),
+            ("tbk", 17, 20),
+        ] {
+            let item = stream
+                .items
+                .iter()
+                .find(|item| item.code.trim() == code)
+                .unwrap();
+            assert_eq!(item.quantity(), Some(current));
+            let mut expected_en = Vec::new();
+            let mut expected_ko = Vec::new();
+            if code == "gpl" {
+                expected_en.push("Durability: 1 of 2".to_string());
+                expected_ko.push("내구력: 1 / 2".to_string());
+            }
+            expected_en.push(format!("Quantity: {current} of {maximum}"));
+            expected_ko.push(format!("수량: {current} / {maximum}"));
+            assert_eq!(format_item(item, "en", 0, 7).base_attributes, expected_en);
+            assert_eq!(format_item(item, "ko", 0, 7).base_attributes, expected_ko);
+        }
+        assert!(stream.items == snapshot);
+    }
+
+    #[settled_contract_test]
+    fn ordinary_capacity_keeps_zero_and_absent_quantities_distinct() {
+        for (code, maximum) in [
+            ("9tk", 240),
+            ("key", 12),
+            ("gpl", 25),
+            ("ibk", 20),
+            ("tbk", 20),
+            ("jav", 90),
+        ] {
+            let mut item = plain();
+            item.code = code.into();
+            item.body.quantity = Some(0);
+            assert_eq!(
+                format_item(&item, "en", 0, 10).base_attributes,
+                [format!("Quantity: 0 of {maximum}")]
+            );
+            item.body.quantity = None;
+            let output = format_item(&item, "en", 0, 10);
+            assert!(output.base_attributes.is_empty());
+            assert!(
+                !output
+                    .detailed_warnings
+                    .iter()
+                    .any(|warning| warning.category == "quantity_context")
+            );
+        }
+    }
+
+    #[settled_contract_test]
+    fn verified_extra_stack_and_runeword_contributions_share_the_quantity_ceiling() {
+        let mut item = plain();
+        item.properties = vec![extra(60), extra(120)];
+        assert_eq!(
+            format_item(&item, "en", 0, 10).base_attributes,
+            ["Quantity: 1 of 270"]
+        );
+        item.properties = vec![extra(60)];
+        item.runeword_attributes = vec![extra(120)];
+        item.is_runeword = true;
+        assert_eq!(
+            format_item(&item, "en", 0, 10).base_attributes,
+            ["Quantity: 1 of 270"]
+        );
+        item.properties = vec![extra(255), extra(255)];
+        item.runeword_attributes.clear();
+        assert_eq!(
+            format_item(&item, "en", 0, 10).base_attributes,
+            ["Quantity: 1 of 511"]
+        );
+        assert_eq!(
+            format_item(&item, "ko", 0, 10).base_attributes,
+            ["수량: 1 / 511"]
+        );
+    }
+
+    #[settled_contract_test]
+    fn unqualified_fields_and_contexts_do_not_invent_a_maximum() {
+        let mut malformed = vec![extra(-1), extra(256)];
+        let mut property = extra(60);
+        property.param = 1;
+        malformed.push(property);
+        let mut property = extra(60);
+        property.raw_value = 61;
+        malformed.push(property);
+        let mut property = extra(60);
+        property.maturity = StatMaturityTier::Inferred;
+        malformed.push(property);
+        let mut property = extra(60);
+        property.is_opaque = true;
+        malformed.push(property);
+        let mut property = extra(60);
+        property.opaque_bits = Some(vec![true]);
+        malformed.push(property);
+        for property in malformed {
+            let mut item = plain();
+            item.properties = vec![property];
+            unknown(&item, 0);
+        }
+        for code in ["???", "cap", "gld"] {
+            let mut item = plain();
+            item.code = code.into();
+            unknown(&item, 0);
+        }
+        let mut item = plain();
+        item.header.save_is_alpha = true;
+        unknown(&item, 0);
+        let mut item = plain();
+        item.body.quantity = Some(u32::MAX);
+        unknown(&item, 0);
+        let mut item = plain();
+        item.header.is_socketed = true;
+        unknown(&item, 0);
+    }
+
+    #[settled_contract_test]
+    fn concealed_options_remain_hidden_and_cannot_supply_a_final_capacity() {
+        let mut item = plain();
+        item.is_identified = false;
+        let unrelated = ItemProperty::new(0, "strength".into(), 0, 3, 3, ItemBitRange::default());
+        item.body.d2r_v3_auxiliary = Some(D2rV3AuxiliaryData {
+            save_version: 105,
+            concealed_stats: Some(Box::new(ItemStats {
+                properties: vec![unrelated],
+                ..Default::default()
+            })),
+            ..Default::default()
+        });
+        let snapshot = item.clone();
+        let output = format_item(&item, "en", 0, 10);
+        assert_eq!(output.base_attributes, ["Quantity: 1 of 90"]);
+        assert!(output.properties.is_empty());
+        assert_eq!(item, snapshot);
+        item.body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .concealed_stats
+            .as_mut()
+            .unwrap()
+            .properties = vec![extra(60)];
+        unknown(&item, 0);
+        assert!(format_item(&item, "en", 0, 10).properties.is_empty());
+    }
+
+    #[settled_contract_test]
+    fn conditional_capacity_and_unrelated_options_preserve_original_models() {
+        let mut item = plain();
+        item.set_attributes = vec![vec![extra(60)]];
+        assert_eq!(
+            format_item(&item, "en", 1, 10).base_attributes,
+            ["Quantity: 1 of 90"]
+        );
+        unknown(&item, 2);
+        item.set_attributes.clear();
+        item.properties = vec![ItemProperty::new(
+            0,
+            "strength".into(),
+            0,
+            3,
+            3,
+            ItemBitRange::default(),
+        )];
+        item.body.quantity = Some(511);
+        let snapshot = item.clone();
+        let output = format_item(&item, "en", 0, 10);
+        assert_eq!(output.base_attributes, ["Quantity: 511 of 90"]);
+        assert_eq!(
+            output.properties,
+            format_properties_list(&snapshot.properties, 10, "en")
+        );
+        assert_eq!(output.name, "Javelin");
+        assert_eq!(item, snapshot);
+        item.body.quantity = None;
+        item.runeword_attributes = vec![extra(60)];
+        let output = format_item(&item, "en", 0, 10);
+        assert!(output.base_attributes.is_empty());
+        assert!(
+            !output
+                .detailed_warnings
+                .iter()
+                .any(|warning| warning.category == "quantity_context")
+        );
     }
 }
