@@ -7,6 +7,7 @@ use d2r_core::domain::item::scanner::{
     scan_item_markers_with_receipt_deadline_profile, ItemMarker, ScannerWorkCounters,
 };
 use d2r_core::domain::item::serialization::{is_likely_jm_section_header, AlphaScannerGapProfile};
+use d2r_core::domain::item::stream::{ItemStreamDialect, PlayerItemStream};
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::save::find_jm_markers;
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
@@ -14,9 +15,9 @@ use d2r_core::verify::dedup_pool::{
     CachedVerificationReceipt, ItemMemoizationPool, ItemSignature, PoolStats,
 };
 use d2r_core::verify::symmetry::{
-    calculate_symmetry_diff, calculate_symmetry_diff_from_parsed_items,
+    calculate_symmetry_diff_from_parsed_items,
     calculate_symmetry_diff_from_parsed_items_with_stage_observer,
-    calculate_symmetry_diff_with_stage_observer, compare_single_item_diff, ItemDiff,
+    calculate_symmetry_diff_from_player_stream, compare_single_item_diff, ItemDiff, RebuildFailure,
     SymmetryOptions, SymmetryStageEvent,
 };
 use rayon::prelude::*;
@@ -33,6 +34,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 enum FailureFamily {
+    Rebuild,
     Geometry,
     RWSet,
     Stat,
@@ -45,6 +47,7 @@ impl FailureFamily {
         format!(
             "[{}]",
             match self {
+                Self::Rebuild => "Rebuild",
                 Self::Geometry => "Geometry",
                 Self::RWSet => "RW/Set",
                 Self::Stat => "Stat",
@@ -56,6 +59,7 @@ impl FailureFamily {
 
     fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
+            "rebuild" => Some(Self::Rebuild),
             "geometry" => Some(Self::Geometry),
             "rwset" | "rw" | "set" => Some(Self::RWSet),
             "stat" => Some(Self::Stat),
@@ -88,6 +92,8 @@ fn bounded_bit_window(bits: Option<&String>, offset: Option<usize>) -> Option<Bi
 
 #[derive(Deserialize, Serialize)]
 struct MismatchRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rebuild_error: Option<RebuildFailure>,
     item_label: String,
     code: String,
     mismatch_type: String,
@@ -293,6 +299,8 @@ fn marker_signature(markers: &[ItemMarker]) -> Vec<ScannerMarkerSignature> {
 
 #[derive(Deserialize, Serialize)]
 struct ParserTopologyReceipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    item_route: Option<ItemRouteReceipt>,
     top_level_count: Option<usize>,
     nested_count: Option<usize>,
     total_tree_count: Option<usize>,
@@ -304,6 +312,54 @@ struct ParserTopologyReceipt {
 }
 
 #[derive(Deserialize, Serialize)]
+struct ItemRouteReceipt {
+    policy: String,
+    selected_dialect: Option<String>,
+    diagnostics: Vec<String>,
+    score_kind: String,
+    cache_policy: String,
+}
+
+fn item_route_receipt(
+    legacy: bool,
+    dialect: Option<ItemStreamDialect>,
+    diagnostics: Vec<String>,
+) -> ItemRouteReceipt {
+    let v3 = dialect == Some(ItemStreamDialect::D2rV3);
+    ItemRouteReceipt {
+        policy: if legacy {
+            "legacy-item-route"
+        } else {
+            "consumer"
+        }
+        .to_string(),
+        selected_dialect: dialect.map(|dialect| {
+            match dialect {
+                ItemStreamDialect::D2rV3 => "d2r-v3",
+                ItemStreamDialect::Alpha => "alpha",
+                ItemStreamDialect::Legacy => "legacy",
+            }
+            .to_string()
+        }),
+        diagnostics,
+        score_kind: if v3 {
+            "exact_source_bit_rebuild"
+        } else if dialect.is_some() {
+            "legacy_forensic_confidence"
+        } else {
+            "not_measured"
+        }
+        .to_string(),
+        cache_policy: if v3 {
+            "no_item_replay_or_receipt_cache"
+        } else {
+            "legacy_raw_capture_may_be_preserved"
+        }
+        .to_string(),
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 struct TopologyReceipt {
     jm_sections: Vec<JmSectionReceipt>,
     parser: ParserTopologyReceipt,
@@ -312,10 +368,12 @@ struct TopologyReceipt {
 struct TopologyBuildResult {
     receipt: TopologyReceipt,
     parsed_items: Option<Vec<Item>>,
+    dialect: Option<ItemStreamDialect>,
 }
 
 #[derive(Serialize)]
 struct GlobalAuditReport {
+    measurement_contract: serde_json::Value,
     target_dir: String,
     total_files: usize,
     total_pass: usize,
@@ -356,6 +414,32 @@ enum LegacyGate {
     Fail,
 }
 
+/// Keep route, scope and score prerequisites adjacent to the reported aggregate.
+fn measurement_contract(args: &Args, discovered: usize, reported: usize) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "consumer-item-rebuild/v2",
+        "route_policy": if args.legacy_item_route { "legacy-item-route" } else { "consumer" },
+        "scope": "primary_player_item_list_and_socket_children",
+        "excluded": ["corpse", "mercenary", "secondary_sections"],
+        "strict_rebuild_performed": !args.topology_only && !args.scanner_only,
+        "target_index": args.target_index,
+        "target_index_scope": "strict roots only; topology counts describe the full primary list",
+        "v3_score_kind": "exact_source_bit_rebuild",
+        "recovery_score_kind": "legacy_forensic_confidence",
+        "score_units": "0..1",
+        "aggregate_is_uniform_metric": false,
+        "aggregate_population": "reported_file_results",
+        "semantic_option_inventory_measured": false,
+        "semantic_fidelity": null,
+        "true_fidelity": null,
+        "discovered_files": discovered,
+        "reported_files": reported,
+        "all_discovered_files_reported": discovered == reported,
+        "filter_applied": args.filter_family.is_some(),
+        "legacy_aggregate_comparison_is_parser_improvement": false,
+    })
+}
+
 fn count_item_tree(item: &Item, counters: &mut (usize, usize, usize, usize)) {
     counters.0 += 1;
     if item.is_residue() {
@@ -376,6 +460,7 @@ fn build_topology_result(
     bytes: &[u8],
     include_parser: bool,
     profile_stages: bool,
+    legacy_item_route: bool,
 ) -> TopologyBuildResult {
     let jm_positions = find_jm_markers(bytes);
     let jm_sections = jm_positions
@@ -407,10 +492,12 @@ fn build_topology_result(
                     residue_count: None,
                     opaque_count: None,
                     raw_span_count: None,
+                    item_route: None,
                     parser_error: Some("skipped by --topology-only".to_string()),
                 },
             },
             parsed_items: None,
+            dialect: None,
         };
     }
 
@@ -430,7 +517,30 @@ fn build_topology_result(
         });
     }
     let stage_started = profile_stages.then(Instant::now);
-    let parsed_items = Item::read_player_items(bytes, &huffman, alpha_mode);
+    let (parsed_items, dialect, item_route) = if legacy_item_route {
+        let selected = if alpha_mode {
+            ItemStreamDialect::Alpha
+        } else {
+            ItemStreamDialect::Legacy
+        };
+        (
+            Item::read_player_items(bytes, &huffman, alpha_mode).map_err(|error| error.to_string()),
+            None,
+            item_route_receipt(true, Some(selected), Vec::new()),
+        )
+    } else {
+        match PlayerItemStream::read(bytes, &huffman) {
+            Ok(stream) => {
+                let receipt = item_route_receipt(false, Some(stream.dialect), stream.diagnostics);
+                (Ok(stream.items), Some(stream.dialect), receipt)
+            }
+            Err(error) => (
+                Err(error.clone()),
+                None,
+                item_route_receipt(false, None, vec![error]),
+            ),
+        }
+    };
     if let (true, Some(stage_started)) = (profile_stages, stage_started) {
         let (item_count, outcome) = match &parsed_items {
             Ok(items) => (Some(items.len()), "ok"),
@@ -444,7 +554,7 @@ fn build_topology_result(
             outcome: Some(outcome.to_string()),
         });
     }
-    let (parser, parsed_items) = match parsed_items {
+    let (mut parser, parsed_items) = match parsed_items {
         Ok(items) => {
             let mut counters = (0usize, 0usize, 0usize, 0usize);
             for item in &items {
@@ -458,6 +568,7 @@ fn build_topology_result(
                     residue_count: Some(counters.1),
                     opaque_count: Some(counters.2),
                     raw_span_count: Some(counters.3),
+                    item_route: None,
                     parser_error: None,
                 },
                 Some(items),
@@ -471,18 +582,21 @@ fn build_topology_result(
                 residue_count: None,
                 opaque_count: None,
                 raw_span_count: None,
+                item_route: None,
                 parser_error: Some(error.to_string()),
             },
             None,
         ),
     };
 
+    parser.item_route = Some(item_route);
     TopologyBuildResult {
         receipt: TopologyReceipt {
             jm_sections,
             parser,
         },
         parsed_items,
+        dialect,
     }
 }
 
@@ -491,7 +605,7 @@ fn build_topology_receipt(
     include_parser: bool,
     profile_stages: bool,
 ) -> TopologyReceipt {
-    build_topology_result(bytes, include_parser, profile_stages).receipt
+    build_topology_result(bytes, include_parser, profile_stages, false).receipt
 }
 
 fn scan_sections_for_receipt(
@@ -631,6 +745,14 @@ fn scan_candidate_for_receipt(
 }
 
 fn classify_failure(diff: &ItemDiff) -> FailureFamily {
+    if diff.rebuild_error.is_some()
+        || diff
+            .children
+            .iter()
+            .any(|child| classify_failure(child) == FailureFamily::Rebuild)
+    {
+        return FailureFamily::Rebuild;
+    }
     let mismatch_type = diff.mismatch_type.as_deref().unwrap_or("");
     let offset = diff.first_mismatch_offset.unwrap_or(0);
     let version = diff.version;
@@ -749,6 +871,7 @@ struct Args {
     worker_single_fixture: bool,
     fail_fast: bool,
     no_cache: bool,
+    legacy_item_route: bool,
     pool: Option<Arc<ItemMemoizationPool>>,
 }
 
@@ -774,6 +897,7 @@ fn bounded_failure_result(file_path: &Path, status: &str, reason: String) -> Aud
                 residue_count: None,
                 opaque_count: None,
                 raw_span_count: None,
+                item_route: None,
                 parser_error: Some(format!(
                     "file read failed while building bounded receipt: {error}"
                 )),
@@ -842,6 +966,9 @@ fn process_file_with_timeout(
         .arg("--json")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if args.legacy_item_route {
+        command.arg("--legacy-item-route");
+    }
     if args.profile_stages {
         command.arg("--profile-stages");
     }
@@ -1196,6 +1323,7 @@ fn process_file(
                         residue_count: None,
                         opaque_count: None,
                         raw_span_count: None,
+                        item_route: None,
                         parser_error: Some("file read failed".to_string()),
                     },
                 },
@@ -1212,10 +1340,12 @@ fn process_file(
         &bytes,
         !args.topology_only && !args.scanner_only,
         args.profile_stages,
+        args.legacy_item_route,
     );
     let TopologyBuildResult {
         receipt: topology,
         parsed_items,
+        dialect,
     } = topology_result;
 
     if args.topology_only {
@@ -1303,6 +1433,27 @@ fn process_file(
     };
 
     let symmetry_result = match parsed_items {
+        Some(items) if !args.legacy_item_route => match dialect {
+            Some(dialect) => {
+                let stream = PlayerItemStream {
+                    dialect,
+                    items,
+                    diagnostics: Vec::new(),
+                };
+                let mut observer = emit_symmetry_stage_event;
+                calculate_symmetry_diff_from_player_stream(
+                    &bytes,
+                    stream,
+                    options,
+                    if args.profile_stages {
+                        Some(&mut observer)
+                    } else {
+                        None
+                    },
+                )
+            }
+            None => Err(anyhow::anyhow!("Consumer reader did not select a dialect")),
+        },
         Some(items) if args.profile_stages => {
             let mut observer = emit_symmetry_stage_event;
             calculate_symmetry_diff_from_parsed_items_with_stage_observer(
@@ -1313,11 +1464,14 @@ fn process_file(
             )
         }
         Some(items) => calculate_symmetry_diff_from_parsed_items(&bytes, items, options),
-        None if args.profile_stages => {
-            let mut observer = emit_symmetry_stage_event;
-            calculate_symmetry_diff_with_stage_observer(&bytes, None, options, &mut observer)
-        }
-        None => calculate_symmetry_diff(&bytes, None, options),
+        None => Err(anyhow::anyhow!(
+            "{}",
+            topology
+                .parser
+                .parser_error
+                .as_deref()
+                .unwrap_or("Player stream was not parsed")
+        )),
     };
 
     match symmetry_result {
@@ -1364,6 +1518,7 @@ fn process_file(
                             }
                             *failure_breakdown.entry(family).or_insert(0) += 1;
                             mismatch_rows.push(MismatchRow {
+                                rebuild_error: it.rebuild_error.clone(),
                                 item_label: format!("Item {}", i),
                                 code: it.code.clone(),
                                 mismatch_type: it.mismatch_type.clone().unwrap_or_default(),
@@ -1834,7 +1989,7 @@ fn main() {
         "filter",
         None,
         Some("filter"),
-        "Filter failures by family (Geometry, RWSet, Stat, Nudge, Unknown)",
+        "Filter failures by family (Rebuild, Geometry, RWSet, Stat, Nudge, Unknown)",
     ));
     parser.add_spec(ArgSpec::option(
         "fixture-name",
@@ -1847,6 +2002,10 @@ fn main() {
         None,
         Some("summary-only"),
         "Show only the summary block",
+    ));
+    parser.add_spec(ArgSpec::flag(
+        "legacy-item-route", None, Some("legacy-item-route"),
+        "Replay the historical outer-version reader/emitter route; scores are not consumer V3 measurements",
     ));
     parser.add_spec(ArgSpec::flag(
         "no-cache",
@@ -2141,6 +2300,7 @@ fn main() {
         worker_single_fixture: parsed.is_set("worker-single-fixture"),
         fail_fast,
         no_cache,
+        legacy_item_route: parsed.is_set("legacy-item-route"),
         pool: None,
     };
 
@@ -2197,7 +2357,8 @@ fn main() {
     }
 
     // 2-Phase Staged Map-Reduce: Build immutable receipt table for zero-lock parallel verification
-    if !args.no_cache
+    if args.legacy_item_route
+        && !args.no_cache
         && args.strict_timeout_ms.is_none()
         && !args.worker_single_fixture
         && !args.topology_only
@@ -2243,6 +2404,7 @@ fn main() {
         println!("{:-<100}", "");
     }
 
+    let discovered_files = file_paths.len();
     let file_results: Vec<(
         std::path::PathBuf,
         AuditResult,
@@ -2337,7 +2499,7 @@ fn main() {
             );
         }
 
-        // If fail-fast is enabled and this file failed, print rupture point and exit immediately
+        // Preserve the failure receipt before the common report writer returns failure.
         if args.fail_fast && res.status != "[PASS]" {
             eprintln!("\n[FAIL-FAST RUPTURE POINT]");
             eprintln!("  File:     {}", res.filename);
@@ -2356,14 +2518,15 @@ fn main() {
             eprintln!(
                 "Execution stopped at first failure. Use --continue-on-fail to audit all files."
             );
-            std::process::exit(1);
+            results.push(res);
+            break;
         }
 
         results.push(res);
     }
 
-    let global_avg_fidelity = if total_files > 0 {
-        cumulative_fidelity / total_files as f32
+    let global_avg_fidelity = if !results.is_empty() {
+        cumulative_fidelity / results.len() as f32
     } else {
         0.0
     };
@@ -2380,6 +2543,7 @@ fn main() {
         .unwrap_or_else(|| "unregistered".to_string());
 
     let global_report = GlobalAuditReport {
+        measurement_contract: measurement_contract(&args, discovered_files, results.len()),
         target_dir: args.target_dir.clone(),
         total_files,
         total_pass,
@@ -2530,6 +2694,7 @@ mod stage_timing_tests {
                     residue_count: None,
                     opaque_count: None,
                     raw_span_count: None,
+                    item_route: None,
                     parser_error: None,
                 },
             },
@@ -2543,5 +2708,94 @@ mod stage_timing_tests {
         let serialized = serde_json::to_value(result).unwrap();
 
         assert!(serialized.get("stage_timing_trace").is_none());
+    }
+}
+
+#[cfg(test)]
+mod consumer_audit_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    #[settled_contract_test]
+    fn consumer_topology_retains_the_selected_dialect() {
+        let bytes = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
+        ))
+        .unwrap();
+        let result = build_topology_result(&bytes, true, false, false);
+        assert_eq!(result.dialect, Some(ItemStreamDialect::D2rV3));
+        let items = result.parsed_items.unwrap();
+        assert_eq!(items.len(), 8);
+        assert_eq!(items[6].code.trim(), "ktr");
+        assert_eq!(items[7].code.trim(), "buc");
+        let route = result.receipt.parser.item_route.unwrap();
+        assert_eq!(route.selected_dialect.as_deref(), Some("d2r-v3"));
+        assert_eq!(route.score_kind, "exact_source_bit_rebuild");
+        assert!(route.diagnostics.is_empty());
+    }
+
+    #[settled_contract_test]
+    fn rejected_consumer_stream_keeps_its_error_without_reparse() {
+        let result = build_topology_result(&[0; 8], true, false, false);
+        assert!(result.parsed_items.is_none());
+        assert!(result.dialect.is_none());
+        assert!(result.receipt.parser.parser_error.is_some());
+        let route = result.receipt.parser.item_route.unwrap();
+        assert!(route.selected_dialect.is_none());
+        assert_eq!(route.score_kind, "not_measured");
+        assert_eq!(route.diagnostics.len(), 1);
+    }
+
+    #[settled_contract_test]
+    fn recovery_and_legacy_receipts_do_not_claim_v3_rebuild() {
+        for legacy in [false, true] {
+            let route = item_route_receipt(
+                legacy,
+                Some(ItemStreamDialect::Alpha),
+                vec!["candidate rejected".to_string()],
+            );
+            let json = serde_json::to_value(&route).unwrap();
+            let restored: ItemRouteReceipt = serde_json::from_value(json).unwrap();
+            assert_eq!(restored.score_kind, "legacy_forensic_confidence");
+            assert_eq!(restored.diagnostics, vec!["candidate rejected"]);
+            assert_eq!(restored.cache_policy, "legacy_raw_capture_may_be_preserved");
+            assert_eq!(
+                restored.policy,
+                if legacy {
+                    "legacy-item-route"
+                } else {
+                    "consumer"
+                }
+            );
+        }
+        let skipped = build_topology_result(&[0; 8], false, false, false);
+        assert!(skipped.receipt.parser.item_route.is_none());
+    }
+
+    #[settled_contract_test]
+    fn rebuild_errors_survive_worker_json_and_family_classification() {
+        let row = ItemDiff {
+            mismatch_type: Some("Rebuild".to_string()),
+            rebuild_error: Some(RebuildFailure {
+                kind: "unsupported_layout".to_string(),
+                reason: "No inverse".to_string(),
+            }),
+            ..Default::default()
+        };
+        let restored: ItemDiff =
+            serde_json::from_value(serde_json::to_value(&row).unwrap()).unwrap();
+        assert_eq!(classify_failure(&restored), FailureFamily::Rebuild);
+        assert_eq!(restored.rebuild_error.unwrap().reason, "No inverse");
+        assert_eq!(
+            FailureFamily::from_str("Rebuild"),
+            Some(FailureFamily::Rebuild)
+        );
+        assert_eq!(
+            classify_failure(&ItemDiff {
+                children: vec![row],
+                ..Default::default()
+            }),
+            FailureFamily::Rebuild
+        );
     }
 }

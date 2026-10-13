@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
+use crate::domain::item::stream::{ItemStreamDialect, PlayerItemStream};
 use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
 use crate::verify::dedup_pool::{ItemMemoizationPool, ItemSignature};
 
@@ -18,8 +19,16 @@ pub struct DiffReport {
     pub items: Vec<ItemDiff>,
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct RebuildFailure {
+    pub kind: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, serde::Deserialize, Default)]
 pub struct ItemDiff {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rebuild_error: Option<RebuildFailure>,
     pub label: String,
     pub code: String,
     pub is_match: bool,
@@ -63,7 +72,7 @@ pub struct ItemDiff {
     pub comparison_bit_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reserialized_bit_source: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<ItemDiff>,
 }
 
@@ -134,6 +143,214 @@ pub fn calculate_symmetry_diff_from_parsed_items_with_stage_observer(
     observer: &mut dyn FnMut(SymmetryStageEvent),
 ) -> anyhow::Result<DiffReport> {
     calculate_symmetry_diff_inner(bytes_a, None, options, Some(items), Some(observer))
+}
+
+/// Audit an already selected consumer stream without inferring its dialect again.
+/// V3 scores describe exact source reconstruction, not semantic option fidelity.
+/// Legacy recovery retains its historical confidence score and cache policy.
+pub fn calculate_symmetry_diff_from_player_stream(
+    bytes: &[u8],
+    stream: PlayerItemStream,
+    options: SymmetryOptions,
+    mut observer: Option<&mut dyn FnMut(SymmetryStageEvent)>,
+) -> anyhow::Result<DiffReport> {
+    anyhow::ensure!(
+        options.roundtrip,
+        "Consumer stream audits require roundtrip mode"
+    );
+    anyhow::ensure!(!stream.items.is_empty(), "No player items to audit");
+    if let Some(index) = options.target_index {
+        anyhow::ensure!(
+            index < stream.items.len(),
+            "Target item index {index} is out of range"
+        );
+    }
+    let started = Instant::now();
+    if let Some(callback) = observer.as_mut() {
+        callback(SymmetryStageEvent::Started {
+            stage: "strict_rebuild_compare",
+        });
+    }
+    let huffman = HuffmanTree::new();
+    let mut report = DiffReport {
+        operation: "consumer_roundtrip".to_string(),
+        item_count_a: stream.items.len(),
+        item_count_b: stream.items.len(),
+        ..Default::default()
+    };
+    for (index, item) in stream.items.iter().enumerate() {
+        if options.target_index.is_some_and(|target| target != index) {
+            continue;
+        }
+        let diff = match stream.dialect {
+            ItemStreamDialect::D2rV3 => {
+                compare_v3_source_item(item, &huffman, bytes, format!("Item {index}"))
+            }
+            dialect => compare_item_with_reserialized(
+                index,
+                item,
+                &huffman,
+                dialect == ItemStreamDialect::Alpha,
+                format!("Item {index}"),
+                bytes,
+                None,
+            ),
+        };
+        let stop = options.fail_fast && !diff.is_match;
+        report.items.push(diff);
+        if stop {
+            break;
+        }
+    }
+    report.success = !report.items.is_empty() && report.items.iter().all(|item| item.is_match);
+    if let Some(callback) = observer.as_mut() {
+        callback(SymmetryStageEvent::Completed {
+            stage: "strict_rebuild_compare",
+            elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            item_count: Some(report.items.len()),
+            outcome: if report.success { "ok" } else { "mismatch" },
+        });
+    }
+    Ok(report)
+}
+
+fn compare_v3_source_item(
+    item: &Item,
+    huffman: &HuffmanTree,
+    bytes: &[u8],
+    label: String,
+) -> ItemDiff {
+    use crate::domain::item::serialization::item_template;
+    let mut diff = ItemDiff {
+        label,
+        code: item.code.trim().to_string(),
+        version: item.header.version,
+        flags: item.header.flags,
+        forensic_audit: item.forensic_audit.clone(),
+        bit_source_contract: Some("v3_typed_rebuild_against_original_save_range".to_string()),
+        cached_bits_preserved: Some(false),
+        comparison_bit_source: Some("original_save_range".to_string()),
+        reserialized_bit_source: Some("explicit_v3_codec".to_string()),
+        ..Default::default()
+    };
+    let span_valid = item.range.start < item.range.end
+        && item.range.end <= bytes.len() as u64 * 8
+        && item.socketed_items.iter().all(|child| {
+            child.range.start >= item.range.start && child.range.end <= item.range.end
+        });
+    let original: Vec<bool> = if span_valid {
+        (item.range.start..item.range.end)
+            .map(|offset| bytes[(offset / 8) as usize] & (1 << (offset % 8)) != 0)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    diff.original_len = original.len();
+    diff.orig_bits = span_valid.then(|| {
+        original
+            .iter()
+            .map(|&bit| if bit { '1' } else { '0' })
+            .collect()
+    });
+    let rebuilt = if !span_valid {
+        Err(RebuildFailure { kind: "invalid_source_span".to_string(), reason: "Item source range is empty, outside the save, or does not contain its socket children".to_string() })
+    } else if item.is_opaque() || item.is_semi_opaque() || !item.modules.is_empty() {
+        Err(RebuildFailure {
+            kind: "unsupported_layout".to_string(),
+            reason: "Opaque, residue or unexplained modules cannot establish a typed rebuild"
+                .to_string(),
+        })
+    } else {
+        let mut typed = item.clone();
+        typed.bits.clear();
+        typed.segments.clear();
+        typed.gap_bits.clear();
+        typed.body.alpha_code_bits.clear();
+        typed.range.start = 0;
+        typed.range.end = 0;
+        typed.total_bits = 0;
+        typed.logical_width = None;
+        // Source-owned V3 alignment is a typed field, not the item replay cache.
+        let template = item_template(typed.code.trim());
+        let emitted = if typed.is_compact {
+            typed.to_bits_d2r_v3_compact(huffman)
+        } else if template.is_some_and(|template| template.is_weapon) {
+            typed.to_bits_d2r_v3_weapon(huffman)
+        } else if template.is_some_and(|template| template.is_armor) {
+            if typed.header.is_socketed {
+                typed.to_bits_d2r_v3_empty_socket_armor(huffman)
+            } else {
+                typed.to_bits_d2r_v3_armor(huffman)
+            }
+        } else if matches!(typed.code.trim(), "rin" | "amu") {
+            typed.to_bits_d2r_v3_jewelry(huffman)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "No explicit V3 inverse for this item class",
+            ))
+        };
+        emitted.map_err(|error| RebuildFailure {
+            kind: if error.kind() == std::io::ErrorKind::Unsupported {
+                "unsupported_layout"
+            } else {
+                "unsupported_or_inconsistent_state"
+            }
+            .to_string(),
+            reason: error.to_string(),
+        })
+    };
+    match rebuilt {
+        Err(error) => {
+            diff.mismatch_type = Some("Rebuild".to_string());
+            diff.segment = Some("V3Layout".to_string());
+            diff.rebuild_error = Some(error);
+        }
+        Ok(target) => {
+            diff.target_len = target.len();
+            diff.target_bits = Some(
+                target
+                    .iter()
+                    .map(|&bit| if bit { '1' } else { '0' })
+                    .collect(),
+            );
+            let mismatch = original.iter().zip(&target).position(|(a, b)| a != b);
+            diff.is_match = mismatch.is_none() && original.len() == target.len();
+            if !diff.is_match {
+                diff.mismatch_type = Some(
+                    if original.len() == target.len() {
+                        "Content"
+                    } else {
+                        "Length"
+                    }
+                    .to_string(),
+                );
+                diff.segment = Some("V3Source".to_string());
+                if let Some(offset) = mismatch {
+                    diff.first_mismatch_offset = Some(offset as u64);
+                    diff.recorded_bit_offset = Some(item.range.start + offset as u64);
+                    diff.recorded_bit_value = Some(original[offset]);
+                    diff.recorded_bit_source = Some("original_save_range".to_string());
+                }
+            }
+        }
+    }
+    for (index, child) in item.socketed_items.iter().enumerate() {
+        diff.children.push(compare_v3_source_item(
+            child,
+            huffman,
+            bytes,
+            format!("Child {index}"),
+        ));
+    }
+    if diff.children.iter().any(|child| !child.is_match) {
+        diff.is_match = false;
+        if diff.mismatch_type.is_none() {
+            diff.mismatch_type = Some("Child".to_string());
+        }
+    }
+    diff.fidelity_score = if diff.is_match { 1.0 } else { 0.0 };
+    diff
 }
 
 fn calculate_symmetry_diff_inner(
@@ -761,5 +978,145 @@ mod tests {
                 ..
             }
         ));
+    }
+}
+
+#[cfg(test)]
+mod consumer_audit_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    const FRESH: &str =
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s";
+    fn input(relative: &str) -> (Vec<u8>, PlayerItemStream) {
+        let bytes =
+            std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)).unwrap();
+        let stream = PlayerItemStream::read(&bytes, &HuffmanTree::new()).unwrap();
+        (bytes, stream)
+    }
+    #[invariant_test]
+    fn fresh_source_rebuild_survives_poisoned_raw_cache() {
+        let (bytes, mut stream) = input(FRESH);
+        assert_eq!(stream.dialect, ItemStreamDialect::D2rV3);
+        for item in &mut stream.items {
+            item.bits = vec![RecordedBit {
+                bit: true,
+                offset: u64::MAX,
+            }];
+            item.total_bits = 1;
+            item.logical_width = Some(1);
+        }
+        let report = calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions::roundtrip(true),
+            None,
+        )
+        .unwrap();
+        assert_eq!(report.items.len(), 8);
+        assert!(report.success, "{report:?}");
+        assert!(report.items.iter().all(|row| row.fidelity_score == 1.0
+            && row.cached_bits_preserved == Some(false)
+            && row.comparison_bit_source.as_deref() == Some("original_save_range")));
+    }
+    #[settled_contract_test]
+    fn source_change_and_semantic_change_cannot_use_memoized_pass() {
+        use crate::verify::dedup_pool::CachedVerificationReceipt;
+        use std::collections::HashMap;
+        let (mut bytes, mut stream) = input(FRESH);
+        let range = stream.items[0].range.clone();
+        let signature = ItemSignature::from_item(&stream.items[0], false);
+        let mut map = HashMap::new();
+        map.insert(
+            signature,
+            CachedVerificationReceipt::from_diff(&ItemDiff {
+                is_match: true,
+                fidelity_score: 1.0,
+                ..Default::default()
+            }),
+        );
+        let pool = Arc::new(ItemMemoizationPool::from_map(map));
+        bytes[range.start as usize / 8] ^= 1;
+        stream.items[1].body.x ^= 1;
+        let report = calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions::roundtrip(true).with_pool(Some(pool.clone())),
+            None,
+        )
+        .unwrap();
+        assert!(!report.success);
+        assert_eq!(report.items[0].mismatch_type.as_deref(), Some("Content"));
+        assert_eq!(report.items[0].recorded_bit_offset, Some(range.start));
+        assert!(report.items[1].rebuild_error.is_some());
+        assert_eq!(pool.stats().total_queries(), 0);
+    }
+    #[settled_contract_test]
+    fn unsupported_socket_parent_is_not_a_cached_pass() {
+        let (bytes, stream) =
+            input("tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s");
+        assert_eq!(stream.dialect, ItemStreamDialect::D2rV3);
+        assert_eq!(stream.items.len(), 1);
+        let report = calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions::roundtrip(true),
+            None,
+        )
+        .unwrap();
+        assert!(!report.success);
+        let root = &report.items[0];
+        assert_eq!(root.mismatch_type.as_deref(), Some("Rebuild"));
+        assert!(root
+            .rebuild_error
+            .as_ref()
+            .is_some_and(|error| !error.reason.is_empty()));
+        assert_eq!(root.fidelity_score, 0.0);
+        assert_eq!(root.children.len(), 3);
+        assert!(root.children.iter().all(|child| child.is_match));
+    }
+    #[settled_contract_test]
+    fn invalid_span_index_empty_and_nonroundtrip_are_rejected() {
+        let (bytes, mut stream) = input(FRESH);
+        stream.items[0].range.end = u64::MAX;
+        let report = calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions::roundtrip(true),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            report.items[0].rebuild_error.as_ref().unwrap().kind,
+            "invalid_source_span"
+        );
+        let (_, stream) = input(FRESH);
+        assert!(calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions {
+                roundtrip: true,
+                target_index: Some(8),
+                ..Default::default()
+            },
+            None
+        )
+        .is_err());
+        let (_, mut stream) = input(FRESH);
+        stream.items.clear();
+        assert!(calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions::roundtrip(true),
+            None
+        )
+        .is_err());
+        let (_, stream) = input(FRESH);
+        assert!(calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            stream,
+            SymmetryOptions::default(),
+            None
+        )
+        .is_err());
     }
 }
