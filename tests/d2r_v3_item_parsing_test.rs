@@ -2620,3 +2620,421 @@ fn d2r_v3_defense_generic_writer_uses_explicit_provenance() {
         );
     }
 }
+
+mod weapon_inverse_contracts {
+    use super::*;
+    const FRESH: &str =
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s";
+    const SCROLLS: &str = "tests/fixtures/savegames/original/amazon_10_scrolls.d2s";
+    const COLDKILL: &str =
+        "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Coldkill_9ha.d2s";
+
+    fn leaf(bytes: &[u8], start: u64, index: usize) -> Item {
+        let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+        reader.skip(start.try_into().unwrap()).unwrap();
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_pos(start);
+        let mut item = Item::from_reader_with_context_d2r_v3(
+            &mut cursor,
+            &HuffmanTree::new(),
+            Some((bytes, start)),
+            index,
+            0x69,
+        )
+        .unwrap();
+        let end = cursor.pos();
+        cursor.byte_align().unwrap();
+        item.body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .alignment_padding = Some(source_bits(bytes, end, cursor.pos()));
+        item
+    }
+    fn bytes(bits: &[bool]) -> Vec<u8> {
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (i, bit) in bits.iter().enumerate() {
+            if *bit {
+                bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        bytes
+    }
+    fn raw(bits: &mut Vec<bool>, value: u32, width: u32) {
+        assert!(width <= 32);
+        bits.extend((0..width).map(|i| value & (1 << i) != 0));
+    }
+    fn pad(bits: &mut Vec<bool>) {
+        bits.resize(bits.len().div_ceil(8) * 8, false);
+    }
+    fn assert_control(bits: Vec<bool>) -> Item {
+        let item = leaf(&bytes(&bits), 0, 0);
+        assert!(item.properties_complete);
+        let rebuilt = without_item_bit_cache(&item)
+            .to_bits_d2r_v3_weapon(&HuffmanTree::new())
+            .unwrap();
+        assert_eq!(rebuilt, bits);
+        let reparsed = leaf(&bytes(&rebuilt), 0, 0);
+        assert_stored_item_model(&reparsed, &item);
+        item
+    }
+
+    #[invariant_test]
+    fn d2r_v3_weapon_original_spans_reconstruct_without_caches() {
+        let cases = [
+            (FRESH, 6, "ktr"),
+            (SCROLLS, 14, "jav"),
+            (ARMOR_FIXTURE, 14, "jav"),
+            (
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_PostWarriv_Act1.d2s",
+                39,
+                "wnd",
+            ),
+            (
+                "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Set_BanesOathmaker_kri.d2s",
+                0,
+                "kri",
+            ),
+            (
+                "tests/fixtures/savegames/gameplay/items/verified_passed/NEC_ITEM_Unique_ThePluckeye_sbw.d2s",
+                0,
+                "sbw",
+            ),
+            (COLDKILL, 0, "9ha"),
+            (
+                "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_KukoShakaku_8lb.d2s",
+                0,
+                "8lb",
+            ),
+            (
+                "tests/fixtures/savegames/gameplay/items/NEC_ITEM_Unique_Lightsabre_7cr.d2s",
+                0,
+                "7cr",
+            ),
+        ];
+        let mut bits_verified = 0;
+        for (path, index, code) in cases {
+            let (original, items) = read_d2r_v3_items(path);
+            let item = &items[index];
+            assert_eq!(item.code.trim(), code);
+            assert!(!item.is_opaque() && !item.is_semi_opaque());
+            assert_eq!(
+                item.to_bits_d2r_v3_weapon(&HuffmanTree::new()).unwrap(),
+                source_bits(&original, item.range.start, item.range.end)
+            );
+            let semantic = without_item_bit_cache(item);
+            let rebuilt = semantic.to_bits_d2r_v3_weapon(&HuffmanTree::new()).unwrap();
+            assert_eq!(
+                rebuilt,
+                source_bits(&original, item.range.start, item.range.end),
+                "{path}"
+            );
+            let mut reconstructed = original.clone();
+            for (i, bit) in rebuilt.iter().enumerate() {
+                let offset = item.range.start as usize + i;
+                let mask = 1 << (offset % 8);
+                reconstructed[offset / 8] =
+                    (reconstructed[offset / 8] & !mask) | if *bit { mask } else { 0 };
+            }
+            assert_eq!(
+                reconstructed, original,
+                "all non-target bytes and checksum remain original"
+            );
+            let reparsed = leaf(&reconstructed, item.range.start, index);
+            assert_stored_item_model(&reparsed, item);
+            bits_verified += rebuilt.len();
+        }
+        println!(
+            "{{\"case\":\"weapon_originals\",\"fixtures\":9,\"items\":9,\"verified_bits\":{bits_verified},\"differing_bits\":0,\"item_cache_used\":false}}"
+        );
+    }
+
+    #[invariant_test]
+    fn d2r_v3_weapon_mutations_match_independent_raw_fields() {
+        let h = HuffmanTree::new();
+        let (original, items) = read_d2r_v3_items(FRESH);
+        let item = &items[6];
+        // The first terminal is pinned by the original save, before the stash flag.
+        assert_eq!(
+            (item.properties[0].range.start, item.properties[0].range.end),
+            (7866, 7875)
+        );
+        for (start, end, before, after, maximum) in
+            [(7848, 7856, 48, 49, true), (7856, 7865, 48, 47, false)]
+        {
+            assert_eq!(
+                raw_little_endian(&source_bits(&original, start, end)),
+                before
+            );
+            let mut semantic = without_item_bit_cache(item);
+            if maximum {
+                semantic.max_durability = Some(after);
+                semantic.body.max_durability = Some(after);
+            } else {
+                semantic.current_durability = Some(after);
+                semantic.body.current_durability = Some(after);
+            }
+            let rebuilt = semantic.to_bits_d2r_v3_weapon(&h).unwrap();
+            let mut expected = original.clone();
+            patch_raw_field(&mut expected, start, end, after);
+            assert_eq!(
+                rebuilt,
+                source_bits(&expected, item.range.start, item.range.end)
+            );
+            assert_stored_item_model(&leaf(&expected, item.range.start, 6), &semantic);
+        }
+        let (original, items) = read_d2r_v3_items(SCROLLS);
+        let item = &items[14];
+        assert_eq!(raw_little_endian(&source_bits(&original, 8439, 8448)), 90);
+        let mut semantic = without_item_bit_cache(item);
+        semantic.quantity = Some(89);
+        semantic.body.quantity = Some(89);
+        let rebuilt = semantic.to_bits_d2r_v3_weapon(&h).unwrap();
+        let mut expected = original.clone();
+        patch_raw_field(&mut expected, 8439, 8448, 89);
+        assert_eq!(
+            rebuilt,
+            source_bits(&expected, item.range.start, item.range.end)
+        );
+        assert_stored_item_model(&leaf(&expected, item.range.start, 14), &semantic);
+        let (original, items) = read_d2r_v3_items(COLDKILL);
+        for stat_id in [18, 54] {
+            let item = &items[0];
+            let property = item
+                .properties
+                .iter()
+                .find(|p| p.stat_id == stat_id)
+                .unwrap();
+            let width = d2r_core::domain::stats::stat_save_bits(stat_id).unwrap();
+            let start = property.range.end - u64::from(width);
+            assert_eq!(
+                raw_little_endian(&source_bits(&original, start, property.range.end)),
+                property.raw_value as u32
+            );
+            let mut semantic = without_item_bit_cache(item);
+            semantic
+                .properties
+                .iter_mut()
+                .find(|p| p.stat_id == stat_id)
+                .unwrap()
+                .value += 1;
+            assert_eq!(
+                semantic
+                    .properties
+                    .iter()
+                    .find(|p| p.stat_id == stat_id)
+                    .unwrap()
+                    .raw_value,
+                property.raw_value
+            );
+            let rebuilt = semantic.to_bits_d2r_v3_weapon(&h).unwrap();
+            let mut expected = original.clone();
+            patch_raw_field(
+                &mut expected,
+                start,
+                property.range.end,
+                property.raw_value as u32 + 1,
+            );
+            assert_eq!(
+                rebuilt,
+                source_bits(&expected, item.range.start, item.range.end)
+            );
+            assert_stored_item_model(&leaf(&expected, item.range.start, 0), &semantic);
+        }
+        println!("{{\"case\":\"weapon_raw_mutations\",\"fields\":5,\"unexpected_bit_changes\":0}}");
+    }
+
+    #[settled_contract_test]
+    fn d2r_v3_weapon_controlled_grammar_preserves_pairs_and_body_conditions() {
+        let (original, items) = read_d2r_v3_items(FRESH);
+        let item = &items[6];
+        let all = source_bits(&original, item.range.start, item.range.end);
+        let natural_end = all.len()
+            - item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .alignment_padding
+                .as_ref()
+                .unwrap()
+                .len();
+        // These controls splice independent raw fields into the original prefix.
+        for (primary, companions) in [
+            (17, &[18][..]),
+            (48, &[49][..]),
+            (50, &[51][..]),
+            (52, &[53][..]),
+            (54, &[55, 56][..]),
+            (57, &[58, 59][..]),
+        ] {
+            let mut bits = all[..138].to_vec();
+            raw(&mut bits, primary, 9);
+            let cost = d2r_core::data::stat_costs::STAT_COSTS
+                .iter()
+                .find(|s| s.id == primary)
+                .unwrap();
+            raw(&mut bits, 0, u32::from(cost.save_param_bits));
+            raw(&mut bits, 1, u32::from(cost.save_bits));
+            for (index, id) in companions.iter().enumerate() {
+                raw(
+                    &mut bits,
+                    index as u32 + 2,
+                    d2r_core::domain::stats::stat_save_bits(*id).unwrap(),
+                );
+            }
+            raw(&mut bits, 511, 9);
+            raw(&mut bits, 0, 1);
+            pad(&mut bits);
+            let decoded = assert_control(bits);
+            assert_eq!(
+                decoded
+                    .properties
+                    .iter()
+                    .map(|p| p.stat_id)
+                    .collect::<Vec<_>>(),
+                std::iter::once(primary)
+                    .chain(companions.iter().copied())
+                    .chain(std::iter::once(511))
+                    .collect::<Vec<_>>()
+            );
+        }
+        for quality in [
+            ItemQuality::Low,
+            ItemQuality::High,
+            ItemQuality::Magic,
+            ItemQuality::Crafted,
+        ] {
+            let mut bits = all[..113].to_vec();
+            raw(&mut bits, quality as u32, 4);
+            raw(&mut bits, 0, 2);
+            match quality {
+                ItemQuality::Low | ItemQuality::High => raw(&mut bits, 2, 3),
+                ItemQuality::Magic => {
+                    raw(&mut bits, 0, 11);
+                    raw(&mut bits, 1, 11);
+                }
+                ItemQuality::Crafted => {
+                    raw(&mut bits, 1, 8);
+                    raw(&mut bits, 2, 8);
+                    raw(&mut bits, 0, 6);
+                }
+                _ => unreachable!(),
+            }
+            bits.extend_from_slice(&all[119..natural_end]);
+            pad(&mut bits);
+            assert_eq!(assert_control(bits).header.quality, Some(quality));
+        }
+        let mut zero = all[..120].to_vec();
+        raw(&mut zero, 0, 8);
+        zero.extend_from_slice(&all[137..natural_end]);
+        pad(&mut zero);
+        let decoded = assert_control(zero);
+        assert_eq!(decoded.max_durability, Some(0));
+        assert_eq!(decoded.current_durability, None);
+        let mut socket = all[..138].to_vec();
+        socket[11] = true;
+        raw(&mut socket, 2, 4);
+        socket.extend_from_slice(&all[138..natural_end]);
+        pad(&mut socket);
+        assert_eq!(assert_control(socket).sockets, Some(2));
+        let mut realm = all[..119].to_vec();
+        raw(&mut realm, 1, 1);
+        for word in [1, 2, 3, 4] {
+            raw(&mut realm, word, 32);
+        }
+        realm.extend_from_slice(&all[120..natural_end]);
+        pad(&mut realm);
+        assert_eq!(
+            assert_control(realm)
+                .body
+                .d2r_v3_auxiliary
+                .unwrap()
+                .realm_data,
+            vec![1, 2, 3, 4]
+        );
+        let mut stash = all[..natural_end - 1].to_vec();
+        raw(&mut stash, 1, 1);
+        raw(&mut stash, 37, 8);
+        pad(&mut stash);
+        assert_eq!(
+            assert_control(stash)
+                .body
+                .d2r_v3_auxiliary
+                .unwrap()
+                .advanced_stash_quantity,
+            Some(37)
+        );
+        println!(
+            "{{\"case\":\"weapon_controlled_grammar\",\"paired_families\":6,\"quality_layouts\":4,\"body_layouts\":4,\"game_generated\":false}}"
+        );
+    }
+
+    #[settled_contract_test]
+    fn d2r_v3_weapon_rejects_incomplete_and_inconsistent_states() {
+        let (_, items) = read_d2r_v3_items(COLDKILL);
+        let original = &items[0];
+        let h = HuffmanTree::new();
+        let changes: &[fn(&mut Item)] = &[
+            |i| i.body.d2r_v3_auxiliary = None,
+            |i| i.properties_complete = false,
+            |i| {
+                i.header.is_identified = false;
+                i.header.flags &= !(1 << 4);
+            },
+            |i| {
+                i.header.is_runeword = true;
+                i.header.flags |= 1 << 26;
+            },
+            |i| i.socketed_items.push(Item::empty_for_tests()),
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 1,
+            |i| i.body.current_durability = None,
+            |i| i.body.x ^= 1,
+            |i| i.body.v105_7mgw_payload = Some(vec![true]),
+            |i| i.body.v5_runeword_extra = Some(1),
+            |i| {
+                i.modules
+                    .push(d2r_core::domain::item::ItemModule::Augmentation(1))
+            },
+            |i| i.defense = Some(1),
+            |i| i.quantity = Some(1),
+            |i| i.magic_prefix = Some(1),
+            |i| i.has_multiple_graphics = true,
+            |i| i.header.x = 16,
+            |i| {
+                i.max_durability = Some(256);
+                i.body.max_durability = Some(256);
+            },
+            |i| {
+                i.properties.remove(1);
+            },
+            |i| i.properties.swap(1, 2),
+            |i| i.properties[1].param = 1,
+            |i| i.properties[1].is_opaque = true,
+            |i| i.properties[1].value = -1,
+            |i| i.properties[1].value = 512,
+            |i| {
+                i.properties.pop();
+            },
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None,
+        ];
+        for (index, change) in changes.iter().enumerate() {
+            let mut item = original.clone();
+            change(&mut item);
+            let error = item
+                .to_bits_d2r_v3_weapon(&h)
+                .expect_err("unsupported state must not replay caches");
+            assert_eq!(
+                error.kind(),
+                std::io::ErrorKind::InvalidInput,
+                "case{index}"
+            );
+        }
+        let (_, armor) = read_d2r_v3_items(ARMOR_FIXTURE);
+        assert!(armor[4].to_bits_d2r_v3_weapon(&h).is_err());
+        println!(
+            "{{\"case\":\"weapon_rejection\",\"rejected_states\":{}}}",
+            changes.len() + 1
+        );
+    }
+}

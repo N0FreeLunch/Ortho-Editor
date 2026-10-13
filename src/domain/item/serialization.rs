@@ -739,7 +739,9 @@ fn peek_item_header_at_with_base_and_gap_profile(
                 // Preserve the existing fallback sequence for the production scanner profile.
                 let fallback_gaps: Vec<usize> = match gap_profile {
                     AlphaScannerGapProfile::Extended => {
-                        vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 16, 24, 32, 40, 48, 50, 56]
+                        vec![
+                            0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 16, 24, 32, 40, 48, 50, 56,
+                        ]
                     }
                     AlphaScannerGapProfile::WitnessSubset => {
                         vec![1, 6, 7, 8, 12, 13, 14, 16, 24, 32, 40, 48, 50, 56]
@@ -2875,8 +2877,6 @@ impl Item {
                         }
                     }
 
-
-
                     if crate::item::item_trace_enabled()
                         && (marker.code.trim() == "xrs"
                             || final_item.code.trim() == "xrs"
@@ -3393,8 +3393,6 @@ impl Item {
                     }
                 }
             }
-
-
         }
 
         Ok(items)
@@ -4367,9 +4365,9 @@ impl Item {
             };
             let (mut props, complete, term, _v5_extra, _unused_bits, shadow_bits, nested_items) =
                 stats_result;
-            let mut concealed_stats =
-                (d2r_v3_save_version == Some(0x69) && !item.header.is_identified)
-                    .then(Box::<ItemStats>::default);
+            let mut concealed_stats = (d2r_v3_save_version == Some(0x69)
+                && !item.header.is_identified)
+                .then(Box::<ItemStats>::default);
 
             if d2r_v3_mode {
                 let quality_val = item.header.quality.unwrap_or(ItemQuality::Normal);
@@ -4824,6 +4822,7 @@ enum D2rV3StoredLayout {
     Jewelry,
     Armor,
     EmptySocketArmor,
+    Weapon,
 }
 
 impl D2rV3JewelryWidths {
@@ -4903,6 +4902,78 @@ fn d2r_v3_write_scalar_list(
         d2r_v3_write_checked(emitter, raw, stat.save_bits as u32, "stat value")?;
     }
     emitter.write_bits(W::TERMINATOR, W::STAT_ID)
+}
+
+fn d2r_v3_write_weapon_list(
+    emitter: &mut BitEmitter,
+    properties: &[crate::domain::stats::ItemProperty],
+) -> io::Result<()> {
+    use crate::domain::stats::parser::D2R_V3_PAIRED_STAT_IDS;
+    let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+    let (terminal, values) = properties
+        .split_last()
+        .ok_or_else(|| invalid("Missing weapon property terminator"))?;
+    if terminal.stat_id != 511
+        || terminal.is_opaque
+        || !terminal.is_verified()
+        || terminal.param != 0
+        || terminal.value != 0
+        || terminal.opaque_bits.is_some()
+    {
+        return Err(invalid("Invalid weapon property terminator"));
+    }
+    let write_value = |emitter: &mut BitEmitter,
+                       property: &crate::domain::stats::ItemProperty,
+                       companion: bool|
+     -> io::Result<()> {
+        if property.is_opaque
+            || !property.is_verified()
+            || property.opaque_bits.is_some()
+            || property.stat_id == 511
+            || (companion && property.param != 0)
+        {
+            return Err(invalid("Unsupported weapon property state"));
+        }
+        let stat = crate::data::stat_costs::STAT_COSTS
+            .iter()
+            .find(|stat| stat.id == property.stat_id)
+            .ok_or_else(|| invalid("Missing weapon property definition"))?;
+        if stat.save_bits == 0 || stat.save_bits > 32 {
+            return Err(invalid("Unsupported weapon property width"));
+        }
+        if !companion {
+            d2r_v3_write_checked(emitter, u64::from(property.stat_id), 9, "weapon stat ID")?;
+            d2r_v3_write_checked(
+                emitter,
+                u64::from(property.param),
+                u32::from(stat.save_param_bits),
+                "weapon stat parameter",
+            )?;
+        }
+        let raw = u64::try_from(i64::from(property.value) + i64::from(stat.save_add))
+            .map_err(|_| invalid("Negative encoded weapon property value"))?;
+        d2r_v3_write_checked(emitter, raw, u32::from(stat.save_bits), "weapon stat value")
+    };
+    let mut index = 0;
+    while index < values.len() {
+        let primary = &values[index];
+        write_value(emitter, primary, false)?;
+        index += 1;
+        if let Some((_, companions)) = D2R_V3_PAIRED_STAT_IDS
+            .iter()
+            .find(|(id, _)| *id == primary.stat_id)
+        {
+            for &expected in *companions {
+                let companion = values
+                    .get(index)
+                    .filter(|property| property.stat_id == expected)
+                    .ok_or_else(|| invalid("Missing or reordered weapon property companion"))?;
+                write_value(emitter, companion, true)?;
+                index += 1;
+            }
+        }
+    }
+    emitter.write_bits(511, 9)
 }
 
 impl crate::domain::item::entity::D2rV3AuxiliaryData {
@@ -5127,6 +5198,12 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::EmptySocketArmor)
     }
 
+    /// Rebuild a stored, identified v105 weapon from typed fields and property groups.
+    /// Filled sockets, runewords and concealed layouts fail without cached-bit fallback.
+    pub fn to_bits_d2r_v3_weapon(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Weapon)
+    }
+
     fn to_bits_d2r_v3_stored(
         &self,
         huffman: &HuffmanTree,
@@ -5143,7 +5220,12 @@ impl Item {
             .quality
             .ok_or_else(|| invalid("Missing jewelry quality"))?;
         let empty_socket_armor = layout == D2rV3StoredLayout::EmptySocketArmor;
-        let armor_layout = layout != D2rV3StoredLayout::Jewelry;
+        let weapon_layout = layout == D2rV3StoredLayout::Weapon;
+        let armor_layout = matches!(
+            layout,
+            D2rV3StoredLayout::Armor | D2rV3StoredLayout::EmptySocketArmor
+        );
+        let socket_layout = empty_socket_armor || (weapon_layout && header.is_socketed);
         let supported_kind = match layout {
             D2rV3StoredLayout::Jewelry => {
                 matches!(self.body.code.trim(), "rin" | "amu")
@@ -5156,6 +5238,8 @@ impl Item {
                             | ItemQuality::Rare
                     )
             }
+            D2rV3StoredLayout::Weapon => item_template(self.body.code.trim())
+                .is_some_and(|template| template.is_weapon && !template.is_armor),
             D2rV3StoredLayout::Armor | D2rV3StoredLayout::EmptySocketArmor => {
                 item_template(self.body.code.trim())
                     .is_some_and(|template| template.is_armor && template.has_durability)
@@ -5174,7 +5258,7 @@ impl Item {
             || header.is_compact
             || !header.is_identified
             || header.is_ear
-            || header.is_socketed != empty_socket_armor
+            || header.is_socketed != socket_layout
             || header.is_personalized
             || header.is_runeword
             || matches!(header.mode, 3 | 5 | 6)
@@ -5184,6 +5268,7 @@ impl Item {
             || !self.properties_complete
         {
             return Err(invalid(match layout {
+                D2rV3StoredLayout::Weapon => "Unsupported D2R v3 weapon layout",
                 D2rV3StoredLayout::Jewelry => "Unsupported D2R v3 jewelry layout",
                 D2rV3StoredLayout::Armor => "Unsupported D2R v3 armor layout",
                 D2rV3StoredLayout::EmptySocketArmor => {
@@ -5191,12 +5276,69 @@ impl Item {
                 }
             }));
         }
-        if empty_socket_armor
+        if socket_layout
             && (self.num_socketed_items != 0 || self.sockets.is_none_or(|capacity| capacity == 0))
         {
             return Err(invalid(
                 "Empty-socket armor requires positive capacity and no filled sockets",
             ));
+        }
+        if weapon_layout {
+            let subtype = matches!(quality, ItemQuality::Low | ItemQuality::High);
+            let magic = quality == ItemQuality::Magic;
+            let named = matches!(quality, ItemQuality::Rare | ItemQuality::Crafted);
+            let archetype = matches!(quality, ItemQuality::Unique | ItemQuality::Set);
+            let maximum = self
+                .body
+                .max_durability
+                .ok_or_else(|| invalid("Missing stored weapon maximum durability"))?;
+            if self.is_opaque()
+                || self.is_semi_opaque()
+                || !self.modules.is_empty()
+                || self.body.v105_7mgw_payload.is_some()
+                || self.body.v5_runeword_extra.is_some()
+                || self.body.mode != header.mode
+                || self.body.location != header.location
+                || self.body.x != header.x
+                || self.body.y != header.y
+                || self.body.page != header.page
+                || self.code.trim() != self.body.code.trim()
+                || self.defense.is_some()
+                || self.body.defense.is_some()
+                || self.max_durability != self.body.max_durability
+                || self.current_durability != self.body.current_durability
+                || self.quantity != self.body.quantity
+                || self.body.current_durability.is_some() != (maximum > 0)
+                || auxiliary.has_quantity != self.quantity.is_some()
+                || self.num_socketed_items != 0
+                || (socket_layout && self.sockets.is_none_or(|capacity| capacity == 0))
+                || (!socket_layout && self.sockets.is_some())
+                || self.low_high_graphic_bits.is_some() != subtype
+                || self.magic_prefix.is_some() != magic
+                || self.magic_suffix.is_some() != magic
+                || self.rare_name_1.is_some() != named
+                || self.rare_name_2.is_some() != named
+                || (!named && self.rare_affixes.iter().any(Option::is_some))
+                || self.unique_id.is_some() != archetype
+                || self.runeword_id.is_some()
+                || self.runeword_level.is_some()
+                || self.has_multiple_graphics != self.multi_graphics_bits.is_some()
+                || self.has_class_specific_data != self.class_specific_bits.is_some()
+                || self.ear_class.is_some()
+                || self.ear_level.is_some()
+                || self.ear_player_name.is_some()
+                || self.personalized_player_name.is_some()
+                || self.timestamp_flag
+                || self.tbk_ibk_teleport.is_some()
+                || header.has_checksum
+                || header.alpha_checksum.is_some()
+                || header.alpha_quality_raw.is_some()
+                || header.alpha_v5_runeword_extra.is_some()
+                || header.alpha_unique_id_raw.is_some()
+                || (header.flags & (1 << 22) != 0) != header.is_ethereal
+            {
+                return Err(invalid("Unsupported or inconsistent stored weapon state"));
+            }
         }
         if armor_layout {
             if auxiliary.has_quantity
@@ -5254,7 +5396,7 @@ impl Item {
         }
         for (flag, expected) in [
             (4, true),
-            (11, empty_socket_armor),
+            (11, socket_layout),
             (16, false),
             (21, false),
             (24, false),
@@ -5334,7 +5476,7 @@ impl Item {
             )?;
         }
         match quality {
-            ItemQuality::High => {
+            ItemQuality::Low | ItemQuality::High => {
                 d2r_v3_write_checked(
                     &mut emitter,
                     self.low_high_graphic_bits
@@ -5358,7 +5500,7 @@ impl Item {
                     "suffix",
                 )?;
             }
-            ItemQuality::Rare => {
+            ItemQuality::Rare | ItemQuality::Crafted => {
                 for (name, field) in [
                     (self.rare_name_1, "first Rare name"),
                     (self.rare_name_2, "second Rare name"),
@@ -5396,7 +5538,7 @@ impl Item {
         for &word in &auxiliary.realm_data {
             d2r_v3_write_checked(&mut emitter, word as u64, 32, "realm word")?;
         }
-        if armor_layout {
+        if armor_layout || weapon_layout {
             for (value, stat_id, name) in [
                 (self.body.defense, 31, "logical defense"),
                 (self.body.max_durability, 73, "stored maximum durability"),
@@ -5406,7 +5548,12 @@ impl Item {
                     "stored current durability",
                 ),
             ] {
-                let value = value.ok_or_else(|| invalid("Missing D2R v3 armor body field"))?;
+                if weapon_layout
+                    && (stat_id == 31 || (stat_id == 72 && self.body.max_durability == Some(0)))
+                {
+                    continue;
+                }
+                let value = value.ok_or_else(|| invalid("Missing D2R v3 stored body field"))?;
                 // Defense is logical; durability retains its encoded body representation.
                 let stored = if stat_id == 31 {
                     let save_add = crate::domain::stats::stat_save_add(stat_id)
@@ -5436,7 +5583,7 @@ impl Item {
         } else if self.quantity.is_some() {
             return Err(invalid("Quantity exists without the D2R v3 presence flag"));
         }
-        if empty_socket_armor {
+        if socket_layout {
             d2r_v3_write_checked(
                 &mut emitter,
                 u64::from(
@@ -5453,13 +5600,19 @@ impl Item {
                 emitter.write_bit(flag)?;
             }
         }
-        d2r_v3_write_scalar_list(&mut emitter, &self.properties)?;
-        for properties in &self.set_attributes {
-            d2r_v3_write_scalar_list(&mut emitter, properties)?;
+        if weapon_layout {
+            d2r_v3_write_weapon_list(&mut emitter, &self.properties)?;
+            for properties in &self.set_attributes {
+                d2r_v3_write_weapon_list(&mut emitter, properties)?;
+            }
+        } else {
+            d2r_v3_write_scalar_list(&mut emitter, &self.properties)?;
+            for properties in &self.set_attributes {
+                d2r_v3_write_scalar_list(&mut emitter, properties)?;
+            }
         }
-        emitter.extend_bits(
-            auxiliary.to_bits_d2r_v3_chronicle(header.flags, header.is_compact)?,
-        )?;
+        emitter
+            .extend_bits(auxiliary.to_bits_d2r_v3_chronicle(header.flags, header.is_compact)?)?;
         emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
         if let Some(quantity) = auxiliary.advanced_stash_quantity {
             d2r_v3_write_checked(

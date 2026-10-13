@@ -7,7 +7,7 @@ use bitstream_io::BitRead;
 use std::cell::{Cell, RefCell};
 
 pub const MAX_ALPHA_V105_ITEM_BITS: u64 = 1500;
-const D2R_V3_PAIRED_STAT_IDS: &[(u32, &[u32])] = &[
+pub(crate) const D2R_V3_PAIRED_STAT_IDS: &[(u32, &[u32])] = &[
     (17, &[18]),
     (48, &[49]),
     (50, &[51]),
