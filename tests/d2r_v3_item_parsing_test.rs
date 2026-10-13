@@ -3038,3 +3038,345 @@ mod weapon_inverse_contracts {
         );
     }
 }
+
+mod ordinary_compact_contracts {
+    use super::*;
+    use d2r_core::domain::item::serialization::item_template;
+    const FRESH: &str =
+        "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s";
+    const QUEST: &str = "tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest3_ScrollObtained_PreAkara.d2s";
+    fn raw(bytes: &[u8], pos: &mut u64, width: u32) -> u32 {
+        let value = raw_little_endian(&source_bits(bytes, *pos, *pos + u64::from(width)));
+        *pos += u64::from(width);
+        value
+    }
+    fn leaf(bytes: &[u8], start: u64) -> Item {
+        let mut reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+        reader.skip(start.try_into().unwrap()).unwrap();
+        let mut cursor = BitCursor::new(reader);
+        cursor.set_pos(start);
+        let mut item = Item::from_reader_with_context_d2r_v3(
+            &mut cursor,
+            &HuffmanTree::new(),
+            Some((bytes, start)),
+            0,
+            105,
+        )
+        .unwrap();
+        let end = cursor.pos();
+        cursor.byte_align().unwrap();
+        item.body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .alignment_padding = Some(source_bits(bytes, end, cursor.pos()));
+        item
+    }
+    fn bytes(bits: &[bool]) -> Vec<u8> {
+        let mut b = vec![0; bits.len().div_ceil(8)];
+        for (i, bit) in bits.iter().enumerate() {
+            if *bit {
+                b[i / 8] |= 1 << (i % 8);
+            }
+        }
+        b
+    }
+    fn push(bits: &mut Vec<bool>, value: u32, width: u32) {
+        bits.extend((0..width).map(|i| value & (1 << i) != 0));
+    }
+    fn ordinary(item: &Item) -> bool {
+        item.is_compact
+            && !item.header.is_ear
+            && !item_template(item.code.trim()).is_some_and(|t| t.has_quest_difficulty)
+    }
+    fn walk<'a>(items: &'a [Item], output: &mut Vec<&'a Item>) {
+        for item in items {
+            if ordinary(item) {
+                output.push(item);
+            }
+            walk(&item.socketed_items, output);
+        }
+    }
+    fn source_tail(bytes: &[u8], item: &Item) -> (u64, u64, u32, Vec<u32>, Option<u8>, Vec<bool>) {
+        let encoded = HuffmanTree::new()
+            .encode(&format!("{} ", item.code.trim()))
+            .unwrap();
+        let code_start = item.range.start + 53;
+        let start = code_start + encoded.len() as u64;
+        assert_eq!(encoded, source_bits(bytes, code_start, start));
+        let mut pos = start;
+        let realm = if raw(bytes, &mut pos, 1) != 0 {
+            (0..4).map(|_| raw(bytes, &mut pos, 32)).collect()
+        } else {
+            vec![]
+        };
+        let stash = (raw(bytes, &mut pos, 1) != 0).then(|| raw(bytes, &mut pos, 8) as u8);
+        let mut stored = item.range.start + 50;
+        let stored = raw(bytes, &mut stored, 3);
+        assert!(item.range.end >= pos && item.range.end - pos < 8);
+        (
+            start,
+            pos,
+            stored,
+            realm,
+            stash,
+            source_bits(bytes, pos, item.range.end),
+        )
+    }
+    #[invariant_test]
+    fn d2r_v3_ordinary_compact_original_fields_and_inverse_are_exact() {
+        let h = HuffmanTree::new();
+        let mut count = 0;
+        let mut bits = 0;
+        let mut zero_presence = 0;
+        let mut children = 0;
+        for path in [
+            FRESH,
+            ARMOR_FIXTURE,
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_PostWarriv_Act1.d2s",
+            QUEST,
+        ] {
+            let (original, items) = read_d2r_v3_items(path);
+            let mut selected = Vec::new();
+            walk(&items, &mut selected);
+            let mut rebuilt_save = original.clone();
+            for item in selected {
+                let (_, _, stored, realm, stash, padding) = source_tail(&original, item);
+                let aux = item
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_ref()
+                    .expect("ordinary source fields must be retained");
+                assert_eq!(aux.save_version, 105);
+                assert_eq!(aux.stored_in, Some(stored as u8));
+                assert_eq!(aux.quest_difficulty, None);
+                assert_eq!(aux.realm_data, realm);
+                assert_eq!(aux.advanced_stash_quantity, stash);
+                assert_eq!(aux.alignment_padding, Some(padding));
+                let emitted = without_item_bit_cache(item)
+                    .to_bits_d2r_v3_compact(&h)
+                    .unwrap();
+                assert_eq!(
+                    emitted,
+                    source_bits(&original, item.range.start, item.range.end)
+                );
+                assert_stored_item_model(&leaf(&original, item.range.start), item);
+                assert!(
+                    item.to_bits_d2r_v3_compact_quest(&h).is_err(),
+                    "quest-only API remains quest-only"
+                );
+                for (i, bit) in emitted.iter().enumerate() {
+                    let p = item.range.start as usize + i;
+                    let mask = 1 << (p % 8);
+                    rebuilt_save[p / 8] =
+                        (rebuilt_save[p / 8] & !mask) | if *bit { mask } else { 0 };
+                }
+                count += 1;
+                bits += emitted.len();
+                zero_presence += usize::from(stash == Some(0));
+                children += usize::from(item.mode == 6);
+            }
+            assert_eq!(
+                rebuilt_save, original,
+                "all original bytes/checksum and downstream sections stay exact"
+            );
+        }
+        assert_eq!((count, bits, zero_presence, children), (49, 3952, 8, 3));
+        println!(
+            "{{\"case\":\"ordinary_compact_originals\",\"items\":49,\"bits\":3952,\"stash_zero_present\":8,\"socket_children\":3,\"differing_bits\":0}}"
+        );
+    }
+    #[invariant_test]
+    fn d2r_v3_ordinary_compact_stash_mutations_match_only_source_value_bits() {
+        let (original, items) = read_d2r_v3_items(ARMOR_FIXTURE);
+        let mut selected = Vec::new();
+        walk(&items, &mut selected);
+        let mut count = 0;
+        for item in selected {
+            let (_, end, _, _, stash, _) = source_tail(&original, item);
+            if stash != Some(0) {
+                continue;
+            }
+            let mut semantic = without_item_bit_cache(item);
+            semantic
+                .body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .advanced_stash_quantity = Some(37);
+            let mut expected = original.clone();
+            assert_eq!(raw_little_endian(&source_bits(&expected, end - 8, end)), 0);
+            patch_raw_field(&mut expected, end - 8, end, 37);
+            let emitted = semantic
+                .to_bits_d2r_v3_compact(&HuffmanTree::new())
+                .unwrap();
+            assert_eq!(
+                emitted,
+                source_bits(&expected, item.range.start, item.range.end)
+            );
+            assert_stored_item_model(&leaf(&expected, item.range.start), &semantic);
+            count += 1;
+        }
+        assert_eq!(count, 4);
+        println!(
+            "{{\"case\":\"ordinary_compact_mutations\",\"fields\":4,\"unexpected_bit_changes\":0}}"
+        );
+    }
+    #[settled_contract_test]
+    fn d2r_v3_ordinary_compact_controlled_tail_and_compatibility_contracts() {
+        let (original, items) = read_d2r_v3_items(FRESH);
+        let item = &items[0];
+        let (start, _, _, _, _, _) = source_tail(&original, item);
+        let prefix = source_bits(&original, item.range.start, start);
+        for realm in [vec![], vec![0, u32::MAX, 0x12345678, 42]] {
+            for stash in [None, Some(0u8), Some(255u8)] {
+                let mut bits = prefix.clone();
+                push(&mut bits, u32::from(!realm.is_empty()), 1);
+                for word in &realm {
+                    push(&mut bits, *word, 32);
+                }
+                push(&mut bits, u32::from(stash.is_some()), 1);
+                if let Some(value) = stash {
+                    push(&mut bits, u32::from(value), 8);
+                }
+                bits.resize(bits.len().div_ceil(8) * 8, false);
+                let model = leaf(&bytes(&bits), 0);
+                let aux = model.body.d2r_v3_auxiliary.as_ref().unwrap();
+                assert_eq!(aux.realm_data, realm);
+                assert_eq!(aux.advanced_stash_quantity, stash);
+                assert_eq!(
+                    without_item_bit_cache(&model)
+                        .to_bits_d2r_v3_compact(&HuffmanTree::new())
+                        .unwrap(),
+                    bits
+                );
+            }
+        }
+        for version in [93u32, 94, 96, 100, 101, 104, 105] {
+            let count = if version > 96 {
+                4
+            } else if version > 93 {
+                3
+            } else {
+                2
+            };
+            let mut bits = vec![];
+            push(&mut bits, 1, 1);
+            for word in 1..=count {
+                push(&mut bits, word, 32);
+            }
+            if version > 101 {
+                push(&mut bits, 1, 1);
+                push(&mut bits, 73, 8);
+            }
+            let raw_bytes = bytes(&bits);
+            let mut cursor = BitCursor::from_raw_at(&raw_bytes, 0);
+            let data = d2r_core::domain::item::entity::read_d2r_v3_compact_tail(
+                &mut cursor,
+                version,
+                "box",
+                false,
+            )
+            .unwrap();
+            assert_eq!(cursor.pos(), bits.len() as u64);
+            if version == 105 {
+                let data = data.unwrap();
+                assert_eq!(data.realm_data, vec![1, 2, 3, 4]);
+                assert_eq!(data.advanced_stash_quantity, Some(73));
+            } else {
+                assert_eq!(data, None);
+            }
+        }
+        let raw_bytes = [255u8; 20];
+        let mut cursor = BitCursor::from_raw_at(&raw_bytes, 0);
+        assert_eq!(
+            d2r_core::domain::item::entity::read_d2r_v3_compact_tail(&mut cursor, 105, "ear", true)
+                .unwrap(),
+            None
+        );
+        assert_eq!(cursor.pos(), 0);
+        let (original, items) = read_d2r_v3_items(QUEST);
+        let mut quests = 0;
+        for item in items.iter().filter(|i| {
+            i.is_compact && item_template(i.code.trim()).is_some_and(|t| t.has_quest_difficulty)
+        }) {
+            let model = without_item_bit_cache(item);
+            let expected = source_bits(&original, item.range.start, item.range.end);
+            assert_eq!(
+                model
+                    .to_bits_d2r_v3_compact_quest(&HuffmanTree::new())
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(
+                model.to_bits_d2r_v3_compact(&HuffmanTree::new()).unwrap(),
+                expected
+            );
+            quests += 1;
+        }
+        assert!(quests > 0);
+        println!(
+            "{{\"case\":\"ordinary_compact_controls\",\"realm_stash_cases\":6,\"version_cases\":7,\"ear_consumed\":0,\"quest_apis_equal\":true,\"game_generated_nonzero_realm\":false}}"
+        );
+    }
+    #[settled_contract_test]
+    fn d2r_v3_ordinary_compact_rejects_missing_or_unemitted_state() {
+        let (_, items) = read_d2r_v3_items(ARMOR_FIXTURE);
+        let original = &items[11];
+        assert_eq!(original.code.trim(), "gcg");
+        let h = HuffmanTree::new();
+        let cases: &[fn(&mut Item)] = &[
+            |i| i.body.d2r_v3_auxiliary = None,
+            |i| {
+                i.body.d2r_v3_auxiliary.as_mut().unwrap().concealed_stats = Some(Default::default())
+            },
+            |i| i.body.v105_7mgw_payload = Some(vec![true]),
+            |i| i.body.v5_runeword_extra = Some(1),
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = 104,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().quest_difficulty = Some(1),
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![1, 2, 3],
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().stored_in = None,
+            |i| i.header.is_compact = false,
+            |i| i.header.is_ear = true,
+            |i| i.header.is_socketed = true,
+            |i| i.header.is_runeword = true,
+            |i| i.header.is_personalized = true,
+            |i| i.socketed_items.push(Item::empty_for_tests()),
+            |i| i.quantity = Some(1),
+            |i| i.body.max_durability = Some(1),
+            |i| {
+                i.modules
+                    .push(d2r_core::domain::item::ItemModule::Opaque(vec![true]))
+            },
+            |i| i.header.id = Some(1),
+            |i| i.header.quality = Some(ItemQuality::Normal),
+            |i| {
+                i.header.mode = 3;
+                i.body.mode = 3;
+            },
+            |i| {
+                i.header.mode = 5;
+                i.body.mode = 5;
+            },
+            |i| {
+                i.header.x = 16;
+                i.body.x = 16;
+            },
+            |i| i.body.x ^= 1,
+        ];
+        for (index, change) in cases.iter().enumerate() {
+            let mut item = original.clone();
+            change(&mut item);
+            assert_eq!(
+                item.to_bits_d2r_v3_compact(&h).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidInput,
+                "case{index}"
+            );
+        }
+        println!(
+            "{{\"case\":\"ordinary_compact_rejections\",\"states\":{}}}",
+            cases.len()
+        );
+    }
+}

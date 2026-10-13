@@ -2707,8 +2707,8 @@ pub fn consume_d2r_v3_compact_tail<R: BitRead>(
     read_d2r_v3_compact_tail(cursor, save_version, code, is_ear).map(|_| ())
 }
 
-/// Retains the source-conditioned compact quest fields of the verified v105 dialect.
-/// Other compact layouts preserve the existing consumption-only contract.
+/// Retains source-owned compact tail fields of the verified v105 dialect.
+/// Other versions and ears preserve the existing consumption contract.
 pub fn read_d2r_v3_compact_tail<R: BitRead>(
     cursor: &mut BitCursor<R>,
     save_version: u32,
@@ -2786,7 +2786,7 @@ pub fn read_d2r_v3_compact_tail<R: BitRead>(
     if is_quest {
         cursor.end_segment();
     }
-    Ok(is_quest.then_some(auxiliary))
+    Ok((save_version == 0x69).then_some(auxiliary))
 }
 
 pub fn parse_item_header<R: BitRead>(

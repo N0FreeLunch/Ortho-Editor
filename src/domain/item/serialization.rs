@@ -5024,6 +5024,20 @@ impl Item {
     /// Rebuild a stored v105 compact quest item from its source-owned field values.
     /// Whole-item bits, ranges and segment caches are never emission inputs.
     pub fn to_bits_d2r_v3_compact_quest(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_compact_layout(huffman, true)
+    }
+
+    /// Rebuild v105 compact items, including ordinary socket children, from typed fields.
+    /// Missing provenance or unsupported states fail without whole-item cache replay.
+    pub fn to_bits_d2r_v3_compact(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_compact_layout(huffman, false)
+    }
+
+    fn to_bits_d2r_v3_compact_layout(
+        &self,
+        huffman: &HuffmanTree,
+        quest_only: bool,
+    ) -> io::Result<Vec<bool>> {
         let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
         let auxiliary = self
             .body
@@ -5031,6 +5045,9 @@ impl Item {
             .as_ref()
             .ok_or_else(|| invalid("Missing explicit D2R v3 compact quest provenance"))?;
         let header = &self.header;
+        let template = item_template(self.body.code.trim())
+            .ok_or_else(|| invalid("Missing compact item template"))?;
+        let is_quest = template.has_quest_difficulty;
         if auxiliary.save_version != 0x69
             || header.save_is_alpha
             || !header.is_compact
@@ -5038,13 +5055,16 @@ impl Item {
             || header.is_socketed
             || header.is_personalized
             || header.is_runeword
-            || matches!(header.mode, 3 | 5 | 6)
-            || !item_template(self.body.code.trim())
-                .is_some_and(|template| template.has_quest_difficulty)
+            || matches!(header.mode, 3 | 5)
+            || (header.mode == 6 && (quest_only || is_quest))
+            || (quest_only && !is_quest)
             || self.code.trim() != self.body.code.trim()
             || auxiliary.filled_sockets != 0
             || auxiliary.set_property_flags.is_some()
             || auxiliary.chronicle.is_some()
+            || auxiliary.concealed_stats.is_some()
+            || self.body.v105_7mgw_payload.is_some()
+            || self.body.v5_runeword_extra.is_some()
             || auxiliary.has_quantity
             || !matches!(auxiliary.realm_data.len(), 0 | 4)
             || self.num_socketed_items != 0
@@ -5128,16 +5148,24 @@ impl Item {
             99..=102 => (true, header.version - 99),
             _ => return Err(invalid("Unsupported compact quest item version")),
         };
-        let difficulty = auxiliary
-            .quest_difficulty
-            .ok_or_else(|| invalid("Missing source-required quest difficulty"))?;
-        let width = crate::domain::stats::stat_save_bits(356)
-            .filter(|&width| width > 0 && width <= 32)
-            .ok_or_else(|| invalid("Missing or unsupported quest difficulty save width"))?;
-        let add = crate::domain::stats::stat_save_add(356)
-            .ok_or_else(|| invalid("Missing quest difficulty save bias"))?;
-        let raw = u64::try_from(i64::from(difficulty) + i64::from(add))
-            .map_err(|_| invalid("Negative encoded quest difficulty"))?;
+        let difficulty_field = if is_quest {
+            let difficulty = auxiliary
+                .quest_difficulty
+                .ok_or_else(|| invalid("Missing source-required quest difficulty"))?;
+            let width = crate::domain::stats::stat_save_bits(356)
+                .filter(|&width| width > 0 && width <= 32)
+                .ok_or_else(|| invalid("Missing or unsupported quest difficulty save width"))?;
+            let add = crate::domain::stats::stat_save_add(356)
+                .ok_or_else(|| invalid("Missing quest difficulty save bias"))?;
+            let raw = u64::try_from(i64::from(difficulty) + i64::from(add))
+                .map_err(|_| invalid("Negative encoded quest difficulty"))?;
+            Some((raw, width))
+        } else {
+            if auxiliary.quest_difficulty.is_some() {
+                return Err(invalid("Ordinary compact item contains quest difficulty"));
+            }
+            None
+        };
         let mut emitter = BitEmitter::new();
         use D2rV3JewelryWidths as W;
         d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
@@ -5153,7 +5181,9 @@ impl Item {
         }
         d2r_v3_write_checked(&mut emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
         emitter.extend_bits(huffman.encode(&format!("{} ", self.body.code.trim()))?)?;
-        d2r_v3_write_checked(&mut emitter, raw, width, "quest difficulty")?;
+        if let Some((raw, width)) = difficulty_field {
+            d2r_v3_write_checked(&mut emitter, raw, width, "quest difficulty")?;
+        }
         emitter.write_bit(!auxiliary.realm_data.is_empty())?;
         for word in &auxiliary.realm_data {
             emitter.write_bits(*word, 32)?;
@@ -6477,7 +6507,7 @@ mod compact_quest_codec_tests {
     }
 
     #[settled_contract_test]
-    fn nonquest_and_other_version_tails_keep_the_previous_contract() {
+    fn ordinary_tail_fields_are_retained_with_unchanged_older_version_consumption() {
         let bytes = fixture("TESTDRUID_Quest3_ScrollObtained_PreAkara");
         for (code, version) in [("box", 105), ("bks", 104)] {
             let mut cursor = BitCursor::from_raw_at(&bytes, 8893);
@@ -6488,12 +6518,26 @@ mod compact_quest_codec_tests {
                 false,
             )
             .unwrap();
-            assert_eq!(data, None);
+            if version == 105 {
+                let data = data.expect("v105 ordinary tail retains source ownership");
+                assert_eq!(data.save_version, 105);
+                assert_eq!(data.quest_difficulty, None);
+                assert!(data.realm_data.is_empty());
+                assert_eq!(data.advanced_stash_quantity, None);
+            } else {
+                assert_eq!(data, None);
+            }
             assert_eq!(cursor.pos(), 8895);
         }
         let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
         assert_eq!(items[10].code.trim(), "mp1");
-        assert_eq!(items[10].body.d2r_v3_auxiliary, None);
+        let data = items[10].body.d2r_v3_auxiliary.as_ref().unwrap();
+        assert_eq!(data.save_version, 105);
+        assert_eq!(data.quest_difficulty, None);
+        assert!(data.realm_data.is_empty());
+        assert_eq!(data.advanced_stash_quantity, None);
+        assert!(data.stored_in.is_some());
+        assert!(data.alignment_padding.is_some());
     }
 }
 
