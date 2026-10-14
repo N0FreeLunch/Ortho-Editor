@@ -214,6 +214,19 @@ pub fn calculate_symmetry_diff_from_player_stream(
     Ok(report)
 }
 
+fn clear_v3_replay_fields(item: &mut Item) {
+    item.bits.clear();
+    item.segments.clear();
+    item.gap_bits.clear();
+    item.body.alpha_code_bits.clear();
+    item.range = Default::default();
+    item.total_bits = 0;
+    item.logical_width = None;
+    for child in &mut item.socketed_items {
+        clear_v3_replay_fields(child);
+    }
+}
+
 fn compare_v3_source_item(
     item: &Item,
     huffman: &HuffmanTree,
@@ -262,14 +275,7 @@ fn compare_v3_source_item(
         })
     } else {
         let mut typed = item.clone();
-        typed.bits.clear();
-        typed.segments.clear();
-        typed.gap_bits.clear();
-        typed.body.alpha_code_bits.clear();
-        typed.range.start = 0;
-        typed.range.end = 0;
-        typed.total_bits = 0;
-        typed.logical_width = None;
+        clear_v3_replay_fields(&mut typed);
         // Source-owned V3 alignment is a typed field, not the item replay cache.
         let template = item_template(typed.code.trim());
         let deferred_stored_host = typed.header.is_runeword
@@ -282,6 +288,12 @@ fn compare_v3_source_item(
                 .is_some_and(|auxiliary| auxiliary.filled_sockets != 0);
         let emitted = if typed.is_compact {
             typed.to_bits_d2r_v3_compact(huffman)
+        } else if !typed.header.is_personalized
+            && typed.header.is_socketed
+            && template.is_some_and(|template| template.is_weapon || template.is_armor)
+            && deferred_stored_host
+        {
+            typed.to_bits_d2r_v3_socket_host(huffman)
         } else if template.is_some_and(|template| template.is_weapon) {
             if deferred_stored_host {
                 typed.to_bits_d2r_v3_weapon(huffman)
@@ -1084,14 +1096,70 @@ mod consumer_audit_tests {
     }
     #[settled_contract_test]
     fn unsupported_socket_parent_is_not_a_cached_pass() {
-        let (bytes, stream) =
+        use crate::verify::dedup_pool::CachedVerificationReceipt;
+        use std::collections::HashMap;
+
+        fn poison(item: &mut Item) {
+            item.bits = vec![RecordedBit {
+                bit: true,
+                offset: u64::MAX,
+            }];
+            item.body.alpha_code_bits = vec![true; 17];
+            item.total_bits = 1;
+            item.logical_width = Some(1);
+            for child in &mut item.socketed_items {
+                poison(child);
+            }
+        }
+        let (bytes, mut stream) =
             input("tests/fixtures/savegames/gameplay/items/NEC_ITEM_Runeword_Hustle_72h.d2s");
         assert_eq!(stream.dialect, ItemStreamDialect::D2rV3);
         assert_eq!(stream.items.len(), 1);
+        assert!(stream.items[0].header.is_runeword);
+        poison(&mut stream.items[0]);
+        let mut invalid = PlayerItemStream {
+            dialect: stream.dialect,
+            items: stream.items.clone(),
+            diagnostics: stream.diagnostics.clone(),
+        };
         let report = calculate_symmetry_diff_from_player_stream(
             &bytes,
             stream,
             SymmetryOptions::roundtrip(true),
+            None,
+        )
+        .unwrap();
+        assert!(report.success, "{report:?}");
+        let root = &report.items[0];
+        assert!(root.is_match);
+        assert_eq!(root.fidelity_score, 1.0);
+        assert_eq!(root.cached_bits_preserved, Some(false));
+        assert_eq!(
+            root.comparison_bit_source.as_deref(),
+            Some("original_save_range")
+        );
+        assert_eq!(root.children.len(), 3);
+        assert!(root
+            .children
+            .iter()
+            .all(|child| child.is_match && child.cached_bits_preserved == Some(false)));
+
+        // This extra typed field has no owner in the admitted V3 host layout.
+        invalid.items[0].runeword_level = Some(1);
+        let mut map = HashMap::new();
+        map.insert(
+            ItemSignature::from_item(&invalid.items[0], false),
+            CachedVerificationReceipt::from_diff(&ItemDiff {
+                is_match: true,
+                fidelity_score: 1.0,
+                ..Default::default()
+            }),
+        );
+        let pool = Arc::new(ItemMemoizationPool::from_map(map));
+        let report = calculate_symmetry_diff_from_player_stream(
+            &bytes,
+            invalid,
+            SymmetryOptions::roundtrip(true).with_pool(Some(pool.clone())),
             None,
         )
         .unwrap();
@@ -1103,9 +1171,12 @@ mod consumer_audit_tests {
             .as_ref()
             .is_some_and(|error| !error.reason.is_empty()));
         assert_eq!(root.fidelity_score, 0.0);
+        assert_eq!(root.cached_bits_preserved, Some(false));
         assert_eq!(root.children.len(), 3);
         assert!(root.children.iter().all(|child| child.is_match));
+        assert_eq!(pool.stats().total_queries(), 0);
     }
+
     #[settled_contract_test]
     fn invalid_span_index_empty_and_nonroundtrip_are_rejected() {
         let (bytes, mut stream) = input(FRESH);

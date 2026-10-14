@@ -4820,6 +4820,8 @@ struct D2rV3JewelryWidths;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum D2rV3StoredLayout {
+    SocketWeapon,
+    SocketArmor,
     StoredMisc,
     StoredWeapon,
     StoredJewelry,
@@ -4847,6 +4849,7 @@ impl D2rV3JewelryWidths {
     const AFFIX: u32 = 11;
     const RARE_NAME: u32 = 8;
     const UNIQUE_ID: u32 = 12;
+    const RUNEWORD_ID: u32 = 16;
     const TOME: u32 = 5;
     const QUANTITY: u32 = 9;
     const STASH_QUANTITY: u32 = 8;
@@ -5271,6 +5274,25 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::StoredMisc)
     }
 
+    /// Rebuild socketed equipment, its typed property lists and ordered children.
+    /// Counts, visibility and child codecs are validated without replay or flag repair.
+    pub fn to_bits_d2r_v3_socket_host(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+        if !self.header.is_socketed {
+            return Err(invalid("Socket host requires the original socketed flag"));
+        }
+        let template = item_template(self.body.code.trim())
+            .ok_or_else(|| invalid("Missing socket host template"))?;
+        let layout = if template.is_weapon && !template.is_armor {
+            D2rV3StoredLayout::SocketWeapon
+        } else if template.is_armor && template.has_durability {
+            D2rV3StoredLayout::SocketArmor
+        } else {
+            return Err(invalid("Unsupported socket host equipment kind"));
+        };
+        self.to_bits_d2r_v3_stored(huffman, layout)
+    }
+
     fn to_bits_d2r_v3_stored(
         &self,
         huffman: &HuffmanTree,
@@ -5286,16 +5308,29 @@ impl Item {
         let quality = header
             .quality
             .ok_or_else(|| invalid("Missing jewelry quality"))?;
+        let socket_host_layout = matches!(
+            layout,
+            D2rV3StoredLayout::SocketWeapon | D2rV3StoredLayout::SocketArmor
+        );
+        let runeword_layout = socket_host_layout && header.is_runeword;
         let empty_socket_armor = layout == D2rV3StoredLayout::EmptySocketArmor;
         let stored_misc_layout = layout == D2rV3StoredLayout::StoredMisc;
-        let stored_weapon_layout = layout == D2rV3StoredLayout::StoredWeapon;
+        let stored_weapon_layout = matches!(
+            layout,
+            D2rV3StoredLayout::StoredWeapon | D2rV3StoredLayout::SocketWeapon
+        );
         let stored_jewelry_layout = layout == D2rV3StoredLayout::StoredJewelry;
         let weapon_layout = matches!(
             layout,
-            D2rV3StoredLayout::Weapon | D2rV3StoredLayout::StoredWeapon
+            D2rV3StoredLayout::Weapon
+                | D2rV3StoredLayout::StoredWeapon
+                | D2rV3StoredLayout::SocketWeapon
         );
         let accessory_layout = layout == D2rV3StoredLayout::Accessory;
-        let stored_armor_layout = layout == D2rV3StoredLayout::StoredArmor;
+        let stored_armor_layout = matches!(
+            layout,
+            D2rV3StoredLayout::StoredArmor | D2rV3StoredLayout::SocketArmor
+        );
         let allows_concealed = accessory_layout
             || stored_armor_layout
             || stored_weapon_layout
@@ -5305,6 +5340,7 @@ impl Item {
             D2rV3StoredLayout::Armor
                 | D2rV3StoredLayout::EmptySocketArmor
                 | D2rV3StoredLayout::StoredArmor
+                | D2rV3StoredLayout::SocketArmor
         );
         let socket_layout =
             empty_socket_armor || ((weapon_layout || stored_armor_layout) && header.is_socketed);
@@ -5331,7 +5367,7 @@ impl Item {
                             | ItemQuality::Set
                     )
             }
-            D2rV3StoredLayout::StoredArmor => {
+            D2rV3StoredLayout::StoredArmor | D2rV3StoredLayout::SocketArmor => {
                 item_template(self.body.code.trim())
                     .is_some_and(|template| template.is_armor && template.has_durability)
                     && matches!(
@@ -5367,10 +5403,10 @@ impl Item {
                             | ItemQuality::Rare
                     )
             }
-            D2rV3StoredLayout::Weapon | D2rV3StoredLayout::StoredWeapon => {
-                item_template(self.body.code.trim())
-                    .is_some_and(|template| template.is_weapon && !template.is_armor)
-            }
+            D2rV3StoredLayout::Weapon
+            | D2rV3StoredLayout::StoredWeapon
+            | D2rV3StoredLayout::SocketWeapon => item_template(self.body.code.trim())
+                .is_some_and(|template| template.is_weapon && !template.is_armor),
             D2rV3StoredLayout::Armor | D2rV3StoredLayout::EmptySocketArmor => {
                 item_template(self.body.code.trim())
                     .is_some_and(|template| template.is_armor && template.has_durability)
@@ -5391,15 +5427,18 @@ impl Item {
             || header.is_ear
             || header.is_socketed != socket_layout
             || header.is_personalized
-            || header.is_runeword
+            || (header.is_runeword && !runeword_layout)
             || matches!(header.mode, 3 | 5)
             || (header.mode == 6 && (!accessory_layout || self.body.code.trim() != "jew"))
-            || auxiliary.filled_sockets != 0
-            || !self.socketed_items.is_empty()
-            || !self.runeword_attributes.is_empty()
+            || (!socket_host_layout
+                && (auxiliary.filled_sockets != 0 || !self.socketed_items.is_empty()))
+            || (!runeword_layout && !self.runeword_attributes.is_empty())
             || !self.properties_complete
         {
             return Err(invalid(match layout {
+                D2rV3StoredLayout::SocketWeapon | D2rV3StoredLayout::SocketArmor => {
+                    "Unsupported D2R v3 socket host layout"
+                }
                 D2rV3StoredLayout::StoredMisc => "Unsupported D2R v3 stored miscellaneous layout",
                 D2rV3StoredLayout::StoredWeapon => "Unsupported D2R v3 stored weapon layout",
                 D2rV3StoredLayout::StoredJewelry => "Unsupported D2R v3 stored jewelry layout",
@@ -5413,8 +5452,27 @@ impl Item {
                 }
             }));
         }
+        if socket_host_layout
+            && (self.sockets.is_none_or(|capacity| capacity == 0)
+                || auxiliary.filled_sockets as usize != self.socketed_items.len()
+                || self.num_socketed_items as usize != self.socketed_items.len()
+                || auxiliary.filled_sockets > self.sockets.unwrap_or_default()
+                || self.socketed_items.iter().any(|child| {
+                    child.header.mode != D2R_V3_SOCKET_CHILD_MODE
+                        || !child.socketed_items.is_empty()
+                })
+                || (runeword_layout
+                    && !header.is_identified
+                    && (!self.runeword_attributes.is_empty()
+                        || !self.stats.runeword_attributes.is_empty())))
+        {
+            return Err(invalid(
+                "Socket host count, capacity, child mode or hidden owner disagrees",
+            ));
+        }
         if socket_layout
-            && (self.num_socketed_items != 0 || self.sockets.is_none_or(|capacity| capacity == 0))
+            && ((!socket_host_layout && self.num_socketed_items != 0)
+                || self.sockets.is_none_or(|capacity| capacity == 0))
         {
             return Err(invalid(
                 "Empty-socket armor requires positive capacity and no filled sockets",
@@ -5447,7 +5505,7 @@ impl Item {
                 || self.quantity != self.body.quantity
                 || self.body.current_durability.is_some() != (maximum > 0)
                 || auxiliary.has_quantity != self.quantity.is_some()
-                || self.num_socketed_items != 0
+                || (!socket_host_layout && self.num_socketed_items != 0)
                 || (socket_layout && self.sockets.is_none_or(|capacity| capacity == 0))
                 || (!socket_layout && self.sockets.is_some())
                 || self.low_high_graphic_bits.is_some() != subtype
@@ -5457,7 +5515,7 @@ impl Item {
                 || self.rare_name_2.is_some() != named
                 || (!named && self.rare_affixes.iter().any(Option::is_some))
                 || self.unique_id.is_some() != archetype
-                || self.runeword_id.is_some()
+                || self.runeword_id.is_some() != runeword_layout
                 || self.runeword_level.is_some()
                 || self.has_multiple_graphics != self.multi_graphics_bits.is_some()
                 || self.has_class_specific_data != self.class_specific_bits.is_some()
@@ -5486,7 +5544,9 @@ impl Item {
                 || self.body.alpha_shadow_skip_bits.is_some()
                 || self.body.alpha_nudge.is_some()
                 || self.body.alpha_set_list_val.is_some()
-                || !self.stats.runeword_attributes.is_empty()
+                || (!self.stats.runeword_attributes.is_empty()
+                    && (!runeword_layout
+                        || self.stats.runeword_attributes != self.runeword_attributes))
                 || (!self.stats.set_attributes.is_empty()
                     && self.stats.set_attributes != self.set_attributes)
             {
@@ -5509,7 +5569,7 @@ impl Item {
                         || !self.stats.properties.is_empty()
                         || self.set_attributes.iter().any(|list| !list.is_empty())
                         || hidden.set_attributes.len() != expected_lists
-                        || !hidden.runeword_attributes.is_empty()
+                        || (!runeword_layout && !hidden.runeword_attributes.is_empty())
                     {
                         return Err(invalid(
                             "Unidentified weapon must retain hidden lists and empty public slots",
@@ -5669,7 +5729,7 @@ impl Item {
                 || self.quantity.is_some()
                 || self.body.quantity.is_some()
                 || auxiliary.has_quantity
-                || self.num_socketed_items != 0
+                || (!socket_host_layout && self.num_socketed_items != 0)
                 || (!socket_layout && self.sockets.is_some())
                 || self.low_high_graphic_bits.is_some() != subtype
                 || self.magic_prefix.is_some() != magic
@@ -5678,7 +5738,7 @@ impl Item {
                 || self.rare_name_2.is_some() != named
                 || (!named && self.rare_affixes.iter().any(Option::is_some))
                 || self.unique_id.is_some() != archetype
-                || self.runeword_id.is_some()
+                || self.runeword_id.is_some() != runeword_layout
                 || self.runeword_level.is_some()
                 || self.has_multiple_graphics != self.multi_graphics_bits.is_some()
                 || self.has_class_specific_data != self.class_specific_bits.is_some()
@@ -5703,7 +5763,9 @@ impl Item {
                 || self.body.alpha_shadow_skip_bits.is_some()
                 || self.body.alpha_nudge.is_some()
                 || self.body.alpha_set_list_val.is_some()
-                || !self.stats.runeword_attributes.is_empty()
+                || (!self.stats.runeword_attributes.is_empty()
+                    && (!runeword_layout
+                        || self.stats.runeword_attributes != self.runeword_attributes))
                 || (!self.stats.set_attributes.is_empty()
                     && self.stats.set_attributes != self.set_attributes)
                 || (header.flags & (1 << 22) != 0) != header.is_ethereal
@@ -5727,7 +5789,7 @@ impl Item {
                         || !self.stats.properties.is_empty()
                         || self.set_attributes.iter().any(|list| !list.is_empty())
                         || hidden.set_attributes.len() != expected_lists
-                        || !hidden.runeword_attributes.is_empty()
+                        || (!runeword_layout && !hidden.runeword_attributes.is_empty())
                     {
                         return Err(invalid(
                             "Unidentified armor must retain hidden lists and empty public slots",
@@ -5801,7 +5863,7 @@ impl Item {
             (16, false),
             (21, false),
             (24, false),
-            (26, false),
+            (26, runeword_layout),
         ] {
             if (header.flags & (1 << flag) != 0) != expected {
                 return Err(invalid(
@@ -5944,6 +6006,16 @@ impl Item {
             }
             _ => {}
         }
+        if runeword_layout {
+            d2r_v3_write_checked(
+                &mut emitter,
+                self.runeword_id
+                    .ok_or_else(|| invalid("Missing socket host runeword ID"))?
+                    as u64,
+                W::RUNEWORD_ID,
+                "runeword ID",
+            )?;
+        }
         emitter.write_bit(!auxiliary.realm_data.is_empty())?;
         if !auxiliary.realm_data.is_empty() && auxiliary.realm_data.len() != 4 {
             return Err(invalid("D2R v3 realm data must contain four words"));
@@ -6044,6 +6116,18 @@ impl Item {
                 d2r_v3_write_scalar_list(&mut emitter, properties)?;
             }
         }
+        if runeword_layout {
+            let properties = if header.is_identified {
+                &self.runeword_attributes
+            } else {
+                &auxiliary
+                    .concealed_stats
+                    .as_ref()
+                    .ok_or_else(|| invalid("Missing concealed runeword owner"))?
+                    .runeword_attributes
+            };
+            d2r_v3_write_weapon_list(&mut emitter, properties)?;
+        }
         emitter
             .extend_bits(auxiliary.to_bits_d2r_v3_chronicle(header.flags, header.is_compact)?)?;
         emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
@@ -6066,7 +6150,20 @@ impl Item {
             ));
         }
         emitter.extend_bits(padding.iter().copied())?;
-        Ok(emitter.into_bits())
+        let mut bits = emitter.into_bits();
+        if socket_host_layout {
+            for child in &self.socketed_items {
+                let encoded = if child.is_compact {
+                    child.to_bits_d2r_v3_compact(huffman)
+                } else if child.code.trim() == "jew" {
+                    child.to_bits_d2r_v3_accessory(huffman)
+                } else {
+                    return Err(invalid("Unsupported explicit V3 socket child kind"));
+                }?;
+                bits.extend(encoded);
+            }
+        }
+        Ok(bits)
     }
 }
 
@@ -9493,5 +9590,619 @@ mod v3_socket_owner_purity_tests {
             parse_item_at_d2r_v3(&mode, item.range.start, &HuffmanTree::new(), *index, 105)
                 .unwrap_err();
         assert!(format!("{:?}", failure.error).contains("socket child mode"));
+    }
+}
+#[cfg(test)]
+mod v3_socket_composite_codec_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+    type Sample = (usize, usize, Vec<u8>, Item);
+    fn samples() -> &'static Vec<Sample> {
+        static INPUTS: OnceLock<Vec<Sample>> = OnceLock::new();
+        INPUTS.get_or_init(|| {
+            let root = std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            let mut rows = Vec::new();
+            for (file, (relative, count)) in [
+                ("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",33),
+                ("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",38),
+                ("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",35),
+                ("tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s",39),
+                ("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",16),
+            ].iter().enumerate() {
+                let bytes = std::fs::read(root.join(relative)).unwrap();
+                let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
+                assert_eq!(items.len(), *count);
+                rows.extend(items.into_iter().enumerate().map(|(index,item)| (file,index,bytes.clone(),item)));
+            }
+            assert_eq!(rows.len(),161);
+            rows
+        })
+    }
+    fn sample(file: usize, index: usize) -> &'static Item {
+        &samples()
+            .iter()
+            .find(|(f, i, _, _)| *f == file && *i == index)
+            .unwrap()
+            .3
+    }
+    fn typed(item: &Item) -> Item {
+        let mut item = item.clone();
+        item.bits.clear();
+        item.segments.clear();
+        item.gap_bits.clear();
+        item.body.alpha_code_bits.clear();
+        item.range = Default::default();
+        item.total_bits = 0;
+        item.logical_width = None;
+        item.socketed_items = item.socketed_items.iter().map(typed).collect();
+        item
+    }
+    fn poison(item: &mut Item) {
+        item.bits = vec![crate::item::RecordedBit {
+            bit: true,
+            offset: u64::MAX,
+        }];
+        item.body.alpha_code_bits = vec![true; 17];
+        for child in &mut item.socketed_items {
+            poison(child);
+        }
+    }
+    fn emit(item: &Item) -> io::Result<Vec<bool>> {
+        item.to_bits_d2r_v3_socket_host(&HuffmanTree::new())
+    }
+    fn packed(bits: &[bool]) -> Vec<u8> {
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (i, &bit) in bits.iter().enumerate() {
+            if bit {
+                bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        bytes
+    }
+    fn reparse(bits: &[bool]) -> Item {
+        let bytes = packed(bits);
+        let (item, consumed) =
+            parse_item_at_d2r_v3(&bytes, 0, &HuffmanTree::new(), 0, 105).unwrap();
+        assert_eq!(consumed as usize, bits.len());
+        item
+    }
+    fn profile(properties: &[ItemProperty]) -> Vec<(u32, u32, i32)> {
+        properties
+            .iter()
+            .map(|p| (p.stat_id, p.param, p.value))
+            .collect()
+    }
+    fn selected(item: &Item) -> ItemStats {
+        if !item.header.is_identified && !item.is_compact {
+            *item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .concealed_stats
+                .as_ref()
+                .unwrap()
+                .clone()
+        } else {
+            ItemStats {
+                properties: item.properties.clone(),
+                set_attributes: item.set_attributes.clone(),
+                runeword_attributes: item.runeword_attributes.clone(),
+            }
+        }
+    }
+    fn body(item: &Item) -> crate::domain::item::entity::ItemBody {
+        let mut body = item.body.clone();
+        body.alpha_code_bits.clear();
+        if let Some(aux) = body.d2r_v3_auxiliary.as_mut() {
+            aux.alignment_padding = None;
+            aux.concealed_stats = None;
+        }
+        body
+    }
+    fn assert_fields(actual: &Item, expected: &Item) {
+        assert_eq!(actual.header, expected.header);
+        assert_eq!(body(actual), body(expected));
+        assert_eq!(
+            (
+                &actual.code,
+                actual.sockets,
+                actual.num_socketed_items,
+                actual.set_list_count,
+                actual.runeword_id,
+                actual.runeword_level
+            ),
+            (
+                &expected.code,
+                expected.sockets,
+                expected.num_socketed_items,
+                expected.set_list_count,
+                expected.runeword_id,
+                expected.runeword_level
+            )
+        );
+        assert_eq!(
+            (
+                actual.magic_prefix,
+                actual.magic_suffix,
+                actual.rare_name_1,
+                actual.rare_name_2,
+                actual.rare_affixes,
+                actual.unique_id,
+                actual.low_high_graphic_bits
+            ),
+            (
+                expected.magic_prefix,
+                expected.magic_suffix,
+                expected.rare_name_1,
+                expected.rare_name_2,
+                expected.rare_affixes,
+                expected.unique_id,
+                expected.low_high_graphic_bits
+            )
+        );
+        let (a, e) = (selected(actual), selected(expected));
+        assert_eq!(profile(&a.properties), profile(&e.properties));
+        assert_eq!(
+            a.set_attributes
+                .iter()
+                .map(|p| profile(p))
+                .collect::<Vec<_>>(),
+            e.set_attributes
+                .iter()
+                .map(|p| profile(p))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            profile(&a.runeword_attributes),
+            profile(&e.runeword_attributes)
+        );
+        if !expected.header.is_identified && !expected.is_compact {
+            assert!(actual.properties.is_empty() && actual.stats.properties.is_empty());
+            assert!(
+                actual.runeword_attributes.is_empty()
+                    && actual.stats.runeword_attributes.is_empty()
+            );
+            assert_eq!(actual.set_attributes.len(), expected.set_attributes.len());
+            assert!(actual.set_attributes.iter().all(Vec::is_empty));
+        }
+        assert_eq!(actual.socketed_items.len(), expected.socketed_items.len());
+        for (a, e) in actual.socketed_items.iter().zip(&expected.socketed_items) {
+            assert_fields(a, e);
+        }
+    }
+    fn control_bits(item: &mut Item) -> Vec<bool> {
+        for pad in 0..8 {
+            item.body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = Some(vec![false; pad]);
+            match emit(item) {
+                Ok(bits) => return bits,
+                Err(e) if e.to_string().contains("alignment field does not match") => {}
+                Err(e) => panic!("Unexpected control error: {e}"),
+            }
+        }
+        panic!("No byte alignment")
+    }
+    fn hide(item: &mut Item) {
+        let hidden = ItemStats {
+            properties: std::mem::take(&mut item.properties),
+            set_attributes: std::mem::take(&mut item.set_attributes),
+            runeword_attributes: std::mem::take(&mut item.runeword_attributes),
+        };
+        item.set_attributes = vec![Vec::new(); hidden.set_attributes.len()];
+        item.stats.properties.clear();
+        item.stats.set_attributes.clear();
+        item.stats.runeword_attributes.clear();
+        item.header.is_identified = false;
+        item.header.flags &= !(1 << 4);
+        item.body.d2r_v3_auxiliary.as_mut().unwrap().concealed_stats = Some(Box::new(hidden));
+    }
+    fn locality(before: &[bool], after: &[bool], range: std::ops::Range<usize>) {
+        assert_eq!(before.len(), after.len());
+        let diffs: Vec<_> = before
+            .iter()
+            .zip(after)
+            .enumerate()
+            .filter_map(|(i, (a, b))| (a != b).then_some(i))
+            .collect();
+        assert!(!diffs.is_empty());
+        assert!(
+            diffs.iter().all(|i| range.contains(i)),
+            "Unexpected changed bits: {diffs:?}, allowed {range:?}"
+        );
+    }
+    #[invariant_test]
+    fn source_socket_composites_and_empty_controls_rebuild_without_replay() {
+        let (mut hosts, mut empty, mut children, mut whole, mut child_bits) = (0, 0, 0, 0, 0);
+        for (_, index, bytes, item) in samples().iter().filter(|(_, _, _, i)| i.header.is_socketed)
+        {
+            let source: Vec<bool> = (item.range.start..item.range.end)
+                .map(|i| bytes[i as usize / 8] & (1 << (i % 8)) != 0)
+                .collect();
+            let mut model = typed(item);
+            poison(&mut model);
+            let bits = emit(&model).unwrap_or_else(|e| panic!("{} index{}: {e}", item.code, index));
+            assert_eq!(bits, source);
+            assert_fields(&reparse(&bits), item);
+            assert_eq!(emit(&typed(&reparse(&bits))).unwrap(), source);
+            let mut spliced = bytes.clone();
+            spliced.splice(
+                item.range.start as usize / 8..item.range.end as usize / 8,
+                packed(&bits),
+            );
+            assert_eq!(&spliced, bytes);
+            if item.socketed_items.is_empty() {
+                empty += 1;
+                let old = if item_template(item.code.trim()).unwrap().is_weapon {
+                    model.to_bits_d2r_v3_stored_weapon(&HuffmanTree::new())
+                } else {
+                    model.to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+                };
+                assert_eq!(old.unwrap(), source);
+            } else {
+                hosts += 1;
+                whole += bits.len();
+                children += item.socketed_items.len();
+                child_bits += item
+                    .socketed_items
+                    .iter()
+                    .map(|c| (c.range.end - c.range.start) as usize)
+                    .sum::<usize>();
+            }
+        }
+        assert_eq!(
+            (hosts, empty, children, whole, child_bits),
+            (6, 10, 10, 2560, 1352)
+        );
+        println!("{{\"hosts\":6,\"empty_controls\":10,\"children\":10,\"composite_bits\":2560,\"parent_bits\":1208,\"child_bits\":1352,\"differing_bits\":0}}");
+    }
+    #[settled_contract_test]
+    fn parent_child_runeword_and_id_mutations_stay_in_source_fields() {
+        let mut count = 0;
+        for (_, _, _, source) in samples()
+            .iter()
+            .filter(|(_, _, _, i)| !i.socketed_items.is_empty())
+        {
+            let before = emit(&typed(source)).unwrap();
+            if source.code.trim() == "ktr" {
+                let p = source
+                    .properties
+                    .iter()
+                    .position(|p| p.stat_id == 22)
+                    .unwrap();
+                let range = &source.properties[p].range;
+                let mut model = typed(source);
+                model.properties[p].value += 1;
+                model.stats.properties = model.properties.clone();
+                let after = emit(&model).unwrap();
+                locality(
+                    &before,
+                    &after,
+                    (range.start - source.range.start) as usize
+                        ..(range.end - source.range.start) as usize,
+                );
+                assert_fields(&reparse(&after), &model);
+                count += 1;
+            }
+            for (child_index, child) in source
+                .socketed_items
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.code.trim() == "jew")
+            {
+                let p = child
+                    .properties
+                    .iter()
+                    .position(|p| p.stat_id != 511 && !p.is_opaque && p.value < 100)
+                    .unwrap();
+                let range = &child.properties[p].range;
+                let mut model = typed(source);
+                let changed = &mut model.socketed_items[child_index];
+                changed.properties[p].value += 1;
+                changed.stats.properties = changed.properties.clone();
+                let after = emit(&model).unwrap();
+                locality(
+                    &before,
+                    &after,
+                    (range.start - source.range.start) as usize
+                        ..(range.end - source.range.start) as usize,
+                );
+                assert_fields(&reparse(&after), &model);
+                count += 1;
+            }
+            if source.header.is_runeword {
+                let p = source
+                    .runeword_attributes
+                    .iter()
+                    .position(|p| p.stat_id == 18)
+                    .unwrap();
+                let range = &source.runeword_attributes[p].range;
+                let mut model = typed(source);
+                model.runeword_attributes[p].value += 1;
+                if !model.stats.runeword_attributes.is_empty() {
+                    model.stats.runeword_attributes = model.runeword_attributes.clone();
+                }
+                let after = emit(&model).unwrap();
+                locality(
+                    &before,
+                    &after,
+                    (range.start - source.range.start) as usize
+                        ..(range.end - source.range.start) as usize,
+                );
+                assert_fields(&reparse(&after), &model);
+                count += 1;
+                assert_eq!(source.header.quality, Some(ItemQuality::Normal));
+                assert!(!source.has_multiple_graphics && !source.has_class_specific_data);
+                let offset = 101
+                    + HuffmanTree::new()
+                        .encode(&format!("{} ", source.code.trim()))
+                        .unwrap()
+                        .len();
+                let stored = before[offset..offset + 16]
+                    .iter()
+                    .enumerate()
+                    .fold(0u16, |value, (i, &bit)| value | ((bit as u16) << i));
+                assert_eq!(Some(stored), source.runeword_id);
+                let mut model = typed(source);
+                model.runeword_id = Some(stored ^ 1);
+                let after = emit(&model).unwrap();
+                locality(&before, &after, offset..offset + 16);
+                assert_fields(&reparse(&after), &model);
+                count += 1;
+            }
+        }
+        assert_eq!(count, 9);
+        println!("{{\"source_local_mutations\":9}}");
+    }
+    #[settled_contract_test]
+    fn hidden_lists_set_slots_and_zero_to_full_child_counts_preserve_owners() {
+        let mut controls = 0;
+        for source in [sample(0, 31), sample(4, 13)] {
+            let before = emit(&typed(source)).unwrap();
+            let mut model = typed(source);
+            hide(&mut model);
+            let bits = emit(&model).unwrap();
+            locality(&before, &bits, 4..5);
+            assert_fields(&reparse(&bits), &model);
+            controls += 1;
+        }
+        let source = sample(4, 13);
+        let original = emit(&typed(source)).unwrap();
+        let parent = (source.socketed_items[0].range.start - source.range.start) as usize;
+        let count_offset = 53
+            + HuffmanTree::new()
+                .encode(&format!("{} ", source.code.trim()))
+                .unwrap()
+                .len();
+        for count in 0..=3 {
+            let mut model = typed(source);
+            model.socketed_items.truncate(count);
+            model.num_socketed_items = count as u8;
+            model.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = count as u8;
+            let bits = emit(&model).unwrap();
+            let mut expected = original[..parent + count * 88].to_vec();
+            for i in 0..3 {
+                expected[count_offset + i] = count & (1 << i) != 0;
+            }
+            assert_eq!(bits, expected);
+            assert_fields(&reparse(&bits), &model);
+            controls += 1;
+        }
+        let mut set = typed(sample(3, 0));
+        assert_eq!(set.header.quality, Some(ItemQuality::Set));
+        assert_eq!(set.set_attributes.len(), 2);
+        set.header.is_socketed = true;
+        set.header.flags |= 1 << 11;
+        set.sockets = Some(2);
+        set.num_socketed_items = 0;
+        set.socketed_items.clear();
+        set.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 0;
+        let empty = control_bits(&mut set);
+        assert_eq!(
+            set.to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+                .unwrap(),
+            empty
+        );
+        let child = typed(&sample(0, 31).socketed_items[0]);
+        let child_bits = child.to_bits_d2r_v3_compact(&HuffmanTree::new()).unwrap();
+        set.socketed_items.push(child);
+        set.num_socketed_items = 1;
+        set.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 1;
+        let filled = emit(&set).unwrap();
+        let mut expected = empty;
+        let offset = 53
+            + HuffmanTree::new()
+                .encode(&format!("{} ", set.code.trim()))
+                .unwrap()
+                .len();
+        expected[offset] = true;
+        expected.extend(child_bits);
+        assert_eq!(filled, expected);
+        assert_fields(&reparse(&filled), &set);
+        controls += 1;
+        hide(&mut set);
+        let bits = emit(&set).unwrap();
+        locality(&filled, &bits, 4..5);
+        assert_fields(&reparse(&bits), &set);
+        controls += 1;
+        assert_eq!(controls, 8);
+        println!("{{\"controlled_variants\":8,\"hidden_set_slots\":2}}");
+    }
+    fn rejects(item: &Item) {
+        let before = item.clone();
+        assert_eq!(emit(item).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(item, &before);
+    }
+    #[settled_contract_test]
+    fn inconsistent_socket_counts_aliases_visibility_and_children_reject_without_mutation() {
+        let mut negative = 0;
+        for source in [sample(0, 31), sample(1, 6), sample(4, 13)] {
+            for case in 0..15 {
+                let mut model = typed(source);
+                match case {
+                    0 => model.num_socketed_items += 1,
+                    1 => model.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets += 1,
+                    2 => model.sockets = Some(model.num_socketed_items - 1),
+                    3 => {
+                        model.socketed_items[0].header.mode = 0;
+                        model.socketed_items[0].body.mode = 0;
+                    }
+                    4 => {
+                        model.socketed_items.pop();
+                    }
+                    5 => {
+                        model.header.is_socketed = false;
+                        model.header.flags &= !(1 << 11);
+                    }
+                    6 => {
+                        model.socketed_items[0]
+                            .body
+                            .d2r_v3_auxiliary
+                            .as_mut()
+                            .unwrap()
+                            .save_version = 98
+                    }
+                    7 => {
+                        let child = model.socketed_items[0].clone();
+                        model.socketed_items[0].socketed_items.push(child);
+                    }
+                    8 => {
+                        model.header.is_personalized = true;
+                        model.header.flags |= 1 << 24;
+                    }
+                    9 => {
+                        model
+                            .properties
+                            .push(model.properties.last().unwrap().clone());
+                        model.stats.properties = model.properties.clone();
+                    }
+                    10 => model.properties_complete = false,
+                    11 => model.body.alpha_header_gap = Some(1),
+                    12 => {
+                        model.socketed_items[0].header.is_identified =
+                            !model.socketed_items[0].header.is_identified
+                    }
+                    13 => model.runeword_level = Some(1),
+                    14 => {
+                        let mut child = typed(sample(0, 28));
+                        assert_eq!(child.code.trim(), "amu");
+                        child.header.mode = 6;
+                        child.body.mode = 6;
+                        model.socketed_items[0] = child;
+                    }
+                    _ => unreachable!(),
+                }
+                rejects(&model);
+                negative += 1;
+            }
+        }
+        for case in 0..7 {
+            let mut model = typed(sample(4, 13));
+            match case {
+                0 => model.runeword_id = None,
+                1 => {
+                    model.runeword_attributes.clear();
+                    model.stats.runeword_attributes.clear();
+                }
+                2 => {
+                    model.runeword_attributes.pop();
+                    model.stats.runeword_attributes = model.runeword_attributes.clone();
+                }
+                3 => {
+                    model.header.is_runeword = false;
+                    model.header.flags &= !(1 << 26);
+                }
+                4 => {
+                    model.stats.runeword_attributes = model.runeword_attributes.clone();
+                    model.stats.runeword_attributes[0].value += 1;
+                }
+                5 => {
+                    model
+                        .body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .concealed_stats = Some(Box::default())
+                }
+                6 => model.header.flags &= !(1 << 26),
+                _ => unreachable!(),
+            }
+            rejects(&model);
+            negative += 1;
+        }
+        for case in 0..5 {
+            let mut model = typed(sample(4, 13));
+            hide(&mut model);
+            let hidden = model
+                .body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .concealed_stats
+                .as_mut()
+                .unwrap();
+            match case {
+                0 => model.runeword_attributes = hidden.runeword_attributes.clone(),
+                1 => model.properties = hidden.properties.clone(),
+                2 => hidden.runeword_attributes.clear(),
+                3 => hidden.properties.clear(),
+                4 => model.stats.runeword_attributes = hidden.runeword_attributes.clone(),
+                _ => unreachable!(),
+            }
+            rejects(&model);
+            negative += 1;
+        }
+        assert_eq!(negative, 57);
+        println!("{{\"negative_states\":57,\"input_mutations\":0}}");
+    }
+    #[settled_contract_test]
+    fn runeword_group_grammar_stays_strict_and_old_leaf_apis_reject_filled_hosts() {
+        let source = sample(4, 13);
+        for case in 0..6 {
+            let mut model = typed(source);
+            let companion = model
+                .runeword_attributes
+                .iter()
+                .position(|p| p.stat_id == 18)
+                .unwrap();
+            match case {
+                0 => {
+                    model.runeword_attributes.remove(companion);
+                }
+                1 => model.runeword_attributes[companion].stat_id = 19,
+                2 => model.runeword_attributes[companion].param = 1,
+                3 => {
+                    let terminal = model.runeword_attributes.last().unwrap().clone();
+                    model.runeword_attributes.insert(0, terminal);
+                }
+                4 => model.runeword_attributes.last_mut().unwrap().value = 1,
+                5 => model.runeword_attributes[companion].is_opaque = true,
+                _ => unreachable!(),
+            }
+            model.stats.runeword_attributes = model.runeword_attributes.clone();
+            rejects(&model);
+        }
+        let mut rejected = 0;
+        for (_, _, _, item) in samples()
+            .iter()
+            .filter(|(_, _, _, i)| !i.socketed_items.is_empty())
+        {
+            let model = typed(item);
+            let h = HuffmanTree::new();
+            let result = if item_template(item.code.trim()).unwrap().is_weapon {
+                model.to_bits_d2r_v3_stored_weapon(&h)
+            } else {
+                model.to_bits_d2r_v3_stored_armor(&h)
+            };
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+            rejected += 1;
+        }
+        assert_eq!(rejected, 6);
+        println!("{{\"malformed_runeword_groups\":6,\"old_leaf_host_rejections\":6}}");
     }
 }
