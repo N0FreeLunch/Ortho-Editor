@@ -36,6 +36,10 @@ pulldown-cmark = "0.12"
 colored = "2.1"
 
 [[bin]]
+name = "semantic-bit-diff"
+path = "src/bin/verify/semantic_bit_diff.rs"
+
+[[bin]]
 name = "d2stat_probe_oracle"
 path = "src/bin/verify/d2stat_probe_oracle.rs"
 

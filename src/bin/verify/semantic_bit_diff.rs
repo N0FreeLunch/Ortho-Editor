@@ -1,7 +1,7 @@
-use std::fs;
-use std::env;
+use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
-use anyhow::{Result, Context, anyhow};
+use std::env;
+use std::fs;
 
 #[derive(Serialize)]
 struct DiffResult {
@@ -14,7 +14,7 @@ struct DiffResult {
 
 fn read_bits(path: &str) -> Result<Vec<bool>> {
     let content = fs::read(path).with_context(|| format!("Failed to read {}", path))?;
-    
+
     // Check if it's a .bits file (ASCII 0/1)
     if path.ends_with(".bits") {
         let content_str = String::from_utf8_lossy(&content);
@@ -24,7 +24,7 @@ fn read_bits(path: &str) -> Result<Vec<bool>> {
             if line.is_empty() || line.starts_with("Dumping") || line.starts_with("#") {
                 continue;
             }
-            
+
             for &b in line.as_bytes() {
                 match b {
                     b'0' => bits.push(false),
@@ -56,8 +56,8 @@ fn find_jm(bits: &[bool]) -> Option<usize> {
     // 0x4A (74) -> LSB: 0, 1, 0, 1, 0, 0, 1, 0
     // 0x4D (77) -> LSB: 1, 0, 1, 1, 0, 0, 1, 0
     let pattern = [
-        false, true, false, true, false, false, true, false,
-        true, false, true, true, false, false, true, false,
+        false, true, false, true, false, false, true, false, true, false, true, true, false, false,
+        true, false,
     ];
 
     if bits.len() < 16 {
@@ -74,7 +74,7 @@ fn find_jm(bits: &[bool]) -> Option<usize> {
 
 fn main() -> Result<()> {
     let args_vec: Vec<String> = env::args().collect();
-    
+
     let mut base_path = None;
     let mut mutated_path = None;
     let mut json_mode = false;
@@ -123,7 +123,7 @@ fn main() -> Result<()> {
         (Some(b_jm), Some(m_jm)) => {
             let mut offset = 0;
             let mut found_divergence = false;
-            
+
             loop {
                 let b_idx = b_jm + offset;
                 let m_idx = m_jm + offset;
@@ -135,7 +135,8 @@ fn main() -> Result<()> {
                 if base_bits[b_idx] != mutated_bits[m_idx] {
                     result.divergence_offset_from_jm = Some(offset as u64);
                     result.base_bit_at_divergence = Some(if base_bits[b_idx] { 1 } else { 0 });
-                    result.mutated_bit_at_divergence = Some(if mutated_bits[m_idx] { 1 } else { 0 });
+                    result.mutated_bit_at_divergence =
+                        Some(if mutated_bits[m_idx] { 1 } else { 0 });
                     result.bit_delta_summary = format!(
                         "Divergence found at offset {} from JM (Base: {}, Mutated: {})",
                         offset,
@@ -149,14 +150,22 @@ fn main() -> Result<()> {
             }
 
             if !found_divergence {
-                result.bit_delta_summary = "No divergence found within available bits from JM anchor.".to_string();
+                result.bit_delta_summary =
+                    "No divergence found within available bits from JM anchor.".to_string();
             }
         }
         _ => {
             let mut missing = Vec::new();
-            if base_jm.is_none() { missing.push("base"); }
-            if mutated_jm.is_none() { missing.push("mutated"); }
-            result.bit_delta_summary = format!("Failed to locate JM marker in {} sequence(s).", missing.join(" and "));
+            if base_jm.is_none() {
+                missing.push("base");
+            }
+            if mutated_jm.is_none() {
+                missing.push("mutated");
+            }
+            result.bit_delta_summary = format!(
+                "Failed to locate JM marker in {} sequence(s).",
+                missing.join(" and ")
+            );
         }
     }
 
@@ -167,8 +176,14 @@ fn main() -> Result<()> {
         println!("{}", result.bit_delta_summary);
         if let Some(offset) = result.divergence_offset_from_jm {
             println!("Divergence Offset: {}", offset);
-            println!("Base Bit:          {}", result.base_bit_at_divergence.unwrap());
-            println!("Mutated Bit:       {}", result.mutated_bit_at_divergence.unwrap());
+            println!(
+                "Base Bit:          {}",
+                result.base_bit_at_divergence.unwrap()
+            );
+            println!(
+                "Mutated Bit:       {}",
+                result.mutated_bit_at_divergence.unwrap()
+            );
         }
     }
 
