@@ -1,4 +1,4 @@
-This is the public bootstrap index for AI agents to locate implementation files, verification tools, and the private Strategy Hub entrypoints resolved from `D2R_SPEC_PATH`. **Read this first if you are lost.**
+This is the public bootstrap index for AI agents to locate implementation files and verification tools. **Read this first if you are lost.**
 
 ## 🌐 Tripartite Navigation Map
 
@@ -6,137 +6,122 @@ This is the public bootstrap index for AI agents to locate implementation files,
 | :--- | :--- | :--- |
 | **`d2r-core`** | **Implementation** (Public Logic) | [NAVIGATOR.md](./NAVIGATOR.md) |
 | **`d2r-data`** | **Game Data** (Extracted Tables) | [NAVIGATOR.md](./d2r-data/NAVIGATOR.md) |
-| **`d2r-spec`** | **Specification** (Private Overlay) | [NAVIGATOR.md](../d2r-spec/NAVIGATOR.md) |
+| **`d2r-spec`** | **Specification** (Private Overlay, if present) | [NAVIGATOR.md](../d2r-spec/NAVIGATOR.md) |
+
+> [!NOTE]
+> This navigator intentionally lists only what `d2r-core` owns. Specification, research, and task details are maintained in the private overlay; this file does not duplicate them. When you need the reasoning behind a domain, open `../d2r-spec/NAVIGATOR.md` (if present) and look up the **same domain name** in its *Domain-to-Private-Artifact Map* section.
 
 ## 0. Navigation Precedence (Read Order)
 1. `AGENTS.md` (global safety + operational constraints)
 2. `NAVIGATOR.md` (this file: public bootstrap map)
-3. Model entrypoint (`GEMINI.md` or `CLAUDE.md`) — when Strategy Hub is present, prefer its spec-side counterpart:
-   - **`../d2r-spec/GEMINI.md`** (Gemini-class primary authority)
-   - **`../d2r-spec/CLAUDE.md`** (Claude-class primary authority)
-4. Private overlay when available:
-   - `../d2r-spec/NAVIGATOR.md`
-   - `../d2r-spec/AGENTS.md`
-   - `../d2r-spec/AI_WORKFLOW.md`
-   - active `../d2r-spec/.agents/tasks/*.md`
+3. Model entrypoint (`GEMINI.md` or `CLAUDE.md`). When the private overlay is present, prefer its counterpart: `../d2r-spec/GEMINI.md` or `../d2r-spec/CLAUDE.md`.
+4. Private overlay entrypoints when available: `../d2r-spec/NAVIGATOR.md`, `../d2r-spec/AGENTS.md`.
 
 If rules conflict, keep `AGENTS.md` safety constraints (`No Automatic Push`, data boundary, anti-loop, verification-first) as non-negotiable.
 
-## ⚡ Quick Access: Active Components
-
-| Component | Implementation | Specification / Context | Verification |
-| :--- | :--- | :--- | :--- |
-| **Parsing Engine** | `src/item.rs`, `src/save.rs` | `discussion/0016`, `0023` | `d2item_inspect` |
-| **Validation Engine** | `src/engine/validation.rs` | `discussion/0034` | `item_validation_test` |
-| **Interpretation** | `src/engine/formatter.rs` | `discussion/0033`, `0034` | `option_rendering_test` |
-| **Inventory Grid** | `src/inventory.rs` | `discussion/0021` | `d2save_inventory_check`|
-| **Game Data Gateway**| `src/data/mod.rs` | `discussion/0035`, `0104` | `cargo check`, `forge --verify` |
-| **Quest/Waypoint (v105)** | `src/save.rs`, `d2r-data/quests.rs`, `d2r-data/waypoints.rs` | `discussion/0068`, `0069` | `d2item_chunk_verify`, `v105_unlocker` |
-
 ## 1. Core Domains & File Map
 
-| Domain | Specification (Truth) | Primary Implementation | Verification Tool |
-| :--- | :--- | :--- | :--- |
-| **Bitstream / Save Header** | `../d2r-spec/NAVIGATOR.md` -> Bitstream / Save Header domain (private overlay, if present) | `src/save.rs` | `src/bin/verify/d2save_map.rs`, `src/bin/verify/d2save_verify.rs` |
-| **Item parsing / Decrypt** | `../d2r-spec/NAVIGATOR.md` -> Item parsing / Decrypt domain (private overlay, if present) | `src/item.rs`, `src/domain/stats/` | `src/bin/verify/d2item_inspect.rs`, `src/bin/verify/d2stat_fidelity_radar.rs`, `src/bin/verify/d2stat_probe_oracle.rs`, `src/bin/verify/d2stat_tiling_prober.rs`, `src/bin/verify/d2save_equipped_invariant.rs` |
-| **Inventory / Grid** | `../d2r-spec/NAVIGATOR.md` -> Inventory / Grid domain (private overlay, if present) | `src/inventory.rs` | `src/bin/verify/d2save_inventory_check.rs` |
-| **Status (Attrs/Skills)** | `../d2r-spec/NAVIGATOR.md` -> Status (Attrs/Skills) domain (private overlay, if present) | `src/save.rs` | `src/bin/d2save_status_inspect.rs` |
-| **Save Verification** | `../d2r-spec/NAVIGATOR.md` -> Save Verification domain (private overlay, if present) | - | `src/bin/verify/d2save_verify.rs`, `src/bin/verify/d2save_equipped_invariant.rs` |
-| **UI / Orchestration** | `../d2r-spec/NAVIGATOR.md` -> UI / Orchestration domain (private overlay, if present) | `src/main.rs` | Elm-rs generated types |
-| **Game Data Access / Copyright Boundary** | `../d2r-spec/discussion/0035`, `0104` | `src/data/mod.rs`, `d2r-data/` | [d2r-data/NAVIGATOR.md](./d2r-data/NAVIGATOR.md) |
-| **Item Validation**      | `../d2r-spec/discussion/0034-item-option-interpretation.md`, `0079` | `src/engine/validation.rs` | `tests/item_validation_test.rs` |
-| **Environment / Paths** | `../d2r-spec/discussion/0036-environment-path-normalization.md` | `.env` | `tests/common.rs` |
-| **Workflow / Rules**   | `AGENTS.md` (public bootstrap), `../d2r-spec/AGENTS.md`, `../d2r-spec/AI_WORKFLOW.md` (private overlay) | `../d2r-spec/.agents/tasks/` preferred, `./.agents/tasks/` public-safe fallback | - |
+Domain names match the private overlay's map, so you can look them up by name there.
 
-## 2. Recent Architectural Decisions (Must Know)
+| Domain | Primary Implementation | Verification |
+| :--- | :--- | :--- |
+| **Bitstream / Save Header** | `src/save.rs` | `d2save_map`, `d2save_verify` |
+| **Item parsing / Decrypt** | `src/item.rs`, `src/domain/stats/` | `d2item_inspect`, `d2stat_fidelity_radar`, `d2stat_probe_oracle`, `d2stat_tiling_prober`, `d2save_equipped_invariant` |
+| **Inventory / Grid** | `src/inventory.rs` | `d2save_inventory_check` |
+| **Status (Attrs/Skills)** | `src/save.rs` | `d2save_status_inspect` |
+| **Option Logic / Display** | `src/engine/validation.rs`, `src/engine/formatter.rs` | `tests/item_validation_test.rs`, `tests/option_rendering_test.rs` |
+| **Quest / Waypoint (v105)** | `src/save.rs` | `d2save_progression_audit` |
+| **Save Verification** | - | `d2save_verify`, `d2save_equipped_invariant` |
+| **Game Data / Copyright Boundary** | `src/data/mod.rs` (gateway only) | `cargo check`; see [d2r-data/NAVIGATOR.md](./d2r-data/NAVIGATOR.md) |
+| **Environment / Path Normalization** | `.env` | `tests/common.rs` |
+| **UI / Orchestration** | `src/main.rs` | Elm-rs generated types |
+
+## 2. Core Principles (Must Know)
 - **Rust + Elm**: Core logic is in Rust; UI is in Elm.
 - **Type Safety**: Use `elm-rs` for 1:1 type mapping. No manual JSON types.
 - **Verification-First**: Never consider a code change "done" until verified with a tool in `src/bin/verify/`.
 - **D2R/DLC Aware**: We prioritize D2R/DLC support over classic LoD logic.
-- **External Data Boundary**: Extracted tables are maintained in `d2r-data/` (root link to sibling repo). In `d2r-core`, only `src/data/mod.rs` should bridge into that data.
-- **Environment First**: All paths MUST be retrieved via `tests/common.rs` or environment variables (Source of Truth: `.env`). Do not hardcode relative paths like `../../d2r-data`.
-- **PowerShell Minimization & Rust-First for Data**: For persistent data processing or high-volume extraction (`0079`), Rust-based integrated tools (`d2data-forge`) MUST be prioritized over PowerShell loops to ensure path integrity (`0087`) and token efficiency.
-
+- **External Data Boundary**: Extracted tables are maintained in the sibling `d2r-data` repo. In `d2r-core`, only `src/data/mod.rs` should bridge into that data.
+- **Environment First**: All paths MUST be retrieved via `tests/common.rs` or environment variables (Source of Truth: `.env`). Do not hardcode relative paths to sibling repositories.
+- **Rust-First for Data Processing**: For persistent or high-volume data processing, prefer integrated Rust tools over ad-hoc PowerShell loops to keep path integrity and token efficiency.
 
 ## 3. Git-Aware Context Recovery
 When you need to know **why** a specific byte offset or bit width was chosen:
 - `git log -p <file>`: Understand the evolution of complex bit-parsing logic.
-- `git blame <file>`: Find the specific commit/task that introduced a change.
-- `git log --grep="00XX"`: Find all code changes related to a specific specification.
-- **Tip**: Our commit messages are in English for core logic, and Korean for specific d2r-spec discussions.
+- `git blame <file>`: Find the specific commit that introduced a change.
+- `git log --grep="<keyword>"`: Find code changes related to a topic.
 
 ## 4. Important Paths
-- **Specs/Discussions**: `../d2r-spec/discussion/` (Private design context and internal reasoning, if the local overlay exists)
-- **Private Navigator**: `../d2r-spec/NAVIGATOR.md` (Private domain-to-research map)
-- **Private Overlay**: `../d2r-spec/AGENTS.md` (Private extension for internal reasoning and workflow)
-- **Private Workflow**: `../d2r-spec/AI_WORKFLOW.md` (Private operational workflow, if present)
-- **Agent Tasks**: `../d2r-spec/.agents/tasks/` preferred, `./.agents/tasks/` only as a sanitized public-safe fallback
 - **Fixtures**: `./tests/fixtures/savegames/` (Reference binary files)
 - **Verification Tools**: `./src/bin/verify/` (Standalone CLI tools for testing)
-- **Data Gateway (Core)**: `./src/data/mod.rs` (thin `#[path]` gateway into external data repo)
+- **Data Gateway**: `./src/data/mod.rs` (thin `#[path]` gateway into the external data repo)
 - **External Game Data Repo**: `./d2r-data/` (symlink to `../d2r-data`; extracted tables stay outside `d2r-core` history)
+- **Private overlay (reference only)**: `../d2r-spec/NAVIGATOR.md`
 
 ## 5. How to Research (Agentic Loop)
-1.  **Check `NAVIGATOR.md`**: Find the logical domain and matching implementation file.
-2.  **Locate Specification**: If `../d2r-spec/NAVIGATOR.md` exists, find the matching internal document for that domain and continue into the private overlay.
-3.  **Check Private Task Specs**: Prefer `../d2r-spec/.agents/tasks/` for active execution plans; use `./.agents/tasks/` only for sanitized public-safe fallbacks.
-4.  **Read Spec**: Always read the corresponding domain specification before coding.
-5.  **Git Research**: Use `git log -p` if the "why" behind existing code is unclear.
-6.  **Locate Patterns**: Search `src/` for similar implementation patterns.
-7.  **Verify**: Identify and run the matching `src/bin/verify/` tool.
-8.  **Escalate Correctly**: If the task is `3+ files` or deep logic, refresh the task spec and route to a stronger model.
-9. **Check Data Boundary**: If requested changes involve extracted game tables/assets, route that scope to `d2r-data` planning and prioritize building/using integrated Rust tools (`d2data-forge`) over manual PowerShell loops.
-
+1. **Check `NAVIGATOR.md`**: Find the logical domain and matching implementation file.
+2. **Locate Specification**: If `../d2r-spec/NAVIGATOR.md` exists, look up the same domain name there and continue from its pointers.
+3. **Read Spec**: Read the corresponding domain specification before coding.
+4. **Git Research**: Use `git log -p` if the "why" behind existing code is unclear.
+5. **Locate Patterns**: Search `src/` for similar implementation patterns.
+6. **Verify**: Identify and run the matching `src/bin/verify/` tool.
+7. **Check Data Boundary**: If a change involves extracted game tables/assets, route that scope to `d2r-data` instead of editing it from `d2r-core`.
 
 ## 6. Verification Tool Catalog
 
-This catalog includes **public verification tools** residing in the `d2r-core` repository. For data extraction or internal forensic tools, consult the respective navigators.
+This catalog lists the **public verification tools** residing in `d2r-core` (all are core-owned, so they are documented here). Tools live in `src/bin/verify/`, `src/bin/`, and `examples/`; run any tool with `--help`.
 
 | Tool Name | Scope | Description & Primary Usage |
 | :--- | :--- | :--- |
-| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating and `--dump-residue-map` for visual residue/gap mapping (with `--json` support for deterministic tables). |
-| **`d2save_batch`**  | Save | **Batch Runner**: Orchestrates `d2save_verify` and `SymmetryBitDiff` at scale with categorization. |
-| **`d2save_map`**    | Save | Dumps the memory map of a `.d2s` file (JM offsets, item counts). |
-| **`d2save_gap`**    | Save | **GAP Core**: Brute-forces header lengths and calculates alignment scores. |
-| **`SymmetryBitDiff`**| Item | **Roundtrip Master**: Compares bit-by-bit symmetry. Use `--roundtrip` for instant verification. |
-| **`d2save_diff`**   | Save | Byte-level diff between two saves (header vs item section). |
-| **`d2save_bit_xor_diff`**| Save | **Semantic Shift Detector**: Bit-level XOR diff with section context. |
-| **`d2save_item_diff`**| Save | **Crucial**: Compares only the item bitstream, masking header noise. |
-| **`d2item_bit_visualizer`** | Item | **Semantic Visualizer**: Hierarchical bitstream mapping with desync context. |
-| **`d2item_inspect`** | Item | Decomposes a `.d2i` or `.d2s` item into its bit-fields and props. |
-| **`d2stat_fidelity_radar`** | Item | **Fidelity Radar**: Fast parallel multi-fixture bit replay and property completeness scanner with atomic JSON receipts. |
-| **`d2stat_template_oracle`**| Item | **Deterministic Option Oracle**: Cross-references parsed item properties against static `d2r-data` Unique/Set/Runeword templates. |
-| **`d2stat_tiling_prober`**  | Item | **Deterministic CSP Prober**: Solves unique reachability path to `0x1FF` terminator via constraint satisfaction backtracking. |
-| **`d2item_section_prefix_trace`** | Item | **Prefix Parity Auditor**: Compares local item parity and cumulative section-prefix traces, including isolated provenance inspect comparisons. |
-| **`d2item_extract`** | Item | Extracts a raw item bit-payload from a save into a `.d2i` file. |
-| **`d2save_inject`** | Item | Injects a raw `.d2i` item into a specific save file. |
-| **`d2save_status_inspect`**| Status | Dumps character attributes and skills (v105/v1 compatible). |
-| **`d2save_status_diff`** | Status | **Status Diff**: Compares character attributes and skills between two save files. |
-| **`dump_character`** | Save | **Comprehensive**: Dumps full character status, skills, and item map. |
-| **`d2save_inventory_check`**| Logic | Verifies inventory grid integrity (no overlaps, valid coordinates). |
-| **`v105_unlocker`** | Save | CLI example for unlocking progression bits in Alpha v105. |
-| **`v105_attribute_search`** | Status | **Attribute Search**: Scans Alpha v105 saves for specific attribute bit-patterns. |
-| **`v105_lab`** | Save | **v105 Experimental**: Sandbox tool for Alpha v105 progression and bit-archaeology experiments. |
+| **`d2save_verify`** | Save | **Standard Auditor**: Validates checksum, JM markers, and serialization fidelity. Supports `--diff-baseline` for regression gating and `--dump-residue-map` for residue/gap mapping (with `--json`). |
+| **`d2save_batch`** | Save | **Batch Runner**: Orchestrates `d2save_verify` and `SymmetryBitDiff` at scale with categorization. |
+| **`d2save_map`** | Save | Dumps the memory map of a `.d2s` file (JM offsets, item counts). |
+| **`d2save_gap`** | Save | **GAP Core**: Brute-forces header lengths and calculates alignment scores. |
+| **`SymmetryBitDiff`** | Item | **Roundtrip Master**: Compares bit-by-bit symmetry. Use `--roundtrip` for instant verification. |
+| **`d2save_diff`** | Save | Byte-level diff between two saves (header vs item section). |
+| **`d2save_bit_xor_diff`** | Save | **Semantic Shift Detector**: Bit-level XOR diff with section context. |
+| **`d2save_item_diff`** | Save | Compares only the item bitstream, masking header noise. |
+| **`d2save_structural_diff`** | Save | **Structural Diff**: Compares structural metadata between two saves to detect layout shifts. |
+| **`d2save_equipped_invariant`** | Save | Verifies equipped-item identification invariants for character and mercenary. |
+| **`d2save_mercenary_audit`** | Save | Audits mercenary data (experience, name, class, subtype) and its consistency with the related save section. |
+| **`d2save_json_dump`** | Save | Dumps save structure (items, skills, etc.) to JSON for machine comparison. |
+| **`d2save_taxonomy`** | Save | **Structural Auditor**: Categorizes fixtures by version and bitstream shape. |
+| **`d2save_arch`** | Save | **Bit Archaeologist**: Unified bit-level `dump` and `diff` for deep forensic exploration. |
+| **`d2save_section_bits`** | Save | **Section Analyzer**: Dumps the bit layout and offsets for each save section (Header, Attrs, Skills, Items). |
 | **`d2save_progression_audit`** | Save | **Progression Master**: Semantic state audit and mutation exporter (Quest/WP). |
 | **`d2save_poison`** | Save | **Forensic XOR**: Flips a single bit at a given offset (LSB-first) for corruption testing. |
-| **`d2save_arch`**   | Save | **Bit Archaeologist**: Unified bit-level `dump` and `diff` for deep forensic exploration. |
-| **`d2save_section_bits`** | Save | **Section Analyzer**: Dumps the bit layout and offsets for each save section (Header, Attrs, Skills, Items). |
-| **`d2save_structural_diff`** | Save | **Structural Diff**: Compares structural metadata between two saves to detect layout shifts. |
-| **`d2item_serialization_audit`** | Item | **Fidelity Master**: Visual bitstream alignment and forensic audit report. |
+| **`d2save_inject`** | Item | Injects a raw `.d2i` item into a specific save file. |
+| **`d2save_inventory_check`** | Logic | Verifies inventory grid integrity (no overlaps, valid coordinates). |
+| **`d2save_status_inspect`** | Status | Dumps character attributes and skills (v105/v1 compatible). |
+| **`d2save_status_diff`** | Status | **Status Diff**: Compares character attributes and skills between two save files. |
+| **`dump_character`** | Save | **Comprehensive**: Dumps full character status, skills, and item map. |
+| **`v105_unlocker`** | Save | CLI example (`examples/`) for unlocking progression bits in Alpha v105. |
+| **`v105_attribute_search`** | Status | **Attribute Search**: Scans Alpha v105 saves for specific attribute bit-patterns. |
+| **`v105_lab`** | Save | **v105 Experimental**: Sandbox tool for Alpha v105 progression and bit-archaeology experiments. |
+| **`d2item_inspect`** | Item | Decomposes a `.d2i` or `.d2s` item into its bit-fields and props. |
+| **`d2item_grep`** | Item | Searches raw bit patterns (0/1) in save or item files. |
+| **`d2item_bit_visualizer`** | Item | **Semantic Visualizer**: Hierarchical bitstream mapping with desync context. |
 | **`d2item_xray`** | Item | **Bit X-Ray**: Detailed bit-level visualization and decomposition of item property streams. |
+| **`d2item_bit_dump`** | Item | **Bitstream Dumper**: Dumps raw bits from an absolute offset with grouping and JSON support. |
+| **`d2item_extract`** | Item | Extracts a raw item bit-payload from a save into a `.d2i` file. |
+| **`d2item_chunk_verify`** | Item | Verifies extracted item chunks. |
+| **`d2item_bve`** | Item | Bit-level verification utility for item payloads. |
+| **`d2item_section_prefix_trace`** | Item | **Prefix Parity Auditor**: Compares local item parity and cumulative section-prefix traces, including isolated provenance inspect comparisons. |
+| **`d2item_serialization_audit`** | Item | **Fidelity Master**: Visual bitstream alignment and forensic audit report. |
 | **`d2item_global_audit`** | Item | **Batch Auditor**: Scans directories for serialization parity mismatches. `analyze-report <report.json> --json --token-efficient` summarizes a saved report without parsing saves; detects inconsistent counts and groups timeout stages. Analysis exit 0 does not mean the saved audit passed. |
-| **`d2save_taxonomy`** | Save | **Structural Auditor**: Categorizes fixtures by version and bitstream shape. |
+| **`d2item_opaque_census`** | Item | Counts and classifies opaque (unresolved) item regions across fixtures. |
 | **`d2item_rhythm_oracle`** | Item | **Rhythm Oracle**: Validates 9-bit property stream rhythms and terminators. |
 | **`d2item_alignment_oracle`** | Item | **Alignment Oracle**: Detects bit-drift and calculates required offsets. |
-| **`d2item_bit_dump`** | Item | **Bitstream Dumper**: Dumps raw bits from an absolute offset with grouping and JSON support. |
+| **`d2stat_fidelity_radar`** | Item | **Fidelity Radar**: Fast parallel multi-fixture bit replay and property completeness scanner with atomic JSON receipts. |
+| **`d2stat_template_oracle`** | Item | **Deterministic Option Oracle**: Cross-references parsed item properties against static Unique/Set/Runeword templates. |
+| **`d2stat_tiling_prober`** | Item | **Deterministic CSP Prober**: Solves the unique reachability path to the `0x1FF` terminator via constraint backtracking. |
 | **`semantic-bit-diff`** | Item | **Semantic Diff**: Read-only forensic CLI to find bit divergence anchored at JM markers. Outputs JSON. (Source: `src/bin/verify/semantic_bit_diff.rs`; run `cargo run --bin semantic-bit-diff -- --base <path> --mutated <path> --json`) |
 | **`d2item_registry_recommender`** | Forensic | **Triage Oracle**: Suggests bit-width updates from audit logs. |
 | **`d2item_registry_patcher`** | Forensic | **Auto-Patcher**: Applies recommendations to the registry atomically. |
 
 ### 🔍 Related Toolsets
-- **Game Data & Extraction**: See [`d2r-data/NAVIGATOR.md`](./d2r-data/NAVIGATOR.md) for `d2r-data-extractor` and `probe`.
-- **Forensic Research**: See [`d2r-spec/NAVIGATOR.md`](../d2r-spec/NAVIGATOR.md) for `d2item_oracle_mapper`, `v5_peek`, and `chunk_verify`.
-- **Tooling Proposals**: See [`d2r-spec/discussion/0173-efficiency-tooling-proposals.md`](../d2r-spec/discussion/0173-efficiency-tooling-proposals.md) for future productivity roadmap.
+- **Game Data & Extraction**: See [`d2r-data/NAVIGATOR.md`](./d2r-data/NAVIGATOR.md).
+- **Forensic research and tooling background**: See [`d2r-spec/NAVIGATOR.md`](../d2r-spec/NAVIGATOR.md) (private overlay, if present).
 
 ### 🚀 Common Verification Commands
 
@@ -155,18 +140,15 @@ cargo run --bin d2save_verify -- <fixture_path> --diff-baseline <baseline_json_p
 ```
 
 ## 7. Navigation Routing Gate (Fast Classification)
-Consult the [`navigation-classification` skill](../d2r-spec/.agents/skills/navigation-classification/SKILL.md) for rules on organizing code and tools across the tripartite structure.
 Before implementing, classify the request:
 - `Core-only`: implementation/verifier updates in `d2r-core` only.
 - `Data-only`: table/extraction updates in `d2r-data` only.
-- `Cross-boundary`: split into separate core/data slices and document file boundaries in task specs before coding.
+- `Cross-boundary`: split into separate core/data slices and document file boundaries before coding.
 
-## 8. Canonical Directive Filenames
-Use these exact filenames for navigation and policy lookup:
-- `AGENTS.md`
-- `gemini.md` (`GEMINI.md` is a case-only alias)
-- `CLAUDE.md` (`cloude.md` is a typo alias; normalize to `CLAUDE.md`)
-- `CONSTITUTION.md`
+## 8. Directive Filenames and Reference Links
+Canonical filenames: `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, `CONSTITUTION.md`.
+
+When the private overlay at `../d2r-spec/` is present, its `GEMINI.md`, `CLAUDE.md`, and `CONSTITUTION.md` are the primary authority for model-specific operating rules. The core-side files are public bootstrap entrypoints that redirect there.
 
 ## 9. Navigator Update Integrity Protocol
 When editing this navigator:
@@ -174,11 +156,4 @@ When editing this navigator:
 2. Apply smallest possible patch for contradictions.
 3. Append clarifications if no contradiction exists.
 4. Keep paths relative from repository root.
-
-## 10. Strategy Hub Model Entrypoints (Canonical)
-When the local Strategy Hub at `../d2r-spec/` is present, use the following spec-side files as the **primary authority** for model-specific operating rules:
-- **`../d2r-spec/GEMINI.md`** — Gemini-class research and planning model entrypoint
-- **`../d2r-spec/CLAUDE.md`** — Claude-class bounded implementation and review model entrypoint
-- **`../d2r-spec/CONSTITUTION.md`** — Strategy Hub private constitutional companion
-
-The core-side files (`GEMINI.md`, `CLAUDE.md`, `CONSTITUTION.md`) are public bootstrap entrypoints that redirect to these spec-side files when the Hub is available.
+5. Keep this file to what `d2r-core` owns. Do not add `d2r-spec` or `d2r-data` internal details (document IDs, task/skill paths, extraction tooling). Add only a reference pointer to the other navigator and, if needed, a domain name to look up there.
