@@ -1078,7 +1078,7 @@ mod tests {
                 .filter(|property| property.name == "item_socket_child")
                 .cloned()
                 .collect();
-            assert_eq!(markers.len(), 3);
+            assert!(markers.is_empty());
             for language in ["en", "ko"] {
                 assert!(format_properties_list(&markers, 99, language).is_empty());
                 let displayed = format_item(item, language, 0, 99);

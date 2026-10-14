@@ -1492,7 +1492,8 @@ fn parse_item_at_d2r_v3(
     if item.header.save_is_alpha && item.header.is_runeword && !item.socketed_items.is_empty() {
         item.sockets = Some(item.socketed_items.len() as u8);
     }
-    item.sync_socket_payload();
+    // Counted V3 children belong to filled_sockets, without Alpha 317/320 synthesis.
+    // Retain the original flags and the captured parent/child source spans.
     item.range.end = bit.saturating_add(total_consumed);
     item.total_bits = total_consumed;
     item.logical_width = Some(total_consumed);
@@ -7444,6 +7445,7 @@ mod concealed_stats_retention_tests {
             }
             let hidden_item = &modified[index];
             assert!(!hidden_item.is_identified);
+            assert_eq!(hidden_item.header.flags, item.header.flags & !(1 << 4));
             assert_eq!(hidden_item.properties, public_sockets);
             assert_eq!(hidden_item.stats.properties, hidden_item.properties);
             assert!(hidden_item.set_attributes.iter().all(Vec::is_empty));
@@ -7469,7 +7471,7 @@ mod concealed_stats_retention_tests {
             } else {
                 assert_eq!(expected.runeword_attributes.len(), 5);
                 assert_eq!(hidden_item.socketed_items.len(), 3);
-                assert_eq!(hidden_item.properties.len(), 3);
+                assert!(hidden_item.properties.is_empty());
             }
         }
     }
@@ -9282,5 +9284,214 @@ mod v3_misc_body_codec_tests {
         assert_eq!(parsed.tbk_ibk_teleport, book.tbk_ibk_teleport);
         assert_eq!(parsed.header, book.header);
         assert_eq!(emit(&typed(&parsed)).unwrap(), bits);
+    }
+}
+
+#[cfg(test)]
+mod v3_socket_owner_purity_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+    type Sample = (usize, usize, Vec<u8>, Item);
+    fn samples() -> &'static Vec<Sample> {
+        static INPUTS: OnceLock<Vec<Sample>> = OnceLock::new();
+        INPUTS.get_or_init(||{let root=std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from).unwrap_or_else(|_|std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));let mut rows=Vec::new();for(file,(relative,count))in[
+        ("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",33),
+        ("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",38),
+        ("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",35),
+        ("tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s",39),
+        ("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",16),
+    ].iter().enumerate(){let bytes=std::fs::read(root.join(relative)).unwrap();let items=Item::read_player_items_d2r_v3(&bytes,&HuffmanTree::new()).unwrap();assert_eq!(items.len(),*count);rows.extend(items.into_iter().enumerate().map(|(index,item)|(file,index,bytes.clone(),item)));}assert_eq!(rows.len(),161);assert_eq!(rows.iter().filter(|(_,_,_,i)|!i.socketed_items.is_empty()).count(),6);rows})
+    }
+    fn profile(p: &[ItemProperty]) -> Vec<ItemProperty> {
+        p.iter()
+            .map(|p| {
+                let mut p = p.clone();
+                p.range = Default::default();
+                p
+            })
+            .collect()
+    }
+    fn body(item: &Item) -> crate::domain::item::entity::ItemBody {
+        let mut body = item.body.clone();
+        body.alpha_code_bits.clear();
+        body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None;
+        body
+    }
+    fn raw_flags(bytes: &[u8], start: u64) -> u32 {
+        assert_eq!(start % 8, 0);
+        u32::from_le_bytes(
+            bytes[start as usize / 8..start as usize / 8 + 4]
+                .try_into()
+                .unwrap(),
+        )
+    }
+    #[invariant_test]
+    fn counted_v3_keeps_physical_parent_lists_flags_and_all_raw_spans() {
+        let (mut hosts, mut children, mut whole_bits, mut child_bits, mut physical_rows) =
+            (0, 0, 0, 0, 0);
+        for (_, index, bytes, item) in samples() {
+            assert_eq!(item.header.flags, raw_flags(bytes, item.range.start));
+            assert_eq!(item.bits.len() as u64, item.range.end - item.range.start);
+            for (offset, bit) in item.bits.iter().enumerate() {
+                let source = item.range.start + offset as u64;
+                assert_eq!(bit.offset, source);
+                assert_eq!(
+                    bit.bit,
+                    bytes[source as usize / 8] & (1 << (source % 8)) != 0
+                );
+            }
+            if item.socketed_items.is_empty() {
+                continue;
+            }
+            hosts += 1;
+            whole_bits += item.range.end - item.range.start;
+            let first = item.socketed_items[0].range.start;
+            let parent = &bytes[item.range.start as usize / 8..first as usize / 8];
+            let mut cursor =
+                crate::data::bit_cursor::BitCursor::new(bitstream_io::BitReader::endian(
+                    std::io::Cursor::new(parent),
+                    bitstream_io::LittleEndian,
+                ));
+            let physical = Item::from_reader_with_context_d2r_v3(
+                &mut cursor,
+                &HuffmanTree::new(),
+                Some((parent, 0)),
+                *index,
+                105,
+            )
+            .unwrap();
+            assert_eq!(item.header, physical.header);
+            assert_eq!(body(item), body(&physical));
+            assert_eq!(profile(&item.properties), profile(&physical.properties));
+            assert_eq!(
+                profile(&item.stats.properties),
+                profile(&physical.stats.properties)
+            );
+            assert_eq!(
+                profile(&item.runeword_attributes),
+                profile(&physical.runeword_attributes)
+            );
+            assert_eq!(item.properties.last().unwrap().stat_id, 511);
+            assert!(item
+                .properties
+                .iter()
+                .all(|p| p.name != "item_socket_child"));
+            physical_rows += item.properties.len();
+            let aux = item.body.d2r_v3_auxiliary.as_ref().unwrap();
+            assert_eq!(aux.filled_sockets, item.num_socketed_items);
+            assert_eq!(item.num_socketed_items as usize, item.socketed_items.len());
+            let mut next = first;
+            for child in &item.socketed_items {
+                assert_eq!(child.range.start, next);
+                assert_eq!(child.header.mode, 6);
+                assert_eq!(child.header.flags, raw_flags(bytes, child.range.start));
+                next = child.range.end;
+                let source: Vec<bool> = (child.range.start..child.range.end)
+                    .map(|offset| bytes[offset as usize / 8] & (1 << (offset % 8)) != 0)
+                    .collect();
+                let mut typed = child.clone();
+                typed.bits.clear();
+                typed.segments.clear();
+                typed.gap_bits.clear();
+                typed.body.alpha_code_bits.clear();
+                typed.range = Default::default();
+                typed.total_bits = 0;
+                typed.logical_width = None;
+                let bits = if child.is_compact {
+                    typed.to_bits_d2r_v3_compact(&HuffmanTree::new())
+                } else {
+                    typed.to_bits_d2r_v3_accessory(&HuffmanTree::new())
+                }
+                .unwrap();
+                assert_eq!(bits, source);
+                children += 1;
+                child_bits += bits.len();
+            }
+            assert_eq!(next, item.range.end);
+        }
+        assert_eq!(
+            (hosts, children, whole_bits, child_bits, physical_rows),
+            (6, 10, 2560, 1352, 12)
+        );
+        println!("{{\"roots\":161,\"hosts\":6,\"synthetic_rows\":0,\"source_bits\":2560,\"children\":10,\"child_bits\":1352,\"physical_main_rows\":12}}");
+    }
+    #[settled_contract_test]
+    fn unidentified_socket_host_keeps_source_flags_and_hidden_ownership() {
+        let (_, _, bytes, original) = samples()
+            .iter()
+            .find(|(file, index, _, _)| *file == 0 && *index == 31)
+            .unwrap();
+        let mut controlled = bytes.clone();
+        let bit = original.range.start + 4;
+        controlled[bit as usize / 8] &= !(1 << (bit % 8));
+        let stream =
+            crate::domain::item::stream::PlayerItemStream::read(&controlled, &HuffmanTree::new())
+                .unwrap();
+        assert_eq!(
+            stream.dialect,
+            crate::domain::item::stream::ItemStreamDialect::D2rV3
+        );
+        assert_eq!(stream.items.len(), 33);
+        let parsed = &stream.items[31];
+        assert_eq!(parsed.header.flags, original.header.flags & !(1 << 4));
+        assert!(!parsed.header.is_identified);
+        assert!(parsed.properties.is_empty() && parsed.stats.properties.is_empty());
+        let hidden = parsed
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .unwrap()
+            .concealed_stats
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            hidden
+                .properties
+                .iter()
+                .map(|p| (p.stat_id, p.value))
+                .collect::<Vec<_>>(),
+            vec![(22, 1), (75, 10), (511, 0)]
+        );
+        assert_eq!(parsed.range, original.range);
+        assert_eq!(parsed.socketed_items.len(), 1);
+        assert_eq!(
+            format!("{:?}", parsed.socketed_items),
+            format!("{:?}", original.socketed_items)
+        );
+    }
+    #[settled_contract_test]
+    fn capacity_and_child_mode_conflicts_still_reject() {
+        let (_, index, bytes, item) = samples()
+            .iter()
+            .find(|(file, index, _, _)| *file == 0 && *index == 31)
+            .unwrap();
+        let mut overflow = bytes.clone();
+        let filled =
+            item.range.start + 53 + HuffmanTree::new().encode("ktr ").unwrap().len() as u64;
+        for i in 0..3 {
+            let offset = filled + i;
+            overflow[offset as usize / 8] = (overflow[offset as usize / 8] & !(1 << (offset % 8)))
+                | ((((2_u8 >> i) & 1) as u8) << (offset % 8));
+        }
+        let failure = parse_item_at_d2r_v3(
+            &overflow,
+            item.range.start,
+            &HuffmanTree::new(),
+            *index,
+            105,
+        )
+        .unwrap_err();
+        assert!(format!("{:?}", failure.error).contains("filled socket count"));
+        let mut mode = bytes.clone();
+        let start = item.socketed_items[0].range.start + 35;
+        for i in 0..3 {
+            let offset = start + i;
+            mode[offset as usize / 8] &= !(1 << (offset % 8));
+        }
+        let failure =
+            parse_item_at_d2r_v3(&mode, item.range.start, &HuffmanTree::new(), *index, 105)
+                .unwrap_err();
+        assert!(format!("{:?}", failure.error).contains("socket child mode"));
     }
 }
