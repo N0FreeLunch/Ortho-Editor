@@ -129,7 +129,7 @@ This catalog includes **public verification tools** residing in the `d2r-core` r
 | **`d2item_rhythm_oracle`** | Item | **Rhythm Oracle**: Validates 9-bit property stream rhythms and terminators. |
 | **`d2item_alignment_oracle`** | Item | **Alignment Oracle**: Detects bit-drift and calculates required offsets. |
 | **`d2item_bit_dump`** | Item | **Bitstream Dumper**: Dumps raw bits from an absolute offset with grouping and JSON support. |
-| **`semantic-bit-diff`** | Item | **Semantic Diff**: Read-only forensic CLI to find bit divergence anchored at JM markers. Outputs JSON. (Located in `tools/semantic-bit-diff`) |
+| **`semantic-bit-diff`** | Item | **Semantic Diff**: Read-only forensic CLI to find bit divergence anchored at JM markers. Outputs JSON. (Source: `src/bin/verify/semantic_bit_diff.rs`; run `cargo run --bin semantic-bit-diff -- --base <path> --mutated <path> --json`) |
 | **`d2item_registry_recommender`** | Forensic | **Triage Oracle**: Suggests bit-width updates from audit logs. |
 | **`d2item_registry_patcher`** | Forensic | **Auto-Patcher**: Applies recommendations to the registry atomically. |
 
