@@ -277,10 +277,22 @@ fn compare_v3_source_item(
         } else if template.is_some_and(|template| template.is_weapon) {
             typed.to_bits_d2r_v3_weapon(huffman)
         } else if template.is_some_and(|template| template.is_armor) {
-            if typed.header.is_socketed {
-                typed.to_bits_d2r_v3_empty_socket_armor(huffman)
+            if typed.header.is_runeword
+                || typed.header.is_personalized
+                || !typed.socketed_items.is_empty()
+                || typed
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_ref()
+                    .is_some_and(|auxiliary| auxiliary.filled_sockets != 0)
+            {
+                if typed.header.is_socketed {
+                    typed.to_bits_d2r_v3_empty_socket_armor(huffman)
+                } else {
+                    typed.to_bits_d2r_v3_armor(huffman)
+                }
             } else {
-                typed.to_bits_d2r_v3_armor(huffman)
+                typed.to_bits_d2r_v3_stored_armor(huffman)
             }
         } else if matches!(typed.code.trim(), "cm1" | "cm2" | "cm3" | "jew") {
             typed.to_bits_d2r_v3_accessory(huffman)

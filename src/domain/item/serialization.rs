@@ -4819,6 +4819,7 @@ struct D2rV3JewelryWidths;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum D2rV3StoredLayout {
+    StoredArmor,
     Jewelry,
     Accessory,
     Armor,
@@ -5241,6 +5242,12 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Accessory)
     }
 
+    /// Rebuild stored armor quality and hidden property lists from typed fields.
+    /// Filled sockets, runewords and unsupported state fail without replay fallback.
+    pub fn to_bits_d2r_v3_stored_armor(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::StoredArmor)
+    }
+
     fn to_bits_d2r_v3_stored(
         &self,
         huffman: &HuffmanTree,
@@ -5259,12 +5266,32 @@ impl Item {
         let empty_socket_armor = layout == D2rV3StoredLayout::EmptySocketArmor;
         let weapon_layout = layout == D2rV3StoredLayout::Weapon;
         let accessory_layout = layout == D2rV3StoredLayout::Accessory;
+        let stored_armor_layout = layout == D2rV3StoredLayout::StoredArmor;
+        let allows_concealed = accessory_layout || stored_armor_layout;
         let armor_layout = matches!(
             layout,
-            D2rV3StoredLayout::Armor | D2rV3StoredLayout::EmptySocketArmor
+            D2rV3StoredLayout::Armor
+                | D2rV3StoredLayout::EmptySocketArmor
+                | D2rV3StoredLayout::StoredArmor
         );
-        let socket_layout = empty_socket_armor || (weapon_layout && header.is_socketed);
+        let socket_layout =
+            empty_socket_armor || ((weapon_layout || stored_armor_layout) && header.is_socketed);
         let supported_kind = match layout {
+            D2rV3StoredLayout::StoredArmor => {
+                item_template(self.body.code.trim())
+                    .is_some_and(|template| template.is_armor && template.has_durability)
+                    && matches!(
+                        quality,
+                        ItemQuality::Low
+                            | ItemQuality::Normal
+                            | ItemQuality::High
+                            | ItemQuality::Magic
+                            | ItemQuality::Rare
+                            | ItemQuality::Crafted
+                            | ItemQuality::Unique
+                            | ItemQuality::Set
+                    )
+            }
             D2rV3StoredLayout::Accessory => match self.body.code.trim() {
                 "cm1" | "cm2" | "cm3" => {
                     matches!(quality, ItemQuality::Magic | ItemQuality::Unique)
@@ -5300,11 +5327,11 @@ impl Item {
         };
         if auxiliary.save_version != 0x69
             || auxiliary.quest_difficulty.is_some()
-            || (!accessory_layout && auxiliary.concealed_stats.is_some())
+            || (!allows_concealed && auxiliary.concealed_stats.is_some())
             || header.save_is_alpha
             || !supported_kind
             || header.is_compact
-            || (!accessory_layout && !header.is_identified)
+            || (!allows_concealed && !header.is_identified)
             || header.is_ear
             || header.is_socketed != socket_layout
             || header.is_personalized
@@ -5317,6 +5344,7 @@ impl Item {
             || !self.properties_complete
         {
             return Err(invalid(match layout {
+                D2rV3StoredLayout::StoredArmor => "Unsupported D2R v3 stored armor layout",
                 D2rV3StoredLayout::Weapon => "Unsupported D2R v3 weapon layout",
                 D2rV3StoredLayout::Jewelry => "Unsupported D2R v3 jewelry layout",
                 D2rV3StoredLayout::Accessory => "Unsupported D2R v3 accessory layout",
@@ -5479,7 +5507,105 @@ impl Item {
                 }
             }
         }
-        if armor_layout {
+        if stored_armor_layout {
+            let subtype = matches!(quality, ItemQuality::Low | ItemQuality::High);
+            let magic = quality == ItemQuality::Magic;
+            let named = matches!(quality, ItemQuality::Rare | ItemQuality::Crafted);
+            let archetype = matches!(quality, ItemQuality::Unique | ItemQuality::Set);
+            let maximum = self
+                .body
+                .max_durability
+                .ok_or_else(|| invalid("Missing stored armor maximum durability"))?;
+            if self.is_opaque()
+                || self.is_semi_opaque()
+                || !self.modules.is_empty()
+                || self.code.trim() != self.body.code.trim()
+                || self.body.mode != header.mode
+                || self.body.location != header.location
+                || self.body.x != header.x
+                || self.body.y != header.y
+                || self.body.page != header.page
+                || self.body.defense.is_none()
+                || self.defense != self.body.defense
+                || self.max_durability != self.body.max_durability
+                || self.current_durability != self.body.current_durability
+                || self.body.current_durability.is_some() != (maximum > 0)
+                || self.quantity.is_some()
+                || self.body.quantity.is_some()
+                || auxiliary.has_quantity
+                || self.num_socketed_items != 0
+                || (!socket_layout && self.sockets.is_some())
+                || self.low_high_graphic_bits.is_some() != subtype
+                || self.magic_prefix.is_some() != magic
+                || self.magic_suffix.is_some() != magic
+                || self.rare_name_1.is_some() != named
+                || self.rare_name_2.is_some() != named
+                || (!named && self.rare_affixes.iter().any(Option::is_some))
+                || self.unique_id.is_some() != archetype
+                || self.runeword_id.is_some()
+                || self.runeword_level.is_some()
+                || self.has_multiple_graphics != self.multi_graphics_bits.is_some()
+                || self.has_class_specific_data != self.class_specific_bits.is_some()
+                || self.ear_class.is_some()
+                || self.ear_level.is_some()
+                || self.ear_player_name.is_some()
+                || self.personalized_player_name.is_some()
+                || self.timestamp_flag
+                || self.tbk_ibk_teleport.is_some()
+                || self.terminator_bit
+                || header.has_checksum
+                || header.alpha_checksum.is_some()
+                || header.alpha_quality_raw.is_some()
+                || header.alpha_v5_runeword_extra.is_some()
+                || header.alpha_unique_id_raw.is_some()
+                || self.body.v105_7mgw_payload.is_some()
+                || self.body.v5_runeword_extra.is_some()
+                || self.body.alpha_header_gap.is_some()
+                || !self.body.alpha_header_gap_bits.is_empty()
+                || !self.body.alpha_body_gap_bits.is_empty()
+                || !self.body.alpha_alignment_padding.is_empty()
+                || self.body.alpha_shadow_skip_bits.is_some()
+                || self.body.alpha_nudge.is_some()
+                || self.body.alpha_set_list_val.is_some()
+                || !self.stats.runeword_attributes.is_empty()
+                || (!self.stats.set_attributes.is_empty()
+                    && self.stats.set_attributes != self.set_attributes)
+                || (header.flags & (1 << 22) != 0) != header.is_ethereal
+            {
+                return Err(invalid("Unsupported or inconsistent stored armor state"));
+            }
+            match (header.is_identified, auxiliary.concealed_stats.as_deref()) {
+                (true, None) => {
+                    if !self.stats.properties.is_empty() && self.stats.properties != self.properties
+                    {
+                        return Err(invalid("Conflicting stored armor public property aliases"));
+                    }
+                }
+                (false, Some(hidden)) => {
+                    let expected_lists = auxiliary
+                        .set_property_flags
+                        .as_ref()
+                        .map(|flags| flags.iter().filter(|&&flag| flag).count())
+                        .unwrap_or(0);
+                    if !self.properties.is_empty()
+                        || !self.stats.properties.is_empty()
+                        || self.set_attributes.iter().any(|list| !list.is_empty())
+                        || hidden.set_attributes.len() != expected_lists
+                        || !hidden.runeword_attributes.is_empty()
+                    {
+                        return Err(invalid(
+                            "Unidentified armor must retain hidden lists and empty public slots",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(invalid(
+                        "Armor identification and concealed ownership disagree",
+                    ))
+                }
+            }
+        }
+        if armor_layout && !stored_armor_layout {
             if auxiliary.has_quantity
                 || self.quantity.is_some()
                 || self.body.quantity.is_some()
@@ -5687,8 +5813,10 @@ impl Item {
                     "stored current durability",
                 ),
             ] {
-                if weapon_layout
-                    && (stat_id == 31 || (stat_id == 72 && self.body.max_durability == Some(0)))
+                if (weapon_layout && stat_id == 31)
+                    || ((weapon_layout || stored_armor_layout)
+                        && stat_id == 72
+                        && self.body.max_durability == Some(0))
                 {
                     continue;
                 }
@@ -5739,7 +5867,7 @@ impl Item {
                 emitter.write_bit(flag)?;
             }
         }
-        let properties = if accessory_layout && !header.is_identified {
+        let properties = if allows_concealed && !header.is_identified {
             &auxiliary
                 .concealed_stats
                 .as_ref()
@@ -5748,9 +5876,18 @@ impl Item {
         } else {
             &self.properties
         };
-        if weapon_layout || accessory_layout {
+        let set_attributes = if allows_concealed && !header.is_identified {
+            &auxiliary
+                .concealed_stats
+                .as_ref()
+                .ok_or_else(|| invalid("Missing concealed Set owner"))?
+                .set_attributes
+        } else {
+            &self.set_attributes
+        };
+        if weapon_layout || allows_concealed {
             d2r_v3_write_weapon_list(&mut emitter, properties)?;
-            for properties in &self.set_attributes {
+            for properties in set_attributes {
                 d2r_v3_write_weapon_list(&mut emitter, properties)?;
             }
         } else {
@@ -7581,5 +7718,588 @@ mod v3_accessory_codec_tests {
         charm.header.mode = 6;
         charm.body.mode = 6;
         assert!(charm.to_bits_d2r_v3_accessory(&HuffmanTree::new()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod v3_stored_armor_codec_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+    type Sample = (usize, usize, Vec<u8>, Item);
+    fn samples() -> &'static Vec<Sample> {
+        static INPUTS: OnceLock<Vec<Sample>> = OnceLock::new();
+        INPUTS.get_or_init(|| {
+            let root=std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from).unwrap_or_else(|_|std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            let mut result=Vec::new();
+            for (file,relative) in [
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",
+                "tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s",
+                "tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",
+            ].iter().enumerate() {
+                let bytes=std::fs::read(root.join(relative)).unwrap();
+                let stream=crate::domain::item::stream::PlayerItemStream::read(&bytes,&HuffmanTree::new()).unwrap();
+                assert_eq!(stream.dialect,crate::domain::item::stream::ItemStreamDialect::D2rV3);
+                for (index,item) in stream.items.into_iter().enumerate(){
+                    if !item.is_compact && item_template(item.code.trim()).is_some_and(|template|template.is_armor){result.push((file,index,bytes.clone(),item));}
+                }
+            }
+            assert_eq!(result.len(),27);result
+        })
+    }
+    fn leaf(item: &Item) -> bool {
+        !item.header.is_runeword && !item.header.is_personalized && item.socketed_items.is_empty()
+    }
+    fn typed(item: &Item) -> Item {
+        let mut result = item.clone();
+        result.bits.clear();
+        result.segments.clear();
+        result.gap_bits.clear();
+        result.body.alpha_code_bits.clear();
+        result.range = Default::default();
+        result.total_bits = 0;
+        result.logical_width = None;
+        result
+    }
+    fn packed(bits: &[bool]) -> Vec<u8> {
+        let mut result = vec![0; bits.len().div_ceil(8)];
+        for (index, &bit) in bits.iter().enumerate() {
+            if bit {
+                result[index / 8] |= 1 << (index % 8);
+            }
+        }
+        result
+    }
+    fn reparse(bits: &[bool]) -> Item {
+        let bytes = packed(bits);
+        let mut cursor = crate::data::bit_cursor::BitCursor::new(bitstream_io::BitReader::endian(
+            std::io::Cursor::new(&bytes),
+            bitstream_io::LittleEndian,
+        ));
+        Item::from_reader_with_context_d2r_v3(
+            &mut cursor,
+            &HuffmanTree::new(),
+            Some((&bytes, 0)),
+            0,
+            105,
+        )
+        .unwrap()
+    }
+    fn normalize_properties(properties: &[ItemProperty]) -> Vec<ItemProperty> {
+        properties
+            .iter()
+            .map(|property| {
+                let mut result = property.clone();
+                result.range = Default::default();
+                result
+            })
+            .collect()
+    }
+    fn normalize_stats(stats: &ItemStats) -> ItemStats {
+        ItemStats {
+            properties: normalize_properties(&stats.properties),
+            set_attributes: stats
+                .set_attributes
+                .iter()
+                .map(|list| normalize_properties(list))
+                .collect(),
+            runeword_attributes: normalize_properties(&stats.runeword_attributes),
+        }
+    }
+    fn normalize_body(item: &Item) -> crate::domain::item::entity::ItemBody {
+        let mut body = item.body.clone();
+        body.alpha_code_bits.clear();
+        let auxiliary = body.d2r_v3_auxiliary.as_mut().unwrap();
+        auxiliary.alignment_padding = None;
+        if let Some(hidden) = auxiliary.concealed_stats.as_mut() {
+            **hidden = normalize_stats(hidden);
+        }
+        body
+    }
+    fn profile(item: &Item) -> (Vec<(u32, u32, i32)>, Vec<Vec<(u32, u32, i32)>>) {
+        let (property, sets) = if item.header.is_identified {
+            (&item.properties, &item.set_attributes)
+        } else {
+            let hidden = item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .concealed_stats
+                .as_ref()
+                .unwrap();
+            (&hidden.properties, &hidden.set_attributes)
+        };
+        let map = |properties: &Vec<ItemProperty>| {
+            properties
+                .iter()
+                .map(|p| (p.stat_id, p.param, p.value))
+                .collect()
+        };
+        (map(property), sets.iter().map(map).collect())
+    }
+    fn control_bits(item: &mut Item) -> Vec<bool> {
+        for length in 0..8 {
+            item.body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = Some(vec![false; length]);
+            match item.to_bits_d2r_v3_stored_armor(&HuffmanTree::new()) {
+                Ok(bits) => return bits,
+                Err(error) if error.to_string().contains("alignment field does not match") => {}
+                Err(error) => panic!("Unexpected control rejection: {error}"),
+            }
+        }
+        panic!("No byte alignment for typed armor control")
+    }
+    fn sample(file: usize, index: usize) -> &'static Item {
+        &samples()
+            .iter()
+            .find(|(f, i, _, _)| *f == file && *i == index)
+            .unwrap()
+            .3
+    }
+
+    #[invariant_test]
+    fn original_stored_armor_fields_and_hidden_lists_rebuild_without_replay() {
+        let h = HuffmanTree::new();
+        let (
+            mut count,
+            mut bits_total,
+            mut hidden,
+            mut hidden_set,
+            mut old_positive,
+            mut old_negative,
+            mut deferred,
+        ) = (0, 0, 0, 0, 0, 0, 0);
+        for (_, _, bytes, item) in samples() {
+            let mut model = typed(item);
+            if !leaf(item) {
+                assert!(model.to_bits_d2r_v3_stored_armor(&h).is_err());
+                deferred += 1;
+                continue;
+            }
+            let original: Vec<bool> = (item.range.start..item.range.end)
+                .map(|offset| bytes[offset as usize / 8] & (1 << (offset % 8)) != 0)
+                .collect();
+            model.bits = vec![crate::item::RecordedBit {
+                bit: true,
+                offset: u64::MAX,
+            }];
+            model.body.alpha_code_bits = vec![true; 31];
+            let rebuilt = model.to_bits_d2r_v3_stored_armor(&h).unwrap();
+            assert_eq!(rebuilt, original, "{}", item.code.trim());
+            count += 1;
+            bits_total += rebuilt.len();
+            let old = if item.header.is_socketed {
+                model.to_bits_d2r_v3_empty_socket_armor(&h)
+            } else {
+                model.to_bits_d2r_v3_armor(&h)
+            };
+            match old {
+                Ok(bits) => {
+                    assert_eq!(bits, original);
+                    old_positive += 1;
+                }
+                Err(_) => old_negative += 1,
+            }
+            let parsed = reparse(&rebuilt);
+            assert_eq!(parsed.header, item.header);
+            assert_eq!(normalize_body(&parsed), normalize_body(item));
+            assert_eq!(
+                normalize_properties(&parsed.properties),
+                normalize_properties(&item.properties)
+            );
+            assert_eq!(normalize_stats(&parsed.stats), normalize_stats(&item.stats));
+            assert_eq!(profile(&parsed), profile(item));
+            assert_eq!(
+                parsed
+                    .set_attributes
+                    .iter()
+                    .map(|list| list.len())
+                    .collect::<Vec<_>>(),
+                item.set_attributes
+                    .iter()
+                    .map(|list| list.len())
+                    .collect::<Vec<_>>()
+            );
+            if !item.header.is_identified {
+                hidden += 1;
+                assert!(
+                    parsed.properties.is_empty()
+                        && parsed.stats.properties.is_empty()
+                        && parsed.set_attributes.iter().all(Vec::is_empty)
+                );
+                if item.header.quality == Some(ItemQuality::Set) {
+                    hidden_set += 1;
+                    assert_eq!(parsed.set_attributes.len(), 1);
+                    assert_eq!(
+                        parsed
+                            .body
+                            .d2r_v3_auxiliary
+                            .as_ref()
+                            .unwrap()
+                            .concealed_stats
+                            .as_ref()
+                            .unwrap()
+                            .set_attributes
+                            .len(),
+                        1
+                    );
+                }
+            }
+            let mut whole = bytes.clone();
+            whole.splice(
+                item.range.start as usize / 8..item.range.end as usize / 8,
+                packed(&rebuilt),
+            );
+            assert_eq!(&whole, bytes);
+            let mut parsed = typed(&parsed);
+            parsed
+                .body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .alignment_padding
+                .clone();
+            assert_eq!(parsed.to_bits_d2r_v3_stored_armor(&h).unwrap(), original);
+        }
+        assert_eq!(
+            (
+                count,
+                bits_total,
+                hidden,
+                hidden_set,
+                old_positive,
+                old_negative,
+                deferred
+            ),
+            (24, 6088, 5, 1, 6, 18, 3)
+        );
+        assert_eq!(
+            (
+                sample(4, 7).body.max_durability,
+                sample(4, 7).body.current_durability
+            ),
+            (Some(12), Some(13))
+        );
+        println!("{{\"actual_items\":24,\"source_bits\":6088,\"differing_bits\":0,\"concealed\":5,\"hidden_set\":1,\"old_positive\":6,\"new\":18,\"deferred\":3}}");
+    }
+
+    #[settled_contract_test]
+    fn stored_body_mutations_match_independently_pinned_source_spans() {
+        // Immutable source offsets keep the writer from choosing its own field oracle.
+        let anchors = [
+            (0, 0, 7448),
+            (0, 10, 8481),
+            (0, 11, 8711),
+            (0, 27, 10866),
+            (1, 7, 8861),
+            (1, 29, 11604),
+            (2, 9, 9197),
+            (3, 0, 7491),
+            (3, 2, 7949),
+            (3, 5, 8700),
+            (3, 6, 9032),
+            (3, 11, 9964),
+            (3, 32, 13663),
+            (3, 33, 14010),
+            (3, 35, 14681),
+            (3, 38, 15418),
+            (4, 4, 7799),
+            (4, 5, 7981),
+            (4, 6, 8180),
+            (4, 7, 8361),
+            (4, 8, 8562),
+            (4, 10, 8932),
+            (4, 12, 9190),
+            (4, 15, 10086),
+        ];
+        let widths: [usize; 3] = [31, 73, 72].map(|id| {
+            crate::data::stat_costs::STAT_COSTS
+                .iter()
+                .find(|stat| stat.id == id)
+                .unwrap()
+                .save_bits as usize
+        });
+        for (file, index, offset) in anchors {
+            let (_, _, source, item) = samples()
+                .iter()
+                .find(|(f, i, _, _)| *f == file && *i == index)
+                .unwrap();
+            let starts = [
+                offset as u64,
+                offset as u64 + widths[0] as u64,
+                offset as u64 + (widths[0] + widths[1]) as u64,
+            ];
+            let original = typed(item)
+                .to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+                .unwrap();
+            for field in 0..3 {
+                let mut model = typed(item);
+                let (value, next) = match field {
+                    0 => {
+                        let old = model.body.defense.unwrap();
+                        model.defense = Some(old + 1);
+                        model.body.defense = Some(old + 1);
+                        (old, old + 1)
+                    }
+                    1 => {
+                        let old = model.body.max_durability.unwrap();
+                        model.max_durability = Some(old + 1);
+                        model.body.max_durability = Some(old + 1);
+                        (old, old + 1)
+                    }
+                    _ => {
+                        let old = model.body.current_durability.unwrap();
+                        model.current_durability = Some(old + 1);
+                        model.body.current_durability = Some(old + 1);
+                        (old, old + 1)
+                    }
+                };
+                let raw = (0..widths[field]).fold(0u64, |v, bit| {
+                    v | (u64::from(
+                        source[(starts[field] + bit as u64) as usize / 8]
+                            & (1 << ((starts[field] + bit as u64) % 8))
+                            != 0,
+                    ) << bit)
+                });
+                let add = if field == 0 {
+                    crate::domain::stats::stat_save_add(31).unwrap()
+                } else {
+                    0
+                };
+                assert_eq!(raw, (i64::from(value) + i64::from(add)) as u64);
+                let rebuilt = model
+                    .to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+                    .unwrap();
+                assert_eq!(rebuilt.len(), original.len());
+                assert_ne!(rebuilt, original);
+                assert!(rebuilt
+                    .iter()
+                    .zip(&original)
+                    .enumerate()
+                    .filter(|(_, (a, b))| a != b)
+                    .all(|(bit, _)| {
+                        let absolute = item.range.start + bit as u64;
+                        absolute >= starts[field] && absolute < starts[field] + widths[field] as u64
+                    }));
+                let parsed = reparse(&rebuilt);
+                assert_eq!(
+                    [
+                        parsed.body.defense,
+                        parsed.body.max_durability,
+                        parsed.body.current_durability
+                    ][field],
+                    Some(next)
+                );
+                assert_eq!(profile(&parsed), profile(item));
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn concealed_set_mutations_keep_public_slots_empty() {
+        let original = sample(3, 35);
+        let mut item = typed(original);
+        let hidden = item
+            .body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .concealed_stats
+            .as_mut()
+            .unwrap();
+        let property = hidden.set_attributes[0]
+            .iter_mut()
+            .find(|property| property.stat_id != 511)
+            .unwrap();
+        let source_span = property.range.clone();
+        property.value += 1;
+        let bits = item
+            .to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+            .unwrap();
+        let before = typed(original)
+            .to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+            .unwrap();
+        assert_eq!(bits.len(), before.len());
+        assert_ne!(bits, before);
+        assert!(bits
+            .iter()
+            .zip(&before)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .all(|(bit, _)| {
+                let offset = original.range.start + bit as u64;
+                offset >= source_span.start && offset < source_span.end
+            }));
+        let parsed = reparse(&bits);
+        assert_eq!(profile(&parsed), profile(&item));
+        assert_ne!(profile(&parsed), profile(original));
+        assert!(
+            parsed.properties.is_empty()
+                && parsed.stats.properties.is_empty()
+                && parsed.set_attributes.iter().all(Vec::is_empty)
+        );
+        assert_eq!(parsed.set_list_count, original.set_list_count);
+    }
+
+    #[settled_contract_test]
+    fn crafted_zero_durability_and_socket_quality_controls_reparse() {
+        let mut crafted = typed(sample(0, 10));
+        crafted.header.quality = Some(ItemQuality::Crafted);
+        let bits = control_bits(&mut crafted);
+        let parsed = reparse(&bits);
+        assert_eq!(parsed.header.quality, Some(ItemQuality::Crafted));
+        assert_eq!(parsed.rare_affixes, crafted.rare_affixes);
+        assert_eq!(profile(&parsed), profile(&crafted));
+        let mut zero = typed(sample(4, 4));
+        zero.max_durability = Some(0);
+        zero.body.max_durability = Some(0);
+        zero.current_durability = None;
+        zero.body.current_durability = None;
+        let bits = control_bits(&mut zero);
+        let parsed = reparse(&bits);
+        assert_eq!(
+            (parsed.body.max_durability, parsed.body.current_durability),
+            (Some(0), None)
+        );
+        assert_eq!(profile(&parsed), profile(&zero));
+        for original in [sample(1, 29), sample(3, 35)] {
+            let mut item = typed(original);
+            item.header.is_socketed = true;
+            item.header.flags |= 1 << 11;
+            item.sockets = Some(3);
+            let bits = control_bits(&mut item);
+            let parsed = reparse(&bits);
+            assert_eq!(parsed.sockets, Some(3));
+            assert!(parsed.socketed_items.is_empty());
+            assert_eq!(profile(&parsed), profile(&item));
+            if !original.header.is_identified {
+                assert!(
+                    parsed.properties.is_empty() && parsed.set_attributes.iter().all(Vec::is_empty)
+                );
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn conflicting_or_unowned_stored_armor_state_is_rejected() {
+        let changes: Vec<fn(&mut Item)> = vec![
+            |i| i.body.defense = i.body.defense.map(|value| value + 1),
+            |i| {
+                i.current_durability = None;
+                i.body.current_durability = None;
+            },
+            |i| {
+                i.max_durability = Some(0);
+                i.body.max_durability = Some(0);
+            },
+            |i| i.quantity = Some(1),
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None,
+            |i| i.body.x ^= 1,
+            |i| i.body.v105_7mgw_payload = Some(vec![false]),
+            |i| i.body.v5_runeword_extra = Some(0),
+            |i| i.body.alpha_body_gap_bits = vec![false],
+            |i| i.properties_complete = false,
+            |i| i.stats.properties[0].value += 1,
+            |i| {
+                i.properties[0].is_opaque = true;
+                i.stats.properties = i.properties.clone();
+            },
+            |i| {
+                i.properties[0].maturity = crate::domain::stats::StatMaturityTier::Inferred;
+                i.stats.properties = i.properties.clone();
+            },
+            |i| {
+                i.properties.pop();
+                i.stats.properties = i.properties.clone();
+            },
+            |i| i.header.is_identified = false,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().concealed_stats = Some(Box::default()),
+            |i| i.header.quality = Some(ItemQuality::Normal),
+            |i| {
+                i.header.mode = 6;
+                i.body.mode = 6;
+            },
+            |i| {
+                i.header.is_socketed = true;
+                i.header.flags |= 1 << 11;
+                i.sockets = Some(0);
+            },
+            |i| i.terminator_bit = true,
+        ];
+        for (index, change) in changes.iter().enumerate() {
+            let mut item = typed(sample(0, 10));
+            change(&mut item);
+            assert_eq!(
+                item.to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput,
+                "case{index}"
+            );
+        }
+        for case in 0..5 {
+            let mut item = typed(sample(3, 35));
+            match case {
+                0 => item.body.d2r_v3_auxiliary.as_mut().unwrap().concealed_stats = None,
+                1 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .concealed_stats
+                        .as_mut()
+                        .unwrap()
+                        .set_attributes
+                        .pop();
+                }
+                2 => {
+                    item.set_attributes[0] = item
+                        .body
+                        .d2r_v3_auxiliary
+                        .as_ref()
+                        .unwrap()
+                        .concealed_stats
+                        .as_ref()
+                        .unwrap()
+                        .properties
+                        .clone()
+                }
+                3 => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .set_property_flags = None
+                }
+                _ => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .concealed_stats
+                        .as_mut()
+                        .unwrap()
+                        .set_attributes[0]
+                        .pop();
+                }
+            }
+            assert!(
+                item.to_bits_d2r_v3_stored_armor(&HuffmanTree::new())
+                    .is_err(),
+                "hidden case{case}"
+            );
+        }
     }
 }
