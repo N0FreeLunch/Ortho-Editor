@@ -279,7 +279,6 @@ fn compare_v3_source_item(
         // Source-owned V3 alignment is a typed field, not the item replay cache.
         let template = item_template(typed.code.trim());
         let deferred_stored_host = typed.header.is_runeword
-            || typed.header.is_personalized
             || !typed.socketed_items.is_empty()
             || typed
                 .body
@@ -288,8 +287,7 @@ fn compare_v3_source_item(
                 .is_some_and(|auxiliary| auxiliary.filled_sockets != 0);
         let emitted = if typed.is_compact {
             typed.to_bits_d2r_v3_compact(huffman)
-        } else if !typed.header.is_personalized
-            && typed.header.is_socketed
+        } else if typed.header.is_socketed
             && template.is_some_and(|template| template.is_weapon || template.is_armor)
             && deferred_stored_host
         {
@@ -302,7 +300,6 @@ fn compare_v3_source_item(
             }
         } else if template.is_some_and(|template| template.is_armor) {
             if typed.header.is_runeword
-                || typed.header.is_personalized
                 || !typed.socketed_items.is_empty()
                 || typed
                     .body

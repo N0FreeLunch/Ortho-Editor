@@ -4850,6 +4850,8 @@ impl D2rV3JewelryWidths {
     const RARE_NAME: u32 = 8;
     const UNIQUE_ID: u32 = 12;
     const RUNEWORD_ID: u32 = 16;
+    const PERSONALIZED_CHARACTER: u32 = 8;
+    const PERSONALIZED_NAME_LIMIT: usize = 16;
     const TOME: u32 = 5;
     const QUANTITY: u32 = 9;
     const STASH_QUANTITY: u32 = 8;
@@ -5331,6 +5333,7 @@ impl Item {
             layout,
             D2rV3StoredLayout::StoredArmor | D2rV3StoredLayout::SocketArmor
         );
+        let allows_personalized = stored_weapon_layout || stored_armor_layout;
         let allows_concealed = accessory_layout
             || stored_armor_layout
             || stored_weapon_layout
@@ -5426,7 +5429,7 @@ impl Item {
             || (!allows_concealed && !header.is_identified)
             || header.is_ear
             || header.is_socketed != socket_layout
-            || header.is_personalized
+            || (header.is_personalized && !allows_personalized)
             || (header.is_runeword && !runeword_layout)
             || matches!(header.mode, 3 | 5)
             || (header.mode == 6 && (!accessory_layout || self.body.code.trim() != "jew"))
@@ -5522,7 +5525,7 @@ impl Item {
                 || self.ear_class.is_some()
                 || self.ear_level.is_some()
                 || self.ear_player_name.is_some()
-                || self.personalized_player_name.is_some()
+                || (self.personalized_player_name.is_some() != header.is_personalized)
                 || self.timestamp_flag
                 || self.tbk_ibk_teleport.is_some()
                 || header.has_checksum
@@ -5745,7 +5748,7 @@ impl Item {
                 || self.ear_class.is_some()
                 || self.ear_level.is_some()
                 || self.ear_player_name.is_some()
-                || self.personalized_player_name.is_some()
+                || (self.personalized_player_name.is_some() != header.is_personalized)
                 || self.timestamp_flag
                 || self.tbk_ibk_teleport.is_some()
                 || self.terminator_bit
@@ -5862,7 +5865,7 @@ impl Item {
             (11, socket_layout),
             (16, false),
             (21, false),
-            (24, false),
+            (24, header.is_personalized),
             (26, runeword_layout),
         ] {
             if (header.flags & (1 << flag) != 0) != expected {
@@ -6015,6 +6018,37 @@ impl Item {
                 W::RUNEWORD_ID,
                 "runeword ID",
             )?;
+        }
+        if header.is_personalized {
+            let name = self
+                .personalized_player_name
+                .as_deref()
+                .ok_or_else(|| invalid("Missing personalized equipment name"))?;
+            let count = name.chars().count();
+            if count > W::PERSONALIZED_NAME_LIMIT
+                || name.chars().any(|ch| ch == '\0' || u32::from(ch) > 255)
+            {
+                return Err(invalid(
+                    "D2R v3 personalized name requires at most 16 non-NUL byte characters",
+                ));
+            }
+            // The V3 reader maps each byte with char::from, rather than UTF-8 decoding.
+            for ch in name.chars() {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    u32::from(ch) as u64,
+                    W::PERSONALIZED_CHARACTER,
+                    "personalized character",
+                )?;
+            }
+            if count < W::PERSONALIZED_NAME_LIMIT {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    0,
+                    W::PERSONALIZED_CHARACTER,
+                    "personalized terminator",
+                )?;
+            }
         }
         emitter.write_bit(!auxiliary.realm_data.is_empty())?;
         if !auxiliary.realm_data.is_empty() && auxiliary.realm_data.len() != 4 {
@@ -9620,14 +9654,14 @@ mod v3_socket_composite_codec_tests {
             rows
         })
     }
-    fn sample(file: usize, index: usize) -> &'static Item {
+    pub(super) fn sample(file: usize, index: usize) -> &'static Item {
         &samples()
             .iter()
             .find(|(f, i, _, _)| *f == file && *i == index)
             .unwrap()
             .3
     }
-    fn typed(item: &Item) -> Item {
+    pub(super) fn typed(item: &Item) -> Item {
         let mut item = item.clone();
         item.bits.clear();
         item.segments.clear();
@@ -9652,7 +9686,7 @@ mod v3_socket_composite_codec_tests {
     fn emit(item: &Item) -> io::Result<Vec<bool>> {
         item.to_bits_d2r_v3_socket_host(&HuffmanTree::new())
     }
-    fn packed(bits: &[bool]) -> Vec<u8> {
+    pub(super) fn packed(bits: &[bool]) -> Vec<u8> {
         let mut bytes = vec![0; bits.len().div_ceil(8)];
         for (i, &bit) in bits.iter().enumerate() {
             if bit {
@@ -9661,7 +9695,7 @@ mod v3_socket_composite_codec_tests {
         }
         bytes
     }
-    fn reparse(bits: &[bool]) -> Item {
+    pub(super) fn reparse(bits: &[bool]) -> Item {
         let bytes = packed(bits);
         let (item, consumed) =
             parse_item_at_d2r_v3(&bytes, 0, &HuffmanTree::new(), 0, 105).unwrap();
@@ -9702,7 +9736,7 @@ mod v3_socket_composite_codec_tests {
         }
         body
     }
-    fn assert_fields(actual: &Item, expected: &Item) {
+    pub(super) fn assert_fields(actual: &Item, expected: &Item) {
         assert_eq!(actual.header, expected.header);
         assert_eq!(body(actual), body(expected));
         assert_eq!(
@@ -9788,7 +9822,7 @@ mod v3_socket_composite_codec_tests {
         }
         panic!("No byte alignment")
     }
-    fn hide(item: &mut Item) {
+    pub(super) fn hide(item: &mut Item) {
         let hidden = ItemStats {
             properties: std::mem::take(&mut item.properties),
             set_attributes: std::mem::take(&mut item.set_attributes),
@@ -10204,5 +10238,203 @@ mod v3_socket_composite_codec_tests {
         }
         assert_eq!(rejected, 6);
         println!("{{\"malformed_runeword_groups\":6,\"old_leaf_host_rejections\":6}}");
+    }
+}
+
+#[cfg(test)]
+mod v3_personalized_equipment_codec_tests {
+    use super::v3_socket_composite_codec_tests as composite;
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+
+    fn source() -> &'static (Vec<u8>, Item) {
+        static SOURCE: OnceLock<(Vec<u8>, Item)> = OnceLock::new();
+        SOURCE.get_or_init(|| {
+            let root = std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            let bytes = std::fs::read(root.join("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaPersonalizeComplete.d2s")).unwrap();
+            let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
+            let item = items[42].clone();
+            assert_eq!(item.code.trim(), "brs");
+            assert_eq!(item.personalized_player_name.as_deref(), Some("TESTDRUID"));
+            assert_eq!(item.range.end - item.range.start, 416);
+            (bytes, item)
+        })
+    }
+    fn emit(item: &Item) -> io::Result<Vec<bool>> {
+        let huffman = HuffmanTree::new();
+        if item.header.is_socketed {
+            item.to_bits_d2r_v3_socket_host(&huffman)
+        } else if item_template(item.code.trim()).unwrap().is_weapon {
+            item.to_bits_d2r_v3_stored_weapon(&huffman)
+        } else {
+            item.to_bits_d2r_v3_stored_armor(&huffman)
+        }
+    }
+    fn assert_fields(actual: &Item, expected: &Item) {
+        composite::assert_fields(actual, expected);
+        assert_eq!(
+            actual.personalized_player_name,
+            expected.personalized_player_name
+        );
+    }
+    fn named(source: &Item, name: &str) -> Item {
+        let mut item = composite::typed(source);
+        item.header.is_personalized = true;
+        item.header.flags |= 1 << 24;
+        item.personalized_player_name = Some(name.to_owned());
+        item
+    }
+    fn rejects(item: &Item) {
+        let before = item.clone();
+        assert_eq!(emit(item).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(item, &before);
+    }
+
+    #[invariant_test]
+    fn actual_personalized_armor_is_source_exact_without_replay() {
+        let (bytes, source) = source();
+        let before = source.clone();
+        let mut typed = composite::typed(source);
+        typed.bits = vec![crate::item::RecordedBit {
+            bit: true,
+            offset: u64::MAX,
+        }];
+        typed.body.alpha_code_bits = vec![true; 17];
+        for child in &mut typed.socketed_items {
+            child.bits = typed.bits.clone();
+            child.body.alpha_code_bits = vec![false; 11];
+        }
+        let bits = emit(&typed).unwrap();
+        let original: Vec<_> = (source.range.start..source.range.end)
+            .map(|offset| bytes[offset as usize / 8] & (1 << (offset % 8)) != 0)
+            .collect();
+        assert_eq!(bits, original);
+        assert_fields(&composite::reparse(&bits), source);
+        assert_eq!(source, &before);
+        println!(
+            "{{\"actual_roots\":1,\"source_bits\":416,\"differing_bits\":0,\"name_bits\":80}}"
+        );
+    }
+
+    #[settled_contract_test]
+    fn name_mutation_is_local_and_whole_save_reparses() {
+        let (bytes, source) = source();
+        let before = emit(&composite::typed(source)).unwrap();
+        let item = named(source, "TESTDRUIE");
+        let after = emit(&item).unwrap();
+        let diffs: Vec<_> = before
+            .iter()
+            .zip(&after)
+            .enumerate()
+            .filter_map(|(i, (a, b))| (a != b).then_some(i))
+            .collect();
+        assert!(!diffs.is_empty());
+        assert!(diffs.iter().all(|i| (128..208).contains(i)));
+        assert_fields(&composite::reparse(&after), &item);
+        let mut patched = bytes.clone();
+        let start = source.range.start as usize / 8;
+        patched[start..start + after.len() / 8].copy_from_slice(&composite::packed(&after));
+        let items = Item::read_player_items_d2r_v3(&patched, &HuffmanTree::new()).unwrap();
+        let original = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        assert_eq!(items.len(), original.len());
+        for (index, (actual, expected)) in items.iter().zip(&original).enumerate() {
+            if index == 42 {
+                assert_fields(actual, &item);
+                assert_eq!(actual.range, expected.range);
+            } else {
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn name_endpoints_and_byte_characters_roundtrip() {
+        let source = &source().1;
+        let base = emit(&composite::typed(source)).unwrap().len() - 80;
+        for name in [
+            "",
+            "A",
+            "ABCDEFGHIJKLMNO",
+            "ABCDEFGHIJKLMNOP",
+            "\u{e9}\u{ff}",
+        ] {
+            let item = named(source, name);
+            let bits = emit(&item).unwrap();
+            assert_eq!(
+                bits.len(),
+                base + 8 * (name.chars().count() + usize::from(name.chars().count() < 16))
+            );
+            assert_fields(&composite::reparse(&bits), &item);
+            assert_eq!(
+                emit(&composite::typed(&composite::reparse(&bits))).unwrap(),
+                bits
+            );
+        }
+    }
+
+    #[settled_contract_test]
+    fn stored_and_socket_roles_keep_hidden_set_runeword_ownership() {
+        let mut controls = 0;
+        for source in [
+            composite::sample(0, 0),
+            composite::sample(4, 15),
+            composite::sample(3, 0),
+            composite::sample(0, 31),
+            composite::sample(4, 13),
+            composite::sample(4, 12),
+        ] {
+            let plain = emit(&composite::typed(source)).unwrap();
+            assert_fields(&composite::reparse(&plain), source);
+            let item = named(source, "ABCDEF");
+            let bits = emit(&item).unwrap();
+            assert_eq!(bits.len(), plain.len() + 56);
+            assert_fields(&composite::reparse(&bits), &item);
+            let mut hidden = item.clone();
+            composite::hide(&mut hidden);
+            let hidden_bits = emit(&hidden).unwrap();
+            let diffs: Vec<_> = bits
+                .iter()
+                .zip(&hidden_bits)
+                .enumerate()
+                .filter_map(|(i, (a, b))| (a != b).then_some(i))
+                .collect();
+            assert_eq!(diffs, vec![4]);
+            assert_fields(&composite::reparse(&hidden_bits), &hidden);
+            controls += 1;
+        }
+        assert_eq!(controls, 6);
+    }
+
+    #[settled_contract_test]
+    fn invalid_names_flags_and_unowned_state_reject() {
+        let source = &source().1;
+        for name in ["ABCDEFGHIJKLMNOPQ", "A\0B", "\u{100}", "\u{1f600}"] {
+            rejects(&named(source, name));
+        }
+        for case in 0..7 {
+            let mut item = named(source, "TESTDRUID");
+            match case {
+                0 => item.personalized_player_name = None,
+                1 => item.header.is_personalized = false,
+                2 => item.header.flags &= !(1 << 24),
+                3 => {
+                    item.header.is_personalized = false;
+                    item.header.flags &= !(1 << 24);
+                }
+                4 => item.runeword_level = Some(1),
+                5 => item.num_socketed_items += 1,
+                6 => {
+                    item.stats.properties[0].value += 1;
+                }
+                _ => unreachable!(),
+            }
+            rejects(&item);
+        }
+        let item = named(composite::sample(0, 0), "A");
+        assert!(item.to_bits_d2r_v3_armor(&HuffmanTree::new()).is_err());
+        let item = named(composite::sample(4, 12), "A");
+        assert!(item.to_bits_d2r_v3_weapon(&HuffmanTree::new()).is_err());
     }
 }
