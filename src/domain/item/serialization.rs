@@ -3,8 +3,7 @@ use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
 };
-use crate::domain::header::entity::{HeaderAxiom, ItemSegmentType, calculate_alpha_v105_checksum};
-use crate::domain::item::Item;
+use crate::domain::header::entity::{calculate_alpha_v105_checksum, HeaderAxiom, ItemSegmentType};
 use crate::domain::item::axiom_meta::{
     Confidence, ForensicAudit, ForensicAxiom, ForensicMetadata, Intentionality,
 };
@@ -13,6 +12,7 @@ use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
 use crate::domain::item::subdomains::property::{AlphaPropertyCombinator, PropertyNormalizer};
 use crate::domain::item::subdomains::stats::StatsCombinator;
+use crate::domain::item::Item;
 use crate::domain::stats::{ItemProperty, ItemStats, StatsAxiom};
 use crate::error::{ParsingError, ParsingFailure, ParsingResult};
 use crate::item::BitSegment;
@@ -4820,6 +4820,7 @@ struct D2rV3JewelryWidths;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum D2rV3StoredLayout {
     Jewelry,
+    Accessory,
     Armor,
     EmptySocketArmor,
     Weapon,
@@ -5234,6 +5235,12 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Weapon)
     }
 
+    /// Rebuild typed charms and jewels, retaining concealed options without public exposure.
+    /// This opt-in writer rejects unsupported state and never reads whole-item replay caches.
+    pub fn to_bits_d2r_v3_accessory(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::Accessory)
+    }
+
     fn to_bits_d2r_v3_stored(
         &self,
         huffman: &HuffmanTree,
@@ -5251,12 +5258,23 @@ impl Item {
             .ok_or_else(|| invalid("Missing jewelry quality"))?;
         let empty_socket_armor = layout == D2rV3StoredLayout::EmptySocketArmor;
         let weapon_layout = layout == D2rV3StoredLayout::Weapon;
+        let accessory_layout = layout == D2rV3StoredLayout::Accessory;
         let armor_layout = matches!(
             layout,
             D2rV3StoredLayout::Armor | D2rV3StoredLayout::EmptySocketArmor
         );
         let socket_layout = empty_socket_armor || (weapon_layout && header.is_socketed);
         let supported_kind = match layout {
+            D2rV3StoredLayout::Accessory => match self.body.code.trim() {
+                "cm1" | "cm2" | "cm3" => {
+                    matches!(quality, ItemQuality::Magic | ItemQuality::Unique)
+                }
+                "jew" => matches!(
+                    quality,
+                    ItemQuality::Magic | ItemQuality::Rare | ItemQuality::Unique
+                ),
+                _ => false,
+            },
             D2rV3StoredLayout::Jewelry => {
                 matches!(self.body.code.trim(), "rin" | "amu")
                     && matches!(
@@ -5282,16 +5300,17 @@ impl Item {
         };
         if auxiliary.save_version != 0x69
             || auxiliary.quest_difficulty.is_some()
-            || auxiliary.concealed_stats.is_some()
+            || (!accessory_layout && auxiliary.concealed_stats.is_some())
             || header.save_is_alpha
             || !supported_kind
             || header.is_compact
-            || !header.is_identified
+            || (!accessory_layout && !header.is_identified)
             || header.is_ear
             || header.is_socketed != socket_layout
             || header.is_personalized
             || header.is_runeword
-            || matches!(header.mode, 3 | 5 | 6)
+            || matches!(header.mode, 3 | 5)
+            || (header.mode == 6 && (!accessory_layout || self.body.code.trim() != "jew"))
             || auxiliary.filled_sockets != 0
             || !self.socketed_items.is_empty()
             || !self.runeword_attributes.is_empty()
@@ -5300,6 +5319,7 @@ impl Item {
             return Err(invalid(match layout {
                 D2rV3StoredLayout::Weapon => "Unsupported D2R v3 weapon layout",
                 D2rV3StoredLayout::Jewelry => "Unsupported D2R v3 jewelry layout",
+                D2rV3StoredLayout::Accessory => "Unsupported D2R v3 accessory layout",
                 D2rV3StoredLayout::Armor => "Unsupported D2R v3 armor layout",
                 D2rV3StoredLayout::EmptySocketArmor => {
                     "Unsupported D2R v3 empty-socket armor layout"
@@ -5370,6 +5390,95 @@ impl Item {
                 return Err(invalid("Unsupported or inconsistent stored weapon state"));
             }
         }
+        if accessory_layout {
+            let magic = quality == ItemQuality::Magic;
+            let rare = quality == ItemQuality::Rare;
+            let unique = quality == ItemQuality::Unique;
+            if self.is_opaque()
+                || self.is_semi_opaque()
+                || !self.modules.is_empty()
+                || self.code.trim() != self.body.code.trim()
+                || self.body.mode != header.mode
+                || self.body.location != header.location
+                || self.body.x != header.x
+                || self.body.y != header.y
+                || self.body.page != header.page
+                || self.defense.is_some()
+                || self.body.defense.is_some()
+                || self.max_durability.is_some()
+                || self.body.max_durability.is_some()
+                || self.current_durability.is_some()
+                || self.body.current_durability.is_some()
+                || self.quantity.is_some()
+                || self.body.quantity.is_some()
+                || auxiliary.has_quantity
+                || self.num_socketed_items != 0
+                || self.sockets.is_some()
+                || self.low_high_graphic_bits.is_some()
+                || self.magic_prefix.is_some() != magic
+                || self.magic_suffix.is_some() != magic
+                || self.rare_name_1.is_some() != rare
+                || self.rare_name_2.is_some() != rare
+                || (!rare && self.rare_affixes.iter().any(Option::is_some))
+                || self.unique_id.is_some() != unique
+                || self.runeword_id.is_some()
+                || self.runeword_level.is_some()
+                || self.has_multiple_graphics != self.multi_graphics_bits.is_some()
+                || self.has_class_specific_data != self.class_specific_bits.is_some()
+                || self.ear_class.is_some()
+                || self.ear_level.is_some()
+                || self.ear_player_name.is_some()
+                || self.personalized_player_name.is_some()
+                || self.timestamp_flag
+                || self.tbk_ibk_teleport.is_some()
+                || self.terminator_bit
+                || header.has_checksum
+                || header.alpha_checksum.is_some()
+                || header.alpha_quality_raw.is_some()
+                || header.alpha_v5_runeword_extra.is_some()
+                || header.alpha_unique_id_raw.is_some()
+                || self.body.v105_7mgw_payload.is_some()
+                || self.body.v5_runeword_extra.is_some()
+                || self.body.alpha_header_gap.is_some()
+                || !self.body.alpha_header_gap_bits.is_empty()
+                || !self.body.alpha_body_gap_bits.is_empty()
+                || !self.body.alpha_alignment_padding.is_empty()
+                || self.body.alpha_shadow_skip_bits.is_some()
+                || self.body.alpha_nudge.is_some()
+                || self.body.alpha_set_list_val.is_some()
+                || !self.stats.set_attributes.is_empty()
+                || !self.stats.runeword_attributes.is_empty()
+                || (header.flags & (1 << 22) != 0) != header.is_ethereal
+            {
+                return Err(invalid(
+                    "Unsupported or inconsistent D2R v3 accessory state",
+                ));
+            }
+            match (header.is_identified, auxiliary.concealed_stats.as_deref()) {
+                (true, None) => {
+                    if !self.stats.properties.is_empty() && self.stats.properties != self.properties
+                    {
+                        return Err(invalid("Conflicting D2R v3 public property aliases"));
+                    }
+                }
+                (false, Some(hidden)) => {
+                    if !self.properties.is_empty()
+                        || !self.stats.properties.is_empty()
+                        || !hidden.set_attributes.is_empty()
+                        || !hidden.runeword_attributes.is_empty()
+                    {
+                        return Err(invalid(
+                            "Unidentified accessory must retain only its concealed property owner",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(invalid(
+                        "Accessory identification and concealed ownership disagree",
+                    ))
+                }
+            }
+        }
         if armor_layout {
             if auxiliary.has_quantity
                 || self.quantity.is_some()
@@ -5425,7 +5534,7 @@ impl Item {
             ));
         }
         for (flag, expected) in [
-            (4, true),
+            (4, header.is_identified),
             (11, socket_layout),
             (16, false),
             (21, false),
@@ -5630,8 +5739,17 @@ impl Item {
                 emitter.write_bit(flag)?;
             }
         }
-        if weapon_layout {
-            d2r_v3_write_weapon_list(&mut emitter, &self.properties)?;
+        let properties = if accessory_layout && !header.is_identified {
+            &auxiliary
+                .concealed_stats
+                .as_ref()
+                .ok_or_else(|| invalid("Missing concealed accessory properties"))?
+                .properties
+        } else {
+            &self.properties
+        };
+        if weapon_layout || accessory_layout {
+            d2r_v3_write_weapon_list(&mut emitter, properties)?;
             for properties in &self.set_attributes {
                 d2r_v3_write_weapon_list(&mut emitter, properties)?;
             }
@@ -6545,7 +6663,7 @@ mod compact_quest_codec_tests {
 mod chronicle_codec_tests {
     use super::*;
     use crate::domain::item::entity::{
-        D2rV3AuxiliaryData, D2rV3ChronicleData, read_d2r_v3_chronicle,
+        read_d2r_v3_chronicle, D2rV3AuxiliaryData, D2rV3ChronicleData,
     };
     use d2r_macros::{invariant_test, settled_contract_test};
 
@@ -6721,15 +6839,13 @@ mod chronicle_codec_tests {
                     payload
                 );
                 bytes.pop();
-                assert!(
-                    read_d2r_v3_chronicle(
-                        &mut BitCursor::from_raw_at(&bytes, 0),
-                        105,
-                        flags,
-                        false
-                    )
-                    .is_err()
-                );
+                assert!(read_d2r_v3_chronicle(
+                    &mut BitCursor::from_raw_at(&bytes, 0),
+                    105,
+                    flags,
+                    false
+                )
+                .is_err());
                 let mut item_bits = bits(&source, 11008, 11276);
                 for (i, value) in item_bits.iter_mut().take(32).enumerate() {
                     *value = flags & (1 << i) != 0;
@@ -6855,11 +6971,9 @@ mod chronicle_codec_tests {
         let mut items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
         assert_eq!(items.len(), 24);
         items[11].body.d2r_v3_auxiliary.as_mut().unwrap().chronicle = Some(valid);
-        assert!(
-            items[11]
-                .to_bits_d2r_v3_compact_quest(&HuffmanTree::new())
-                .is_err()
-        );
+        assert!(items[11]
+            .to_bits_d2r_v3_compact_quest(&HuffmanTree::new())
+            .is_err());
     }
     #[invariant_test]
     fn supported_jewelry_inverse_keeps_chronicle_before_stash() {
@@ -6946,12 +7060,11 @@ mod concealed_stats_retention_tests {
         let mut decoded_count = 0;
         for item in &items {
             if item.is_compact {
-                assert!(
-                    item.body
-                        .d2r_v3_auxiliary
-                        .as_ref()
-                        .is_none_or(|auxiliary| auxiliary.concealed_stats.is_none())
-                );
+                assert!(item
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_ref()
+                    .is_none_or(|auxiliary| auxiliary.concealed_stats.is_none()));
                 continue;
             }
             let auxiliary = item.body.d2r_v3_auxiliary.as_ref().unwrap();
@@ -6991,11 +7104,9 @@ mod concealed_stats_retention_tests {
             assert_eq!(raw_bits(&bytes, start, 9), id);
             assert_eq!(raw_bits(&bytes, start + 9, width) as i32 - save_add, value);
         }
-        assert!(
-            crate::domain::item::entity::D2rV3AuxiliaryData::default()
-                .concealed_stats
-                .is_none()
-        );
+        assert!(crate::domain::item::entity::D2rV3AuxiliaryData::default()
+            .concealed_stats
+            .is_none());
     }
 
     #[settled_contract_test]
@@ -7111,5 +7222,364 @@ mod concealed_stats_retention_tests {
             io::ErrorKind::InvalidInput
         );
         assert_eq!(clean, copy);
+    }
+}
+
+#[cfg(test)]
+mod v3_accessory_codec_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+
+    fn samples() -> &'static Vec<(Vec<u8>, Item)> {
+        static INPUTS: OnceLock<Vec<(Vec<u8>, Item)>> = OnceLock::new();
+        INPUTS.get_or_init(|| {
+            let mut result = Vec::new();
+            for file in [
+                "TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+                "TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
+                "TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",
+            ] {
+                let root = std::env::var("D2R_CORE_PATH")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+                let bytes = std::fs::read(
+                    root.join("tests/fixtures/savegames/gameplay/normal/act1")
+                        .join(file),
+                )
+                .unwrap();
+                let stream = crate::domain::item::stream::PlayerItemStream::read(
+                    &bytes,
+                    &HuffmanTree::new(),
+                )
+                .unwrap();
+                assert_eq!(
+                    stream.dialect,
+                    crate::domain::item::stream::ItemStreamDialect::D2rV3
+                );
+                for item in stream.items {
+                    if matches!(item.code.trim(), "cm1" | "cm2" | "cm3" | "jew") {
+                        result.push((bytes.clone(), item));
+                    }
+                }
+            }
+            assert_eq!(result.len(), 9);
+            result
+        })
+    }
+    fn typed(item: &Item) -> Item {
+        let mut result = item.clone();
+        result.bits.clear();
+        result.segments.clear();
+        result.gap_bits.clear();
+        result.body.alpha_code_bits.clear();
+        result.range = Default::default();
+        result.total_bits = 0;
+        result.logical_width = None;
+        result
+    }
+    fn props(item: &Item) -> &[ItemProperty] {
+        if item.header.is_identified {
+            &item.properties
+        } else {
+            &item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .concealed_stats
+                .as_ref()
+                .unwrap()
+                .properties
+        }
+    }
+    fn props_mut(item: &mut Item) -> &mut Vec<ItemProperty> {
+        if item.header.is_identified {
+            &mut item.properties
+        } else {
+            &mut item
+                .body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .concealed_stats
+                .as_mut()
+                .unwrap()
+                .properties
+        }
+    }
+    fn profile(item: &Item) -> Vec<(u32, u32, i32)> {
+        props(item)
+            .iter()
+            .map(|p| (p.stat_id, p.param, p.value))
+            .collect()
+    }
+    fn bytes(bits: &[bool]) -> Vec<u8> {
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (index, &bit) in bits.iter().enumerate() {
+            if bit {
+                bytes[index / 8] |= 1 << (index % 8);
+            }
+        }
+        bytes
+    }
+    fn reparse(bits: &[bool]) -> Item {
+        let data = bytes(bits);
+        let mut cursor = crate::data::bit_cursor::BitCursor::new(bitstream_io::BitReader::endian(
+            std::io::Cursor::new(&data),
+            bitstream_io::LittleEndian,
+        ));
+        Item::from_reader_with_context_d2r_v3(
+            &mut cursor,
+            &HuffmanTree::new(),
+            Some((&data, 0)),
+            0,
+            105,
+        )
+        .unwrap()
+    }
+    fn control_bits(item: &mut Item) -> Vec<bool> {
+        for length in 0..8 {
+            item.body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = Some(vec![false; length]);
+            match item.to_bits_d2r_v3_accessory(&HuffmanTree::new()) {
+                Ok(bits) => return bits,
+                Err(error) if error.to_string().contains("alignment field does not match") => {}
+                Err(error) => panic!("Unexpected control rejection: {error}"),
+            }
+        }
+        panic!("No byte alignment for a typed control")
+    }
+
+    #[invariant_test]
+    fn original_accessories_rebuild_without_cache_and_keep_hidden_visibility() {
+        let h = HuffmanTree::new();
+        let mut total = 0;
+        let mut hidden = 0;
+        let mut grouped = 0;
+        for (source, item) in samples() {
+            let original: Vec<bool> = (item.range.start..item.range.end)
+                .map(|offset| source[offset as usize / 8] & (1 << (offset % 8)) != 0)
+                .collect();
+            let mut model = typed(item);
+            model.bits = vec![crate::item::RecordedBit {
+                bit: true,
+                offset: u64::MAX,
+            }];
+            let rebuilt = model.to_bits_d2r_v3_accessory(&h).unwrap();
+            assert_eq!(rebuilt, original, "{}", item.code.trim());
+            total += rebuilt.len();
+            let parsed = reparse(&rebuilt);
+            assert_eq!(parsed.header, item.header);
+            assert_eq!(parsed.code.trim(), item.code.trim());
+            assert_eq!(profile(&parsed), profile(item));
+            if !item.header.is_identified {
+                hidden += 1;
+                assert!(parsed.properties.is_empty() && parsed.stats.properties.is_empty());
+                assert!(parsed
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_ref()
+                    .unwrap()
+                    .concealed_stats
+                    .is_some());
+            }
+            if props(item).iter().any(|p| matches!(p.stat_id, 48 | 50)) {
+                grouped += 1;
+            }
+            let mut whole = source.clone();
+            whole.splice(
+                item.range.start as usize / 8..item.range.end as usize / 8,
+                bytes(&rebuilt),
+            );
+            assert_eq!(&whole, source);
+            let padding = item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .alignment_padding
+                .clone();
+            let mut parsed = typed(&parsed);
+            parsed
+                .body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = padding;
+            assert_eq!(parsed.to_bits_d2r_v3_accessory(&h).unwrap(), original);
+        }
+        assert_eq!((total, hidden, grouped), (1736, 1, 5));
+        println!("{{\"actual_items\":9,\"source_bits\":1736,\"differing_bits\":0,\"concealed_items\":1,\"paired_items\":5}}");
+    }
+
+    #[settled_contract_test]
+    fn logical_property_mutations_change_only_the_source_owned_field() {
+        for (_, item) in samples() {
+            let mut model = typed(item);
+            let original = model.to_bits_d2r_v3_accessory(&HuffmanTree::new()).unwrap();
+            let changed = props_mut(&mut model)
+                .iter_mut()
+                .find(|p| p.stat_id != 511)
+                .unwrap();
+            let span = changed.range.clone();
+            changed.value += 1;
+            if model.header.is_identified {
+                model.stats.properties = model.properties.clone();
+            }
+            let rebuilt = model.to_bits_d2r_v3_accessory(&HuffmanTree::new()).unwrap();
+            assert_eq!(rebuilt.len(), original.len());
+            assert_ne!(rebuilt, original);
+            let differences: Vec<_> = rebuilt
+                .iter()
+                .zip(&original)
+                .enumerate()
+                .filter_map(|(i, (a, b))| (a != b).then_some(i as u64 + item.range.start))
+                .collect();
+            assert!(
+                differences
+                    .iter()
+                    .all(|offset| *offset >= span.start && *offset < span.end),
+                "{differences:?} outside {span:?}"
+            );
+            assert_eq!(profile(&reparse(&rebuilt)), profile(&model));
+        }
+    }
+
+    #[settled_contract_test]
+    fn rare_unique_and_socket_jewel_controls_roundtrip_as_typed_fields() {
+        let jewel = &samples()
+            .iter()
+            .find(|(_, i)| i.code.trim() == "jew")
+            .unwrap()
+            .1;
+        for quality in [ItemQuality::Rare, ItemQuality::Unique] {
+            let mut item = typed(jewel);
+            item.header.quality = Some(quality);
+            item.magic_prefix = None;
+            item.magic_suffix = None;
+            if quality == ItemQuality::Rare {
+                item.rare_name_1 = Some(1);
+                item.rare_name_2 = Some(2);
+                item.rare_affixes[0] = Some(3);
+            } else {
+                item.unique_id = Some(1);
+            }
+            let bits = control_bits(&mut item);
+            let parsed = reparse(&bits);
+            assert_eq!(parsed.header.quality, Some(quality));
+            assert_eq!(parsed.rare_affixes, item.rare_affixes);
+            assert_eq!(parsed.unique_id, item.unique_id);
+            assert_eq!(profile(&parsed), profile(&item));
+        }
+        for code in ["cm1", "cm2", "cm3"] {
+            let original = &samples()
+                .iter()
+                .find(|(_, item)| item.code.trim() == code && item.header.is_identified)
+                .unwrap()
+                .1;
+            let mut item = typed(original);
+            item.header.quality = Some(ItemQuality::Unique);
+            item.magic_prefix = None;
+            item.magic_suffix = None;
+            item.unique_id = Some(1);
+            let bits = control_bits(&mut item);
+            let parsed = reparse(&bits);
+            assert_eq!(parsed.code.trim(), code);
+            assert_eq!(parsed.header.quality, Some(ItemQuality::Unique));
+            assert_eq!(profile(&parsed), profile(&item));
+        }
+        let mut child = typed(jewel);
+        child.header.mode = 6;
+        child.body.mode = 6;
+        let bits = control_bits(&mut child);
+        let parsed = reparse(&bits);
+        assert_eq!(parsed.header.mode, 6);
+        assert_eq!(profile(&parsed), profile(&child));
+    }
+
+    #[settled_contract_test]
+    fn unsupported_or_conflicting_accessory_state_is_rejected() {
+        let (_, original) = samples()
+            .iter()
+            .find(|(_, i)| i.code.trim() == "jew")
+            .unwrap();
+        let changes: Vec<fn(&mut Item)> = vec![
+            |i| i.body.x ^= 1,
+            |i| i.quantity = Some(1),
+            |i| i.body.max_durability = Some(1),
+            |i| i.sockets = Some(1),
+            |i| i.properties_complete = false,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true,
+            |i| i.body.v105_7mgw_payload = Some(vec![false]),
+            |i| i.body.v5_runeword_extra = Some(0),
+            |i| i.body.alpha_body_gap_bits = vec![false],
+            |i| i.header.quality = Some(ItemQuality::Set),
+            |i| i.stats.properties[0].value += 1,
+            |i| i.properties[0].is_opaque = true,
+            |i| i.properties[0].maturity = crate::domain::stats::StatMaturityTier::Inferred,
+            |i| {
+                i.properties.pop();
+            },
+            |i| i.terminator_bit = true,
+            |i| i.body.d2r_v3_auxiliary.as_mut().unwrap().concealed_stats = Some(Box::default()),
+        ];
+        for (index, change) in changes.iter().enumerate() {
+            let mut item = typed(original);
+            change(&mut item);
+            if matches!(index, 12 | 13 | 14) {
+                item.stats.properties = item.properties.clone();
+            }
+            assert_eq!(
+                item.to_bits_d2r_v3_accessory(&HuffmanTree::new())
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput,
+                "case{index}"
+            );
+        }
+        let (_, hidden) = samples()
+            .iter()
+            .find(|(_, i)| !i.header.is_identified)
+            .unwrap();
+        for case in 0..3 {
+            let mut item = typed(hidden);
+            match case {
+                0 => item.body.d2r_v3_auxiliary.as_mut().unwrap().concealed_stats = None,
+                1 => item.properties = props(hidden).to_vec(),
+                _ => {
+                    item.body
+                        .d2r_v3_auxiliary
+                        .as_mut()
+                        .unwrap()
+                        .concealed_stats
+                        .as_mut()
+                        .unwrap()
+                        .runeword_attributes = props(hidden).to_vec()
+                }
+            };
+            assert!(item.to_bits_d2r_v3_accessory(&HuffmanTree::new()).is_err());
+        }
+        let (_, paired) = samples()
+            .iter()
+            .find(|(_, i)| i.properties.iter().any(|p| p.stat_id == 50))
+            .unwrap();
+        let mut item = typed(paired);
+        let index = item
+            .properties
+            .iter()
+            .position(|p| p.stat_id == 51)
+            .unwrap();
+        item.properties.remove(index);
+        item.stats.properties = item.properties.clone();
+        assert!(item.to_bits_d2r_v3_accessory(&HuffmanTree::new()).is_err());
+        let mut charm = typed(paired);
+        charm.header.mode = 6;
+        charm.body.mode = 6;
+        assert!(charm.to_bits_d2r_v3_accessory(&HuffmanTree::new()).is_err());
     }
 }
