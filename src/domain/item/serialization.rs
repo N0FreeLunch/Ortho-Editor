@@ -4819,6 +4819,7 @@ struct D2rV3JewelryWidths;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum D2rV3StoredLayout {
+    StoredMisc,
     StoredWeapon,
     StoredJewelry,
     StoredArmor,
@@ -4845,6 +4846,7 @@ impl D2rV3JewelryWidths {
     const AFFIX: u32 = 11;
     const RARE_NAME: u32 = 8;
     const UNIQUE_ID: u32 = 12;
+    const TOME: u32 = 5;
     const QUANTITY: u32 = 9;
     const STASH_QUANTITY: u32 = 8;
     const STAT_ID: u32 = 9;
@@ -5262,6 +5264,12 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::StoredJewelry)
     }
 
+    /// Rebuild typed Normal tomes, keys and cubes with source-owned body fields.
+    /// Quantity presence and the tome payload are emitted without replay or defaults.
+    pub fn to_bits_d2r_v3_stored_misc(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
+        self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::StoredMisc)
+    }
+
     fn to_bits_d2r_v3_stored(
         &self,
         huffman: &HuffmanTree,
@@ -5278,6 +5286,7 @@ impl Item {
             .quality
             .ok_or_else(|| invalid("Missing jewelry quality"))?;
         let empty_socket_armor = layout == D2rV3StoredLayout::EmptySocketArmor;
+        let stored_misc_layout = layout == D2rV3StoredLayout::StoredMisc;
         let stored_weapon_layout = layout == D2rV3StoredLayout::StoredWeapon;
         let stored_jewelry_layout = layout == D2rV3StoredLayout::StoredJewelry;
         let weapon_layout = matches!(
@@ -5299,6 +5308,16 @@ impl Item {
         let socket_layout =
             empty_socket_armor || ((weapon_layout || stored_armor_layout) && header.is_socketed);
         let supported_kind = match layout {
+            D2rV3StoredLayout::StoredMisc => {
+                quality == ItemQuality::Normal
+                    && matches!(self.body.code.trim(), "key" | "tbk" | "ibk" | "box")
+                    && item_template(self.body.code.trim()).is_some_and(|template| {
+                        !template.is_weapon
+                            && !template.is_armor
+                            && !template.has_durability
+                            && !template.has_quest_difficulty
+                    })
+            }
             D2rV3StoredLayout::StoredJewelry => {
                 matches!(self.body.code.trim(), "rin" | "amu")
                     && matches!(
@@ -5380,6 +5399,7 @@ impl Item {
             || !self.properties_complete
         {
             return Err(invalid(match layout {
+                D2rV3StoredLayout::StoredMisc => "Unsupported D2R v3 stored miscellaneous layout",
                 D2rV3StoredLayout::StoredWeapon => "Unsupported D2R v3 stored weapon layout",
                 D2rV3StoredLayout::StoredJewelry => "Unsupported D2R v3 stored jewelry layout",
                 D2rV3StoredLayout::StoredArmor => "Unsupported D2R v3 stored armor layout",
@@ -5502,7 +5522,7 @@ impl Item {
                 }
             }
         }
-        if accessory_layout || stored_jewelry_layout {
+        if accessory_layout || stored_jewelry_layout || stored_misc_layout {
             let magic = quality == ItemQuality::Magic;
             let rare = quality == ItemQuality::Rare
                 || (stored_jewelry_layout && quality == ItemQuality::Crafted);
@@ -5523,9 +5543,14 @@ impl Item {
                 || self.body.max_durability.is_some()
                 || self.current_durability.is_some()
                 || self.body.current_durability.is_some()
-                || self.quantity.is_some()
-                || self.body.quantity.is_some()
-                || auxiliary.has_quantity
+                || if stored_misc_layout {
+                    self.quantity != self.body.quantity
+                        || auxiliary.has_quantity != self.quantity.is_some()
+                } else {
+                    self.quantity.is_some()
+                        || self.body.quantity.is_some()
+                        || auxiliary.has_quantity
+                }
                 || self.num_socketed_items != 0
                 || self.sockets.is_some()
                 || self.low_high_graphic_bits.is_some()
@@ -5544,7 +5569,12 @@ impl Item {
                 || self.ear_player_name.is_some()
                 || self.personalized_player_name.is_some()
                 || self.timestamp_flag
-                || self.tbk_ibk_teleport.is_some()
+                || if stored_misc_layout {
+                    self.tbk_ibk_teleport.is_some()
+                        != matches!(self.body.code.trim(), "tbk" | "ibk")
+                } else {
+                    self.tbk_ibk_teleport.is_some()
+                }
                 || self.terminator_bit
                 || header.has_checksum
                 || header.alpha_checksum.is_some()
@@ -5565,7 +5595,9 @@ impl Item {
                 || !self.stats.runeword_attributes.is_empty()
                 || (header.flags & (1 << 22) != 0) != header.is_ethereal
             {
-                return Err(invalid(if stored_jewelry_layout {
+                return Err(invalid(if stored_misc_layout {
+                    "Unsupported or inconsistent stored miscellaneous state"
+                } else if stored_jewelry_layout {
                     "Unsupported or inconsistent stored jewelry state"
                 } else {
                     "Unsupported or inconsistent D2R v3 accessory state"
@@ -5854,6 +5886,18 @@ impl Item {
                     "High subtype",
                 )?;
             }
+            ItemQuality::Normal
+                if stored_misc_layout && matches!(self.body.code.trim(), "tbk" | "ibk") =>
+            {
+                d2r_v3_write_checked(
+                    &mut emitter,
+                    self.tbk_ibk_teleport
+                        .ok_or_else(|| invalid("Missing stored tome field"))?
+                        as u64,
+                    W::TOME,
+                    "tome field",
+                )?;
+            }
             ItemQuality::Magic => {
                 d2r_v3_write_checked(
                     &mut emitter,
@@ -5988,7 +6032,7 @@ impl Item {
         } else {
             &self.set_attributes
         };
-        if weapon_layout || allows_concealed {
+        if weapon_layout || allows_concealed || stored_misc_layout {
             d2r_v3_write_weapon_list(&mut emitter, properties)?;
             for properties in set_attributes {
                 d2r_v3_write_weapon_list(&mut emitter, properties)?;
@@ -8863,5 +8907,380 @@ mod v3_stored_property_owner_tests {
             }
             assert!(emit(&item).is_err(), "jewelry case{case}");
         }
+    }
+}
+
+#[cfg(test)]
+mod v3_misc_body_codec_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+    type Sample = (usize, usize, Vec<u8>, Item);
+    fn samples() -> &'static Vec<Sample> {
+        static INPUTS: OnceLock<Vec<Sample>> = OnceLock::new();
+        INPUTS.get_or_init(|| {
+            let root = std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from)
+                .unwrap_or_else(|_|std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            let mut result=Vec::new();
+            for(file,relative)in[
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s",
+                "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",
+                "tests/fixtures/savegames/gameplay/normal/act4/TESTDRUID_Act4_Enter.d2s",
+                "tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s",
+            ].iter().enumerate(){let bytes=std::fs::read(root.join(relative)).unwrap();let stream=crate::domain::item::stream::PlayerItemStream::read(&bytes,&HuffmanTree::new()).unwrap();assert_eq!(stream.dialect,crate::domain::item::stream::ItemStreamDialect::D2rV3);for(index,item)in stream.items.into_iter().enumerate(){if matches!(item.code.trim(),"key"|"tbk"|"ibk"|"box"|"tsc"|"isc"){result.push((file,index,bytes.clone(),item));}}}
+            assert_eq!(result.len(),14);result
+        })
+    }
+    fn sample(file: usize, index: usize) -> &'static Item {
+        &samples()
+            .iter()
+            .find(|(f, i, _, _)| *f == file && *i == index)
+            .unwrap()
+            .3
+    }
+    fn typed(item: &Item) -> Item {
+        let mut item = item.clone();
+        item.bits.clear();
+        item.segments.clear();
+        item.gap_bits.clear();
+        item.body.alpha_code_bits.clear();
+        item.range = Default::default();
+        item.total_bits = 0;
+        item.logical_width = None;
+        item
+    }
+    fn emit(item: &Item) -> io::Result<Vec<bool>> {
+        item.to_bits_d2r_v3_stored_misc(&HuffmanTree::new())
+    }
+    fn packed(bits: &[bool]) -> Vec<u8> {
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (index, &bit) in bits.iter().enumerate() {
+            if bit {
+                bytes[index / 8] |= 1 << (index % 8);
+            }
+        }
+        bytes
+    }
+    fn reparse(bits: &[bool]) -> Item {
+        let bytes = packed(bits);
+        // The counted consumer owns byte alignment, beyond the low-level item reader.
+        let (item, consumed) =
+            parse_item_at_d2r_v3(&bytes, 0, &HuffmanTree::new(), 0, 105).unwrap();
+        assert_eq!(consumed as usize, bits.len());
+        item
+    }
+    fn props(item: &Item) -> Vec<(u32, u32, i32)> {
+        item.properties
+            .iter()
+            .map(|p| (p.stat_id, p.param, p.value))
+            .collect()
+    }
+    fn norm_body(item: &Item) -> crate::domain::item::entity::ItemBody {
+        let mut body = item.body.clone();
+        body.alpha_code_bits.clear();
+        body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None;
+        body
+    }
+    fn control_bits(item: &mut Item) -> Vec<bool> {
+        for length in 0..8 {
+            item.body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = Some(vec![false; length]);
+            match emit(item) {
+                Ok(bits) => return bits,
+                Err(e) if e.to_string().contains("alignment field does not match") => {}
+                Err(e) => panic!("Unexpected control error: {e}"),
+            }
+        }
+        panic!("No byte alignment")
+    }
+    fn quantity_presence(code: &str) -> usize {
+        match code.trim() {
+            "key" => 123,
+            "ibk" => 126,
+            "tbk" => 124,
+            "box" => 120,
+            _ => panic!("Not a pinned misc code"),
+        }
+    }
+    fn tome_offset(code: &str) -> usize {
+        match code.trim() {
+            "ibk" => 120,
+            "tbk" => 118,
+            _ => panic!("Not a pinned tome"),
+        }
+    }
+    fn raw(bits: &[bool], start: usize, width: usize) -> u32 {
+        bits[start..start + width]
+            .iter()
+            .enumerate()
+            .fold(0, |value, (i, &bit)| value | ((bit as u32) << i))
+    }
+    #[invariant_test]
+    fn original_misc_bodies_and_compact_scrolls_rebuild_without_replay() {
+        let (mut count, mut total, mut compact) = (0, 0, 0);
+        for (_, _, bytes, item) in samples() {
+            let source: Vec<bool> = (item.range.start..item.range.end)
+                .map(|offset| bytes[offset as usize / 8] & (1 << (offset % 8)) != 0)
+                .collect();
+            let mut model = typed(item);
+            model.bits = vec![crate::item::RecordedBit {
+                bit: true,
+                offset: u64::MAX,
+            }];
+            model.body.alpha_code_bits = vec![true; 17];
+            if item.is_compact {
+                assert!(emit(&model).is_err());
+                assert_eq!(
+                    model.to_bits_d2r_v3_compact(&HuffmanTree::new()).unwrap(),
+                    source
+                );
+                compact += 1;
+                continue;
+            }
+            let bits = emit(&model).unwrap();
+            assert_eq!(bits, source);
+            let parsed = reparse(&bits);
+            assert_eq!(parsed.header, item.header);
+            assert_eq!(norm_body(&parsed), norm_body(item));
+            assert_eq!(parsed.tbk_ibk_teleport, item.tbk_ibk_teleport);
+            assert_eq!(props(&parsed), props(item));
+            assert_eq!(parsed.stats.properties.len(), item.stats.properties.len());
+            assert!(parsed.set_attributes.is_empty() && parsed.runeword_attributes.is_empty());
+            assert_eq!(emit(&typed(&parsed)).unwrap(), source);
+            let mut whole = bytes.clone();
+            whole.splice(
+                item.range.start as usize / 8..item.range.end as usize / 8,
+                packed(&bits),
+            );
+            assert_eq!(&whole, bytes);
+            count += 1;
+            total += bits.len();
+        }
+        assert_eq!((count, total, compact), (12, 1752, 2));
+        println!("{{\"actual_items\":12,\"source_bits\":1752,\"differing_bits\":0,\"compact_controls\":2}}");
+    }
+    #[settled_contract_test]
+    fn source_quantity_and_tome_mutations_match_pinned_raw_fields() {
+        let (mut quantity_count, mut tome_count) = (0, 0);
+        for (_, _, bytes, source) in samples().iter().filter(|(_, _, _, item)| !item.is_compact) {
+            let before = emit(&typed(source)).unwrap();
+            let source_bits: Vec<bool> = (source.range.start..source.range.end)
+                .map(|offset| bytes[offset as usize / 8] & (1 << (offset % 8)) != 0)
+                .collect();
+            let offset = quantity_presence(&source.code);
+            assert_eq!(source_bits[offset], source.quantity.is_some());
+            if let Some(quantity) = source.quantity {
+                assert_eq!(raw(&source_bits, offset + 1, 9), quantity);
+                let mut item = typed(source);
+                item.quantity = Some(quantity + 1);
+                item.body.quantity = item.quantity;
+                let bits = emit(&item).unwrap();
+                assert_eq!(bits.len(), before.len());
+                assert_ne!(bits, before);
+                assert!(bits
+                    .iter()
+                    .zip(&before)
+                    .enumerate()
+                    .filter(|(_, (a, b))| a != b)
+                    .all(|(i, _)| i > offset && i < offset + 10));
+                let parsed = reparse(&bits);
+                assert_eq!(parsed.quantity, item.quantity);
+                assert_eq!(norm_body(&parsed), norm_body(&item));
+                assert_eq!(props(&parsed), props(source));
+                quantity_count += 1;
+            }
+            if let Some(value) = source.tbk_ibk_teleport {
+                let offset = tome_offset(&source.code);
+                assert_eq!(raw(&source_bits, offset, 5), value as u32);
+                let mut item = typed(source);
+                item.tbk_ibk_teleport = Some(value + 1);
+                let bits = emit(&item).unwrap();
+                assert_eq!(bits.len(), before.len());
+                assert_ne!(bits, before);
+                assert!(bits
+                    .iter()
+                    .zip(&before)
+                    .enumerate()
+                    .filter(|(_, (a, b))| a != b)
+                    .all(|(i, _)| i >= offset && i < offset + 5));
+                let parsed = reparse(&bits);
+                assert_eq!(parsed.tbk_ibk_teleport, item.tbk_ibk_teleport);
+                assert_eq!(norm_body(&parsed), norm_body(&item));
+                assert_eq!(props(&parsed), props(source));
+                tome_count += 1;
+            }
+        }
+        assert_eq!((quantity_count, tome_count), (11, 8));
+    }
+    #[settled_contract_test]
+    fn controlled_presence_endpoints_realm_and_stash_fields_reparse() {
+        let source = sample(0, 18);
+        let original = emit(&typed(source)).unwrap();
+        let quantity = quantity_presence(&source.code);
+        for value in [0, 511] {
+            let mut item = typed(source);
+            item.quantity = Some(value);
+            item.body.quantity = item.quantity;
+            let bits = emit(&item).unwrap();
+            let mut expected = original.clone();
+            for i in 0..9 {
+                expected[quantity + 1 + i] = value & (1 << i) != 0;
+            }
+            assert_eq!(bits, expected);
+            let parsed = reparse(&bits);
+            assert_eq!(parsed.quantity, Some(value));
+            assert!(parsed.body.d2r_v3_auxiliary.unwrap().has_quantity);
+        }
+        let mut absent = typed(source);
+        absent.quantity = None;
+        absent.body.quantity = None;
+        absent.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = false;
+        let bits = control_bits(&mut absent);
+        let oldpad = source
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .unwrap()
+            .alignment_padding
+            .as_ref()
+            .unwrap()
+            .len();
+        let mut expected = original[..original.len() - oldpad].to_vec();
+        expected[quantity] = false;
+        expected.drain(quantity + 1..quantity + 10);
+        expected.extend_from_slice(
+            absent
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .alignment_padding
+                .as_ref()
+                .unwrap(),
+        );
+        assert_eq!(bits, expected);
+        let parsed = reparse(&bits);
+        assert_eq!(parsed.quantity, None);
+        assert!(!parsed.body.d2r_v3_auxiliary.unwrap().has_quantity);
+        for value in [0, 31] {
+            let mut item = typed(source);
+            item.tbk_ibk_teleport = Some(value);
+            let bits = emit(&item).unwrap();
+            let offset = tome_offset(&source.code);
+            let mut expected = original.clone();
+            for i in 0..5 {
+                expected[offset + i] = value & (1 << i) != 0;
+            }
+            assert_eq!(bits, expected);
+            assert_eq!(reparse(&bits).tbk_ibk_teleport, Some(value));
+        }
+        let mut realm = typed(source);
+        realm.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0, 1, u32::MAX, 17];
+        let bits = control_bits(&mut realm);
+        let parsed = reparse(&bits);
+        assert_eq!(norm_body(&parsed), norm_body(&realm));
+        assert_eq!(props(&parsed), props(source));
+        for quantity in [0, 255] {
+            let mut item = typed(source);
+            item.body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .advanced_stash_quantity = Some(quantity);
+            let bits = control_bits(&mut item);
+            let parsed = reparse(&bits);
+            assert_eq!(norm_body(&parsed), norm_body(&item));
+            assert_eq!(props(&parsed), props(source));
+        }
+    }
+    #[settled_contract_test]
+    fn unowned_or_conflicting_misc_state_is_rejected() {
+        for source in [sample(0, 2), sample(0, 18), sample(3, 36)] {
+            for case in 0..17 {
+                let mut item = typed(source);
+                match case {
+                    0 => item.body.x ^= 1,
+                    1 => item.header.quality = Some(ItemQuality::Magic),
+                    2 => item.max_durability = Some(0),
+                    3 => item.defense = Some(1),
+                    4 => item.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 1,
+                    5 => item.header.is_personalized = true,
+                    6 => item.header.is_identified = false,
+                    7 => item.properties_complete = false,
+                    8 => {
+                        item.body
+                            .d2r_v3_auxiliary
+                            .as_mut()
+                            .unwrap()
+                            .quest_difficulty = Some(0)
+                    }
+                    9 => item.stats.properties[0].value += 1,
+                    10 => item.body.quantity = Some(1),
+                    11 => {
+                        let aux = item.body.d2r_v3_auxiliary.as_mut().unwrap();
+                        aux.has_quantity = !aux.has_quantity;
+                    }
+                    12 => {
+                        item.tbk_ibk_teleport = if item.tbk_ibk_teleport.is_some() {
+                            None
+                        } else {
+                            Some(0)
+                        }
+                    }
+                    13 => item.properties.push(item.properties[0].clone()),
+                    14 => {
+                        item.quantity = Some(512);
+                        item.body.quantity = item.quantity;
+                        item.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true;
+                    }
+                    15 => item.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = 98,
+                    _ => {
+                        item.properties.clear();
+                        item.stats.properties.clear();
+                    }
+                }
+                assert_eq!(
+                    emit(&item).unwrap_err().kind(),
+                    io::ErrorKind::InvalidInput,
+                    "misc negative{case}"
+                );
+            }
+        }
+        let mut item = typed(sample(0, 18));
+        item.tbk_ibk_teleport = Some(32);
+        assert_eq!(emit(&item).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+    #[settled_contract_test]
+    fn grouped_misc_control_uses_existing_v3_property_grammar() {
+        let root = std::env::var("D2R_CORE_PATH")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        let bytes = std::fs::read(root.join("tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Stats_Verify.d2s")).unwrap();
+        let stream =
+            crate::domain::item::stream::PlayerItemStream::read(&bytes, &HuffmanTree::new())
+                .unwrap();
+        let charm = &stream.items[8];
+        assert_eq!(
+            charm
+                .properties
+                .iter()
+                .map(|p| p.stat_id)
+                .collect::<Vec<_>>(),
+            vec![2, 48, 49, 511]
+        );
+        let mut book = typed(sample(1, 21));
+        book.properties = charm.properties.clone();
+        book.stats.properties = book.properties.clone();
+        let bits = control_bits(&mut book);
+        let parsed = reparse(&bits);
+        assert_eq!(props(&parsed), props(&book));
+        assert_eq!(norm_body(&parsed), norm_body(&book));
+        assert_eq!(parsed.tbk_ibk_teleport, book.tbk_ibk_teleport);
+        assert_eq!(parsed.header, book.header);
+        assert_eq!(emit(&typed(&parsed)).unwrap(), bits);
     }
 }
