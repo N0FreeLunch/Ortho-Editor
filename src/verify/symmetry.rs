@@ -272,10 +272,22 @@ fn compare_v3_source_item(
         typed.logical_width = None;
         // Source-owned V3 alignment is a typed field, not the item replay cache.
         let template = item_template(typed.code.trim());
+        let deferred_stored_host = typed.header.is_runeword
+            || typed.header.is_personalized
+            || !typed.socketed_items.is_empty()
+            || typed
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .is_some_and(|auxiliary| auxiliary.filled_sockets != 0);
         let emitted = if typed.is_compact {
             typed.to_bits_d2r_v3_compact(huffman)
         } else if template.is_some_and(|template| template.is_weapon) {
-            typed.to_bits_d2r_v3_weapon(huffman)
+            if deferred_stored_host {
+                typed.to_bits_d2r_v3_weapon(huffman)
+            } else {
+                typed.to_bits_d2r_v3_stored_weapon(huffman)
+            }
         } else if template.is_some_and(|template| template.is_armor) {
             if typed.header.is_runeword
                 || typed.header.is_personalized
@@ -297,7 +309,11 @@ fn compare_v3_source_item(
         } else if matches!(typed.code.trim(), "cm1" | "cm2" | "cm3" | "jew") {
             typed.to_bits_d2r_v3_accessory(huffman)
         } else if matches!(typed.code.trim(), "rin" | "amu") {
-            typed.to_bits_d2r_v3_jewelry(huffman)
+            if deferred_stored_host {
+                typed.to_bits_d2r_v3_jewelry(huffman)
+            } else {
+                typed.to_bits_d2r_v3_stored_jewelry(huffman)
+            }
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
