@@ -1,5 +1,5 @@
 //! Opt-in, read-only fixed-template observer for counted D2R v3 primary items.
-use super::{evaluate_item_against_template, TemplateOracleReport};
+use super::{TemplateOracleReport, evaluate_item_against_template};
 use d2r_core::item::{HuffmanTree, Item};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -82,7 +82,7 @@ fn options(args: &[String]) -> Result<Options, Failure> {
                 return Err(failure(
                     "unsupported_option",
                     format!("Unsupported option: {flag}"),
-                ))
+                ));
             }
         };
         if !seen.insert(key) {
@@ -197,18 +197,24 @@ fn observe(bytes: &[u8], path: &Path) -> Receipt {
         );
     }
     receipt.status = "ok";
-    receipt.metric_outcome = if receipt.report.total_expected_stats == 0 {
+    receipt.metric_outcome = metric_outcome(&receipt.report);
+    receipt
+}
+
+fn metric_outcome(report: &TemplateOracleReport) -> &'static str {
+    if report.conditional_template_mismatches > 0 {
+        "red"
+    } else if report.total_expected_stats == 0 {
         "not_admitted"
-    } else if receipt.report.missing_expected_stats > 0
-        || receipt.report.extra_unmatched_stats > 0
-        || receipt.report.value_in_range_stats != receipt.report.total_expected_stats
-        || receipt.report.template_identity_conflicts > 0
+    } else if report.missing_expected_stats > 0
+        || report.extra_unmatched_stats > 0
+        || report.value_in_range_stats != report.total_expected_stats
+        || report.template_identity_conflicts > 0
     {
         "red"
     } else {
         "green"
-    };
-    receipt
+    }
 }
 
 fn emit(receipt: &Receipt, options: &Options) -> std::io::Result<()> {
@@ -221,10 +227,17 @@ fn emit(receipt: &Receipt, options: &Options) -> std::io::Result<()> {
     if options.json && !options.token_efficient {
         println!("{}", serde_json::to_string(receipt)?);
     } else {
-        eprintln!("D2R v3 template oracle: status={}, metric={}, primary={:?}, matched={}/{}, in-range={}, errors={}",
-            receipt.status, receipt.metric_outcome, receipt.top_level_item_count,
-            receipt.report.matched_expected_stats, receipt.report.total_expected_stats,
-            receipt.report.value_in_range_stats, receipt.errors.len());
+        eprintln!(
+            "D2R v3 template oracle: status={}, metric={}, primary={:?}, matched={}/{}, in-range={}, conditional-mismatches={}, errors={}",
+            receipt.status,
+            receipt.metric_outcome,
+            receipt.top_level_item_count,
+            receipt.report.matched_expected_stats,
+            receipt.report.total_expected_stats,
+            receipt.report.value_in_range_stats,
+            receipt.report.conditional_template_mismatches,
+            receipt.errors.len()
+        );
     }
     Ok(())
 }
@@ -245,7 +258,9 @@ pub(super) fn dispatch(args: &[String]) -> Option<i32> {
         }
     };
     if options.help {
-        println!("Usage: d2stat_template_oracle --dialect d2r-v3 --file <full.d2s> [--output <new.json>] [--json | --token-efficient]\nRead-only counted primary items; no corpus or fallback. Default/--dialect legacy retains the existing route.");
+        println!(
+            "Usage: d2stat_template_oracle --dialect d2r-v3 --file <full.d2s> [--output <new.json>] [--json | --token-efficient]\nRead-only counted primary items; no corpus or fallback. Default/--dialect legacy retains the existing route."
+        );
         return Some(0);
     }
     let receipt = match fs::read(&options.file) {
@@ -355,15 +370,14 @@ mod tests {
             .iter()
             .find(|item| item.id == 121)
             .unwrap();
-        assert!(template
-            .stats
-            .iter()
-            .all(|expected| row
+        assert!(
+            template.stats.iter().all(|expected| row
                 .parsed_stats
                 .iter()
                 .any(|(id, value)| *id == expected.stat_id
                     && *value >= expected.min
-                    && *value <= expected.max)));
+                    && *value <= expected.max))
+        );
     }
 
     #[settled_contract_test]
@@ -371,11 +385,13 @@ mod tests {
         let path = fixture("TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s", "act1");
         let receipt = observe(&fs::read(&path).unwrap(), &path);
         assert_eq!(receipt.status, "ok");
-        assert!(receipt
-            .report
-            .item_evaluations
-            .iter()
-            .all(|row| row.unique_id != Some(121)));
+        assert!(
+            receipt
+                .report
+                .item_evaluations
+                .iter()
+                .all(|row| row.unique_id != Some(121))
+        );
     }
 
     #[settled_contract_test]
@@ -478,5 +494,338 @@ mod tests {
         let error = emit(&envelope(Path::new("fixture.d2s")), &options).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read(output).unwrap(), original);
+    }
+}
+
+#[cfg(test)]
+mod superior_tests {
+    use super::*;
+    use d2r_core::item::ItemProperty;
+    use d2r_macros::settled_contract_test;
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+
+    fn sources() -> &'static BTreeMap<&'static str, Item> {
+        static SOURCES: OnceLock<BTreeMap<&'static str, Item>> = OnceLock::new();
+        SOURCES.get_or_init(|| {
+            let root = std::env::var_os("D2R_CORE_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            let mut cases = BTreeMap::new();
+            for (file, targets) in [
+                (
+                    "TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s",
+                    vec![(31, "ktr")],
+                ),
+                (
+                    "TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",
+                    vec![(17, "wrb")],
+                ),
+                (
+                    "TESTDRUID_Quest1_DenOfEvil_Done_PreAkara.d2s",
+                    vec![(9, "jav"), (19, "ob1")],
+                ),
+            ] {
+                let path = root
+                    .join("tests/fixtures/savegames/gameplay/normal/act1")
+                    .join(file);
+                let bytes = fs::read(&path).unwrap();
+                let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
+                for (index, code) in targets {
+                    let item = &items[index];
+                    assert_eq!(item.code.trim(), code);
+                    cases.insert(code, item.clone());
+                }
+                assert_eq!(fs::read(path).unwrap(), bytes);
+            }
+            cases
+        })
+    }
+
+    fn evaluate(item: &Item) -> TemplateOracleReport {
+        let mut report = TemplateOracleReport::default();
+        let mut view = item.clone();
+        view.properties.retain(|property| property.stat_id != 511);
+        let original = view.clone();
+        evaluate_item_against_template(
+            &mut report,
+            Path::new("controlled-source-view"),
+            0,
+            &view,
+            false,
+        );
+        assert_eq!(view, original);
+        report
+    }
+
+    fn percent(item: &Item, first: i32, second: i32) -> Item {
+        let mut result = item.clone();
+        result
+            .properties
+            .retain(|property| ![17, 18, 22, 24, 160].contains(&property.stat_id));
+        for (id, value) in [(17, first), (18, second)] {
+            result.properties.insert(
+                (id - 17) as usize,
+                ItemProperty::new(
+                    id,
+                    "controlled-damage".to_owned(),
+                    0,
+                    value,
+                    value,
+                    Default::default(),
+                ),
+            );
+        }
+        result.stats.properties = result.properties.clone();
+        // The changed payload width determines this control's padding from the captured zero padding.
+        let old_padding = item
+            .body
+            .d2r_v3_auxiliary
+            .as_ref()
+            .unwrap()
+            .alignment_padding
+            .as_ref()
+            .unwrap();
+        assert!(old_padding.iter().all(|bit| !*bit));
+        let old_width: usize = item
+            .properties
+            .iter()
+            .filter(|p| [17, 18, 22, 24, 160].contains(&p.stat_id))
+            .map(|p| (p.range.end - p.range.start) as usize)
+            .sum();
+        let new_width = 9 + [17, 18]
+            .iter()
+            .map(|id| {
+                d2r_core::data::stat_costs::STAT_COSTS
+                    .iter()
+                    .find(|cost| cost.id == *id)
+                    .unwrap()
+                    .save_bits as usize
+            })
+            .sum::<usize>();
+        let padding = (old_padding.len() + old_width % 8 + 8 - new_width % 8) % 8;
+        result
+            .body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .alignment_padding = Some(vec![false; padding]);
+        let huffman = HuffmanTree::new();
+        let bits = if result.header.is_socketed {
+            result.to_bits_d2r_v3_socket_host(&huffman)
+        } else {
+            result.to_bits_d2r_v3_stored_weapon(&huffman)
+        }
+        .unwrap();
+        assert_eq!(bits.len() % 8, 0);
+        let mut bytes = b"JM\x01\x00".to_vec();
+        for chunk in bits.chunks(8) {
+            bytes.push(
+                chunk
+                    .iter()
+                    .enumerate()
+                    .fold(0u8, |byte, (index, bit)| byte | ((*bit as u8) << index)),
+            );
+        }
+        let items = Item::read_counted_list_d2r_v3(&bytes, 0, &huffman, 105).unwrap();
+        assert_eq!(items.len(), 1);
+        items.into_iter().next().unwrap()
+    }
+
+    #[settled_contract_test]
+    fn captured_superior_flat_channels_retain_unexplained_intrinsics() {
+        for (code, max_damage, channels, extra) in [
+            ("ktr", 7, vec![22], vec![]),
+            ("wrb", 9, vec![22], vec![]),
+            ("jav", 5, vec![22, 160], vec![]),
+            ("ob1", 5, vec![22], vec![7, 107]),
+        ] {
+            let report = evaluate(&sources()[code]);
+            let row = &report.item_evaluations[0];
+            assert_eq!(report.missing_expected_stats, 0, "{code}");
+            assert_eq!(
+                report.value_in_range_stats, report.total_expected_stats,
+                "{code}"
+            );
+            assert_eq!(report.conditional_template_mismatches, 0);
+            assert!(row.conditional_diagnostics.is_empty());
+            assert_eq!(row.extra_parsed_stat_ids, extra);
+            let profile = row.superior_damage_expectation.as_ref().unwrap();
+            assert_eq!(profile.branch, "flat_one");
+            assert_eq!(profile.source_roll_range, (5, 15));
+            assert_eq!(profile.base_max_damage, max_damage);
+            assert_eq!(profile.flat_stat_ids, channels);
+            assert!(profile.flat_fallback_possible);
+            assert_eq!(
+                metric_outcome(&report),
+                if extra.is_empty() { "green" } else { "red" }
+            );
+        }
+    }
+
+    #[settled_contract_test]
+    fn encoded_percentage_controls_reject_rounding_and_unequal_pairs() {
+        let valid = evaluate(&percent(&sources()["ktr"], 15, 15));
+        assert_eq!(metric_outcome(&valid), "green");
+        assert_eq!(
+            valid.item_evaluations[0]
+                .superior_damage_expectation
+                .as_ref()
+                .unwrap()
+                .admissible_percent_range,
+            Some((15, 15))
+        );
+        let zero_bonus = evaluate(&percent(&sources()["ktr"], 5, 5));
+        assert_eq!(metric_outcome(&zero_bonus), "red");
+        assert!(zero_bonus.value_in_range_stats < zero_bonus.total_expected_stats);
+        // Both values independently pass; only the shared-roll condition makes this red.
+        let unequal = evaluate(&percent(&sources()["wrb"], 15, 14));
+        assert_eq!(unequal.missing_expected_stats, 0);
+        assert_eq!(unequal.extra_unmatched_stats, 0);
+        assert_eq!(unequal.value_in_range_stats, unequal.total_expected_stats);
+        assert_eq!(unequal.conditional_template_mismatches, 1);
+        assert_eq!(metric_outcome(&unequal), "red");
+        let diagnostic = &unequal.item_evaluations[0].conditional_diagnostics[0];
+        assert_eq!(diagnostic.kind, "invalid_superior_percentage_pair");
+        assert!(!diagnostic.message.is_empty() && !diagnostic.hint.is_empty());
+        let impossible = evaluate(&percent(&sources()["jav"], 15, 15));
+        assert_eq!(
+            impossible.value_in_range_stats,
+            impossible.total_expected_stats
+        );
+        assert_eq!(metric_outcome(&impossible), "red");
+        assert!(
+            impossible.item_evaluations[0]
+                .superior_damage_expectation
+                .as_ref()
+                .unwrap()
+                .admissible_percent_range
+                .is_none()
+        );
+        assert!(
+            impossible.item_evaluations[0]
+                .conditional_diagnostics
+                .iter()
+                .any(|d| d.kind == "impossible_superior_percentage")
+        );
+    }
+
+    #[settled_contract_test]
+    fn malformed_carriers_and_unsupported_context_remain_visible() {
+        let original = &sources()["ktr"];
+        let mut flat = original.clone();
+        flat.properties
+            .iter_mut()
+            .find(|p| p.stat_id == 22)
+            .unwrap()
+            .value = 2;
+        assert_eq!(metric_outcome(&evaluate(&flat)), "red");
+        flat.properties.retain(|p| p.stat_id != 22);
+        assert_eq!(evaluate(&flat).missing_expected_stats, 1);
+        let mut duplicate = original.clone();
+        duplicate.properties.push(
+            duplicate
+                .properties
+                .iter()
+                .find(|p| p.stat_id == 22)
+                .unwrap()
+                .clone(),
+        );
+        assert_eq!(evaluate(&duplicate).conditional_template_mismatches, 1);
+        let mut parameter = original.clone();
+        parameter
+            .properties
+            .iter_mut()
+            .find(|p| p.stat_id == 22)
+            .unwrap()
+            .param = 1;
+        assert_eq!(evaluate(&parameter).conditional_template_mismatches, 1);
+        let full_pair = percent(&sources()["wrb"], 15, 15);
+        for broken in [17, 18] {
+            let mut missing = full_pair.clone();
+            missing.properties.retain(|p| p.stat_id != broken);
+            assert_eq!(metric_outcome(&evaluate(&missing)), "red");
+        }
+        let mut duplicate = full_pair.clone();
+        duplicate.properties.push(
+            duplicate
+                .properties
+                .iter()
+                .find(|p| p.stat_id == 17)
+                .unwrap()
+                .clone(),
+        );
+        assert_eq!(evaluate(&duplicate).conditional_template_mismatches, 1);
+        let mut parameter = full_pair.clone();
+        parameter
+            .properties
+            .iter_mut()
+            .find(|p| p.stat_id == 18)
+            .unwrap()
+            .param = 1;
+        assert_eq!(evaluate(&parameter).conditional_template_mismatches, 1);
+        let mut mixed = full_pair.clone();
+        mixed.properties.push(
+            original
+                .properties
+                .iter()
+                .find(|p| p.stat_id == 22)
+                .unwrap()
+                .clone(),
+        );
+        assert_eq!(evaluate(&mixed).extra_unmatched_stats, 1);
+        let mut unsupported = original.clone();
+        unsupported.code = "not-a-base".to_owned();
+        assert_eq!(evaluate(&unsupported).conditional_template_mismatches, 1);
+        let quality = super::super::QUALITY_ITEMS
+            .iter()
+            .find(|q| q.id == 6)
+            .unwrap();
+        let mut wrong_source = quality.clone();
+        wrong_source.mod1_param = 1;
+        assert!(
+            !super::super::superior_damage_expectations(original, &wrong_source)
+                .2
+                .is_empty()
+        );
+    }
+
+    #[settled_contract_test]
+    fn profile_admission_and_report_merge_preserve_legacy_contracts() {
+        let original = &sources()["ktr"];
+        for variant in 0..4 {
+            let mut item = original.clone();
+            match variant {
+                0 => item.header.save_is_alpha = true,
+                1 => item.body.d2r_v3_auxiliary = None,
+                2 => item.properties_complete = false,
+                _ => item.header.is_identified = false,
+            }
+            let report = evaluate(&item);
+            assert!(
+                report.item_evaluations[0]
+                    .superior_damage_expectation
+                    .is_none()
+            );
+            assert_eq!(report.conditional_template_mismatches, 0);
+            assert!(
+                report.item_evaluations[0]
+                    .conditional_diagnostics
+                    .is_empty()
+            );
+            if variant == 3 {
+                assert_eq!(report.total_expected_stats, 0);
+            } else {
+                assert!(report.item_evaluations[0].missing_stat_ids.contains(&17));
+            }
+        }
+        let mut normal = original.clone();
+        normal.header.quality = Some(d2r_core::item::ItemQuality::Normal);
+        assert!(evaluate(&normal).item_evaluations.is_empty());
+        let mut merged = evaluate(&sources()["ktr"]);
+        merged.merge(evaluate(&percent(&sources()["wrb"], 15, 14)));
+        assert_eq!(merged.conditional_template_mismatches, 1);
+        assert_eq!(merged.item_evaluations.len(), 2);
+        assert_eq!(metric_outcome(&merged), "red");
     }
 }

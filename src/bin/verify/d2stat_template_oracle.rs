@@ -3,10 +3,12 @@ use d2r_core::data::generated::{
     gems::GEMS, quality_items::QUALITY_ITEMS, runewords::RUNEWORDS, set_items::SET_ITEMS,
     unique_items::UNIQUE_ITEMS,
 };
-use d2r_core::data::item_specs::{GemSpec, ItemStatRange, QualityItem, Runeword, SetItem, UniqueItem};
+use d2r_core::data::item_specs::{
+    BASE_ITEM_SPECS, GemSpec, ItemStatRange, QualityItem, Runeword, SetItem, UniqueItem,
+};
 use d2r_core::domain::item::{HuffmanTree, Item, ItemQuality};
 use d2r_core::domain::stats::axiom::StatsAxiom;
-use d2r_core::engine::validation::{resolve_runeword, RunewordMatchSource};
+use d2r_core::engine::validation::{get_all_item_types, resolve_runeword, RunewordMatchSource};
 use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -249,6 +251,7 @@ pub struct TemplateOracleReport {
     pub extra_unmatched_stats: usize,
     pub admitted_template_evaluations: usize,
     pub template_identity_conflicts: usize,
+    pub conditional_template_mismatches: usize,
     pub semantic_option_coverage_percent: Option<f64>,
     pub item_evaluations: Vec<ItemEvaluation>,
 }
@@ -280,6 +283,8 @@ pub struct ItemEvaluation {
     pub missing_stat_ids: Vec<u32>,
     pub extra_parsed_stat_ids: Vec<u32>,
     pub parsed_stats: Vec<(u32, i32)>,
+    pub superior_damage_expectation: Option<SuperiorDamageExpectation>,
+    pub conditional_diagnostics: Vec<TemplateDiagnostic>,
 }
 
 impl TemplateOracleReport {
@@ -296,6 +301,7 @@ impl TemplateOracleReport {
         self.extra_unmatched_stats += other.extra_unmatched_stats;
         self.admitted_template_evaluations += other.admitted_template_evaluations;
         self.template_identity_conflicts += other.template_identity_conflicts;
+        self.conditional_template_mismatches += other.conditional_template_mismatches;
         self.item_evaluations.append(&mut other.item_evaluations);
     }
 }
@@ -553,6 +559,186 @@ fn stat_matches_expected(expected_id: u32, parsed_id: u32) -> bool {
     false
 }
 
+#[derive(Debug, Serialize)]
+pub struct TemplateDiagnostic {
+    pub kind: &'static str,
+    pub message: String,
+    pub hint: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SuperiorDamageExpectation {
+    pub branch: &'static str,
+    pub source_roll_range: (i32, i32),
+    pub base_max_damage: u16,
+    pub admissible_percent_range: Option<(i32, i32)>,
+    pub flat_fallback_possible: bool,
+    pub flat_stat_ids: Vec<u32>,
+}
+
+fn superior_damage_expectations(
+    item: &Item,
+    quality: &QualityItem,
+) -> (
+    Vec<ItemStatRange>,
+    Option<SuperiorDamageExpectation>,
+    Vec<TemplateDiagnostic>,
+) {
+    let mut expected = quality.stats.to_vec();
+    let mut diagnostics = Vec::new();
+    let mut reject = |kind, message: &str| {
+        diagnostics.push(TemplateDiagnostic {
+        kind,
+        message: message.to_owned(),
+        hint: "Inspect the captured damage fields, quality source row and base damage; do not synthesize missing properties or apply a stat alias.",
+    })
+    };
+    let slots = [
+        (
+            Some(quality.mod1_code),
+            quality.mod1_param,
+            quality.mod1_min,
+            quality.mod1_max,
+        ),
+        (
+            quality.mod2_code,
+            quality.mod2_param,
+            quality.mod2_min,
+            quality.mod2_max,
+        ),
+    ];
+    let damage: Vec<_> = slots.iter().filter(|slot| slot.0 == Some("dmg%")).collect();
+    if damage.is_empty() {
+        return (expected, None, diagnostics);
+    }
+    let (_, param, first, last) = *damage[0];
+    let (low, high) = (first.min(last), first.max(last));
+    let source_pair_valid = [17, 18].iter().all(|id| {
+        let rows: Vec<_> = quality
+            .stats
+            .iter()
+            .filter(|stat| stat.stat_id == *id)
+            .collect();
+        rows.len() == 1
+            && rows[0].param == 0
+            && (rows[0].min.min(rows[0].max), rows[0].min.max(rows[0].max)) == (low, high)
+    });
+    if damage.len() != 1 || param != 0 || low <= 0 || !source_pair_valid || !quality.weapon {
+        reject(
+            "unsupported_superior_damage_source",
+            "Superior damage source must contain one positive scalar roll and one parameter-free 17/18 expectation pair.",
+        );
+        return (expected, None, diagnostics);
+    }
+    let code = item.code.trim();
+    let types = get_all_item_types(code);
+    let Some(base) = BASE_ITEM_SPECS.iter().find(|base| base.code == code) else {
+        reject(
+            "missing_superior_damage_base",
+            "No base damage context exists for this Superior weapon.",
+        );
+        return (expected, None, diagnostics);
+    };
+    let maximum = base.max_dmg.max(base.max_dmg2h);
+    if maximum == 0 || !types.contains(&"weap") {
+        reject(
+            "unsupported_superior_damage_host",
+            "Superior damage context requires a weapon with positive base maximum damage.",
+        );
+        return (expected, None, diagnostics);
+    }
+    // One source roll feeds both percent fields. A zero integer bonus uses flat damage.
+    let percent_low = i64::from(low).max((100 + i64::from(maximum) - 1) / i64::from(maximum));
+    let percent_range = (percent_low <= i64::from(high)).then_some((percent_low as i32, high));
+    let flat_possible = i64::from(low) <= i64::from(high).min(99 / i64::from(maximum));
+    let mut flat_ids = Vec::new();
+    if base.max_dmg > 0 || base.max_dmg2h == 0 {
+        flat_ids.push(22);
+    }
+    if base.max_dmg2h > 0 || base.max_dmg == 0 {
+        flat_ids.push(24);
+    }
+    if types.contains(&"thro") {
+        flat_ids.push(160);
+    }
+    let percent: Vec<_> = item
+        .properties
+        .iter()
+        .filter(|p| matches!(p.stat_id, 17 | 18))
+        .collect();
+    let branch = if percent.is_empty() {
+        "flat_one"
+    } else {
+        "percentage"
+    };
+    if branch == "percentage" {
+        if let Some((min, max)) = percent_range {
+            for stat in expected
+                .iter_mut()
+                .filter(|stat| matches!(stat.stat_id, 17 | 18))
+            {
+                stat.min = min;
+                stat.max = max;
+            }
+        } else {
+            // Keep source expectations visible; a reversed interval would be normalized by the matcher.
+            reject(
+                "impossible_superior_percentage",
+                "No source roll can produce a positive percent damage increment on this base.",
+            );
+        }
+        if percent.len() != 2
+            || percent.iter().filter(|p| p.stat_id == 17).count() != 1
+            || percent.iter().filter(|p| p.stat_id == 18).count() != 1
+            || percent.iter().any(|p| p.param != 0)
+            || percent[0].value != percent[1].value
+        {
+            reject(
+                "invalid_superior_percentage_pair",
+                "Superior percent damage must contain exactly one 17/18 pair with equal values and zero parameters.",
+            );
+        }
+    } else if flat_possible {
+        expected.retain(|stat| !matches!(stat.stat_id, 17 | 18));
+        expected.extend(flat_ids.iter().map(|id| ItemStatRange {
+            stat_id: *id,
+            min: 1,
+            max: 1,
+            param: 0,
+        }));
+        for id in &flat_ids {
+            let fields: Vec<_> = item
+                .properties
+                .iter()
+                .filter(|p| p.stat_id == *id)
+                .collect();
+            if fields.len() > 1 || fields.iter().any(|p| p.param != 0) {
+                reject(
+                    "invalid_superior_flat_channel",
+                    "Superior flat damage channels must occur once with zero parameters.",
+                );
+            }
+        }
+    } else {
+        reject(
+            "impossible_superior_flat_fallback",
+            "Every source roll produces a positive percent increment; the flat fallback is unavailable.",
+        );
+    }
+    (
+        expected,
+        Some(SuperiorDamageExpectation {
+            branch,
+            source_roll_range: (low, high),
+            base_max_damage: maximum,
+            admissible_percent_range: percent_range,
+            flat_fallback_possible: flat_possible,
+            flat_stat_ids: flat_ids,
+        }),
+        diagnostics,
+    )
+}
+
 fn evaluate_item_against_template(
     report: &mut TemplateOracleReport,
     path: &Path,
@@ -587,6 +773,11 @@ fn evaluate_item_against_template(
         &item.properties
     };
 
+    let superior_template = match &template {
+        MatchedTemplate::Superior { template, .. } => Some(*template),
+        _ => None,
+    };
+
     let (template_type, template_name, template_code, expected_stats, template_match_source): (
         &str,
         &str,
@@ -611,33 +802,23 @@ fn evaluate_item_against_template(
         MatchedTemplate::Runeword { template, source } => {
             ("Runeword", template.name, None, template.stats, source)
         }
-        MatchedTemplate::AlphaWitnessRuneword { name, stats } => {
-            (
-                "Runeword",
-                name,
-                None,
-                stats,
-                TemplateMatchSource::AlphaWitness,
-            )
-        }
+        MatchedTemplate::AlphaWitnessRuneword { name, stats } => (
+            "Runeword",
+            name,
+            None,
+            stats,
+            TemplateMatchSource::AlphaWitness,
+        ),
         MatchedTemplate::Superior { template, source } => {
-            (
-                "Superior",
-                template.mod1_code,
-                None,
-                template.stats,
-                source,
-            )
+            ("Superior", template.mod1_code, None, template.stats, source)
         }
-        MatchedTemplate::Gem { template, source } => {
-            (
-                "Gem",
-                template.name,
-                Some(template.code),
-                template.weapon_stats,
-                source,
-            )
-        }
+        MatchedTemplate::Gem { template, source } => (
+            "Gem",
+            template.name,
+            Some(template.code),
+            template.weapon_stats,
+            source,
+        ),
     };
 
     let template_identity_status = if matches!(
@@ -652,12 +833,44 @@ fn evaluate_item_against_template(
     // Unidentified items, completely opaque items, or loose socketables (gems/runes without host equipment)
     // cannot have active properties verified on their own standalone bitstream.
     let is_gem = template_type == "Gem";
-    let expectations_admitted = is_identified && !is_opaque && !is_gem && template_identity_status.expectations_admitted();
+    let expectations_admitted =
+        is_identified && !is_opaque && !is_gem && template_identity_status.expectations_admitted();
 
     if expectations_admitted {
         report.admitted_template_evaluations += 1;
-    } else if is_identified && !is_opaque && !is_gem && matches!(template_identity_status, TemplateIdentityStatus::CodeConflict) {
+    } else if is_identified
+        && !is_opaque
+        && !is_gem
+        && matches!(
+            template_identity_status,
+            TemplateIdentityStatus::CodeConflict
+        )
+    {
         report.template_identity_conflicts += 1;
+    }
+
+    let (contextual_stats, superior_damage_expectation, conditional_diagnostics) =
+        if expectations_admitted
+            && !is_semi_opaque
+            && item.properties_complete
+            && !alpha_mode
+            && !item.header.save_is_alpha
+            && item
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .is_some_and(|aux| aux.save_version == 105)
+        {
+            match superior_template {
+                Some(quality) => superior_damage_expectations(item, quality),
+                None => (expected_stats.to_vec(), None, Vec::new()),
+            }
+        } else {
+            (expected_stats.to_vec(), None, Vec::new())
+        };
+    let expected_stats = contextual_stats.as_slice();
+    if expectations_admitted && !conditional_diagnostics.is_empty() {
+        report.conditional_template_mismatches += 1;
     }
 
     let axiom = StatsAxiom::new(
@@ -762,6 +975,8 @@ fn evaluate_item_against_template(
         missing_stat_ids,
         extra_parsed_stat_ids,
         parsed_stats: parsed_effective_stats,
+        superior_damage_expectation,
+        conditional_diagnostics,
     });
 }
 
