@@ -1,6 +1,6 @@
 use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter};
-use d2r_core::domain::item::stream::{ItemContainer, PlayerItemStream};
+use d2r_core::domain::item::stream::{ItemContainer, ItemStreamDialect, PlayerItemStream};
 use d2r_core::domain::progression::Progression;
 use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::item::{HuffmanTree, Item};
@@ -205,18 +205,19 @@ fn main() {
     let merc_state =
         d2r_core::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
     let huffman = HuffmanTree::new();
-    let merc_equipped_items = parse_mercenary_equipped_items(&bytes, &map, &huffman, is_alpha);
+    let player_stream =
+        PlayerItemStream::read(&bytes, &huffman).expect("Failed to parse player item stream");
+    let merc_export = parse_mercenary_equipped_items(&bytes, &map, &huffman, &player_stream);
 
     let merc_json = json!({
         "class_name": merc_state.class_name(),
         "hireling_id": merc_state.hireling_id,
         "subtype_id": merc_state.subtype_id,
         "experience": merc_state.experience,
-        "equipped_items": merc_equipped_items
+        "equipped_items": merc_export.items,
+        "item_stream": merc_export.evidence
     });
 
-    let player_stream =
-        PlayerItemStream::read(&bytes, &huffman).expect("Failed to parse player item stream");
     let player_items = player_item_payloads(&player_stream, level as u8);
 
     // Map entire payload to match index.html expected format
@@ -390,69 +391,197 @@ fn player_item_payloads(stream: &PlayerItemStream, level: u8) -> serde_json::Val
     })
 }
 
+#[derive(serde::Serialize)]
+struct MercenaryItemStreamEvidence {
+    dialect: ItemStreamDialect,
+    status: &'static str,
+    declared_count: Option<u16>,
+    parsed_count: usize,
+    exported_count: usize,
+    source_range: Option<std::ops::Range<u64>>,
+    diagnostics: Vec<String>,
+}
+
+struct MercenaryItemExport {
+    items: Vec<serde_json::Value>,
+    evidence: MercenaryItemStreamEvidence,
+}
+
+fn mercenary_export_failure(
+    mut evidence: MercenaryItemStreamEvidence,
+    reason: impl Into<String>,
+) -> MercenaryItemExport {
+    evidence.status = "error";
+    evidence.diagnostics.push(reason.into());
+    MercenaryItemExport {
+        items: Vec::new(),
+        evidence,
+    }
+}
+
 fn parse_mercenary_equipped_items(
     bytes: &[u8],
     map: &d2r_core::save::SaveSectionMap,
     huffman: &HuffmanTree,
-    is_alpha: bool,
-) -> Vec<serde_json::Value> {
+    player_stream: &PlayerItemStream,
+) -> MercenaryItemExport {
+    let dialect = player_stream.dialect;
+    let is_alpha = dialect == ItemStreamDialect::Alpha;
+    let mut evidence = MercenaryItemStreamEvidence {
+        dialect,
+        status: "absent",
+        declared_count: None,
+        parsed_count: 0,
+        exported_count: 0,
+        source_range: None,
+        diagnostics: Vec::new(),
+    };
     let Some(jf) = map.jf_pos.or_else(|| find_marker(bytes, b"jf")) else {
-        return Vec::new();
+        return MercenaryItemExport {
+            items: Vec::new(),
+            evidence,
+        };
     };
 
     let jm_positions = d2r_core::save::find_jm_markers(bytes);
-    let Some(merc_jm_idx) = jm_positions
-        .iter()
-        .enumerate()
-        .find_map(|(idx, pos)| (*pos > jf).then_some(idx))
-    else {
-        return Vec::new();
+    let jm_pos = if dialect == ItemStreamDialect::D2rV3 {
+        let primary_end = player_stream
+            .items
+            .last()
+            .map(|item| item.range.end)
+            .unwrap_or(0);
+        if jf as u64 * 8 < primary_end {
+            return mercenary_export_failure(
+                evidence,
+                "Mercenary marker overlaps the owned primary list",
+            );
+        }
+        let owned = jf.saturating_add(2);
+        // An unhired character has jf immediately followed by the standard footer.
+        if bytes.get(owned..owned.saturating_add(2)) == Some(b"kf".as_slice())
+            && MercenaryFooter::from_bytes(&bytes[owned..]).is_standard()
+        {
+            return MercenaryItemExport {
+                items: Vec::new(),
+                evidence,
+            };
+        }
+        if bytes.get(owned..owned.saturating_add(2)) != Some(b"JM".as_slice()) {
+            return mercenary_export_failure(
+                evidence,
+                "Owned V3 mercenary list must begin immediately after jf",
+            );
+        }
+        owned
+    } else {
+        let Some(pos) = jm_positions.iter().copied().find(|pos| *pos > jf) else {
+            return MercenaryItemExport {
+                items: Vec::new(),
+                evidence,
+            };
+        };
+        pos
     };
-
-    let jm_pos = jm_positions[merc_jm_idx];
-    if jm_pos + 4 > bytes.len() {
-        return Vec::new();
-    }
-
-    let item_count = u16::from_le_bytes([bytes[jm_pos + 2], bytes[jm_pos + 3]]);
+    let Some(header) = bytes.get(jm_pos..jm_pos.saturating_add(4)) else {
+        return mercenary_export_failure(evidence, "Mercenary list header is truncated");
+    };
+    let item_count = u16::from_le_bytes([header[2], header[3]]);
+    evidence.declared_count = Some(item_count);
     let (Some(kf), Some(lf)) = (
         map.kf_pos.or_else(|| find_marker(bytes, b"kf")),
         map.lf_pos.or_else(|| find_marker(bytes, b"lf")),
     ) else {
-        return Vec::new();
+        return mercenary_export_failure(evidence, "Mercenary footer markers are missing");
     };
-
     let next_pos = jm_positions
-        .get(merc_jm_idx + 1)
+        .iter()
         .copied()
+        .find(|pos| *pos > jm_pos)
         .unwrap_or(bytes.len());
-    let items_start = jm_pos;
-    let items_end = kf.min(next_pos);
-    if !MercenaryFooter::from_bytes(&bytes[kf..]).is_standard()
+    let items_end = if dialect == ItemStreamDialect::D2rV3 {
+        kf
+    } else {
+        kf.min(next_pos)
+    };
+    if kf > bytes.len()
+        || !MercenaryFooter::from_bytes(&bytes[kf..]).is_standard()
         || lf < kf
-        || items_start >= items_end
+        || jm_pos >= items_end
     {
-        return Vec::new();
+        return mercenary_export_failure(
+            evidence,
+            "Mercenary list has an unsupported footer envelope",
+        );
+    }
+    evidence.source_range = Some((jm_pos as u64 + 4) * 8..items_end as u64 * 8);
+    let items = if dialect == ItemStreamDialect::D2rV3 {
+        let Some(raw_version) = bytes
+            .get(4..8)
+            .and_then(|raw| <[u8; 4]>::try_from(raw).ok())
+        else {
+            return mercenary_export_failure(evidence, "Save version is truncated");
+        };
+        match d2r_core::domain::item::serialization::read_counted_list_d2r_v3(
+            &bytes[..items_end],
+            jm_pos,
+            huffman,
+            u32::from_le_bytes(raw_version),
+        ) {
+            Ok(items) => items,
+            Err(error) => return mercenary_export_failure(evidence, error.to_string()),
+        }
+    } else {
+        match Item::read_section(
+            &bytes[jm_pos..items_end],
+            jm_pos as u64 * 8,
+            item_count,
+            huffman,
+            is_alpha,
+            false,
+        ) {
+            Ok(items) => items,
+            Err(error) => return mercenary_export_failure(evidence, error.to_string()),
+        }
+    };
+    evidence.parsed_count = items.len();
+    evidence.status = "ok";
+    if dialect == ItemStreamDialect::D2rV3 {
+        let mut next = (jm_pos as u64 + 4) * 8;
+        for (index, item) in items.iter().enumerate() {
+            if item.range.start != next || item.range.end <= next || item.range.end % 8 != 0 {
+                return mercenary_export_failure(
+                    evidence,
+                    "V3 mercenary item source ranges are not contiguous",
+                );
+            }
+            next = item.range.end;
+            let slot = dialect.placement(item).equipment_slot;
+            if !item.properties_complete
+                || item.is_opaque()
+                || item.is_semi_opaque()
+                || !item.is_identified
+                || !matches!(slot, Some("Head" | "Armor" | "Weapon1" | "Weapon2"))
+            {
+                evidence.status = "partial";
+                evidence.diagnostics.push(format!(
+                    "Mercenary item {index} has unresolved properties or placement"
+                ));
+            }
+        }
+        if items.len() != item_count as usize || next != items_end as u64 * 8 {
+            return mercenary_export_failure(
+                evidence,
+                "V3 mercenary count or footer closure disagrees with source",
+            );
+        }
     }
 
-    let items_data = &bytes[items_start..items_end];
-    let Ok(items) = Item::read_section(
-        items_data,
-        items_start as u64 * 8,
-        item_count,
-        huffman,
-        is_alpha,
-        false,
-    ) else {
-        return Vec::new();
-    };
-
-    items
+    let equipped_items: Vec<_> = items
         .into_iter()
         .enumerate()
         .filter_map(|(i, item)| {
             let trimmed_code = item.code.trim();
-            if !is_alpha && trimmed_code.is_empty() {
+            if dialect != ItemStreamDialect::D2rV3 && !is_alpha && trimmed_code.is_empty() {
                 return None;
             }
 
@@ -479,6 +608,15 @@ fn parse_mercenary_equipped_items(
 
             let (slot_en, slot_source, candidate_kind) = if is_alpha {
                 alpha_mercenary_slot_semantics(&merc_item, item.is_residue())
+            } else if dialect == ItemStreamDialect::D2rV3 {
+                let slot = match dialect.placement(&item).equipment_slot {
+                    Some("Head") => "Helm",
+                    Some("Armor") => "Armor",
+                    Some("Weapon1") => "Weapon1",
+                    Some("Weapon2") => "Weapon2",
+                    _ => "Unknown",
+                };
+                (slot.to_string(), "d2r_v3_owned_counted_list", if slot == "Unknown" { "unresolved_d2r_v3_candidate" } else { "equipped_slot_candidate" })
             } else {
                 (
                     merc_item.slot_name(),
@@ -490,7 +628,7 @@ fn parse_mercenary_equipped_items(
             let m_fmt_ko = d2r_core::engine::formatter::format_item(&item, "ko", 0, 1);
             let m_fmt_en = d2r_core::engine::formatter::format_item(&item, "en", 0, 1);
 
-            Some(json!({
+            let mut payload = json!({
                 "index": i,
                 "code": code_display,
                 "name_en": name_en,
@@ -501,7 +639,7 @@ fn parse_mercenary_equipped_items(
                 "y": item.y,
                 "width": width,
                 "height": height,
-                "is_equipped": item.mode == 1 || (is_alpha && item.mode != 0),
+                "is_equipped": if dialect == ItemStreamDialect::D2rV3 { item.mode == 1 && item.is_identified && slot_en != "Unknown" } else { item.mode == 1 || (is_alpha && item.mode != 0) },
                 "location": item.location,
                 "mode": item.mode,
                 "slot_en": slot_en,
@@ -522,9 +660,29 @@ fn parse_mercenary_equipped_items(
                 "max_durability": item.max_durability,
                 "current_durability": item.current_durability,
                 "quantity": item.quantity,
-            }))
+            });
+            if dialect == ItemStreamDialect::D2rV3 {
+                payload["parsing"] = json!({
+                    "source_range": item.range,
+                    "is_identified": item.is_identified,
+                    "is_opaque": item.is_opaque() || item.is_semi_opaque(),
+                    "property_status": if item.properties_complete { "complete" } else { "partial" }
+                });
+            }
+            Some(payload)
         })
-        .collect()
+        .collect();
+    evidence.exported_count = equipped_items.len();
+    if evidence.exported_count != item_count as usize {
+        evidence.status = "partial";
+        evidence
+            .diagnostics
+            .push("Mercenary declaration and exported count differ".to_string());
+    }
+    MercenaryItemExport {
+        items: equipped_items,
+        evidence,
+    }
 }
 
 fn alpha_mercenary_slot_semantics(
@@ -759,6 +917,206 @@ mod player_export_tests {
         assert_eq!(
             payload["unknown"][0]["parsing"]["placement_diagnostic"],
             "Unresolved item fragment"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mercenary_export_tests {
+    use super::*;
+    use d2r_macros::{invariant_test, settled_contract_test};
+
+    fn load(relative: &str) -> (Vec<u8>, d2r_core::save::SaveSectionMap, PlayerItemStream) {
+        let root = std::env::var("D2R_CORE_PATH")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        let bytes = fs::read(root.join("tests/fixtures/savegames").join(relative)).unwrap();
+        let map = map_core_sections(&bytes).unwrap();
+        let stream = PlayerItemStream::read(&bytes, &HuffmanTree::new()).unwrap();
+        (bytes, map, stream)
+    }
+
+    #[invariant_test]
+    fn actual_mercenary_exports_preserve_all_six_source_items_and_1872_bits() {
+        let h = HuffmanTree::new();
+        let mut source_bits = 0;
+        let mut exported = 0;
+        for (name, codes, expected_bits) in [
+            ("TESTASSASSIN_Act1_Rogue_BowOnly.d2s", vec!["hbw"], 328),
+            (
+                "TESTASSASSIN_Act1_Rogue_BowArmor.d2s",
+                vec!["lea", "hbw"],
+                624,
+            ),
+            (
+                "TESTASSASSIN_Act1_Rogue_CapBowArmor.d2s",
+                vec!["lea", "cap", "hbw"],
+                920,
+            ),
+        ] {
+            let (bytes, map, stream) = load(&format!("gameplay/normal/act1/{name}"));
+            let unchanged = bytes.clone();
+            assert_eq!(stream.dialect, ItemStreamDialect::D2rV3);
+            let jm = map.jf_pos.unwrap() + 2;
+            let kf = map.kf_pos.unwrap();
+            assert_eq!(&bytes[jm..jm + 2], b"JM");
+            let declared = u16::from_le_bytes([bytes[jm + 2], bytes[jm + 3]]);
+            assert_eq!(declared as usize, codes.len());
+            let source = d2r_core::domain::item::serialization::read_counted_list_d2r_v3(
+                &bytes[..kf],
+                jm,
+                &h,
+                105,
+            )
+            .unwrap();
+            let result = parse_mercenary_equipped_items(&bytes, &map, &h, &stream);
+            assert_eq!(result.evidence.status, "ok");
+            assert!(result.evidence.diagnostics.is_empty());
+            assert_eq!(result.evidence.declared_count, Some(declared));
+            assert_eq!(
+                (result.evidence.parsed_count, result.evidence.exported_count),
+                (codes.len(), codes.len())
+            );
+            assert_eq!(
+                result.evidence.source_range,
+                Some((jm as u64 + 4) * 8..kf as u64 * 8)
+            );
+            assert_eq!(
+                result
+                    .items
+                    .iter()
+                    .map(|value| value["code"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                codes
+            );
+            let mut file_bits = 0;
+            for (item, value) in source.iter().zip(&result.items) {
+                assert!(item.properties_complete && item.socketed_items.is_empty());
+                assert!(!item.is_opaque() && !item.is_semi_opaque());
+                assert_eq!(value["quality"], "Rare");
+                assert_eq!(value["mode"], 1);
+                assert_eq!(value["is_equipped"], true);
+                assert_eq!(value["parsing"]["is_identified"], true);
+                assert_eq!(value["parsing"]["source_range"], json!(item.range));
+                assert_eq!(value["slot_source"], "d2r_v3_owned_counted_list");
+                assert_eq!(
+                    value["slot_en"],
+                    match item.code.trim() {
+                        "lea" => "Armor",
+                        "cap" => "Helm",
+                        "hbw" => "Weapon1",
+                        _ => panic!("unexpected actual gear"),
+                    }
+                );
+                let properties: Vec<_> = value["properties"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|p| {
+                        (
+                            p["stat_id"].as_u64().unwrap() as u32,
+                            p["param"].as_u64().unwrap() as u32,
+                            p["value"].as_i64().unwrap() as i32,
+                        )
+                    })
+                    .collect();
+                assert_eq!(
+                    properties,
+                    item.properties
+                        .iter()
+                        .map(|p| (p.stat_id, p.param, p.value))
+                        .collect::<Vec<_>>()
+                );
+                let raw: Vec<_> = (item.range.start..item.range.end)
+                    .map(|bit| bytes[bit as usize / 8] & (1 << (bit % 8)) != 0)
+                    .collect();
+                let mut typed = item.clone();
+                typed.bits.clear();
+                typed.segments.clear();
+                typed.gap_bits.clear();
+                typed.body.alpha_code_bits.clear();
+                typed.range = Default::default();
+                typed.total_bits = 0;
+                typed.logical_width = None;
+                let rebuilt = if item.code.trim() == "hbw" {
+                    typed.to_bits_d2r_v3_stored_weapon(&h)
+                } else {
+                    typed.to_bits_d2r_v3_stored_armor(&h)
+                }
+                .unwrap();
+                assert_eq!(rebuilt, raw);
+                file_bits += raw.len();
+                exported += 1;
+            }
+            assert_eq!(file_bits, expected_bits);
+            source_bits += file_bits;
+            assert_eq!(bytes, unchanged);
+        }
+        assert_eq!((exported, source_bits), (6, 1872));
+        println!(
+            "mercenary actual source: 3 fixtures, 6 Rare items, 1872bits0diff; counts1/2/3 and original slots/properties preserved"
+        );
+    }
+
+    #[settled_contract_test]
+    fn v3_mercenary_count_and_footer_errors_are_visible_without_alpha_fallback() {
+        let (bytes, map, stream) =
+            load("gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_BowArmor.d2s");
+        let h = HuffmanTree::new();
+        let jm = map.jf_pos.unwrap() + 2;
+        for count in [1_u16, 3] {
+            let mut changed = bytes.clone();
+            changed[jm + 2..jm + 4].copy_from_slice(&count.to_le_bytes());
+            let result = parse_mercenary_equipped_items(&changed, &map, &h, &stream);
+            assert_eq!(result.evidence.status, "error");
+            assert_eq!(result.evidence.declared_count, Some(count));
+            assert!(!result.evidence.diagnostics.is_empty());
+            assert!(result.items.is_empty());
+        }
+        for offset in [jm, map.kf_pos.unwrap()] {
+            let mut changed = bytes.clone();
+            changed[offset] = b'x';
+            let result = parse_mercenary_equipped_items(&changed, &map, &h, &stream);
+            assert_eq!(result.evidence.status, "error");
+            assert!(!result.evidence.diagnostics.is_empty());
+            assert!(result.items.is_empty());
+        }
+    }
+
+    #[settled_contract_test]
+    fn absent_empty_and_alpha_controls_retain_explicit_stream_status() {
+        let h = HuffmanTree::new();
+        let (bytes, map, stream) = load("gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s");
+        let absent = parse_mercenary_equipped_items(&bytes, &map, &h, &stream);
+        assert_eq!(absent.evidence.status, "absent");
+        assert!(absent.items.is_empty() && absent.evidence.diagnostics.is_empty());
+        let mut zero = bytes.clone();
+        let start = map.jf_pos.unwrap() + 2;
+        zero.splice(start..start, [b'J', b'M', 0, 0]);
+        let zero_map = map_core_sections(&zero).unwrap();
+        let empty = parse_mercenary_equipped_items(&zero, &zero_map, &h, &stream);
+        assert_eq!(empty.evidence.status, "ok");
+        assert_eq!(empty.evidence.declared_count, Some(0));
+        assert!(empty.items.is_empty() && empty.evidence.diagnostics.is_empty());
+
+        let (alpha_bytes, alpha_map, alpha_stream) = load("original/amazon_authority_runeword.d2s");
+        assert_eq!(alpha_stream.dialect, ItemStreamDialect::Alpha);
+        let alpha = parse_mercenary_equipped_items(&alpha_bytes, &alpha_map, &h, &alpha_stream);
+        assert!(alpha.items.is_empty());
+        assert_eq!(alpha.evidence.dialect, ItemStreamDialect::Alpha);
+        assert_eq!(
+            alpha_mercenary_slot_semantics(
+                &MercenaryEquipmentItem {
+                    code: "hbw".into(),
+                    location: 0,
+                    mode: 3,
+                    x: 0,
+                    y: 0
+                },
+                false
+            )
+            .0,
+            "Weapon1"
         );
     }
 }
