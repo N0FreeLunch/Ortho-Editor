@@ -10259,9 +10259,9 @@ mod v3_personalized_equipment_codec_tests {
         SOURCE.get_or_init(|| {
             let root = std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-            let bytes = std::fs::read(root.join("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaPersonalizeComplete.d2s")).unwrap();
+            let bytes = std::fs::read(root.join("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest6_BaalIncomplete.d2s")).unwrap();
             let items = Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap();
-            let item = items[42].clone();
+            let item = items[23].clone();
             assert_eq!(item.code.trim(), "brs");
             assert_eq!(item.personalized_player_name.as_deref(), Some("TESTDRUID"));
             assert_eq!(item.range.end - item.range.start, 416);
@@ -10346,7 +10346,7 @@ mod v3_personalized_equipment_codec_tests {
         let original = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
         assert_eq!(items.len(), original.len());
         for (index, (actual, expected)) in items.iter().zip(&original).enumerate() {
-            if index == 42 {
+            if index == 23 {
                 assert_fields(actual, &item);
                 assert_eq!(actual.range, expected.range);
             } else {
