@@ -415,7 +415,13 @@ mod tests {
         let path = fixture("TESTDRUID_Quest1_AshearaTalked.d2s", "act3");
         let receipt = observe(&fs::read(&path).unwrap(), &path);
         assert_eq!(receipt.status, "ok");
-        assert_eq!(receipt.metric_outcome, "red");
+        assert_eq!(receipt.metric_outcome, "green");
+        assert_eq!(receipt.report.missing_expected_stats, 0);
+        assert_eq!(receipt.report.extra_unmatched_stats, 0);
+        assert_eq!(
+            receipt.report.value_in_range_stats,
+            receipt.report.total_expected_stats
+        );
         let row = receipt
             .report
             .item_evaluations
