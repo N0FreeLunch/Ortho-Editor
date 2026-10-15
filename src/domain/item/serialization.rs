@@ -5270,8 +5270,8 @@ impl Item {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::StoredJewelry)
     }
 
-    /// Rebuild typed Normal tomes, keys and cubes with source-owned body fields.
-    /// Quantity presence and the tome payload are emitted without replay or defaults.
+    /// Rebuild supported typed miscellaneous leaves, including noncompact quest items.
+    /// Quality, quantity presence and tome payload are emitted without replay or defaults.
     pub fn to_bits_d2r_v3_stored_misc(&self, huffman: &HuffmanTree) -> io::Result<Vec<bool>> {
         self.to_bits_d2r_v3_stored(huffman, D2rV3StoredLayout::StoredMisc)
     }
@@ -5349,13 +5349,19 @@ impl Item {
             empty_socket_armor || ((weapon_layout || stored_armor_layout) && header.is_socketed);
         let supported_kind = match layout {
             D2rV3StoredLayout::StoredMisc => {
-                quality == ItemQuality::Normal
-                    && matches!(self.body.code.trim(), "key" | "tbk" | "ibk" | "box")
-                    && item_template(self.body.code.trim()).is_some_and(|template| {
+                let code = self.body.code.trim();
+                let supported_quality = match code {
+                    "key" | "tbk" | "ibk" | "box" | "ice" => quality == ItemQuality::Normal,
+                    "vip" => quality == ItemQuality::Unique,
+                    _ => false,
+                };
+                supported_quality
+                    && item_template(code).is_some_and(|template| {
                         !template.is_weapon
-                            && !template.is_armor
-                            && !template.has_durability
-                            && !template.has_quest_difficulty
+                        && !template.is_armor
+                        && !template.has_durability
+                        // Difficulty is a compact quest field, absent from these noncompact leaves.
+                        && (!template.has_quest_difficulty || matches!(code, "vip" | "ice"))
                     })
             }
             D2rV3StoredLayout::StoredJewelry => {
@@ -10436,5 +10442,360 @@ mod v3_personalized_equipment_codec_tests {
         assert!(item.to_bits_d2r_v3_armor(&HuffmanTree::new()).is_err());
         let item = named(composite::sample(4, 12), "A");
         assert!(item.to_bits_d2r_v3_weapon(&HuffmanTree::new()).is_err());
+    }
+}
+#[cfg(test)]
+mod v3_misc_quest_leaf_codec_tests {
+    use super::*;
+    use crate::domain::item::stream::PlayerItemStream;
+    use d2r_macros::{invariant_test, settled_contract_test};
+    use std::sync::OnceLock;
+
+    type Sample = (Vec<u8>, Vec<Item>, usize);
+    fn samples() -> &'static Vec<Sample> {
+        static INPUTS: OnceLock<Vec<Sample>> = OnceLock::new();
+        INPUTS.get_or_init(|| {
+            let root = std::env::var("D2R_CORE_PATH").map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            [
+                ("tests/fixtures/savegames/gameplay/normal/act2/TESTDRUID_Q3_AmuletFoundNoTalk.d2s", 44, 41, "vip", 208),
+                ("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_MaraPotionObtained.d2s", 41, 38, "ice", 136),
+            ].into_iter().map(|(file,count,index,code,width)| {
+                let bytes = std::fs::read(root.join(file)).unwrap();
+                let stream = PlayerItemStream::read(&bytes, &HuffmanTree::new()).unwrap();
+                assert_eq!(stream.items.len(),count);
+                let item=&stream.items[index];
+                assert_eq!(item.code.trim(),code);
+                assert_eq!(item.range.end-item.range.start,width);
+                assert!(item_template(code).unwrap().has_quest_difficulty);
+                assert!(!item.is_compact);
+                assert_eq!(item.body.d2r_v3_auxiliary.as_ref().unwrap().quest_difficulty,None);
+                (bytes,stream.items,index)
+            }).collect()
+        })
+    }
+    fn typed(source: &Item) -> Item {
+        let mut item = source.clone();
+        item.bits.clear();
+        item.segments.clear();
+        item.gap_bits.clear();
+        item.body.alpha_code_bits.clear();
+        item.range = Default::default();
+        item.total_bits = 0;
+        item.logical_width = None;
+        assert!(item.socketed_items.is_empty());
+        item
+    }
+    fn emit(item: &Item) -> io::Result<Vec<bool>> {
+        item.to_bits_d2r_v3_stored_misc(&HuffmanTree::new())
+    }
+    fn raw(bytes: &[u8], item: &Item) -> Vec<bool> {
+        (item.range.start..item.range.end)
+            .map(|i| bytes[i as usize / 8] & (1 << (i % 8)) != 0)
+            .collect()
+    }
+    fn packed(bits: &[bool]) -> Vec<u8> {
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (i, &bit) in bits.iter().enumerate() {
+            if bit {
+                bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        bytes
+    }
+    fn reparse(bits: &[bool]) -> Item {
+        let bytes = packed(bits);
+        let (item, consumed) =
+            parse_item_at_d2r_v3(&bytes, 0, &HuffmanTree::new(), 0, 105).unwrap();
+        assert_eq!(consumed as usize, bits.len());
+        item
+    }
+    fn body(item: &Item) -> crate::domain::item::entity::ItemBody {
+        let mut body = item.body.clone();
+        body.alpha_code_bits.clear();
+        body.d2r_v3_auxiliary.as_mut().unwrap().alignment_padding = None;
+        body
+    }
+    fn props(item: &Item) -> Vec<(u32, u32, i32)> {
+        item.properties
+            .iter()
+            .map(|p| (p.stat_id, p.param, p.value))
+            .collect()
+    }
+    fn assert_fields(actual: &Item, expected: &Item) {
+        assert_eq!(actual.header, expected.header);
+        assert_eq!(body(actual), body(expected));
+        assert_eq!(actual.code.trim(), expected.code.trim());
+        assert_eq!(actual.unique_id, expected.unique_id);
+        assert_eq!(actual.quantity, expected.quantity);
+        assert_eq!(props(actual), props(expected));
+        assert_eq!(actual.set_attributes, expected.set_attributes);
+        assert_eq!(actual.runeword_attributes, expected.runeword_attributes);
+        assert!(actual.socketed_items.is_empty());
+        assert!(actual.properties_complete);
+        assert_eq!(
+            actual
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .unwrap()
+                .quest_difficulty,
+            None
+        );
+    }
+    fn locality(before: &[bool], after: &[bool], range: std::ops::Range<usize>) {
+        assert_eq!(before.len(), after.len());
+        let differences: Vec<_> = before
+            .iter()
+            .zip(after)
+            .enumerate()
+            .filter_map(|(i, (a, b))| (a != b).then_some(i))
+            .collect();
+        assert!(!differences.is_empty());
+        assert!(differences.iter().all(|&i| range.contains(&i)));
+    }
+    fn field(bits: &[bool], start: usize, width: usize) -> u32 {
+        bits[start..start + width]
+            .iter()
+            .enumerate()
+            .fold(0, |n, (i, &b)| n | ((b as u32) << i))
+    }
+    fn splice(sample: &Sample, model: &Item, bits: &[bool]) {
+        let (bytes, original, index) = sample;
+        let source = &original[*index];
+        assert_eq!(bits.len() as u64, source.range.end - source.range.start);
+        let mut save = bytes.clone();
+        let start = source.range.start as usize / 8;
+        save[start..start + bits.len() / 8].copy_from_slice(&packed(bits));
+        let parsed = PlayerItemStream::read(&save, &HuffmanTree::new()).unwrap();
+        assert_eq!(parsed.items.len(), original.len());
+        for (n, (actual, expected)) in parsed.items.iter().zip(original).enumerate() {
+            if n == *index {
+                assert_fields(actual, model);
+                assert_eq!(actual.range, expected.range);
+            } else {
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+    fn controlled(item: &mut Item) -> Vec<bool> {
+        for padding in 0..8 {
+            item.body
+                .d2r_v3_auxiliary
+                .as_mut()
+                .unwrap()
+                .alignment_padding = Some(vec![false; padding]);
+            match emit(item) {
+                Ok(bits) => return bits,
+                Err(e) if e.to_string().contains("alignment field does not match") => {}
+                Err(e) => panic!("Unexpected control rejection: {e}"),
+            }
+        }
+        panic!("No consistent alignment")
+    }
+    #[invariant_test]
+    fn original_misc_quest_leaves_are_source_exact_without_replay() {
+        let mut total = 0;
+        for (bytes, items, index) in samples() {
+            let source = &items[*index];
+            let original = source.clone();
+            let mut model = typed(source);
+            model.bits = vec![crate::item::RecordedBit {
+                bit: true,
+                offset: u64::MAX,
+            }];
+            model.body.alpha_code_bits = vec![true; 19];
+            let before = model.clone();
+            let bits = emit(&model).unwrap();
+            assert_eq!(bits, raw(bytes, source));
+            assert_fields(&reparse(&bits), source);
+            assert_eq!(model, before);
+            assert_eq!(source, &original);
+            total += bits.len();
+        }
+        assert_eq!(total, 344);
+        println!("{{\"actual_leaves\":2,\"source_bits\":344,\"differing_bits\":0,\"compact_difficulty_insertions\":0}}");
+    }
+    #[settled_contract_test]
+    fn unique_main_and_level_mutations_stay_in_source_fields_and_whole_saves() {
+        let mut mutations = 0;
+        for sample in samples() {
+            let (bytes, items, index) = sample;
+            let source = &items[*index];
+            let before = raw(bytes, source);
+            let code_bits = HuffmanTree::new()
+                .encode(&format!("{} ", source.code.trim()))
+                .unwrap()
+                .len();
+            if source.code.trim() == "vip" {
+                let offset = 101
+                    + code_bits
+                    + if source.has_multiple_graphics { 3 } else { 0 }
+                    + if source.has_class_specific_data {
+                        11
+                    } else {
+                        0
+                    };
+                assert_eq!(field(&before, offset, 12), 123);
+                assert_eq!(source.unique_id, Some(123));
+                let mut model = typed(source);
+                model.unique_id = Some(124);
+                let bits = emit(&model).unwrap();
+                locality(&before, &bits, offset..offset + 12);
+                assert_fields(&reparse(&bits), &model);
+                splice(sample, &model, &bits);
+                mutations += 1;
+                let p = source
+                    .properties
+                    .iter()
+                    .position(|p| p.stat_id == 45)
+                    .unwrap();
+                let range = (source.properties[p].range.start - source.range.start) as usize
+                    ..(source.properties[p].range.end - source.range.start) as usize;
+                let mut model = typed(source);
+                model.properties[p].value += 1;
+                model.stats.properties = model.properties.clone();
+                let bits = emit(&model).unwrap();
+                locality(&before, &bits, range);
+                assert_fields(&reparse(&bits), &model);
+                splice(sample, &model, &bits);
+                mutations += 1;
+            } else {
+                let offset = 88 + code_bits;
+                assert_eq!(
+                    field(&before, offset, 7),
+                    u32::from(source.header.level.unwrap())
+                );
+                let mut model = typed(source);
+                model.header.level = Some((source.header.level.unwrap() + 1) % 128);
+                let bits = emit(&model).unwrap();
+                locality(&before, &bits, offset..offset + 7);
+                assert_fields(&reparse(&bits), &model);
+                splice(sample, &model, &bits);
+                mutations += 1;
+            }
+        }
+        assert_eq!(mutations, 3);
+    }
+    #[settled_contract_test]
+    fn existing_presence_and_footer_grammar_keeps_quest_difficulty_absent() {
+        let mut controls = 0;
+        for (_, items, index) in samples() {
+            let source = &items[*index];
+            let mut realm = typed(source);
+            realm.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0, 1, u32::MAX, 17];
+            let bits = controlled(&mut realm);
+            assert_fields(&reparse(&bits), &realm);
+            controls += 1;
+            for value in [0, 511] {
+                let mut quantity = typed(source);
+                quantity.quantity = Some(value);
+                quantity.body.quantity = Some(value);
+                quantity
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_mut()
+                    .unwrap()
+                    .has_quantity = true;
+                let bits = controlled(&mut quantity);
+                assert_fields(&reparse(&bits), &quantity);
+                controls += 1;
+            }
+            for value in [0, 255] {
+                let mut stash = typed(source);
+                stash
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_mut()
+                    .unwrap()
+                    .advanced_stash_quantity = Some(value);
+                let bits = controlled(&mut stash);
+                assert_fields(&reparse(&bits), &stash);
+                controls += 1;
+            }
+        }
+        assert_eq!(controls, 10);
+    }
+    #[settled_contract_test]
+    fn unsupported_quality_aliases_difficulty_and_children_reject_without_mutation() {
+        let mut rejected = 0;
+        for (_, items, index) in samples() {
+            let source = &items[*index];
+            for case in 0..22 {
+                let mut item = typed(source);
+                match case {
+                    0 => {
+                        item.code = "xyz".into();
+                        item.body.code = "xyz ".into();
+                    }
+                    1 => {
+                        item.header.quality = Some(if source.code.trim() == "vip" {
+                            ItemQuality::Normal
+                        } else {
+                            ItemQuality::Unique
+                        })
+                    }
+                    2 => {
+                        item.unique_id = if source.code.trim() == "vip" {
+                            None
+                        } else {
+                            Some(123)
+                        }
+                    }
+                    3 => {
+                        if source.code.trim() == "vip" {
+                            item.unique_id = Some(4096);
+                        } else {
+                            item.header.id = None;
+                        }
+                    }
+                    4 => {
+                        item.header.is_identified = false;
+                        item.header.flags &= !(1 << 4);
+                    }
+                    5 => {
+                        item.body
+                            .d2r_v3_auxiliary
+                            .as_mut()
+                            .unwrap()
+                            .quest_difficulty = Some(0)
+                    }
+                    6 => {
+                        item.is_compact = true;
+                        item.header.is_compact = true;
+                        item.header.flags |= 1 << 21;
+                    }
+                    7 => item.body.x ^= 1,
+                    8 => item.max_durability = Some(0),
+                    9 => item.sockets = Some(1),
+                    10 => item.socketed_items.push(source.clone()),
+                    11 => item.properties_complete = false,
+                    12 => item.stats.properties[0].value += 1,
+                    13 => item.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true,
+                    14 => item.tbk_ibk_teleport = Some(0),
+                    15 => item.header.save_is_alpha = true,
+                    16 => item.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = 98,
+                    17 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![1],
+                    18 => item.header.flags ^= 1 << 4,
+                    19 => item.body.mode ^= 1,
+                    20 => item.magic_prefix = Some(0),
+                    21 => {
+                        item.quantity = Some(512);
+                        item.body.quantity = Some(512);
+                        item.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true;
+                    }
+                    _ => unreachable!(),
+                }
+                let before = item.clone();
+                assert_eq!(
+                    emit(&item).unwrap_err().kind(),
+                    io::ErrorKind::InvalidInput,
+                    "case{case}"
+                );
+                assert_eq!(item, before);
+                rejected += 1;
+            }
+        }
+        assert_eq!(rejected, 44);
     }
 }

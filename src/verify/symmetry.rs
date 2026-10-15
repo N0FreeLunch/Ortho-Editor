@@ -317,7 +317,10 @@ fn compare_v3_source_item(
             }
         } else if matches!(typed.code.trim(), "cm1" | "cm2" | "cm3" | "jew") {
             typed.to_bits_d2r_v3_accessory(huffman)
-        } else if matches!(typed.code.trim(), "key" | "tbk" | "ibk" | "box") {
+        } else if matches!(
+            typed.code.trim(),
+            "key" | "tbk" | "ibk" | "box" | "vip" | "ice"
+        ) {
             typed.to_bits_d2r_v3_stored_misc(huffman)
         } else if matches!(typed.code.trim(), "rin" | "amu") {
             if deferred_stored_host {
