@@ -18,6 +18,9 @@ use std::path::{Path, PathBuf};
 #[path = "d2stat_template_oracle/d2r_v3.rs"]
 mod d2r_v3;
 
+#[path = "d2stat_template_oracle/intrinsics.rs"]
+mod intrinsics;
+
 mod clap_stub {
     pub struct Args {
         pub corpus_dir: Option<String>,
@@ -252,6 +255,13 @@ pub struct TemplateOracleReport {
     pub admitted_template_evaluations: usize,
     pub template_identity_conflicts: usize,
     pub conditional_template_mismatches: usize,
+    pub intrinsic_items_observed: usize,
+    pub required_automatic_stats: usize,
+    pub matched_automatic_stats: usize,
+    pub value_in_range_automatic_stats: usize,
+    pub admitted_staffmod_properties: usize,
+    pub intrinsic_mismatches: usize,
+    pub intrinsic_evaluations: Vec<IntrinsicItemEvaluation>,
     pub semantic_option_coverage_percent: Option<f64>,
     pub item_evaluations: Vec<ItemEvaluation>,
 }
@@ -287,6 +297,14 @@ pub struct ItemEvaluation {
     pub conditional_diagnostics: Vec<TemplateDiagnostic>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct IntrinsicItemEvaluation {
+    pub file: String,
+    pub item_index: usize,
+    pub item_index_contract: &'static str,
+    pub evaluation: intrinsics::IntrinsicEvaluation,
+}
+
 impl TemplateOracleReport {
     pub fn merge(&mut self, mut other: Self) {
         self.total_saves_scanned += other.total_saves_scanned;
@@ -302,10 +320,17 @@ impl TemplateOracleReport {
         self.admitted_template_evaluations += other.admitted_template_evaluations;
         self.template_identity_conflicts += other.template_identity_conflicts;
         self.conditional_template_mismatches += other.conditional_template_mismatches;
+        self.intrinsic_items_observed += other.intrinsic_items_observed;
+        self.required_automatic_stats += other.required_automatic_stats;
+        self.matched_automatic_stats += other.matched_automatic_stats;
+        self.value_in_range_automatic_stats += other.value_in_range_automatic_stats;
+        self.admitted_staffmod_properties += other.admitted_staffmod_properties;
+        self.intrinsic_mismatches += other.intrinsic_mismatches;
+        self.intrinsic_evaluations
+            .append(&mut other.intrinsic_evaluations);
         self.item_evaluations.append(&mut other.item_evaluations);
     }
 }
-
 fn scan_directory(dir: &Path, ext: &str) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if dir.is_file() {
@@ -748,8 +773,55 @@ fn evaluate_item_against_template(
 ) {
     report.total_items_scanned += 1;
 
-    let template = match find_item_template(item, alpha_mode) {
-        Some(t) => t,
+    let template = find_item_template(item, alpha_mode);
+    let known_primary_stats: &[ItemStatRange] = match template.as_ref() {
+        Some(MatchedTemplate::Unique { template, source })
+            if !matches!(source, TemplateMatchSource::UniqueCodeFallback)
+                && template_identity_status(item.code.trim(), Some(template.code))
+                    .expectations_admitted() =>
+        {
+            template.stats
+        }
+        Some(MatchedTemplate::Set { template, .. })
+            if template_identity_status(item.code.trim(), Some(template.code))
+                .expectations_admitted() =>
+        {
+            template.stats
+        }
+        Some(MatchedTemplate::Superior { template, .. }) => template.stats,
+        _ => &[],
+    };
+    let mut intrinsic_indices = Vec::new();
+    if let Some(outcome) = intrinsics::evaluate(item, alpha_mode, known_primary_stats) {
+        let evaluation = outcome.evaluation;
+        report.intrinsic_items_observed += 1;
+        report.required_automatic_stats += evaluation.automatic_checks.len();
+        report.matched_automatic_stats += evaluation
+            .automatic_checks
+            .iter()
+            .filter(|check| check.observed.len() == 1)
+            .count();
+        report.value_in_range_automatic_stats += evaluation
+            .automatic_checks
+            .iter()
+            .filter(|check| check.admitted)
+            .count();
+        report.admitted_staffmod_properties += evaluation
+            .staffmod_checks
+            .iter()
+            .filter(|check| check.admitted)
+            .count();
+        report.intrinsic_mismatches += usize::from(!evaluation.diagnostics.is_empty());
+        intrinsic_indices = outcome.admitted_property_indices;
+        report.intrinsic_evaluations.push(IntrinsicItemEvaluation {
+            file: path.display().to_string(),
+            item_index,
+            item_index_contract: "player_items_zero_based_flattened",
+            evaluation,
+        });
+    }
+    let template = match template {
+        Some(template) => template,
         None => return,
     };
 
@@ -930,12 +1002,18 @@ fn evaluate_item_against_template(
 
     let mut extra_parsed_stat_ids = Vec::new();
     if expectations_admitted {
-        for (parsed_id, _) in &parsed_effective_stats {
+        for (property_index, property) in parsed_properties.iter().enumerate() {
+            if owns_runeword_list && property.stat_id == 511 {
+                continue;
+            }
+            let parsed_id = axiom.map_alpha_id(property.stat_id);
             let is_matched = expected_stats
                 .iter()
-                .any(|e| stat_matches_expected(e.stat_id, *parsed_id));
-            if !is_matched {
-                extra_parsed_stat_ids.push(*parsed_id);
+                .any(|expected| stat_matches_expected(expected.stat_id, parsed_id));
+            let intrinsic_owned =
+                !owns_runeword_list && intrinsic_indices.contains(&property_index);
+            if !is_matched && !intrinsic_owned {
+                extra_parsed_stat_ids.push(parsed_id);
                 report.extra_unmatched_stats += 1;
             }
         }
@@ -979,7 +1057,6 @@ fn evaluate_item_against_template(
         conditional_diagnostics,
     });
 }
-
 fn evaluate_save_file(path: &Path) -> TemplateOracleReport {
     let mut report = TemplateOracleReport {
         total_saves_scanned: 1,

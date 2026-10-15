@@ -154,7 +154,7 @@ fn envelope(path: &Path) -> Receipt {
         top_level_item_count: None,
         item_index_contract: INDEX_CONTRACT,
         evidence_surface: "live-observer",
-        coverage_limit: "Counted primary items only; children and secondary sections excluded. Template coverage counts stat-ID presence and separately value ranges; it is not canonical semantic-option inventory, spatial legality, game-load proof or Ftrue. Generated-template conflicts remain visible.",
+        coverage_limit: "Counted primary items only; children and secondary sections excluded. Fixed-template coverage counts stat-ID presence and value ranges. Declared automatic checks separately require source parameter/value/occurrence; optional staffmod counts are observations, not missing-roll coverage. Unsupported overlap remains unadmitted. This is not canonical semantic-option inventory, spatial legality, game-load proof or Ftrue. Source and generated-template conflicts remain visible.",
         report: TemplateOracleReport::default(),
         errors: Vec::new(),
     }
@@ -179,8 +179,17 @@ fn observe(bytes: &[u8], path: &Path) -> Receipt {
         semantic_view
             .properties
             .retain(|property| property.stat_id != 511);
+        let old_intrinsic_len = receipt.report.intrinsic_evaluations.len();
         let old_len = receipt.report.item_evaluations.len();
         evaluate_item_against_template(&mut receipt.report, path, index, &semantic_view, false);
+        if receipt.report.intrinsic_evaluations.len() > old_intrinsic_len {
+            receipt
+                .report
+                .intrinsic_evaluations
+                .last_mut()
+                .unwrap()
+                .item_index_contract = INDEX_CONTRACT;
+        }
         if receipt.report.item_evaluations.len() > old_len {
             receipt
                 .report
@@ -202,21 +211,22 @@ fn observe(bytes: &[u8], path: &Path) -> Receipt {
 }
 
 fn metric_outcome(report: &TemplateOracleReport) -> &'static str {
-    if report.conditional_template_mismatches > 0 {
+    if report.conditional_template_mismatches > 0 || report.intrinsic_mismatches > 0 {
         "red"
-    } else if report.total_expected_stats == 0 {
+    } else if report.total_expected_stats == 0 && report.required_automatic_stats == 0 {
         "not_admitted"
     } else if report.missing_expected_stats > 0
         || report.extra_unmatched_stats > 0
         || report.value_in_range_stats != report.total_expected_stats
         || report.template_identity_conflicts > 0
+        || report.matched_automatic_stats != report.required_automatic_stats
+        || report.value_in_range_automatic_stats != report.required_automatic_stats
     {
         "red"
     } else {
         "green"
     }
 }
-
 fn emit(receipt: &Receipt, options: &Options) -> std::io::Result<()> {
     if let Some(path) = &options.output {
         let mut output = OpenOptions::new().write(true).create_new(true).open(path)?;
@@ -639,12 +649,12 @@ mod superior_tests {
     }
 
     #[settled_contract_test]
-    fn captured_superior_flat_channels_retain_unexplained_intrinsics() {
+    fn captured_superior_flat_channels_keep_source_qualified_intrinsics() {
         for (code, max_damage, channels, extra) in [
-            ("ktr", 7, vec![22], vec![]),
+            ("ktr", 7, vec![22], Vec::<u32>::new()),
             ("wrb", 9, vec![22], vec![]),
             ("jav", 5, vec![22, 160], vec![]),
-            ("ob1", 5, vec![22], vec![7, 107]),
+            ("ob1", 5, vec![22], vec![]),
         ] {
             let report = evaluate(&sources()[code]);
             let row = &report.item_evaluations[0];
@@ -656,6 +666,16 @@ mod superior_tests {
             assert_eq!(report.conditional_template_mismatches, 0);
             assert!(row.conditional_diagnostics.is_empty());
             assert_eq!(row.extra_parsed_stat_ids, extra);
+            assert_eq!(report.required_automatic_stats, usize::from(code == "ob1"));
+            assert_eq!(
+                report.admitted_staffmod_properties,
+                usize::from(code == "ob1")
+            );
+            assert_eq!(report.intrinsic_mismatches, 0);
+            if code == "ob1" {
+                assert!(row.parsed_stats.contains(&(7, 4)));
+                assert!(row.parsed_stats.contains(&(107, 2)));
+            }
             let profile = row.superior_damage_expectation.as_ref().unwrap();
             assert_eq!(profile.branch, "flat_one");
             assert_eq!(profile.source_roll_range, (5, 15));
@@ -833,5 +853,288 @@ mod superior_tests {
         assert_eq!(merged.conditional_template_mismatches, 1);
         assert_eq!(merged.item_evaluations.len(), 2);
         assert_eq!(metric_outcome(&merged), "red");
+    }
+}
+
+#[cfg(test)]
+mod intrinsic_source_tests {
+    use super::*;
+    use d2r_core::data::item_specs::ItemStatRange;
+    use d2r_core::item::ItemQuality;
+    use d2r_macros::settled_contract_test;
+
+    fn path(relative: &str) -> PathBuf {
+        std::env::var_os("D2R_CORE_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+            .join("tests/fixtures/savegames")
+            .join(relative)
+    }
+    fn item(relative: &str, index: usize) -> Item {
+        let bytes = fs::read(path(relative)).unwrap();
+        Item::read_player_items_d2r_v3(&bytes, &HuffmanTree::new()).unwrap()[index].clone()
+    }
+    fn orb() -> Item {
+        item(
+            "gameplay/normal/act1/TESTDRUID_Quest1_DenOfEvil_Done_PreAkara.d2s",
+            19,
+        )
+    }
+    fn evaluate(item: &Item) -> TemplateOracleReport {
+        let mut view = item.clone();
+        view.properties.retain(|p| p.stat_id != 511);
+        let original = view.clone();
+        let mut report = TemplateOracleReport::default();
+        evaluate_item_against_template(
+            &mut report,
+            Path::new("controlled-intrinsic-source"),
+            0,
+            &view,
+            false,
+        );
+        assert_eq!(view, original);
+        report
+    }
+
+    #[settled_contract_test]
+    fn captured_intrinsics_have_independent_required_and_optional_counters() {
+        let item = orb();
+        let original = item.clone();
+        let report = evaluate(&item);
+        assert_eq!(
+            (
+                report.total_expected_stats,
+                report.matched_expected_stats,
+                report.value_in_range_stats
+            ),
+            (2, 2, 2)
+        );
+        assert_eq!(
+            (
+                report.required_automatic_stats,
+                report.matched_automatic_stats,
+                report.value_in_range_automatic_stats
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(report.admitted_staffmod_properties, 1);
+        assert_eq!(report.intrinsic_mismatches, 0);
+        let row = &report.intrinsic_evaluations[0].evaluation;
+        assert_eq!(
+            (
+                row.auto_saved_id,
+                row.auto_source_row_id,
+                row.host_auto_group
+            ),
+            (Some(10), Some(9), Some(303))
+        );
+        assert_eq!((row.source_range_start, row.source_range_end), (9672, 9912));
+        assert_eq!(row.staffmod_checks[0].param, 43);
+        assert_eq!(row.staffmod_checks[0].observed[0].value, 2);
+        assert!(report.item_evaluations[0].extra_parsed_stat_ids.is_empty());
+        assert_eq!(
+            report.item_evaluations[0].parsed_stats,
+            [(7, 4), (22, 1), (75, 11), (107, 2)]
+        );
+        assert_eq!(metric_outcome(&report), "green");
+        assert_eq!(item, original);
+    }
+
+    #[settled_contract_test]
+    fn intrinsic_contradictions_stay_red_when_fixed_ratios_are_green() {
+        let original = orb();
+        let mut cases = Vec::new();
+        for id in [0, 1, 11, 2047] {
+            let mut x = original.clone();
+            x.class_specific_bits = Some(id);
+            cases.push((format!("auto_id{id}"), x));
+        }
+        let mut x = original.clone();
+        x.has_class_specific_data = false;
+        cases.push(("header_presence".into(), x));
+        for value in [0, 6] {
+            let mut x = original.clone();
+            x.properties[0].value = value;
+            cases.push((format!("auto_value{value}"), x));
+        }
+        let mut x = original.clone();
+        x.properties.remove(0);
+        cases.push(("missing_auto".into(), x));
+        let mut x = original.clone();
+        x.properties.push(x.properties[0].clone());
+        cases.push(("duplicate_auto".into(), x));
+        for value in [0, 4] {
+            let mut x = original.clone();
+            x.properties[3].value = value;
+            cases.push((format!("staff_value{value}"), x));
+        }
+        for param in [0, 66, 60] {
+            let mut x = original.clone();
+            x.properties[3].param = param;
+            cases.push((format!("staff_parameter{param}"), x));
+        }
+        let mut x = original.clone();
+        x.properties.push(x.properties[3].clone());
+        cases.push(("duplicate_staff".into(), x));
+        let mut x = original.clone();
+        for param in [35, 36, 37] {
+            let mut p = x.properties[3].clone();
+            p.param = param;
+            x.properties.push(p);
+        }
+        cases.push(("four_staffmods".into(), x));
+        assert_eq!(cases.len(), 16);
+        for (name, item) in cases {
+            let report = evaluate(&item);
+            assert_eq!(report.missing_expected_stats, 0, "{name}");
+            assert_eq!(
+                report.value_in_range_stats, report.total_expected_stats,
+                "{name}"
+            );
+            assert!(report.intrinsic_mismatches > 0, "{name}");
+            assert_eq!(metric_outcome(&report), "red", "{name}");
+        }
+    }
+
+    #[settled_contract_test]
+    fn optional_absence_and_unidentified_headers_never_hydrate_rolls() {
+        let mut no_staff = orb();
+        no_staff.properties.retain(|p| p.stat_id != 107);
+        let report = evaluate(&no_staff);
+        assert_eq!(report.admitted_staffmod_properties, 0);
+        assert_eq!(report.required_automatic_stats, 1);
+        assert_eq!(metric_outcome(&report), "green");
+        let mut hidden = orb();
+        hidden.header.is_identified = false;
+        hidden.is_identified = false;
+        hidden.properties.clear();
+        let report = evaluate(&hidden);
+        assert_eq!(report.required_automatic_stats, 0);
+        assert_eq!(report.admitted_staffmod_properties, 0);
+        assert_eq!(
+            report.intrinsic_evaluations[0].evaluation.status,
+            "unidentified"
+        );
+        assert_eq!(metric_outcome(&report), "not_admitted");
+        assert!(hidden.properties.is_empty());
+        let mut leak = orb();
+        leak.header.is_identified = false;
+        let report = evaluate(&leak);
+        assert_eq!(report.total_expected_stats, 0);
+        assert_eq!(metric_outcome(&report), "red");
+        assert_eq!(
+            report.intrinsic_evaluations[0].evaluation.diagnostics[0].kind,
+            "unidentified_property_leak"
+        );
+    }
+
+    #[settled_contract_test]
+    fn normal_and_rare_staffmods_are_observed_before_fixed_template_return() {
+        for (file, index, class, count) in [
+            (
+                "gameplay/normal/act1/TESTASSASSIN_Act1_Rogue_Lv7_Exp58640.d2s",
+                24,
+                "sor",
+                1,
+            ),
+            (
+                "gameplay/normal/act5/TESTDRUID_Quest6_BaalIncomplete.d2s",
+                16,
+                "dru",
+                2,
+            ),
+        ] {
+            let report = evaluate(&item(file, index));
+            assert_eq!(report.templated_items_found, 0);
+            assert_eq!(report.admitted_staffmod_properties, count);
+            assert_eq!(
+                report.intrinsic_evaluations[0]
+                    .evaluation
+                    .host_staffmods_class,
+                Some(class)
+            );
+            assert_eq!(report.intrinsic_mismatches, 0);
+            assert_eq!(metric_outcome(&report), "not_admitted");
+        }
+    }
+
+    #[settled_contract_test]
+    fn intrinsic_partial_alpha_and_overlap_contexts_do_not_suppress_properties() {
+        let original = orb();
+        let mut alpha = original.clone();
+        alpha.header.save_is_alpha = true;
+        assert_eq!(evaluate(&alpha).intrinsic_items_observed, 0);
+        let mut missing = original.clone();
+        missing.body.d2r_v3_auxiliary = None;
+        assert_eq!(evaluate(&missing).intrinsic_items_observed, 0);
+        let mut unknown_level = original.clone();
+        unknown_level.level = None;
+        let unknown = super::super::intrinsics::evaluate(&unknown_level, false, &[]).unwrap();
+        assert_eq!(unknown.evaluation.status, "partial");
+        assert!(!unknown.admitted_property_indices.contains(&3));
+        assert!(
+            unknown
+                .evaluation
+                .unadmitted_contexts
+                .contains(&"staffmod_class_layout_or_level")
+        );
+        let mut incomplete = original.clone();
+        incomplete.properties_complete = false;
+        let report = evaluate(&incomplete);
+        assert_eq!(
+            report.intrinsic_evaluations[0].evaluation.status,
+            "unadmitted"
+        );
+        assert!(
+            report.item_evaluations[0]
+                .extra_parsed_stat_ids
+                .contains(&7)
+        );
+        let mut rare = original.clone();
+        rare.quality = Some(ItemQuality::Rare);
+        let r = super::super::intrinsics::evaluate(&rare, false, &[]).unwrap();
+        assert_eq!(r.evaluation.status, "partial");
+        assert!(!r.admitted_property_indices.contains(&0));
+        for known in [
+            ItemStatRange {
+                stat_id: 7,
+                param: 0,
+                min: 1,
+                max: 5,
+            },
+            ItemStatRange {
+                stat_id: 107,
+                param: 43,
+                min: 1,
+                max: 3,
+            },
+        ] {
+            let r = super::super::intrinsics::evaluate(&original, false, &[known]).unwrap();
+            assert_eq!(r.evaluation.status, "partial");
+            let index = if known.stat_id == 7 { 0 } else { 3 };
+            assert!(!r.admitted_property_indices.contains(&index));
+        }
+    }
+
+    #[settled_contract_test]
+    fn intrinsic_merge_and_actual_v3_index_contracts_are_preserved() {
+        let mut merged = evaluate(&orb());
+        merged.merge(evaluate(&orb()));
+        assert_eq!(merged.required_automatic_stats, 2);
+        assert_eq!(merged.matched_automatic_stats, 2);
+        assert_eq!(merged.value_in_range_automatic_stats, 2);
+        assert_eq!(merged.admitted_staffmod_properties, 2);
+        assert_eq!(merged.intrinsic_evaluations.len(), 2);
+        assert_eq!(merged.intrinsic_mismatches, 0);
+        assert_eq!(metric_outcome(&merged), "green");
+        let p = path("gameplay/normal/act1/TESTDRUID_Quest1_DenOfEvil_Done_PreAkara.d2s");
+        let receipt = observe(&fs::read(&p).unwrap(), &p);
+        assert_eq!(receipt.status, "ok");
+        assert_eq!(receipt.metric_outcome, "green");
+        assert_eq!(receipt.report.total_expected_stats, 5);
+        assert_eq!(receipt.report.extra_unmatched_stats, 0);
+        let row = &receipt.report.intrinsic_evaluations[0];
+        assert_eq!(row.item_index, 19);
+        assert_eq!(row.item_index_contract, INDEX_CONTRACT);
     }
 }
