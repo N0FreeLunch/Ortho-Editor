@@ -1,4 +1,5 @@
 pub mod defense;
+pub(crate) mod durability;
 pub mod formatter;
 pub mod validation;
 pub mod checksum;

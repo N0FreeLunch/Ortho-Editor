@@ -9,6 +9,7 @@ use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
 use crate::engine::defense::{DefenseDisplay, displayed_defense};
+use crate::engine::durability::{DurabilityDisplay, displayed_durability};
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
@@ -34,6 +35,7 @@ pub struct FormattedItem {
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
     let mut base_attributes = Vec::new();
     let mut defense_advisory = None;
+    let mut durability_advisory = None;
     let mut quantity_advisory = false;
 
     if let Some(display) = displayed_defense(item, active_set_count, char_level) {
@@ -54,14 +56,31 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         }
     }
 
-    if let (Some(cur), Some(max)) = (item.current_durability(), item.max_durability()) {
-        if max > 0 {
-            let label = get_loc("ItemStats1d", language).trim();
-            if label.contains('%') {
-                base_attributes.push(format_template(label, &[cur.to_string(), max.to_string()]));
-            } else {
-                base_attributes.push(format!("{label} {cur} / {max}"));
+    if let Some(display) = displayed_durability(item, active_set_count) {
+        let (current, maximum) = match display {
+            DurabilityDisplay::Final { current, maximum } => (current, maximum.to_string()),
+            DurabilityDisplay::BaseOnly {
+                current,
+                base,
+                reason,
+            } => {
+                durability_advisory = Some((base, reason));
+                (current, "?".to_string())
             }
+        };
+        let label = get_loc("ItemStats1d", language).trim();
+        if label.contains('%') {
+            base_attributes.push(format_template(label, &[current.to_string(), maximum]));
+        } else {
+            base_attributes.push(format!("{label} {current} / {maximum}"));
+        }
+        if let Some((base, _)) = durability_advisory {
+            let label = if language == "ko" {
+                "기본 최대 내구력"
+            } else {
+                "Base Maximum Durability"
+            };
+            base_attributes.push(format!("{label}: {base}"));
         }
     }
 
@@ -172,6 +191,16 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
             "The maximum stack size cannot be determined from the available item data.",
             crate::engine::validation::WarningConfidenceTier::Advisory,
             "quantity_context",
+        );
+        warnings.push(warning.message.clone());
+        detailed_warnings.push(warning);
+    }
+
+    if let Some((_, reason)) = durability_advisory {
+        let warning = crate::engine::validation::ValidationWarning::new(
+            reason.message(),
+            crate::engine::validation::WarningConfidenceTier::Advisory,
+            "durability_context",
         );
         warnings.push(warning.message.clone());
         detailed_warnings.push(warning);
