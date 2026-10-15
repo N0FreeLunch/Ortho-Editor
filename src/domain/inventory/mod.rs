@@ -866,6 +866,76 @@ pub fn get_item_size(code: &str) -> (u8, u8) {
     }
 }
 pub fn get_item_category(code: &str) -> &'static str {
+    let code = code.trim();
+    if let Some(template) = crate::data::item_codes::ITEM_TEMPLATES
+        .iter()
+        .find(|template| template.code == code)
+    {
+        let types = crate::engine::validation::get_all_item_types(code);
+        if template.is_armor {
+            for (item_type, category) in [
+                ("glov", "Gloves"),
+                ("boot", "Boots"),
+                ("belt", "Belt"),
+                ("helm", "Helmet"),
+                ("shld", "Shield"),
+                ("tors", "Body Armor"),
+            ] {
+                if types.contains(&item_type) {
+                    return category;
+                }
+            }
+            return "Armor";
+        }
+        if template.is_weapon {
+            if types.contains(&"tpot") {
+                return "Throwing Potion";
+            }
+            if types.contains(&"bow") || types.contains(&"xbow") {
+                return "Long Weapon/Bow";
+            }
+            // Preserve established coarse weapon labels when source data confirms a weapon.
+            return match legacy_item_category(code) {
+                category @ ("Large Weapon" | "Medium Weapon" | "Long Weapon/Bow") => category,
+                _ => "Weapon",
+            };
+        }
+        // Rejuvenation inherits both healing and mana; classify the subtype first.
+        for (item_type, category) in [
+            ("rpot", "Rejuvenation Potion"),
+            ("hpot", "Healing Potion"),
+            ("mpot", "Mana Potion"),
+            ("poti", "Special Potion"),
+            ("scro", "Scroll"),
+            ("book", "Book"),
+            ("key", "Keys"),
+            ("bowq", "Ammo"),
+            ("xboq", "Ammo"),
+            ("scha", "Small Charm"),
+            ("mcha", "Large Charm"),
+            ("lcha", "Grand Charm"),
+            ("char", "Charm"),
+            ("jewl", "Jewel"),
+            ("gem", "Gem/Skull"),
+            ("rune", "Rune"),
+            ("ring", "Ring"),
+            ("amul", "Amulet"),
+            ("ques", "Quest Item"),
+            ("gold", "Gold"),
+            ("body", "Body Part"),
+            ("play", "Body Part"),
+            ("misc", "Miscellaneous"),
+        ] {
+            if types.contains(&item_type) {
+                return category;
+            }
+        }
+    }
+    // Codes without current type authority retain the existing compatibility fallback.
+    legacy_item_category(code)
+}
+
+fn legacy_item_category(code: &str) -> &'static str {
     match code.trim() {
         // Potions
         "hp1" | "hp2" | "hp3" | "hp4" | "hp5" => "Healing Potion",
@@ -1305,5 +1375,117 @@ mod tests {
         let cube_item = make_mock_item("tsc", 3, 0, 0, 0);
         let res_all = InventoryGrid::validate_all_containers_integrity(&[inv_valid, stash_valid, cube_box, cube_item]);
         assert_eq!(res_all, Ok(()));
+    }
+}
+
+#[cfg(test)]
+mod source_category_contract_tests {
+    use super::get_item_category;
+    use d2r_macros::settled_contract_test;
+
+    #[settled_contract_test]
+    fn captured_gameplay_codes_use_source_equipment_and_item_classes() {
+        for (code, expected) in [
+            ("ktr", "Weapon"),
+            ("wrb", "Weapon"),
+            ("sst", "Weapon"),
+            ("spr", "Weapon"),
+            ("ob1", "Weapon"),
+            ("wnd", "Weapon"),
+            ("mac", "Weapon"),
+            ("gpl", "Throwing Potion"),
+            ("hbw", "Long Weapon/Bow"),
+            ("hla", "Body Armor"),
+            ("brs", "Body Armor"),
+            ("vgl", "Gloves"),
+            ("mbl", "Belt"),
+            ("skp", "Helmet"),
+            ("dr1", "Helmet"),
+            ("tow", "Shield"),
+            ("box", "Quest Item"),
+        ] {
+            assert_eq!(get_item_category(code), expected, "{code}");
+        }
+    }
+
+    #[settled_contract_test]
+    fn armor_source_families_keep_belts_boots_and_class_specific_descendants_distinct() {
+        let groups = [
+            ("glov", "Gloves"),
+            ("boot", "Boots"),
+            ("belt", "Belt"),
+            ("helm", "Helmet"),
+            ("circ", "Helmet"),
+            ("pelt", "Helmet"),
+            ("phlm", "Helmet"),
+            ("shie", "Shield"),
+            ("ashd", "Shield"),
+            ("head", "Shield"),
+            ("tors", "Body Armor"),
+        ];
+        for (source_type, expected) in groups {
+            let members: Vec<_> = crate::data::item_codes::ITEM_TEMPLATES
+                .iter()
+                .filter(|template| template.item_type == Some(source_type))
+                .collect();
+            assert!(
+                members.len() >= 3,
+                "normal and upgraded source family {source_type}"
+            );
+            for template in members {
+                assert!(template.is_armor);
+                assert_eq!(
+                    get_item_category(template.code),
+                    expected,
+                    "{}",
+                    template.code
+                );
+            }
+        }
+    }
+
+    #[settled_contract_test]
+    fn potion_subtype_precedes_both_parents_and_socketables_keep_their_source_classes() {
+        for (code, expected) in [
+            ("rvs", "Rejuvenation Potion"),
+            ("rvl", "Rejuvenation Potion"),
+            ("hp1", "Healing Potion"),
+            ("mp1", "Mana Potion"),
+            ("vps", "Special Potion"),
+            ("r01", "Rune"),
+            ("r33", "Rune"),
+            ("gpr", "Gem/Skull"),
+            ("cm1", "Small Charm"),
+            ("cm2", "Large Charm"),
+            ("cm3", "Grand Charm"),
+            ("jew", "Jewel"),
+            ("rin", "Ring"),
+            ("amu", "Amulet"),
+            ("tsc", "Scroll"),
+            ("tbk", "Book"),
+            ("aqv", "Ammo"),
+            ("cqv", "Ammo"),
+            ("key", "Keys"),
+            ("gld", "Gold"),
+        ] {
+            assert_eq!(get_item_category(code), expected, "{code}");
+        }
+    }
+
+    #[settled_contract_test]
+    fn missing_source_context_retains_compatibility_without_inventing_item_classes() {
+        assert_eq!(get_item_category(" vgl "), "Gloves");
+        assert_eq!(get_item_category(" lbt "), "Boots");
+        assert_eq!(get_item_category(" tbl "), "Belt");
+        for (code, expected) in [
+            ("wwa7", "Medium Weapon"),
+            ("ssw", "Medium Weapon"),
+            ("fsm", "Shield"),
+            ("not-a-code", "Misc/Unknown"),
+            ("", "Misc/Unknown"),
+            ("VGL", "Misc/Unknown"),
+        ] {
+            assert_eq!(get_item_category(code), expected, "{code}");
+        }
     }
 }
