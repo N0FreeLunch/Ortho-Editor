@@ -429,25 +429,26 @@ impl InventoryGrid {
 
     /// Convenience method to create a grid from a save file's raw bytes.
     pub fn from_save_bytes(bytes: &[u8], huffman: &crate::item::HuffmanTree) -> Self {
+        use crate::domain::item::stream::{ItemContainer, ItemStreamDialect, PlayerItemStream};
+
         let mut grid = Self::new_inventory();
-
-        // Find JM marker
-        let jm_pos =
-            (0..bytes.len().saturating_sub(1)).find(|&i| bytes[i] == b'J' && bytes[i + 1] == b'M');
-
-        if jm_pos.is_some() {
-            let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-            if let Ok(items) = Item::read_player_items(bytes, huffman, version == 105) {
-                for item in items {
-                    if item.location == 0 {
-                        grid.occupy(
-                            item.x,
-                            item.y,
-                            get_item_size(&item.code).0,
-                            get_item_size(&item.code).1,
-                        );
+        if let Ok(stream) = PlayerItemStream::read(bytes, huffman) {
+            for item in &stream.items {
+                let (x, y) = if stream.dialect == ItemStreamDialect::D2rV3 {
+                    let placement = stream.placement(item);
+                    if placement.container != ItemContainer::Inventory {
+                        continue;
                     }
-                }
+                    (placement.x, placement.y)
+                } else {
+                    // Preserve legacy projection until Alpha placement has independent authority.
+                    if item.location != 0 {
+                        continue;
+                    }
+                    (item.x, item.y)
+                };
+                let (width, height) = get_item_size(&item.code);
+                grid.occupy(x, y, width, height);
             }
         }
         grid
@@ -1486,6 +1487,109 @@ mod source_category_contract_tests {
             ("VGL", "Misc/Unknown"),
         ] {
             assert_eq!(get_item_category(code), expected, "{code}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod inventory_loader_contract_tests {
+    use super::InventoryGrid;
+    use crate::domain::item::stream::{ItemContainer, ItemStreamDialect, PlayerItemStream};
+    use crate::item::HuffmanTree;
+    use d2r_macros::settled_contract_test;
+
+    fn fixture(relative: &str) -> Vec<u8> {
+        let root = std::env::var_os("D2R_CORE_PATH")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        std::fs::read(root.join("tests/fixtures/savegames").join(relative)).unwrap()
+    }
+
+    fn grid_mask(bytes: &[u8]) -> u64 {
+        InventoryGrid::from_save_bytes(bytes, &HuffmanTree::new())
+            .bitboard_mask_u64()
+            .unwrap()
+    }
+
+    #[settled_contract_test]
+    fn captured_v3_inventory_matches_raw_header_masks_without_belt_or_stash_cells() {
+        // Masks come from source mode/storage coordinates and raw item dimensions.
+        let cases = [
+            (
+                "gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
+                0x8020000000,
+            ),
+            ("original/amazon_lvl2_progression_complex.d2s", 0x0000000c03),
+        ];
+        for (file, expected) in cases {
+            assert_eq!(grid_mask(&fixture(file)), expected, "{file}");
+        }
+    }
+
+    #[settled_contract_test]
+    fn selected_alpha_retains_legacy_grid_projection() {
+        // Alpha potion placement remains unvalidated; retain the existing public mask.
+        let bytes = fixture("original/amazon_authority_runeword.d2s");
+        let stream = PlayerItemStream::read(&bytes, &HuffmanTree::new()).unwrap();
+        assert_eq!(stream.dialect, ItemStreamDialect::Alpha);
+        assert_eq!(grid_mask(&bytes), 0x0006018071);
+    }
+
+    #[settled_contract_test]
+    fn controlled_storage_header_excludes_cube_stash_and_unknown_from_inventory() {
+        let original = fixture("gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s");
+        let huffman = HuffmanTree::new();
+        let stream = PlayerItemStream::read(&original, &huffman).unwrap();
+        assert_eq!(stream.dialect, ItemStreamDialect::D2rV3);
+        let scroll = &stream.items[4];
+        assert_eq!(scroll.code.trim(), "tsc");
+        let storage_start = scroll.range.start + 50;
+        for (storage, container) in [
+            (0u8, ItemContainer::Unknown),
+            (1, ItemContainer::Inventory),
+            (4, ItemContainer::Cube),
+            (5, ItemContainer::Stash),
+        ] {
+            let mut changed = original.clone();
+            for bit in 0..3 {
+                let offset = storage_start + bit;
+                let byte = &mut changed[(offset / 8) as usize];
+                *byte = (*byte & !(1 << (offset % 8))) | (((storage >> bit) & 1) << (offset % 8));
+            }
+            let reparsed = PlayerItemStream::read(&changed, &huffman).unwrap();
+            assert_eq!(reparsed.dialect, ItemStreamDialect::D2rV3);
+            assert_eq!(reparsed.items.len(), stream.items.len());
+            assert_eq!(reparsed.items[4].range, scroll.range);
+            assert_eq!(reparsed.placement(&reparsed.items[4]).container, container);
+            for (index, (before, after)) in original.iter().zip(&changed).enumerate() {
+                let delta = before ^ after;
+                for bit in 0..8 {
+                    if delta & (1 << bit) != 0 {
+                        let offset = index as u64 * 8 + bit;
+                        assert!((storage_start..storage_start + 3).contains(&offset));
+                    }
+                }
+            }
+            // Controlled decoder input only; no game-load legality is asserted.
+            let expected = if storage == 1 {
+                0x8020000000
+            } else {
+                0x0020000000
+            };
+            assert_eq!(grid_mask(&changed), expected, "storage={storage}");
+        }
+    }
+
+    #[settled_contract_test]
+    fn short_or_invalid_save_headers_return_empty_grid_without_panicking() {
+        for bytes in [
+            &b""[..],
+            &b"J"[..],
+            &b"JM"[..],
+            &b"JM00000"[..],
+            &b"JM000000"[..],
+        ] {
+            assert_eq!(grid_mask(bytes), 0, "{bytes:?}");
         }
     }
 }
