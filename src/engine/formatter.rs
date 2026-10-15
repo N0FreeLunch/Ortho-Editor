@@ -1,4 +1,4 @@
-use crate::data::affixes::{PREFIXES, SUFFIXES};
+use crate::data::affixes::{AFFIX_NAMES, PREFIXES, SUFFIXES};
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::localization::LOCALIZATIONS;
 // use crate::data::monsters::MONSTER_TYPES;
@@ -8,7 +8,7 @@ use crate::data::sets::SET_BONUSES;
 use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
-use crate::engine::defense::{DefenseDisplay, displayed_defense};
+use crate::engine::defense::{DefenseDisplay, displayed_defense, is_explicit_v105};
 use crate::engine::durability::{DurabilityDisplay, displayed_durability};
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
@@ -871,6 +871,32 @@ fn rare_name_key(raw_id: u8) -> Option<&'static str> {
     (!key.is_empty()).then_some(*key)
 }
 
+fn magic_affix_name(item: &Item, kind: &str, id: u16) -> Option<&'static str> {
+    let primary = match kind {
+        "prefix" => PREFIXES,
+        "suffix" => SUFFIXES,
+        _ => return None,
+    };
+    primary
+        .iter()
+        .find(|a| a.id == u32::from(id))
+        .map(|a| a.name)
+        .or_else(|| {
+            if is_explicit_v105(item)
+                && item.is_identified
+                && item.header.is_identified
+                && item.is_completely_parsed()
+            {
+                AFFIX_NAMES
+                    .iter()
+                    .find(|a| a.kind == kind && a.id == u32::from(id))
+                    .map(|a| a.name_key)
+            } else {
+                None
+            }
+        })
+}
+
 pub fn resolve_item_name(item: &Item, language: &str) -> String {
     // 1. Runeword
     if item.is_runeword || item.header.is_runeword {
@@ -929,8 +955,8 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
     if item.quality == Some(ItemQuality::Magic) && item.is_identified {
         let mut name = String::new();
         if let Some(id) = item.magic_prefix.filter(|&id| id != 0) {
-            if let Some(affix) = PREFIXES.iter().find(|a| a.id == id as u32) {
-                name.push_str(get_loc(affix.name, language));
+            if let Some(name_key) = magic_affix_name(item, "prefix", id) {
+                name.push_str(get_loc(name_key, language));
             }
         }
 
@@ -946,8 +972,8 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
         name.push_str(base_name);
 
         if let Some(id) = item.magic_suffix.filter(|&id| id != 0) {
-            if let Some(affix) = SUFFIXES.iter().find(|a| a.id == id as u32) {
-                let s_loc = get_loc(affix.name, language);
+            if let Some(name_key) = magic_affix_name(item, "suffix", id) {
+                let s_loc = get_loc(name_key, language);
                 if language != "ko" {
                     name.push(' ');
                 }
@@ -2351,5 +2377,111 @@ mod quantity_display_tests {
                 .iter()
                 .any(|warning| warning.category == "quantity_context")
         );
+    }
+}
+
+#[cfg(test)]
+mod magic_affix_name_source_tests {
+    use super::*;
+    use crate::domain::item::entity::D2rV3AuxiliaryData;
+    use crate::item::HuffmanTree;
+    use d2r_macros::settled_contract_test;
+
+    fn magic() -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = "ktr ".into();
+        item.body.code = item.code.clone();
+        item.quality = Some(ItemQuality::Magic);
+        item.header.quality = item.quality;
+        item.is_identified = true;
+        item.header.is_identified = true;
+        item.header.save_is_alpha = false;
+        item.properties_complete = true;
+        item.magic_prefix = Some(0);
+        item.magic_suffix = Some(195);
+        item.body.d2r_v3_auxiliary = Some(D2rV3AuxiliaryData {
+            save_version: 105,
+            ..Default::default()
+        });
+        item
+    }
+
+    #[settled_contract_test]
+    fn actual_magic_affix_name_source_matches_saved_id_and_preserves_parsed_damage() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_BloodRavenKilled_PreKashya.d2s"
+        );
+        let items = Item::read_player_items_d2r_v3(bytes, &HuffmanTree::new()).unwrap();
+        let snapshot = items.clone();
+        let katar = &items[32];
+        assert_eq!(katar.code.trim(), "ktr");
+        assert_eq!(katar.magic_suffix, Some(195));
+        assert!(!SUFFIXES.iter().any(|s| s.id == 195));
+        assert!(
+            katar
+                .properties
+                .iter()
+                .any(|p| p.stat_id == 22 && p.param == 0 && p.value == 1)
+        );
+        let namespaced_source = AFFIX_NAMES
+            .iter()
+            .find(|s| s.kind == "suffix" && s.id == 195)
+            .unwrap();
+        assert_eq!(namespaced_source.name_key, "of Craftsmanship");
+        assert_eq!(resolve_item_name(katar, "en"), "Katar of Craftmanship");
+        assert_eq!(
+            resolve_item_name(katar, "ko"),
+            format!(
+                "{}{}",
+                get_loc("Katar", "ko"),
+                get_loc("of Craftsmanship", "ko")
+            )
+        );
+        assert_eq!(items, snapshot);
+    }
+
+    #[settled_contract_test]
+    fn source_name_fallback_is_bounded_by_identification_and_explicit_complete_v3_context() {
+        let original = magic();
+        assert_eq!(resolve_item_name(&original, "en"), "Katar of Craftmanship");
+        let mut item = original.clone();
+        item.header.save_is_alpha = true;
+        assert_eq!(resolve_item_name(&item, "en"), "Katar");
+        item = original.clone();
+        item.body.d2r_v3_auxiliary = None;
+        assert_eq!(resolve_item_name(&item, "en"), "Katar");
+        item = original.clone();
+        item.is_identified = false;
+        item.header.is_identified = false;
+        assert_eq!(resolve_item_name(&item, "en"), "Katar");
+        item = original.clone();
+        item.header.is_identified = false;
+        assert_eq!(resolve_item_name(&item, "en"), "Katar");
+        item = original.clone();
+        item.properties_complete = false;
+        assert_eq!(resolve_item_name(&item, "en"), "Katar");
+        item = original.clone();
+        item.magic_suffix = Some(2047);
+        assert_eq!(resolve_item_name(&item, "en"), "Katar");
+        assert_eq!(original.magic_suffix, Some(195));
+    }
+
+    #[settled_contract_test]
+    fn existing_primary_labels_and_affix_namespaces_keep_their_original_policy() {
+        let mut item = magic();
+        item.magic_suffix = Some(740);
+        let expected = format!("Katar {}", get_loc("of Energy", "en"));
+        assert_eq!(resolve_item_name(&item, "en"), expected);
+        item.header.save_is_alpha = true;
+        assert_eq!(resolve_item_name(&item, "en"), expected);
+        item.header.save_is_alpha = false;
+        item.magic_suffix = Some(0);
+        item.magic_prefix = Some(195);
+        assert_eq!(magic_affix_name(&item, "prefix", 195), Some("Cinnabar"));
+        assert_eq!(
+            magic_affix_name(&item, "suffix", 195),
+            Some("of Craftsmanship")
+        );
+        assert_eq!(magic_affix_name(&item, "unknown", 195), None);
     }
 }
