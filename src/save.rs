@@ -196,16 +196,18 @@ pub fn classify_item_slot(item: &Item) -> ItemSlotClass {
     ItemSlotClass::Unknown
 }
 
+/// Collect the structurally selected player stream in parent-before-child order.
+/// V3 placement follows its selected dialect; inventory, belt and cube roots share
+/// the coarse InventoryLike class. Socket children follow tree ownership.
 pub fn collect_player_slots(
     bytes: &[u8],
     huffman: &HuffmanTree,
 ) -> io::Result<Vec<(Item, ItemSlotClass)>> {
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-    let alpha_mode = version == 105;
-    let items = Item::read_player_items(bytes, huffman, alpha_mode)?;
+    let stream = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut slots = Vec::new();
-    for item in items {
-        push_with_children(&mut slots, item);
+    for item in stream.items {
+        push_with_children(&mut slots, item, stream.dialect, false);
     }
     Ok(slots)
 }
@@ -238,12 +240,34 @@ pub fn try_apply_save_side_coordinated_relocation(
     Ok(())
 }
 
-fn push_with_children(slots: &mut Vec<(Item, ItemSlotClass)>, mut item: Item) {
+fn push_with_children(
+    slots: &mut Vec<(Item, ItemSlotClass)>,
+    mut item: Item,
+    dialect: crate::domain::item::stream::ItemStreamDialect,
+    is_child: bool,
+) {
+    use crate::domain::item::stream::{ItemContainer, ItemStreamDialect};
+
     let children = mem::take(&mut item.socketed_items);
-    let class = classify_item_slot(&item);
+    let class = if dialect == ItemStreamDialect::D2rV3 {
+        if is_child {
+            ItemSlotClass::SocketChild
+        } else {
+            match dialect.placement(&item).container {
+                ItemContainer::Equipment => ItemSlotClass::EquipmentLike,
+                ItemContainer::Inventory | ItemContainer::Belt | ItemContainer::Cube => {
+                    ItemSlotClass::InventoryLike
+                }
+                ItemContainer::Stash => ItemSlotClass::StashLike,
+                ItemContainer::Unknown => ItemSlotClass::Unknown,
+            }
+        }
+    } else {
+        classify_item_slot(&item)
+    };
     slots.push((item, class));
     for child in children {
-        push_with_children(slots, child);
+        push_with_children(slots, child, dialect, true);
     }
 }
 
