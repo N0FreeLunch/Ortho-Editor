@@ -1,5 +1,5 @@
 use crate::data::affixes::{AFFIX_NAMES, PREFIXES, SUFFIXES};
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::item_codes::{ITEM_NAME_SOURCES, ITEM_TEMPLATES};
 use crate::data::localization::LOCALIZATIONS;
 // use crate::data::monsters::MONSTER_TYPES;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
@@ -960,11 +960,7 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
             }
         }
 
-        let base_name = ITEM_TEMPLATES
-            .iter()
-            .find(|t| t.code == item.code.trim())
-            .map(|t| get_loc(t.name, language))
-            .unwrap_or(&item.code);
+        let base_name = base_item_name(item, language);
 
         if !name.is_empty() {
             name.push(' ');
@@ -984,12 +980,19 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
     }
 
     // Default: Base Name
-    ITEM_TEMPLATES
+    base_item_name(item, language).to_string()
+}
+
+fn base_item_name<'a>(item: &'a Item, language: &str) -> &'a str {
+    let Some(template) = ITEM_TEMPLATES.iter().find(|t| t.code == item.code.trim()) else {
+        return &item.code;
+    };
+    ITEM_NAME_SOURCES
         .iter()
-        .find(|t| t.code == item.code.trim())
-        .map(|t| get_loc(t.name, language))
-        .unwrap_or(&item.code)
-        .to_string()
+        .find(|source| source.code == template.code)
+        .and_then(|source| get_loc_optional(source.name_key, language))
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| get_loc(template.name, language))
 }
 
 fn get_loc(key: &str, language: &str) -> &'static str {
@@ -2433,7 +2436,7 @@ mod magic_affix_name_source_tests {
             resolve_item_name(katar, "ko"),
             format!(
                 "{}{}",
-                get_loc("Katar", "ko"),
+                get_loc("ktr", "ko"),
                 get_loc("of Craftsmanship", "ko")
             )
         );
@@ -2483,5 +2486,91 @@ mod magic_affix_name_source_tests {
             Some("of Craftsmanship")
         );
         assert_eq!(magic_affix_name(&item, "unknown", 195), None);
+    }
+}
+
+#[cfg(test)]
+mod base_item_name_source_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    fn base(code: &str) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.body.code = item.code.clone();
+        item
+    }
+
+    #[settled_contract_test]
+    fn known_base_codes_use_source_localization_without_identification_or_dialect_gates() {
+        for code in ["ktr", "fhl"] {
+            let mut item = base(code);
+            let expected = get_loc(code, "ko");
+            assert_eq!(resolve_item_name(&item, "ko"), expected);
+            item.header.save_is_alpha = true;
+            item.properties_complete = false;
+            assert_eq!(resolve_item_name(&item, "ko"), expected);
+            item.quality = Some(ItemQuality::Magic);
+            item.is_identified = false;
+            assert_eq!(resolve_item_name(&item, "ko"), expected);
+            assert_eq!(resolve_item_name(&item, "en"), get_loc(code, "en"));
+        }
+    }
+
+    #[settled_contract_test]
+    fn unavailable_source_localization_keeps_template_and_unknown_code_fallbacks() {
+        let source = ITEM_NAME_SOURCES
+            .iter()
+            .find(|s| get_loc_optional(s.name_key, "ko").is_none())
+            .unwrap();
+        let item = base(source.code);
+        let template = ITEM_TEMPLATES
+            .iter()
+            .find(|t| t.code == source.code)
+            .unwrap();
+        assert_eq!(resolve_item_name(&item, "ko"), get_loc(template.name, "ko"));
+        let item = base("unknown-code ");
+        assert_eq!(resolve_item_name(&item, "ko"), "unknown-code ");
+    }
+
+    #[settled_contract_test]
+    fn source_base_keys_do_not_override_named_quality_precedence() {
+        let mut item = base("sbw");
+        item.quality = Some(ItemQuality::Unique);
+        item.is_identified = true;
+        item.unique_id = Some(59);
+        assert_eq!(resolve_item_name(&item, "ko"), get_loc("Pluckeye", "ko"));
+        item.is_identified = false;
+        assert_eq!(resolve_item_name(&item, "ko"), get_loc("sbw", "ko"));
+        item = base("kit");
+        item.quality = Some(ItemQuality::Set);
+        item.is_identified = true;
+        item.unique_id = Some(21);
+        assert_eq!(
+            resolve_item_name(&item, "ko"),
+            get_loc("Milabrega's Orb", "ko")
+        );
+    }
+
+    #[settled_contract_test]
+    fn generated_source_key_lookup_preserves_models_across_the_complete_metadata_domain() {
+        assert_eq!(ITEM_NAME_SOURCES.len(), 692);
+        for source in ITEM_NAME_SOURCES {
+            let item = base(source.code);
+            let before = item.clone();
+            for language in ["en", "ko"] {
+                if let Some(expected) =
+                    get_loc_optional(source.name_key, language).filter(|s| !s.trim().is_empty())
+                {
+                    assert_eq!(
+                        resolve_item_name(&item, language),
+                        expected,
+                        "{}",
+                        source.code
+                    );
+                }
+            }
+            assert_eq!(item, before);
+        }
     }
 }
