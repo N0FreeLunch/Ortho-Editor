@@ -1,9 +1,13 @@
 use d2r_core::domain::character::skills::parse_skill_section;
-use d2r_core::domain::forensic::v105::{MercenaryEquipmentItem, MercenaryFooter};
+use d2r_core::engine::mercenary_items::{
+    collect_mercenary_items, mercenary_item_slot, MercenaryItemStreamEvidence,
+};
 use d2r_core::domain::item::stream::{ItemContainer, ItemStreamDialect, PlayerItemStream};
 use d2r_core::domain::progression::Progression;
 use d2r_core::domain::progression::waypoint::WaypointSet;
-use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::item::HuffmanTree;
+#[cfg(test)]
+use d2r_core::{item::Item, domain::forensic::v105::MercenaryEquipmentItem, engine::mercenary_items::alpha_mercenary_slot_semantics};
 use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
 use serde_json::json;
 use std::env;
@@ -391,32 +395,10 @@ fn player_item_payloads(stream: &PlayerItemStream, level: u8) -> serde_json::Val
     })
 }
 
-#[derive(serde::Serialize)]
-struct MercenaryItemStreamEvidence {
-    dialect: ItemStreamDialect,
-    status: &'static str,
-    declared_count: Option<u16>,
-    parsed_count: usize,
-    exported_count: usize,
-    source_range: Option<std::ops::Range<u64>>,
-    diagnostics: Vec<String>,
-}
 
 struct MercenaryItemExport {
     items: Vec<serde_json::Value>,
     evidence: MercenaryItemStreamEvidence,
-}
-
-fn mercenary_export_failure(
-    mut evidence: MercenaryItemStreamEvidence,
-    reason: impl Into<String>,
-) -> MercenaryItemExport {
-    evidence.status = "error";
-    evidence.diagnostics.push(reason.into());
-    MercenaryItemExport {
-        items: Vec::new(),
-        evidence,
-    }
 }
 
 fn parse_mercenary_equipped_items(
@@ -425,157 +407,11 @@ fn parse_mercenary_equipped_items(
     huffman: &HuffmanTree,
     player_stream: &PlayerItemStream,
 ) -> MercenaryItemExport {
-    let dialect = player_stream.dialect;
+    let collected = collect_mercenary_items(bytes, map, huffman, player_stream);
+    let mut evidence = collected.evidence;
+    let dialect = evidence.dialect;
     let is_alpha = dialect == ItemStreamDialect::Alpha;
-    let mut evidence = MercenaryItemStreamEvidence {
-        dialect,
-        status: "absent",
-        declared_count: None,
-        parsed_count: 0,
-        exported_count: 0,
-        source_range: None,
-        diagnostics: Vec::new(),
-    };
-    let Some(jf) = map.jf_pos.or_else(|| find_marker(bytes, b"jf")) else {
-        return MercenaryItemExport {
-            items: Vec::new(),
-            evidence,
-        };
-    };
-
-    let jm_positions = d2r_core::save::find_jm_markers(bytes);
-    let jm_pos = if dialect == ItemStreamDialect::D2rV3 {
-        let primary_end = player_stream
-            .items
-            .last()
-            .map(|item| item.range.end)
-            .unwrap_or(0);
-        if jf as u64 * 8 < primary_end {
-            return mercenary_export_failure(
-                evidence,
-                "Mercenary marker overlaps the owned primary list",
-            );
-        }
-        let owned = jf.saturating_add(2);
-        // An unhired character has jf immediately followed by the standard footer.
-        if bytes.get(owned..owned.saturating_add(2)) == Some(b"kf".as_slice())
-            && MercenaryFooter::from_bytes(&bytes[owned..]).is_standard()
-        {
-            return MercenaryItemExport {
-                items: Vec::new(),
-                evidence,
-            };
-        }
-        if bytes.get(owned..owned.saturating_add(2)) != Some(b"JM".as_slice()) {
-            return mercenary_export_failure(
-                evidence,
-                "Owned V3 mercenary list must begin immediately after jf",
-            );
-        }
-        owned
-    } else {
-        let Some(pos) = jm_positions.iter().copied().find(|pos| *pos > jf) else {
-            return MercenaryItemExport {
-                items: Vec::new(),
-                evidence,
-            };
-        };
-        pos
-    };
-    let Some(header) = bytes.get(jm_pos..jm_pos.saturating_add(4)) else {
-        return mercenary_export_failure(evidence, "Mercenary list header is truncated");
-    };
-    let item_count = u16::from_le_bytes([header[2], header[3]]);
-    evidence.declared_count = Some(item_count);
-    let (Some(kf), Some(lf)) = (
-        map.kf_pos.or_else(|| find_marker(bytes, b"kf")),
-        map.lf_pos.or_else(|| find_marker(bytes, b"lf")),
-    ) else {
-        return mercenary_export_failure(evidence, "Mercenary footer markers are missing");
-    };
-    let next_pos = jm_positions
-        .iter()
-        .copied()
-        .find(|pos| *pos > jm_pos)
-        .unwrap_or(bytes.len());
-    let items_end = if dialect == ItemStreamDialect::D2rV3 {
-        kf
-    } else {
-        kf.min(next_pos)
-    };
-    if kf > bytes.len()
-        || !MercenaryFooter::from_bytes(&bytes[kf..]).is_standard()
-        || lf < kf
-        || jm_pos >= items_end
-    {
-        return mercenary_export_failure(
-            evidence,
-            "Mercenary list has an unsupported footer envelope",
-        );
-    }
-    evidence.source_range = Some((jm_pos as u64 + 4) * 8..items_end as u64 * 8);
-    let items = if dialect == ItemStreamDialect::D2rV3 {
-        let Some(raw_version) = bytes
-            .get(4..8)
-            .and_then(|raw| <[u8; 4]>::try_from(raw).ok())
-        else {
-            return mercenary_export_failure(evidence, "Save version is truncated");
-        };
-        match d2r_core::domain::item::serialization::read_counted_list_d2r_v3(
-            &bytes[..items_end],
-            jm_pos,
-            huffman,
-            u32::from_le_bytes(raw_version),
-        ) {
-            Ok(items) => items,
-            Err(error) => return mercenary_export_failure(evidence, error.to_string()),
-        }
-    } else {
-        match Item::read_section(
-            &bytes[jm_pos..items_end],
-            jm_pos as u64 * 8,
-            item_count,
-            huffman,
-            is_alpha,
-            false,
-        ) {
-            Ok(items) => items,
-            Err(error) => return mercenary_export_failure(evidence, error.to_string()),
-        }
-    };
-    evidence.parsed_count = items.len();
-    evidence.status = "ok";
-    if dialect == ItemStreamDialect::D2rV3 {
-        let mut next = (jm_pos as u64 + 4) * 8;
-        for (index, item) in items.iter().enumerate() {
-            if item.range.start != next || item.range.end <= next || item.range.end % 8 != 0 {
-                return mercenary_export_failure(
-                    evidence,
-                    "V3 mercenary item source ranges are not contiguous",
-                );
-            }
-            next = item.range.end;
-            let slot = dialect.placement(item).equipment_slot;
-            if !item.properties_complete
-                || item.is_opaque()
-                || item.is_semi_opaque()
-                || !item.is_identified
-                || !matches!(slot, Some("Head" | "Armor" | "Weapon1" | "Weapon2"))
-            {
-                evidence.status = "partial";
-                evidence.diagnostics.push(format!(
-                    "Mercenary item {index} has unresolved properties or placement"
-                ));
-            }
-        }
-        if items.len() != item_count as usize || next != items_end as u64 * 8 {
-            return mercenary_export_failure(
-                evidence,
-                "V3 mercenary count or footer closure disagrees with source",
-            );
-        }
-    }
-
+    let items = collected.items;
     let equipped_items: Vec<_> = items
         .into_iter()
         .enumerate()
@@ -591,13 +427,6 @@ fn parse_mercenary_equipped_items(
                 trimmed_code
             };
 
-            let merc_item = MercenaryEquipmentItem {
-                code: code_display.to_string(),
-                location: item.location,
-                mode: item.mode,
-                x: item.x,
-                y: item.y,
-            };
             let (name_en, name_ko) = get_item_localization(code_display);
             let (width, height) = d2r_core::inventory::get_item_size(code_display);
             let quality = if item.header.is_runeword {
@@ -606,24 +435,7 @@ fn parse_mercenary_equipped_items(
                 quality_to_str(item.header.quality)
             };
 
-            let (slot_en, slot_source, candidate_kind) = if is_alpha {
-                alpha_mercenary_slot_semantics(&merc_item, item.is_residue())
-            } else if dialect == ItemStreamDialect::D2rV3 {
-                let slot = match dialect.placement(&item).equipment_slot {
-                    Some("Head") => "Helm",
-                    Some("Armor") => "Armor",
-                    Some("Weapon1") => "Weapon1",
-                    Some("Weapon2") => "Weapon2",
-                    _ => "Unknown",
-                };
-                (slot.to_string(), "d2r_v3_owned_counted_list", if slot == "Unknown" { "unresolved_d2r_v3_candidate" } else { "equipped_slot_candidate" })
-            } else {
-                (
-                    merc_item.slot_name(),
-                    "shared_mercenary_slot_name",
-                    "legacy_candidate",
-                )
-            };
+            let (slot_en, slot_source, candidate_kind) = mercenary_item_slot(&item, dialect);
 
             let m_fmt_ko = d2r_core::engine::formatter::format_item(&item, "ko", 0, 1);
             let m_fmt_en = d2r_core::engine::formatter::format_item(&item, "en", 0, 1);
@@ -672,62 +484,13 @@ fn parse_mercenary_equipped_items(
             Some(payload)
         })
         .collect();
-    evidence.exported_count = equipped_items.len();
-    if evidence.exported_count != item_count as usize {
-        evidence.status = "partial";
-        evidence
-            .diagnostics
-            .push("Mercenary declaration and exported count differ".to_string());
-    }
+    evidence.record_exported_count(equipped_items.len());
     MercenaryItemExport {
         items: equipped_items,
         evidence,
     }
 }
 
-fn alpha_mercenary_slot_semantics(
-    item: &MercenaryEquipmentItem,
-    is_residue: bool,
-) -> (String, &'static str, &'static str) {
-    let slot = match (item.location, item.mode, item.x) {
-        (3, 1, _) => Some("Armor"),
-        (4, 1, _) => Some("Weapon1"),
-        (1, 1, 1) => Some("Helm"),
-        (1, 1, 3) => Some("Armor"),
-        (1, 1, 4) => Some("Weapon1"),
-        (1, 1, 5) => Some("Weapon2"),
-        (4, 5, _) => Some("Weapon1"),
-        (1, 4, _) => Some("Weapon2"),
-        (4, 0, _) => Some("Helm"),
-        (0, 3, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate (observed mode 3)
-        (0, 5, _) => Some("Weapon1"), // Rogue Bow/Weapon candidate (observed mode 5)
-        _ => None,
-    };
-
-    match slot {
-        Some(s) => {
-            let kind = if is_residue {
-                "parser_residue_in_valid_slot"
-            } else if item.code == "unk" {
-                "unknown_code_localization_gap"
-            } else {
-                "equipped_slot_candidate"
-            };
-            (s.to_string(), "alpha_v105_signature", kind)
-        }
-        None => (
-            "Unknown".to_string(),
-            "unclassified_alpha_v105_candidate",
-            "parser_residue",
-        ),
-    }
-}
-
-fn find_marker(bytes: &[u8], marker: &[u8; 2]) -> Option<usize> {
-    bytes.windows(2).position(|window| window == marker)
-}
-
-// Helper: get standard quality string representation
 fn quality_to_str(q: Option<d2r_core::domain::item::quality::ItemQuality>) -> &'static str {
     use d2r_core::domain::item::quality::ItemQuality;
     match q {

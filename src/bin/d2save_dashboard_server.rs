@@ -227,6 +227,7 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
     let mut cube = Vec::new();
     let mut unknown = Vec::new();
     let stream = PlayerItemStream::read(bytes, &huffman)?;
+    let mercenary = mercenary_payload(bytes, &map, &huffman, &stream);
     {
         let set_piece_counts = equipped_set_piece_counts(stream.items.iter().filter(|item| {
             stream.placement(item).container == ItemContainer::Equipment
@@ -287,8 +288,55 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
         "waypoints": {"normal": active_waypoints(0), "nightmare": active_waypoints(1), "hell": active_waypoints(2)},
         "quests": {"normal": quests[0], "nightmare": quests[1], "hell": quests[2]},
         "equipment": equipment, "inventory": inventory, "unknown": unknown, "belt": belt, "stash": stash, "cube": cube,
-        "mercenary": Value::Null,
+        "mercenary": mercenary,
     }))
+}
+
+fn mercenary_payload(
+    bytes: &[u8],
+    map: &d2r_core::save::SaveSectionMap,
+    huffman: &HuffmanTree,
+    player_stream: &PlayerItemStream,
+) -> Value {
+    use d2r_core::engine::mercenary_items::{collect_mercenary_items, mercenary_item_slot};
+
+    let header =
+        &bytes[..d2r_core::domain::progression::axiom::V105_WAYPOINT_OFFSET.min(bytes.len())];
+    let w4_bytes = bytes.get(d2r_core::domain::progression::axiom::V105_NPC_OFFSET..);
+    let state =
+        d2r_core::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
+    let collected = collect_mercenary_items(bytes, map, huffman, player_stream);
+    let mut evidence = collected.evidence;
+    let dialect = evidence.dialect;
+    let equipped_items: Vec<_> = collected
+        .items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            if dialect == d2r_core::domain::item::stream::ItemStreamDialect::Legacy
+                && item.code.trim().is_empty()
+            {
+                return None;
+            }
+            let (slot, slot_source, candidate_kind) = mercenary_item_slot(&item, dialect);
+            // Preserve the existing mercenary formatting context; level decoding is separate.
+            let mut data = item_json(index, &item, 1, 0);
+            data["slot_en"] = json!(slot);
+            data["slot_source"] = json!(slot_source);
+            data["candidate_kind"] = json!(candidate_kind);
+            data["is_equipped"] = json!(candidate_kind == "equipped_slot_candidate");
+            Some(data)
+        })
+        .collect();
+    evidence.record_exported_count(equipped_items.len());
+    json!({
+        "class_name": state.class_name(),
+        "hireling_id": state.hireling_id,
+        "subtype_id": state.subtype_id,
+        "experience": state.experience,
+        "equipped_items": equipped_items,
+        "item_stream": evidence,
+    })
 }
 
 fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> Value {
@@ -558,5 +606,58 @@ mod tests {
         assert_eq!(child["opaque_info"]["reasons"][0], "Unresolved tail");
         assert!(child["runeword_attributes"].is_array());
         assert!(child["warnings_ko"].is_array());
+    }
+}
+
+#[cfg(test)]
+mod mercenary_dashboard_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    #[settled_contract_test]
+    fn actual_dashboard_payload_exposes_source_bound_mercenary_items() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s"
+        );
+        let data = dashboard_payload(bytes).unwrap();
+        let merc = &data["mercenary"];
+        assert!(merc.is_object());
+        assert_eq!(merc["item_stream"]["dialect"], "d2r-v3");
+        assert_eq!(merc["item_stream"]["status"], "ok");
+        assert_eq!(merc["item_stream"]["declared_count"], 2);
+        assert_eq!(merc["item_stream"]["exported_count"], 2);
+        let items = merc["equipped_items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(
+            items
+                .iter()
+                .all(|item| item["candidate_kind"] == "equipped_slot_candidate")
+        );
+        let helm = items.iter().find(|item| item["code"] == "fhl").unwrap();
+        assert_eq!(helm["slot_en"], "Helm");
+        assert_eq!(helm["socketed_items"].as_array().unwrap().len(), 2);
+        let primary_count: usize = ["equipment", "inventory", "belt", "stash", "cube", "unknown"]
+            .iter()
+            .map(|key| data[key].as_array().unwrap().len())
+            .sum();
+        assert_eq!(data["parser"]["player_item_count"], primary_count);
+    }
+
+    #[settled_contract_test]
+    fn unhired_dashboard_payload_retains_absent_stream_and_empty_equipment() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s"
+        );
+        let map = map_core_sections(bytes).unwrap();
+        let huffman = HuffmanTree::new();
+        let stream = PlayerItemStream {
+            dialect: d2r_core::domain::item::stream::ItemStreamDialect::D2rV3,
+            items: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let payload = mercenary_payload(bytes, &map, &huffman, &stream);
+        assert_eq!(payload["item_stream"]["status"], "absent");
+        assert_eq!(payload["item_stream"]["exported_count"], 0);
+        assert!(payload["equipped_items"].as_array().unwrap().is_empty());
     }
 }

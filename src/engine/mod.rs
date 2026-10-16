@@ -6,3 +6,5 @@ pub mod checksum;
 pub mod config;
 pub mod item_parallel;
 pub(crate) mod socket_effects;
+
+pub mod mercenary_items;
