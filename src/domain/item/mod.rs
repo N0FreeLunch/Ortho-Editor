@@ -1,4 +1,5 @@
 pub mod quality;
+pub mod image;
 pub mod entity;
 pub mod builder;
 pub mod serialization;

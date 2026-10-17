@@ -1,4 +1,7 @@
 use d2r_core::data::item_specs::get_base_item_spec;
+use d2r_core::domain::item::image::ItemImageKey;
+#[path = "dashboard/image_service.rs"]
+mod image_service;
 use d2r_core::data::set_items::SET_ITEMS;
 use d2r_core::domain::character::skills::parse_skill_section;
 use d2r_core::domain::item::ItemModule;
@@ -52,6 +55,30 @@ fn handle(mut stream: TcpStream, observe: bool) -> std::io::Result<()> {
     let method = words.next().unwrap_or_default();
     let path = words.next().unwrap_or_default();
     match (method, path) {
+        ("POST", "/api/item-images/resolve") => {
+            if body.len() > MAX_SAVE_BYTES {
+                return reply(
+                    &mut stream,
+                    413,
+                    "application/json",
+                    br#"{"error":"image request too large"}"#,
+                );
+            }
+            match image_service::resolve(body) {
+                Ok(images) => reply(
+                    &mut stream,
+                    200,
+                    "application/json; charset=utf-8",
+                    &serde_json::to_vec(&images).unwrap(),
+                ),
+                Err(error) => reply(
+                    &mut stream,
+                    400,
+                    "application/json; charset=utf-8",
+                    json!({"error":error}).to_string().as_bytes(),
+                ),
+            }
+        }
         ("POST", "/api/parse-save") => {
             if body.len() > MAX_SAVE_BYTES {
                 return reply(
@@ -447,6 +474,7 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
             "raw_y": item.y,
             "is_identified": item.is_identified,
             "unique_id": item.unique_id,
+            "image_key": ItemImageKey::from(item),
             "has_multiple_graphics": item.has_multiple_graphics,
             "multi_graphics_bits": item.multi_graphics_bits,
             "raw_range": item.range,
@@ -559,6 +587,10 @@ mod tests {
 
     fn assert_projection(data: &Value, item: &Item, level: u8, set_count: usize) {
         assert_eq!(data["code"], item.code.trim());
+        assert_eq!(
+            data["image_key"],
+            serde_json::to_value(ItemImageKey::from(item)).unwrap()
+        );
         assert_eq!(data["has_multiple_graphics"], item.has_multiple_graphics);
         assert_eq!(data["multi_graphics_bits"], json!(item.multi_graphics_bits));
         for (field, source) in [
