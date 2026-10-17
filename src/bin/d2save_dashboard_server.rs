@@ -447,6 +447,8 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
             "raw_y": item.y,
             "is_identified": item.is_identified,
             "unique_id": item.unique_id,
+            "has_multiple_graphics": item.has_multiple_graphics,
+            "multi_graphics_bits": item.multi_graphics_bits,
             "raw_range": item.range,
             "parse_status": if item.is_residue() { "residue" } else if is_opaque { "partial" } else { "parsed" },
         }).as_object().expect("item provenance object").clone()
@@ -557,6 +559,8 @@ mod tests {
 
     fn assert_projection(data: &Value, item: &Item, level: u8, set_count: usize) {
         assert_eq!(data["code"], item.code.trim());
+        assert_eq!(data["has_multiple_graphics"], item.has_multiple_graphics);
+        assert_eq!(data["multi_graphics_bits"], json!(item.multi_graphics_bits));
         for (field, source) in [
             ("properties", &item.properties),
             ("runeword_attributes", &item.runeword_attributes),
