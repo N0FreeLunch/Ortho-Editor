@@ -1,20 +1,36 @@
 use d2r_core::domain::character::skills::parse_skill_section;
-use d2r_core::engine::mercenary_items::{
-    collect_mercenary_items, mercenary_item_slot, MercenaryItemStreamEvidence,
-};
 use d2r_core::domain::item::stream::{ItemContainer, ItemStreamDialect, PlayerItemStream};
 use d2r_core::domain::progression::Progression;
 use d2r_core::domain::progression::waypoint::WaypointSet;
+use d2r_core::engine::mercenary_items::{
+    MercenaryItemStreamEvidence, collect_mercenary_items, mercenary_item_slot,
+};
 use d2r_core::item::HuffmanTree;
-#[cfg(test)]
-use d2r_core::{item::Item, domain::forensic::v105::MercenaryEquipmentItem, engine::mercenary_items::alpha_mercenary_slot_semantics};
 use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
+use d2r_core::verify::player_stream_observer::{
+    PlayerStreamConsumer, ProducerFailure, attach_player_stream_observation,
+};
+#[cfg(test)]
+use d2r_core::{
+    domain::forensic::v105::MercenaryEquipmentItem,
+    engine::mercenary_items::alpha_mercenary_slot_semantics, item::Item,
+};
 use serde_json::json;
 use std::env;
 use std::fs;
 use std::path::Path;
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!(
+            "{}",
+            serde_json::to_string(&error).expect("Serializable producer error")
+        );
+        std::process::exit(error.exit_code());
+    }
+}
+
+fn run() -> Result<(), ProducerFailure> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 || args.iter().any(|a| a == "-h" || a == "--help") {
         println!("D2R Save Game JSON Dump Tool");
@@ -23,7 +39,8 @@ fn main() {
         println!("Options:");
         println!("  -o, --output <PATH>  Output path for the generated JSON dump");
         println!("  -h, --help           Show this help message");
-        return;
+        println!("  --observe-player-items  Add shared player symmetry diagnostics");
+        return Ok(());
     }
 
     let mut input_file: Option<String> = None;
@@ -37,8 +54,10 @@ fn main() {
                     output_file = Some(args[i + 1].clone());
                     i += 2;
                 } else {
-                    eprintln!("Error: -o/--output requires a path argument");
-                    return;
+                    return Err(ProducerFailure::execution(
+                        "arguments",
+                        "Output requires a path",
+                    ));
                 }
             }
             arg if !arg.starts_with('-') => {
@@ -56,8 +75,10 @@ fn main() {
     }
 
     let Some(input_path) = input_file else {
-        eprintln!("Error: Missing input .d2s file path");
-        return;
+        return Err(ProducerFailure::execution(
+            "arguments",
+            "Missing input .d2s path",
+        ));
     };
 
     let output_path = output_file.unwrap_or_else(|| {
@@ -66,15 +87,17 @@ fn main() {
         format!("{}.json", stem)
     });
 
-    let bytes = fs::read(&input_path).expect("Failed to read d2s file");
-    let save = Save::from_bytes(&bytes).expect("Failed to parse save header");
-    let map = map_core_sections(&bytes).expect("Failed to map sections");
+    let bytes = fs::read(&input_path).map_err(|error| ProducerFailure::execution("read", error))?;
+    let save =
+        Save::from_bytes(&bytes).map_err(|error| ProducerFailure::product("header", error))?;
+    let map =
+        map_core_sections(&bytes).map_err(|error| ProducerFailure::product("sections", error))?;
 
     let is_alpha = save.header.version == 105;
 
     // Parse attributes (gf section)
     let attrs = AttributeSection::parse(&bytes, map.gf_pos, map.if_pos)
-        .expect("Failed to parse attributes");
+        .map_err(|error| ProducerFailure::product("attributes", error))?;
 
     let get_stat = |id: u32| -> i32 { attrs.actual_value(id, is_alpha).unwrap_or(0) };
 
@@ -209,8 +232,8 @@ fn main() {
     let merc_state =
         d2r_core::domain::forensic::v105::mercenary::MercenaryState::from_hybrid(header, w4_bytes);
     let huffman = HuffmanTree::new();
-    let player_stream =
-        PlayerItemStream::read(&bytes, &huffman).expect("Failed to parse player item stream");
+    let player_stream = PlayerItemStream::read(&bytes, &huffman)
+        .map_err(|error| ProducerFailure::product("player_items", error))?;
     let merc_export = parse_mercenary_equipped_items(&bytes, &map, &huffman, &player_stream);
 
     let merc_json = json!({
@@ -225,7 +248,7 @@ fn main() {
     let player_items = player_item_payloads(&player_stream, level as u8);
 
     // Map entire payload to match index.html expected format
-    let payload = json!({
+    let mut payload = json!({
         "character": {
             "name": save.header.char_name,
             "class": d2r_core::save::class_name(save.header.char_class),
@@ -264,14 +287,25 @@ fn main() {
         "mercenary": merc_json
     });
 
-    let out_str = serde_json::to_string_pretty(&payload).expect("Failed to serialize JSON");
+    if args.iter().any(|arg| arg == "--observe-player-items") {
+        attach_player_stream_observation(
+            &mut payload,
+            &bytes,
+            &player_stream,
+            PlayerStreamConsumer::JsonDump,
+        );
+    }
+    let out_str = serde_json::to_string_pretty(&payload)
+        .map_err(|error| ProducerFailure::execution("serialize_output", error))?;
     if let Some(parent) = Path::new(&output_path).parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).ok();
+            fs::create_dir_all(parent)
+                .map_err(|error| ProducerFailure::execution("output_directory", error))?;
         }
     }
-    fs::write(&output_path, out_str).expect("Failed to write output JSON");
+    fs::write(&output_path, out_str).map_err(|error| ProducerFailure::execution("write", error))?;
     println!("Successfully dumped save game JSON to {}", output_path);
+    Ok(())
 }
 
 fn player_item_payloads(stream: &PlayerItemStream, level: u8) -> serde_json::Value {
@@ -394,7 +428,6 @@ fn player_item_payloads(stream: &PlayerItemStream, level: u8) -> serde_json::Val
             "parsed_count": stream.items.len(), "exported_count": exported_count }
     })
 }
-
 
 struct MercenaryItemExport {
     items: Vec<serde_json::Value>,

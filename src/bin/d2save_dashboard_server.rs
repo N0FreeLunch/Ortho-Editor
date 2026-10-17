@@ -1,16 +1,19 @@
 use d2r_core::data::item_specs::get_base_item_spec;
 use d2r_core::data::set_items::SET_ITEMS;
 use d2r_core::domain::character::skills::parse_skill_section;
+use d2r_core::domain::item::ItemModule;
 use d2r_core::domain::item::quality::ItemQuality;
 use d2r_core::domain::item::stream::{ItemContainer, PlayerItemStream};
-use d2r_core::domain::item::ItemModule;
-use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::domain::progression::Progression;
+use d2r_core::domain::progression::waypoint::WaypointSet;
 use d2r_core::engine::defense::equipped_set_piece_counts;
-use d2r_core::engine::formatter::{format_item, FormattedSetBonus};
+use d2r_core::engine::formatter::{FormattedSetBonus, format_item};
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
-use d2r_core::save::{class_skill_base_id, map_core_sections, AttributeSection, Save};
-use serde_json::{json, Value};
+use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
+use d2r_core::verify::player_stream_observer::{
+    PlayerStreamConsumer, ProducerFailure, attach_player_stream_observation,
+};
+use serde_json::{Value, json};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -19,6 +22,11 @@ use std::path::{Path, PathBuf};
 const MAX_SAVE_BYTES: usize = 16 * 1024 * 1024;
 
 fn main() -> std::io::Result<()> {
+    if std::env::args().any(|arg| arg == "--help" || arg == "-h") {
+        println!("Usage: d2save_dashboard_server [--port=<PORT>] [--observe-player-items]");
+        return Ok(());
+    }
+    let observe = std::env::args().any(|arg| arg == "--observe-player-items");
     let port = std::env::args()
         .skip(1)
         .find_map(|arg| arg.strip_prefix("--port=").and_then(|v| v.parse().ok()))
@@ -27,13 +35,13 @@ fn main() -> std::io::Result<()> {
     eprintln!("dashboard server listening on http://127.0.0.1:{port}");
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
-            let _ = handle(stream);
+            let _ = handle(stream, observe);
         }
     }
     Ok(())
 }
 
-fn handle(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle(mut stream: TcpStream, observe: bool) -> std::io::Result<()> {
     let request = read_request(&mut stream)?;
     let Some(split) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
         return reply(&mut stream, 400, "text/plain", b"Malformed request");
@@ -53,7 +61,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
                     br#"{"error":"save too large"}"#,
                 );
             }
-            match dashboard_payload(body) {
+            match dashboard_payload_with_observation(body, observe) {
                 Ok(payload) => reply(
                     &mut stream,
                     200,
@@ -64,7 +72,8 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
                     &mut stream,
                     422,
                     "application/json; charset=utf-8",
-                    json!({"error": error}).to_string().as_bytes(),
+                    json!({"error": error, "failure": ProducerFailure::product("dashboard_payload", &error)})
+                        .to_string().as_bytes(),
                 ),
             }
         }
@@ -145,11 +154,20 @@ fn reply(
         422 => "Unprocessable Content",
         _ => "Not Found",
     };
-    write!(stream, "HTTP/1.1 {status} {text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len())?;
+    write!(
+        stream,
+        "HTTP/1.1 {status} {text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        body.len()
+    )?;
     stream.write_all(body)
 }
 
+#[cfg(test)]
 fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
+    dashboard_payload_with_observation(bytes, false)
+}
+
+fn dashboard_payload_with_observation(bytes: &[u8], observe: bool) -> Result<Value, String> {
     let save = Save::from_bytes(bytes).map_err(|error| error.to_string())?;
     let map = map_core_sections(bytes).map_err(|error| error.to_string())?;
     let alpha = save.header.version == 105;
@@ -229,9 +247,12 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
     let stream = PlayerItemStream::read(bytes, &huffman)?;
     let mercenary = mercenary_payload(bytes, &map, &huffman, &stream);
     {
-        let set_piece_counts = equipped_set_piece_counts(stream.items.iter().filter(|item| {
-            stream.placement(item).container == ItemContainer::Equipment
-        }));
+        let set_piece_counts = equipped_set_piece_counts(
+            stream
+                .items
+                .iter()
+                .filter(|item| stream.placement(item).container == ItemContainer::Equipment),
+        );
 
         for (index, item) in stream.items.iter().enumerate() {
             let placement = stream.placement(item);
@@ -263,7 +284,7 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
             }
         }
     }
-    Ok(json!({
+    let mut payload = json!({
         "parser": {
             "item_dialect": stream.dialect,
             "player_item_count": stream.items.len(),
@@ -289,7 +310,16 @@ fn dashboard_payload(bytes: &[u8]) -> Result<Value, String> {
         "quests": {"normal": quests[0], "nightmare": quests[1], "hell": quests[2]},
         "equipment": equipment, "inventory": inventory, "unknown": unknown, "belt": belt, "stash": stash, "cube": cube,
         "mercenary": mercenary,
-    }))
+    });
+    if observe {
+        attach_player_stream_observation(
+            &mut payload,
+            bytes,
+            &stream,
+            PlayerStreamConsumer::Dashboard,
+        );
+    }
+    Ok(payload)
 }
 
 fn mercenary_payload(
@@ -425,16 +455,18 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
 }
 
 fn format_set_bonuses(bonuses: &[FormattedSetBonus]) -> Value {
-    json!(bonuses
-        .iter()
-        .map(|bonus| {
-            json!({
-                "active": bonus.active,
-                "required_count": bonus.required_count,
-                "lines": bonus.lines,
+    json!(
+        bonuses
+            .iter()
+            .map(|bonus| {
+                json!({
+                    "active": bonus.active,
+                    "required_count": bonus.required_count,
+                    "lines": bonus.lines,
+                })
             })
-        })
-        .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    )
 }
 
 fn base_damage(code: &str) -> Value {
@@ -459,11 +491,13 @@ fn properties(items: &[ItemProperty]) -> Vec<Value> {
             // and opaque state. Future fields no longer require a second allowlist.
             let mut value = serde_json::to_value(item).expect("ItemProperty serialization");
             if item.name.trim().is_empty() {
-                value["name"] = json!(d2r_core::data::stat_costs::STAT_COSTS
-                    .iter()
-                    .find(|stat| stat.id == item.stat_id)
-                    .map(|stat| stat.name.to_string())
-                    .unwrap_or_else(|| format!("stat_{}", item.stat_id)));
+                value["name"] = json!(
+                    d2r_core::data::stat_costs::STAT_COSTS
+                        .iter()
+                        .find(|stat| stat.id == item.stat_id)
+                        .map(|stat| stat.name.to_string())
+                        .unwrap_or_else(|| format!("stat_{}", item.stat_id))
+                );
             }
             value
         })
@@ -490,6 +524,37 @@ mod tests {
     use super::*;
     use d2r_macros::settled_contract_test;
 
+    #[settled_contract_test]
+    fn optional_observation_keeps_product_payload_and_empty_stream_success() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s"
+        );
+        let baseline = dashboard_payload(bytes).unwrap();
+        assert!(baseline.get("player_item_observation").is_none());
+        let mut observed = dashboard_payload_with_observation(bytes, true).unwrap();
+        let receipt = observed
+            .as_object_mut()
+            .unwrap()
+            .remove("player_item_observation")
+            .unwrap();
+        assert_eq!(observed, baseline);
+        assert_eq!(receipt["outcome"], "pass");
+        assert_eq!(receipt["consumer"], "dashboard");
+
+        let stream = PlayerItemStream::read(bytes, &HuffmanTree::new()).unwrap();
+        let start = stream.items.first().unwrap().range.start as usize / 8;
+        let end = stream.items.last().unwrap().range.end as usize / 8;
+        let mut empty = bytes.to_vec();
+        empty.drain(start..end);
+        empty[start - 2..start].copy_from_slice(&0_u16.to_le_bytes());
+        let payload = dashboard_payload_with_observation(&empty, true).unwrap();
+        assert_eq!(
+            payload["player_item_observation"]["outcome"],
+            "not_applicable"
+        );
+        assert_eq!(payload["parser"]["player_item_count"], 0);
+    }
+
     fn assert_projection(data: &Value, item: &Item, level: u8, set_count: usize) {
         assert_eq!(data["code"], item.code.trim());
         for (field, source) in [
@@ -508,11 +573,12 @@ mod tests {
         }
         assert_eq!(
             data["set_attributes"],
-            json!(item
-                .set_attributes
-                .iter()
-                .map(|p| properties(p))
-                .collect::<Vec<_>>())
+            json!(
+                item.set_attributes
+                    .iter()
+                    .map(|p| properties(p))
+                    .collect::<Vec<_>>()
+            )
         );
         for language in ["ko", "en"] {
             let formatted = format_item(item, language, set_count, level);

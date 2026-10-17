@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::domain::item::axiom_meta::{FidelityScore, ForensicAudit};
 use crate::domain::item::stream::{ItemStreamDialect, PlayerItemStream};
-use crate::item::{peek_item_header_at, HuffmanTree, Item, RecordedBit};
+use crate::item::{HuffmanTree, Item, RecordedBit, peek_item_header_at};
 use crate::verify::dedup_pool::{ItemMemoizationPool, ItemSignature};
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, Default)]
@@ -151,6 +151,16 @@ pub fn calculate_symmetry_diff_from_parsed_items_with_stage_observer(
 pub fn calculate_symmetry_diff_from_player_stream(
     bytes: &[u8],
     stream: PlayerItemStream,
+    options: SymmetryOptions,
+    observer: Option<&mut dyn FnMut(SymmetryStageEvent)>,
+) -> anyhow::Result<DiffReport> {
+    calculate_symmetry_diff_from_player_stream_ref(bytes, &stream, options, observer)
+}
+
+/// Borrow the exact stream used by a consumer without cloning or parsing it again.
+pub fn calculate_symmetry_diff_from_player_stream_ref(
+    bytes: &[u8],
+    stream: &PlayerItemStream,
     options: SymmetryOptions,
     mut observer: Option<&mut dyn FnMut(SymmetryStageEvent)>,
 ) -> anyhow::Result<DiffReport> {
@@ -1139,10 +1149,11 @@ mod consumer_audit_tests {
             Some("original_save_range")
         );
         assert_eq!(root.children.len(), 3);
-        assert!(root
-            .children
-            .iter()
-            .all(|child| child.is_match && child.cached_bits_preserved == Some(false)));
+        assert!(
+            root.children
+                .iter()
+                .all(|child| child.is_match && child.cached_bits_preserved == Some(false))
+        );
 
         // This extra typed field has no owner in the admitted V3 host layout.
         invalid.items[0].runeword_level = Some(1);
@@ -1166,10 +1177,11 @@ mod consumer_audit_tests {
         assert!(!report.success);
         let root = &report.items[0];
         assert_eq!(root.mismatch_type.as_deref(), Some("Rebuild"));
-        assert!(root
-            .rebuild_error
-            .as_ref()
-            .is_some_and(|error| !error.reason.is_empty()));
+        assert!(
+            root.rebuild_error
+                .as_ref()
+                .is_some_and(|error| !error.reason.is_empty())
+        );
         assert_eq!(root.fidelity_score, 0.0);
         assert_eq!(root.cached_bits_preserved, Some(false));
         assert_eq!(root.children.len(), 3);
@@ -1193,33 +1205,39 @@ mod consumer_audit_tests {
             "invalid_source_span"
         );
         let (_, stream) = input(FRESH);
-        assert!(calculate_symmetry_diff_from_player_stream(
-            &bytes,
-            stream,
-            SymmetryOptions {
-                roundtrip: true,
-                target_index: Some(8),
-                ..Default::default()
-            },
-            None
-        )
-        .is_err());
+        assert!(
+            calculate_symmetry_diff_from_player_stream(
+                &bytes,
+                stream,
+                SymmetryOptions {
+                    roundtrip: true,
+                    target_index: Some(8),
+                    ..Default::default()
+                },
+                None
+            )
+            .is_err()
+        );
         let (_, mut stream) = input(FRESH);
         stream.items.clear();
-        assert!(calculate_symmetry_diff_from_player_stream(
-            &bytes,
-            stream,
-            SymmetryOptions::roundtrip(true),
-            None
-        )
-        .is_err());
+        assert!(
+            calculate_symmetry_diff_from_player_stream(
+                &bytes,
+                stream,
+                SymmetryOptions::roundtrip(true),
+                None
+            )
+            .is_err()
+        );
         let (_, stream) = input(FRESH);
-        assert!(calculate_symmetry_diff_from_player_stream(
-            &bytes,
-            stream,
-            SymmetryOptions::default(),
-            None
-        )
-        .is_err());
+        assert!(
+            calculate_symmetry_diff_from_player_stream(
+                &bytes,
+                stream,
+                SymmetryOptions::default(),
+                None
+            )
+            .is_err()
+        );
     }
 }

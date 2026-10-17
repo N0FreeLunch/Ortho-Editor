@@ -6,6 +6,7 @@ pub mod delta;
 pub mod desync;
 pub mod forensics;
 pub mod mutation;
+pub mod player_stream_observer;
 pub mod save_integrity;
 pub mod sba;
 pub mod symmetry;
