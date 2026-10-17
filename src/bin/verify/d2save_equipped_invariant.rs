@@ -26,7 +26,10 @@ use d2r_core::verify::alpha_inventory_routing::{
 // Alpha belt claims are checked before routing isolation, regardless of identification
 // or opacity. Non-consumables cannot occupy belt storage; preserve and report them.
 // This is evidence of an impossible parsed placement, not proof of its root cause.
-// Capacity, collisions, and D2R-v3 belt placement are outside this audit's coverage.
+// D2R-v3 belt slots count left to right, then upward: column = x % 4, row = x / 4.
+// Each occupied row must have every lower row occupied in the same column.
+// Check raw claims before routing isolation; never compact or repair source slots.
+// Alpha positions and equipped-belt-specific capacity remain outside coverage.
 
 /// The audit covers only the primary player list, not mercenary/corpse/golem lists.
 /// Slot compatibility is a partial diagnostic heuristic, not a complete gear oracle.
@@ -128,7 +131,7 @@ mod cli {
 
     fn print_help() {
         println!(
-            "d2save_equipped_invariant - Primary equipped identification and Alpha belt invariant verifier"
+            "d2save_equipped_invariant - Primary equipped identification and belt invariant verifier"
         );
         println!();
         println!("USAGE:");
@@ -136,7 +139,7 @@ mod cli {
         println!();
         println!("OPTIONS:");
         println!(
-            "    --dialect <NAME>        alpha (default, includes belt kinds) or d2r-v3; primary list only"
+            "    --dialect <NAME>        alpha (default: belt kinds) or d2r-v3 (belt kinds/positions); primary list only"
         );
         println!("    --fixture <PATH>        Verify a single .d2s save file (fast diagnosis)");
         println!(
@@ -159,8 +162,14 @@ pub enum InvariantClassification {
     FlagShiftAnomaly,
     /// Genuine hard violation where a valid equipped item is unidentified.
     TrueUnidentifiedViolation,
-    /// A raw Alpha belt claim contains an item that cannot be stored in a belt.
+    /// A raw belt claim contains an item that cannot be stored in a belt.
     BeltItemMismatch,
+    /// A D2R-v3 belt item has an unoccupied lower slot in the same column.
+    BeltColumnGap,
+    /// Multiple D2R-v3 belt items claim the same slot.
+    BeltSlotCollision,
+    /// A D2R-v3 belt claim lies outside the 16-slot envelope.
+    BeltSlotOutOfBounds,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,6 +203,9 @@ pub struct InvariantAuditReport {
     pub total_equipped_checked: usize,
     pub total_belt_checked: usize,
     pub belt_item_mismatch_count: usize,
+    pub belt_column_gap_count: usize,
+    pub belt_slot_collision_count: usize,
+    pub belt_slot_out_of_bounds_count: usize,
     pub total_anomalies: usize,
     pub phantom_header_drift_count: usize,
     pub slot_mismatch_phantom_drift_count: usize,
@@ -448,6 +460,100 @@ fn belt_anomaly(filename: &str, index: usize, item: &Item) -> Option<EquippedAno
     })
 }
 
+fn v3_belt_anomaly(
+    filename: &str,
+    index: usize,
+    item: &Item,
+    classification: InvariantClassification,
+    detail: String,
+) -> EquippedAnomaly {
+    EquippedAnomaly {
+        file: filename.into(),
+        item_index: index,
+        code: item.code.trim().into(),
+        version: item.version,
+        mode: item.mode,
+        location: item.location,
+        x: item.x,
+        y: item.y,
+        flags: format!("0x{:08x}", item.flags),
+        is_identified: item.is_identified,
+        is_compact: item.is_compact,
+        is_opaque: item.is_opaque() || item.is_semi_opaque(),
+        classification,
+        diagnosis: format!(
+            "{detail} Preserve the source slot; inspect item {index} and the preceding boundary with d2item_inspect. This finding does not establish input corruption."
+        ),
+    }
+}
+
+fn audit_v3_belt_positions(filename: &str, items: &[Item]) -> Vec<EquippedAnomaly> {
+    let mut occupied = [None; 16];
+    let mut consumables = [false; 16];
+    let mut anomalies = Vec::new();
+    for (index, item) in items.iter().enumerate().filter(|(_, item)| item.mode == 2) {
+        if !is_belt_consumable(&item.code) {
+            anomalies.push(v3_belt_anomaly(
+                filename,
+                index,
+                item,
+                InvariantClassification::BeltItemMismatch,
+                format!(
+                    "Non-consumable '{}' claims D2R-v3 belt slot {}.",
+                    item.code.trim(),
+                    item.x
+                ),
+            ));
+        }
+        if item.x >= 16 {
+            anomalies.push(v3_belt_anomaly(
+                filename,
+                index,
+                item,
+                InvariantClassification::BeltSlotOutOfBounds,
+                format!("D2R-v3 belt slot {} exceeds the 0..15 envelope.", item.x),
+            ));
+            continue;
+        }
+        // Even a bad item kind owns a raw slot claim: retain collision evidence.
+        // It cannot, however, supply support for a consumable above it.
+        if let Some(previous) = occupied[item.x as usize] {
+            anomalies.push(v3_belt_anomaly(
+                filename,
+                index,
+                item,
+                InvariantClassification::BeltSlotCollision,
+                format!(
+                    "D2R-v3 belt slot {} is also claimed by item {previous}.",
+                    item.x
+                ),
+            ));
+        } else {
+            occupied[item.x as usize] = Some(index);
+        }
+        consumables[item.x as usize] |= is_belt_consumable(&item.code);
+    }
+    for (index, item) in items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.mode == 2 && item.x < 16 && is_belt_consumable(&item.code))
+    {
+        let column = item.x % 4;
+        let row = item.x / 4;
+        let missing: Vec<_> = (0..row)
+            .map(|lower| column + lower * 4)
+            .filter(|slot| !consumables[*slot as usize])
+            .collect();
+        if !missing.is_empty() {
+            anomalies.push(v3_belt_anomaly(
+                filename, index, item, InvariantClassification::BeltColumnGap,
+                format!("D2R-v3 belt column {column}, bottom-origin row {row}, slot {} has empty lower consumable slots {missing:?}; unused cells must be above occupied cells.", item.x),
+            ));
+        }
+    }
+    anomalies
+}
+
 fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialect) -> FileAudit {
     let filename = path
         .file_name()
@@ -539,6 +645,10 @@ fn audit_bytes(path: &Path, bytes: &[u8], huffman: &HuffmanTree, dialect: Dialec
         }
     }
 
+    if dialect == Dialect::D2rV3 {
+        total_belt = items.iter().filter(|item| item.mode == 2).count();
+        anomalies.extend(audit_v3_belt_positions(&filename, &items));
+    }
     FileAudit {
         items: total_items,
         equipped: total_equipped,
@@ -618,6 +728,9 @@ fn main() {
     let mut flag_shift_count = 0;
     let mut true_violation_count = 0;
     let mut belt_mismatch_count = 0;
+    let mut belt_gap_count = 0;
+    let mut belt_collision_count = 0;
+    let mut belt_bounds_count = 0;
 
     for a in &all_anomalies {
         match a.classification {
@@ -626,13 +739,16 @@ fn main() {
             InvariantClassification::FlagShiftAnomaly => flag_shift_count += 1,
             InvariantClassification::TrueUnidentifiedViolation => true_violation_count += 1,
             InvariantClassification::BeltItemMismatch => belt_mismatch_count += 1,
+            InvariantClassification::BeltColumnGap => belt_gap_count += 1,
+            InvariantClassification::BeltSlotCollision => belt_collision_count += 1,
+            InvariantClassification::BeltSlotOutOfBounds => belt_bounds_count += 1,
         }
     }
 
     let affected_files: Vec<String> = affected_files_set.into_keys().collect();
 
     let report = InvariantAuditReport {
-        schema_version: "d2save-equipped-primary/v2",
+        schema_version: "d2save-equipped-primary/v3",
         dialect: args.dialect,
         status: if !parse_failures.is_empty() {
             "error"
@@ -641,7 +757,7 @@ fn main() {
         } else {
             "ok"
         },
-        coverage_limit: "Primary player list identification and partial slot rules, plus Alpha raw belt item-kind claims; no D2R-v3 belt rules, belt capacity/collisions, mercenary/corpse/golem lists, complete slot oracle, game-load or fidelity proof.",
+        coverage_limit: "Primary player list identification and partial slot rules; Alpha belt item-kind claims; D2R-v3 belt kinds, 16-slot bounds, collisions and bottom-filled columns. No Alpha positions, equipped-belt-specific capacity, mercenary/corpse/golem lists, complete slot oracle, game-load or fidelity proof.",
         total_saves_parsed,
         parse_failures,
         total_saves_checked: save_paths.len(),
@@ -649,6 +765,9 @@ fn main() {
         total_equipped_checked: total_equipped,
         total_belt_checked: total_belt,
         belt_item_mismatch_count: belt_mismatch_count,
+        belt_column_gap_count: belt_gap_count,
+        belt_slot_collision_count: belt_collision_count,
+        belt_slot_out_of_bounds_count: belt_bounds_count,
         total_anomalies: all_anomalies.len(),
         phantom_header_drift_count: phantom_count,
         slot_mismatch_phantom_drift_count: slot_mismatch_count,
@@ -683,8 +802,11 @@ fn main() {
     }
     println!("Total items:         {}", total_items);
     println!("Equipped items:      {}", total_equipped);
-    println!("Alpha belt claims:   {}", total_belt);
+    println!("Belt claims:         {}", total_belt);
     println!("Belt mismatches:     {}", belt_mismatch_count);
+    println!("Belt column gaps:    {}", belt_gap_count);
+    println!("Belt slot collisions:{}", belt_collision_count);
+    println!("Belt out of bounds:  {}", belt_bounds_count);
     println!("Total anomalies:     {}", all_anomalies.len());
     println!("Elapsed time:        {:.2?}", elapsed);
     println!("--------------------------------------------------------------------------------");
@@ -763,6 +885,130 @@ fn main() {
 mod tests {
     use super::*;
     use d2r_macros::settled_contract_test;
+
+    fn v3_potion(slot: u8) -> Item {
+        let mut item = Item {
+            code: "hp1".into(),
+            ..Item::default()
+        };
+        item.mode = 2;
+        item.x = slot;
+        item
+    }
+
+    #[settled_contract_test]
+    fn v3_belt_position_audit_checks_all_column_occupancy_masks() {
+        for column in 0..4 {
+            for mask in 0u8..16 {
+                let items: Vec<_> = (0..4)
+                    .filter(|row| mask & (1 << row) != 0)
+                    .map(|row| v3_potion(column + row * 4))
+                    .collect();
+                let anomalies = audit_v3_belt_positions("mask.d2s", &items);
+                let supported = matches!(mask, 0 | 1 | 3 | 7 | 15);
+                assert_eq!(
+                    anomalies.is_empty(),
+                    supported,
+                    "column={column}, mask={mask}"
+                );
+                for anomaly in &anomalies {
+                    assert!(matches!(
+                        anomaly.classification,
+                        InvariantClassification::BeltColumnGap
+                    ));
+                    assert_eq!(anomaly.x % 4, column);
+                    assert_eq!(anomaly.x, items[anomaly.item_index].x);
+                    assert!(anomaly.diagnosis.contains("empty lower consumable slots"));
+                }
+            }
+        }
+        // Every slot and mixed consumable types are valid when all columns are full.
+        let mut full: Vec<_> = (0..16).map(v3_potion).collect();
+        for (index, item) in full.iter_mut().enumerate() {
+            item.code = ["hp1", "mp5", "rvs", "tsc"][index % 4].into();
+        }
+        assert!(audit_v3_belt_positions("full.d2s", &full).is_empty());
+    }
+
+    #[settled_contract_test]
+    fn v3_belt_positions_preserve_collision_bounds_and_invalid_kind_evidence() {
+        let mut bad_kind = v3_potion(0);
+        bad_kind.code = "rin".into();
+        let mut inventory = v3_potion(8);
+        inventory.mode = 0;
+        let items = vec![
+            bad_kind,
+            v3_potion(4),
+            v3_potion(4),
+            v3_potion(16),
+            inventory,
+        ];
+        let anomalies = audit_v3_belt_positions("bad.d2s", &items);
+        let count = |name: &str| {
+            anomalies
+                .iter()
+                .filter(|anomaly| format!("{:?}", anomaly.classification) == name)
+                .count()
+        };
+        assert_eq!(count("BeltItemMismatch"), 1);
+        assert_eq!(count("BeltSlotCollision"), 1);
+        assert_eq!(count("BeltSlotOutOfBounds"), 1);
+        assert_eq!(count("BeltColumnGap"), 2);
+        assert_eq!(anomalies.len(), 5);
+        assert!(anomalies.iter().all(|anomaly| anomaly.item_index < 4));
+        // The auditor does not normalize, remove or move any claimed slot.
+        assert_eq!(
+            items.iter().map(|item| item.x).collect::<Vec<_>>(),
+            [0, 4, 4, 16, 8]
+        );
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn druid_v3_belt_gap_is_detected_after_one_raw_slot_mutation() {
+        let root = std::env::var_os("D2R_CORE_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        let path = root
+            .join("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+        let bytes = fs::read(&path).unwrap();
+        let huffman = HuffmanTree::new();
+        let items = Item::read_player_items_d2r_v3(&bytes, &huffman).unwrap();
+        assert_eq!(items.iter().filter(|item| item.mode == 2).count(), 11);
+        assert!(audit_v3_belt_positions("druid.d2s", &items).is_empty());
+        let (index, potion) = items
+            .iter()
+            .enumerate()
+            .find(|(_, item)| item.mode == 2 && item.x == 0)
+            .unwrap();
+        assert!(is_belt_consumable(&potion.code));
+        // V3 ordinary header: mode at +35, body slot +38, raw x +42 (4 bits).
+        // Move the sole column0 bottom item to row1 by toggling x bit2 only.
+        let offset = potion.range.start as usize + 44;
+        assert_eq!(bytes[offset / 8] & (1 << (offset % 8)), 0);
+        let mut mutated = bytes.clone();
+        mutated[offset / 8] ^= 1 << (offset % 8);
+        assert_eq!(
+            bytes.iter().zip(&mutated).filter(|(a, b)| a != b).count(),
+            1
+        );
+        let audit = audit_bytes(&path, &mutated, &huffman, Dialect::D2rV3);
+        assert!(audit.failure.is_none());
+        assert_eq!(audit.belt, 11);
+        let gaps: Vec<_> = audit
+            .anomalies
+            .iter()
+            .filter(|anomaly| {
+                matches!(
+                    anomaly.classification,
+                    InvariantClassification::BeltColumnGap
+                )
+            })
+            .collect();
+        assert_eq!(gaps.len(), 1);
+        assert_eq!((gaps[0].item_index, gaps[0].x), (index, 4));
+        assert!(gaps[0].diagnosis.contains("[0]"));
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
 
     #[settled_contract_test]
     fn belt_audit_reports_identified_and_opaque_non_consumables() {
