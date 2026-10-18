@@ -2387,7 +2387,7 @@ impl Item {
                     if alpha_mode && self.header.version == 3 && self.code.trim() == "bst" {
                         emitter.write_bit(false)?;
                     }
-                    crate::domain::item::serialization::write_property_list(
+                    crate::domain::stats::write_property_list(
                         emitter,
                         &self.code,
                         &self.properties,
@@ -2402,7 +2402,7 @@ impl Item {
                         &s_axiom,
                     )?;
                     for set_props in &self.set_attributes {
-                        crate::domain::item::serialization::write_property_list(
+                        crate::domain::stats::write_property_list(
                             emitter,
                             &self.code,
                             set_props,
