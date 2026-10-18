@@ -3,6 +3,7 @@ pub mod image;
 pub mod entity;
 pub mod builder;
 pub mod serialization;
+mod huffman;
 pub mod axiom_meta;
 pub mod scanner;
 pub mod editor;
