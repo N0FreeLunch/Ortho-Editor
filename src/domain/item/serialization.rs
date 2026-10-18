@@ -6346,8 +6346,10 @@ pub fn write_property_list(
     }
 
     // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
-    if properties_complete && axiom.has_tvs_padding(alpha_runeword) {
-        emitter.write_bits(0, 9)?;
+    if properties_complete
+        && let Some(tvs_bits) = axiom.tvs_padding_bits(alpha_runeword)
+    {
+        emitter.write_bits(0, tvs_bits)?;
     }
 
     Ok(())

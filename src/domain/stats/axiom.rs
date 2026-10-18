@@ -228,13 +228,21 @@ impl StatsAxiom {
     /// Determines if a specific Alpha v105 version/item-type requires 9-bit TVS padding
     /// after the property terminator (511).
     pub fn has_tvs_padding(&self, is_runeword: bool) -> bool {
+        self.tvs_padding_bits(is_runeword).is_some()
+    }
+
+    pub(crate) fn tvs_padding_bits(&self, is_runeword: bool) -> Option<u32> {
         if !self.is_alpha() {
-            return false;
+            return None;
         }
         if is_runeword || self.is_compact {
-            return false;
+            return None;
         }
-        matches!(self.version, 0 | 1 | 2 | 4 | 6)
+        let policy = &crate::data::generated::layout_policy::ALPHA_TVS_PADDING_POLICY;
+        policy
+            .header_versions
+            .contains(&self.version)
+            .then_some(u32::from(policy.padding_bits))
     }
 
     pub fn header_geometry(&self, flags: u32) -> HeaderGeometry {

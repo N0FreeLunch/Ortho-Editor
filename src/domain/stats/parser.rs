@@ -1199,9 +1199,9 @@ where
             }
         }
 
-        if axiom.has_tvs_padding(alpha_runeword) {
-            if !is_authority_host || recorder.remaining() >= 9 {
-                let _tvs = recorder.read_bits::<u32>(9)?;
+        if let Some(tvs_bits) = axiom.tvs_padding_bits(alpha_runeword) {
+            if !is_authority_host || recorder.remaining() >= u64::from(tvs_bits) {
+                let _tvs = recorder.read_bits::<u32>(tvs_bits)?;
             }
         }
         return Ok(Some((
