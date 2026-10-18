@@ -90,36 +90,14 @@ impl QuestSet {
         Self { quests }
     }
 
-    pub fn from_v105_bytes(bytes: &[u8], normal_anchor: usize, act5_anchor: usize) -> Self {
+    pub fn from_v105_bytes(bytes: &[u8], normal_anchor: usize, _act5_anchor: usize) -> Self {
+        let legacy_base = 415;
+        let anchor_shift = normal_anchor.saturating_sub(legacy_base);
+
         let quests = V105_QUESTS
             .iter()
             .map(|entry| {
-                // Grounding Logic: metadata (V105_QUESTS) uses a legacy 415 base.
-                // Discussion 0230 revealed that Act 5 starts at a drifted anchor (0x90).
-                let legacy_base = 415;
-                const STRIDE: usize = 2;
-
-                let (anchor, base_index) = if entry.act == 5 {
-                    (act5_anchor, 24 * STRIDE)
-                } else {
-                    (normal_anchor, 0)
-                };
-                
-                let quest_index_bytes = if entry.v105_offset >= legacy_base {
-                    entry.v105_offset - legacy_base
-                } else {
-                    0
-                };
-
-                // The offset relative to the specific act's anchor
-                let relative_to_anchor = if quest_index_bytes >= base_index {
-                    quest_index_bytes - base_index
-                } else {
-                    0
-                };
-
-                // The payload starts at the anchor + relative quest index.
-                let absolute_payload_start = anchor + relative_to_anchor;
+                let absolute_payload_start = entry.v105_offset + anchor_shift;
                 let section_offset = if absolute_payload_start >= crate::domain::progression::axiom::V105_QUEST_OFFSET {
                     absolute_payload_start - crate::domain::progression::axiom::V105_QUEST_OFFSET
                 } else {
@@ -137,30 +115,12 @@ impl QuestSet {
         Self { quests }
     }
 
-    pub fn sync_to_v105_bytes(&self, bytes: &mut [u8], normal_anchor: usize, act5_anchor: usize) {
+    pub fn sync_to_v105_bytes(&self, bytes: &mut [u8], normal_anchor: usize, _act5_anchor: usize) {
+        let legacy_base = 415;
+        let anchor_shift = normal_anchor.saturating_sub(legacy_base);
+
         for quest in &self.quests {
-            let legacy_base = 415;
-            const STRIDE: usize = 2;
-
-            let (anchor, base_index) = if quest.act() == 5 {
-                (act5_anchor, 24 * STRIDE)
-            } else {
-                (normal_anchor, 0)
-            };
-
-            let quest_index_bytes = if quest.v105_offset() >= legacy_base {
-                quest.v105_offset() - legacy_base
-            } else {
-                0
-            };
-
-            let relative_to_anchor = if quest_index_bytes >= base_index {
-                quest_index_bytes - base_index
-            } else {
-                0
-            };
-
-            let absolute_payload_start = anchor + relative_to_anchor;
+            let absolute_payload_start = quest.v105_offset() + anchor_shift;
             let section_offset = if absolute_payload_start >= crate::domain::progression::axiom::V105_QUEST_OFFSET {
                 absolute_payload_start - crate::domain::progression::axiom::V105_QUEST_OFFSET
             } else {
@@ -365,13 +325,15 @@ impl QuestSection {
         }
     }
 
-    /// Complete Anya NM quest directly by writing 0x101D to NM Prison of Ice (relative 104)
-    pub fn complete_anya_quest_with_scroll(&mut self, _name: &str, _consumed: bool, _normal_anchor: usize, _act5_anchor: usize) -> bool {
-        let offset = 104;
-        if offset + 1 < self.raw_bytes.len() {
-            self.raw_bytes[offset] = 0x1D;
-            self.raw_bytes[offset + 1] = 0x10;
-            return true;
+    /// Complete Anya quest directly by writing completion flags to quest offset
+    pub fn complete_anya_quest_with_scroll(&mut self, name: &str, _consumed: bool, _normal_anchor: usize, _act5_anchor: usize) -> bool {
+        if let Some(entry) = V105_QUESTS.iter().find(|e| e.name == name) {
+            let offset = entry.v105_offset - crate::domain::progression::axiom::V105_QUEST_OFFSET;
+            if offset + 1 < self.raw_bytes.len() {
+                self.raw_bytes[offset] = 0x1D;
+                self.raw_bytes[offset + 1] = 0x10;
+                return true;
+            }
         }
         false
     }
