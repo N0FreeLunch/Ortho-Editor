@@ -139,6 +139,17 @@ pub struct PropertyRhythm {
     pub has_extra_terminal_bit: bool,
 }
 
+impl PropertyRhythm {
+    fn from_layout(layout: &crate::data::generated::layout_policy::PropertyRhythmLayout) -> Self {
+        Self {
+            id_bits: u32::from(layout.id_bits),
+            value_bits: layout.value_bits.map(u32::from),
+            has_terminal_bit: layout.has_terminal_bit,
+            has_extra_terminal_bit: layout.has_extra_terminal_bit,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactLayoutPolicy {
     AlphaV105,
@@ -415,73 +426,41 @@ impl StatsAxiom {
         is_compact: bool,
         stat_id: u32,
     ) -> PropertyRhythm {
-        if self.is_alpha() {
-            if stat_id == 320 || self.map_alpha_id(stat_id) == 320 {
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: None,
-                    has_terminal_bit: false,
-                    has_extra_terminal_bit: false,
-                };
-            }
-
-            if self.version == 0 && _is_runeword && !matches!(self.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2") {
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: Some(7),
-                    has_terminal_bit: false,
-                    has_extra_terminal_bit: false,
-                };
-            }
-
-            if _is_runeword {
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: Some(9),
-                    has_terminal_bit: false,
-                    has_extra_terminal_bit: false,
-                };
-            }
-
-            // Alpha v105 Version 0 and 1 rows use a 17-bit rhythm
-            // (9-bit stat id + 8-bit value). Reading the value as 9 bits overreads
-            // the next property seam and produces the observed 256-offset drift.
-            if self.version == 0 || self.version == 1 {
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: Some(8),
-                    has_terminal_bit: false,
-                    has_extra_terminal_bit: false,
-                };
-            }
-
-            if self.version == 2
-                || self.version == 4
-                || self.version == 6
-                || self.code.trim() == "Opaque"
-            {
-                return PropertyRhythm {
-                    id_bits: 9,
-                    value_bits: Some(9),
-                    has_terminal_bit: false,
-                    has_extra_terminal_bit: false,
-                };
-            }
-
-            return PropertyRhythm {
-                id_bits: 9,
-                value_bits: None,
-                has_terminal_bit: false,
-                has_extra_terminal_bit: false,
-            };
+        if !self.is_alpha() {
+            return PropertyRhythm::from_layout(
+                &crate::data::generated::layout_policy::RETAIL_PROPERTY_RHYTHM_LAYOUT,
+            );
         }
-
-        PropertyRhythm {
-            id_bits: 9,
-            value_bits: None,
-            has_terminal_bit: true,
-            has_extra_terminal_bit: false,
+        let policy = &crate::data::generated::layout_policy::ALPHA_PROPERTY_RHYTHM_POLICY;
+        let mut rhythm = PropertyRhythm::from_layout(&policy.layout);
+        if stat_id == policy.dynamic_value_stat_id
+            || self.map_alpha_id(stat_id) == policy.dynamic_value_stat_id
+        {
+            return rhythm;
         }
+        if self.version == policy.initial_runeword_header_version
+            && _is_runeword
+            && !policy.authority_codes.contains(&self.code.trim())
+        {
+            rhythm.value_bits = Some(u32::from(policy.initial_runeword_value_bits));
+            return rhythm;
+        }
+        if _is_runeword {
+            rhythm.value_bits = Some(u32::from(policy.runeword_value_bits));
+            return rhythm;
+        }
+        if let Some((_, value_bits)) = policy
+            .version_value_bits
+            .iter()
+            .find(|(version, _)| *version == self.version)
+        {
+            rhythm.value_bits = Some(u32::from(*value_bits));
+            return rhythm;
+        }
+        if self.code.trim() == policy.opaque_code {
+            rhythm.value_bits = Some(u32::from(policy.opaque_value_bits));
+        }
+        rhythm
     }
 
     pub fn resolve_flag_padding(&self, flags: u32, is_socketed: bool) -> u64 {
