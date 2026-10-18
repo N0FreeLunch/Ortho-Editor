@@ -187,6 +187,16 @@ impl StatsAxiom {
             .unwrap_or(raw_id)
     }
 
+    /// Tests the legacy parameter-omission policy using explicit caller inputs.
+    pub(crate) fn omits_property_parameter(&self, code: &str, header_version: u8) -> bool {
+        self.save_is_alpha
+            && crate::data::generated::layout_policy::ALPHA_V105_OMITTED_PROPERTY_PARAMETER_RULES
+                .iter()
+                .any(|rule| {
+                    rule.item_code == code.trim() && rule.header_version == header_version
+                })
+    }
+
     /// Determines if a specific Alpha v105 version/item-type requires 9-bit TVS padding
     /// after the property terminator (511).
     pub fn has_tvs_padding(&self, is_runeword: bool) -> bool {

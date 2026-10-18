@@ -6287,12 +6287,7 @@ pub fn write_property_list(
             let stat_cost = crate::data::stat_costs::STAT_COSTS
                 .iter()
                 .find(|s| s.id == mapped_id);
-            let is_authority_host =
-                axiom.save_is_alpha && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
-            let suppress_authority_params = axiom.save_is_alpha
-                && (alpha_runeword || is_authority_host)
-                && matches!(code.trim(), "xrs" | "c8xr" | "rhd")
-                && (version == 1 || version == 0);
+            let suppress_authority_params = axiom.omits_property_parameter(code, version);
             if let Some(stat) = stat_cost {
                 if stat.save_param_bits > 0 && !suppress_authority_params {
                     emitter.write_bits(prop.param as u32, stat.save_param_bits as u32)?;
