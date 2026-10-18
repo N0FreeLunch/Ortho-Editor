@@ -10,7 +10,7 @@ pub mod fusion_mapper;
 pub use entity::{ItemProperty, ItemStats, ItemStatList, StatMaturityTier};
 pub use attribute::{AttributeSection, AttributeEntry};
 pub use axiom::StatsAxiom;
-pub use parser::{read_property_list, parse_single_property};
+pub use parser::{read_property_list, parse_single_property, PropertyReaderContext};
 pub use serialization::write_property_list;
 pub use tiling_solver::BitSpaceTilingSolver;
 pub use fusion_mapper::{StatFusionMapper, FusedStatView};

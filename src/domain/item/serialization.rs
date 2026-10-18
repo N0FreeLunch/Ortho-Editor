@@ -4806,11 +4806,7 @@ pub fn scan_socket_children(
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PropertyReaderContext<'a> {
-    pub bytes: &'a [u8],
-    pub item_start_bit: u64,
-}
+pub use crate::domain::stats::PropertyReaderContext;
 
 /// Physical widths for the explicitly selected D2R v3 stored-item grammar.
 struct D2rV3JewelryWidths;

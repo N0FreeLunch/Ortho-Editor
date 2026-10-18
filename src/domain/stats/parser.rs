@@ -1,10 +1,16 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::header::entity::ItemSegmentType;
-use crate::domain::item::{ItemBitRange, ItemQuality};
+use crate::domain::item::{HuffmanTree, ItemBitRange, ItemQuality};
 use crate::domain::stats::{ItemProperty, StatsAxiom};
-use crate::item::{HuffmanTree, ParsingResult, PropertyReaderContext};
+use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 use std::cell::{Cell, RefCell};
+
+#[derive(Debug, Clone)]
+pub struct PropertyReaderContext<'a> {
+    pub bytes: &'a [u8],
+    pub item_start_bit: u64,
+}
 
 pub const MAX_ALPHA_V105_ITEM_BITS: u64 = 1500;
 pub(crate) const D2R_V3_PAIRED_STAT_IDS: &[(u32, &[u32])] = &[
