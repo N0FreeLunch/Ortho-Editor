@@ -2244,7 +2244,7 @@ impl Item {
             }
 
             // Slice 2: Capture residue between items (Resilient Recovery)
-            while alpha_mode && start > start_offset {
+            if alpha_mode && start > start_offset {
                 if crate::item::item_trace_enabled() {
                     use std::io::Write;
                     eprintln!(
@@ -2444,12 +2444,7 @@ impl Item {
                             item_count += 1;
                         }
                         start_offset += consumed;
-                        break;
-                    } else {
-                        break;
                     }
-                } else {
-                    break;
                 }
             }
 

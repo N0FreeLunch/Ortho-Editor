@@ -47,7 +47,7 @@ pub struct AttributeSection {
 impl AttributeSection {
     pub fn parse(bytes: &[u8], gf_pos: usize, if_pos: usize) -> io::Result<Self> {
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-        let is_alpha = version == 105 || version == 0x69;
+        let is_alpha = version == 105;
         
         // Skip the 'gf' marker (2 bytes) before parsing the bitstream
         let bitstream_start = gf_pos + 2;
