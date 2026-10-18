@@ -163,27 +163,20 @@ pub enum CodeEncoding {
 }
 
 impl StatsAxiom {
-    pub fn is_alpha(&self) -> bool {
+    fn admits_legacy_alpha_stats_header(&self) -> bool {
         self.save_is_alpha
-            && (self.version == 5
-                || self.version == 1
-                || self.version == 2
-                || self.version == 0
-                || self.version == 4
-                || self.version == 6
-                || self.version == 7)
+            && crate::data::generated::layout_policy::ALPHA_ITEM_HEADER_ADMISSION_POLICY
+                .stats_versions
+                .contains(&self.version)
+    }
+
+    pub fn is_alpha(&self) -> bool {
+        self.admits_legacy_alpha_stats_header()
     }
 
     /// Whitelist for Alpha stat mapping (includes version 7).
     pub fn uses_alpha_mapping(&self) -> bool {
-        self.save_is_alpha
-            && (self.version == 5
-                || self.version == 1
-                || self.version == 2
-                || self.version == 0
-                || self.version == 7
-                || self.version == 4
-                || self.version == 6)
+        self.admits_legacy_alpha_stats_header()
     }
 
     /// Maps an Alpha v105 raw stat ID to its effective (standard) ID.

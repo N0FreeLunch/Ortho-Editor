@@ -82,7 +82,7 @@ static VALID_CODES: LazyLock<HashSet<&'static [u8]>> = LazyLock::new(|| {
     }
     // Axiom 0365: Explicit Alpha/Legacy white-listed codes (Forensic markers & Quest items)
     set.insert(b"wuw8");
-    set.insert(b"\xCF\x4F"); // ÏO
+    set.insert(b"\xCF\x4F"); // Legacy marker: `ÏO`.
     set.insert(b"\x48\x04"); // H\x04
     set.insert(b"acww");  // Shadow Item placeholder
     set.insert(b"bwcw");  // Tome
@@ -110,7 +110,10 @@ impl HeaderAxiom {
     }
 
     pub fn is_alpha(&self) -> bool {
-        self.alpha_mode && (self.version == 5 || self.version == 1 || self.version == 2 || self.version == 3 || self.version == 0 || self.version == 7 || self.version == 4 || self.version == 6)
+        self.alpha_mode
+            && crate::data::generated::layout_policy::ALPHA_ITEM_HEADER_ADMISSION_POLICY
+                .header_versions
+                .contains(&self.version)
     }
 
     pub fn is_plausible(&self, mode: u8, location: u8, code: &[u8], _flags: u32) -> bool {
