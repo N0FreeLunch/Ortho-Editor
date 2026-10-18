@@ -197,6 +197,30 @@ impl StatsAxiom {
                 })
     }
 
+    /// Selects the default value width before caller-specific registry overrides.
+    pub(crate) fn default_property_value_width(
+        &self,
+        header_version: u8,
+        stat_save_bits: Option<u32>,
+        rhythm: PropertyRhythm,
+    ) -> u32 {
+        let default_width = match stat_save_bits {
+            Some(save_bits) => rhythm.value_bits.unwrap_or(save_bits),
+            None => u32::from(crate::data::generated::layout_policy::UNKNOWN_PROPERTY_VALUE_BITS),
+        };
+        if !self.save_is_alpha {
+            return default_width;
+        }
+        crate::data::generated::layout_policy::ALPHA_V105_PROPERTY_DEFAULT_WIDTH_RULES
+            .iter()
+            .find(|rule| {
+                rule.header_version == header_version
+                    && u32::from(rule.id_bits) == rhythm.id_bits
+                    && u32::from(rule.from_value_bits) == default_width
+            })
+            .map_or(default_width, |rule| u32::from(rule.to_value_bits))
+    }
+
     /// Determines if a specific Alpha v105 version/item-type requires 9-bit TVS padding
     /// after the property terminator (511).
     pub fn has_tvs_padding(&self, is_runeword: bool) -> bool {
@@ -633,5 +657,42 @@ mod tests {
             retail_axiom.stat_maturity(99999, false),
             crate::domain::stats::StatMaturityTier::Speculative
         );
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn test_property_default_width_preserves_legacy_selector_classes() {
+        let widths = [None, Some(0), Some(8), Some(9), Some(10), Some(32), Some(64)];
+        let mut cases = 0;
+        for alpha in [false, true] {
+            let axiom = StatsAxiom::new(3, ItemQuality::Normal, alpha);
+            for version in u8::MIN..=u8::MAX {
+                for id_bits in [0, 8, 9, 10, 32, 64] {
+                    for stat_save_bits in widths {
+                        for value_bits in widths {
+                            let rhythm = PropertyRhythm {
+                                id_bits,
+                                value_bits,
+                                has_terminal_bit: false,
+                                has_extra_terminal_bit: false,
+                            };
+                            let mut expected = match stat_save_bits {
+                                Some(save_bits) => value_bits.unwrap_or(save_bits),
+                                None => 9,
+                            };
+                            if alpha && matches!(version, 0 | 1) && id_bits == 9 && expected == 9 {
+                                expected = 8;
+                            }
+                            assert_eq!(
+                                axiom.default_property_value_width(version, stat_save_bits, rhythm),
+                                expected,
+                                "alpha {alpha}, version {version}, id bits {id_bits}, stat {stat_save_bits:?}, rhythm {value_bits:?}"
+                            );
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 150_528);
     }
 }

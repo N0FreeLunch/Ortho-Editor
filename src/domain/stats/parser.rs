@@ -1238,25 +1238,11 @@ where
         }
     }
 
-    let mut default_width = if let Some(stat) = stat_cost {
-        if let Some(width) = rhythm.value_bits {
-            width
-        } else {
-            stat.save_bits as u32
-        }
-    } else {
-        9
-    };
-
-    // Alpha v105 Version 0 and 1 items use a 17-bit rhythm (9-bit id + 8-bit value)
-    // for standard stats, even when the stat table would otherwise suggest a wider save field.
-    if axiom.save_is_alpha
-        && (_version == 0 || _version == 1)
-        && rhythm.id_bits == 9
-        && default_width == 9
-    {
-        default_width = 8;
-    }
+    let default_width = axiom.default_property_value_width(
+        _version,
+        stat_cost.map(|stat| u32::from(stat.save_bits)),
+        rhythm,
+    );
 
     let mut effective_width = axiom.stat_bit_width(stat_id, default_width);
     if axiom.code.trim() == "wa2" && (stat_id == 320 || axiom.map_alpha_id(stat_id) == 320) {

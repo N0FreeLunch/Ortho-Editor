@@ -6294,25 +6294,11 @@ pub fn write_property_list(
                 }
             }
             if raw_id != terminator {
-                let mut default_width = if let Some(stat) = stat_cost {
-                    if let Some(width) = rhythm.value_bits {
-                        width
-                    } else {
-                        stat.save_bits as u32
-                    }
-                } else {
-                    9
-                };
-
-                // Alpha v105 Version 0 and 1 items use a 17-bit rhythm (9-bit id + 8-bit value)
-                // for standard stats, even when the stat table would otherwise suggest a wider save field.
-                if axiom.save_is_alpha
-                    && (version == 0 || version == 1)
-                    && rhythm.id_bits == 9
-                    && default_width == 9
-                {
-                    default_width = 8;
-                }
+                let default_width = axiom.default_property_value_width(
+                    version,
+                    stat_cost.map(|stat| u32::from(stat.save_bits)),
+                    rhythm,
+                );
 
                 let effective_width = if code.trim() == "wa2"
                     && (raw_id == 320 || axiom.map_alpha_id(raw_id) == 320)
