@@ -96,14 +96,10 @@ impl ForensicAxiom for V105PropertyNudgeAxiom {
 
 impl V105PropertyNudgeAxiom {
     pub fn get_nudge(&self, version: u8) -> u8 {
-        match version {
-            5 => 5, // Version 5 requires a 5-bit residue nudge (Slice 23)
-            4 => 1, // Version 4 requires a 1-bit residue nudge (Slice 5)
-            3 => 1, // Version 3 requires a 1-bit residue nudge (Observed in authority fixture)
-            2 | 0 => 3, // Version 2 and 0 require a 3-bit residue nudge
-            1 => 0, // Version 1 (xrs runeword base) does not use this nudge
-            _ => 0,
-        }
+        crate::data::generated::layout_policy::ALPHA_V105_PROPERTY_RESIDUE_RULES
+            .iter()
+            .find(|rule| rule.header_version == version)
+            .map_or(0, |rule| rule.residue_bits)
     }
 }
 
