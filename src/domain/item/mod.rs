@@ -4,6 +4,7 @@ pub mod entity;
 pub mod builder;
 pub mod serialization;
 mod huffman;
+mod bit_emitter;
 pub mod axiom_meta;
 pub mod scanner;
 pub mod editor;
