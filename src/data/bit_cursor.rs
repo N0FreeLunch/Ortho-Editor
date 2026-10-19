@@ -30,6 +30,34 @@ pub struct BitCursor<R: BitRead> {
     pub alpha_quality: Option<ItemQuality>,
 }
 
+/// Owns contexts opened after an enclosing stack depth without owning cursor position.
+pub(crate) struct CursorContextScope<'a, R: BitRead> {
+    cursor: &'a mut BitCursor<R>,
+    enclosing_depth: usize,
+}
+
+impl<R: BitRead> std::ops::Deref for CursorContextScope<'_, R> {
+    type Target = BitCursor<R>;
+
+    fn deref(&self) -> &Self::Target {
+        self.cursor
+    }
+}
+
+impl<R: BitRead> std::ops::DerefMut for CursorContextScope<'_, R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.cursor
+    }
+}
+
+impl<R: BitRead> Drop for CursorContextScope<'_, R> {
+    fn drop(&mut self) {
+        while self.cursor.context_stack.len() > self.enclosing_depth {
+            self.cursor.end_segment();
+        }
+    }
+}
+
 impl<R: BitRead> BackingBitCursor for BitCursor<R> {
     fn pos(&self) -> u64 {
         self.bit_pos
@@ -259,7 +287,7 @@ impl<R: BitRead> BitCursor<R> {
     /// Ends the current semantic segment and records it.
     pub fn end_segment(&mut self) {
         if let Some((label, start, expected)) = self.context_stack.pop() {
-            let _actual_bits = self.bit_pos - start;
+            let _actual_bits = self.bit_pos.saturating_sub(start);
             if let Some(_expected_bits) = expected {
                 // If trace enabled, we could log mismatches here.
             }
@@ -275,14 +303,23 @@ impl<R: BitRead> BitCursor<R> {
         }
     }
 
+    /// Closes this scope and its pending descendants on return or unwind.
+    /// Cursor position, consumed bits, limits, and existing error snapshots are retained.
+    pub(crate) fn scoped_context(&mut self, name: &str) -> CursorContextScope<'_, R> {
+        let enclosing_depth = self.context_stack.len();
+        self.push_context(name);
+        CursorContextScope {
+            cursor: self,
+            enclosing_depth,
+        }
+    }
+
     pub fn with_context<T, F>(&mut self, name: &str, mut f: F) -> ParsingResult<T>
     where
         F: FnMut(&mut Self) -> ParsingResult<T>,
     {
-        self.push_context(name);
-        let res = f(self);
-        self.pop_context();
-        res
+        let mut scope = self.scoped_context(name);
+        f(&mut scope)
     }
 
     pub fn pop_context(&mut self) {
@@ -381,6 +418,143 @@ mod tests {
     use super::*;
     use bitstream_io::{BitReader, LittleEndian};
     use std::io::Cursor;
+
+    use d2r_macros::hypothesis_test;
+
+    #[hypothesis_test]
+    fn refactor_context_scope_descendants_close_on_success_error_and_unwind() {
+        let mut cases = 0;
+        for trace in [false, true] {
+            for offset in [0, 3] {
+                for exit in 0..3 {
+                    let bytes = [0b10101101; 4];
+                    let mut cursor =
+                        BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                    cursor.push_context("owner");
+                    for _ in 0..offset {
+                        cursor.read_bit().unwrap();
+                    }
+                    cursor.set_trace(trace);
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        cursor.with_context("scope", |cursor| {
+                            cursor.push_context("leaf");
+                            let value = cursor.read_bits::<u32>(2)?;
+                            match exit {
+                                0 => Ok(value),
+                                1 => {
+                                    cursor.err(ParsingError::Generic("scope error sentinel".into()))
+                                }
+                                _ => std::panic::panic_any("scope panic sentinel"),
+                            }
+                        })
+                    }));
+                    match exit {
+                        0 => assert!(outcome.unwrap().is_ok()),
+                        1 => {
+                            let failure = outcome.unwrap().unwrap_err();
+                            assert_eq!(failure.context_stack, vec!["owner", "scope", "leaf"]);
+                            assert_eq!(
+                                (failure.bit_offset, failure.context_relative_offset),
+                                (offset + 2, 2)
+                            );
+                            assert_eq!(
+                                failure.error,
+                                ParsingError::Generic("scope error sentinel".into())
+                            );
+                        }
+                        _ => assert_eq!(
+                            outcome.unwrap_err().downcast_ref::<&str>(),
+                            Some(&"scope panic sentinel")
+                        ),
+                    }
+                    assert_eq!(cursor.context_stack(), vec!["owner"]);
+                    assert_eq!((cursor.pos(), cursor.limit()), (offset + 2, None));
+                    assert_eq!(cursor.recorded_bits().len(), (offset + 2) as usize);
+                    assert_eq!(cursor.segments().len(), if trace { 2 } else { 0 });
+                    if trace {
+                        for (segment, label, depth) in [
+                            (&cursor.segments()[0], "leaf", 2),
+                            (&cursor.segments()[1], "scope", 1),
+                        ] {
+                            assert_eq!(segment.label, label);
+                            assert_eq!(
+                                (segment.start, segment.end, segment.depth),
+                                (offset, offset + 2, depth)
+                            );
+                        }
+                    }
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 12);
+    }
+
+    #[hypothesis_test]
+    fn refactor_context_scope_nesting_and_explicit_close_preserve_ancestor() {
+        let mut cases = 0;
+        for trace in [false, true] {
+            for explicit_close in [false, true] {
+                let bytes = [0b10101101; 4];
+                let mut cursor =
+                    BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                cursor.set_trace(trace);
+                cursor.push_context("owner");
+                {
+                    let mut outer = cursor.scoped_context("outer");
+                    {
+                        let mut inner = outer.scoped_context("inner");
+                        inner.read_bits::<u32>(2).unwrap();
+                        if explicit_close {
+                            inner.pop_context();
+                        }
+                    }
+                    assert_eq!(outer.context_stack(), vec!["owner", "outer"]);
+                    if explicit_close {
+                        outer.pop_context();
+                    }
+                }
+                assert_eq!(cursor.context_stack(), vec!["owner"]);
+                assert_eq!(cursor.pos(), 2);
+                assert_eq!(cursor.segments().len(), if trace { 2 } else { 0 });
+                if trace {
+                    assert_eq!(cursor.segments()[0].label, "inner");
+                    assert_eq!(cursor.segments()[1].label, "outer");
+                }
+                cases += 1;
+            }
+        }
+        assert_eq!(cases, 4);
+    }
+
+    #[hypothesis_test]
+    fn refactor_context_scope_rewind_does_not_replace_original_panic() {
+        for trace in [false, true] {
+            let bytes = [0b10101101; 4];
+            let mut cursor = BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+            cursor.push_context("owner");
+            cursor.read_bits::<u32>(3).unwrap();
+            cursor.set_trace(trace);
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut context = cursor.scoped_context("rewound");
+                context.rollback(0);
+                std::panic::panic_any("rewind panic sentinel");
+            }));
+            assert_eq!(
+                outcome.unwrap_err().downcast_ref::<&str>(),
+                Some(&"rewind panic sentinel")
+            );
+            assert_eq!(cursor.context_stack(), vec!["owner"]);
+            assert_eq!(cursor.pos(), 0);
+            assert_eq!(cursor.recorded_bits().len(), 3);
+            assert_eq!(cursor.segments().len(), usize::from(trace));
+            if trace {
+                let segment = &cursor.segments()[0];
+                assert_eq!((segment.start, segment.end, segment.depth), (3, 0, 1));
+                assert_eq!(segment.label, "rewound");
+            }
+        }
+    }
 
     #[test]
     fn test_bit_cursor_basic_read() {

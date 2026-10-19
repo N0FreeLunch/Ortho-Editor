@@ -577,20 +577,36 @@ fn nested_property_depth_failure() -> crate::error::ParsingFailure {
     }
 }
 
+struct ThreadLocalValueScope<T: Copy + 'static> {
+    key: &'static std::thread::LocalKey<std::cell::Cell<T>>,
+    previous: T,
+}
+
+impl<T: Copy + 'static> ThreadLocalValueScope<T> {
+    fn replace(key: &'static std::thread::LocalKey<std::cell::Cell<T>>, value: T) -> Self {
+        Self {
+            key,
+            previous: key.with(|cell| cell.replace(value)),
+        }
+    }
+}
+
+impl<T: Copy + 'static> Drop for ThreadLocalValueScope<T> {
+    fn drop(&mut self) {
+        self.key.with(|cell| cell.set(self.previous));
+    }
+}
+
 fn with_nested_property_depth<T, E>(
     overflow_error: impl FnOnce() -> E,
     operation: impl FnOnce() -> Result<T, E>,
 ) -> Result<T, E> {
-    NESTED_DEPTH.with(|depth| {
-        let previous = depth.get();
-        if nested_property_depth_exhausted(previous) {
-            return Err(overflow_error());
-        }
-        depth.set(previous + 1);
-        let result = operation();
-        depth.set(previous);
-        result
-    })
+    let previous = NESTED_DEPTH.with(|depth| depth.get());
+    if nested_property_depth_exhausted(previous) {
+        return Err(overflow_error());
+    }
+    let _depth = ThreadLocalValueScope::replace(&NESTED_DEPTH, previous + 1);
+    operation()
 }
 
 pub fn read_property_list<R: BitRead, F>(
@@ -987,23 +1003,19 @@ where
             }
 
             let result = with_nested_property_depth(nested_property_depth_failure, || {
-                recorder.push_context("nested");
-                let prev_nested = crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| {
-                    let p = v.get();
-                    v.set(true);
-                    p
-                });
+                let _context = recorder.scoped_context("nested");
+                let _recovery = ThreadLocalValueScope::replace(
+                    &crate::domain::header::entity::IN_NESTED_RECOVERY,
+                    true,
+                );
                 // Use axiom.is_alpha(): ensure nested items use the correct mode
-                let res = recovery_fn(
+                recovery_fn(
                     _section_recovery.bytes,
                     target_local_pos,
                     huffman,
                     child_idx,
                     axiom.is_alpha(),
-                );
-                crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(prev_nested));
-                recorder.pop_context();
-                res
+                )
             });
 
             // If recovery_fn fails but the offset was scanner-verified (force_from_scan),
@@ -1288,7 +1300,8 @@ where
     {
         let entry_pos = recorder.pos();
         let absolute_entry_pos = reader_ctx.item_start_bit + entry_pos;
-        recorder.push_context("nested");
+        let mut context = recorder.scoped_context("nested");
+        let recorder = &mut *context;
 
         let mut found_pos = absolute_entry_pos;
         if is_stat_320 {
@@ -1348,7 +1361,6 @@ where
             }
             handled = true;
         }
-        recorder.pop_context();
     }
 
     if !handled {
@@ -1445,6 +1457,389 @@ mod tests {
     use std::io::Cursor;
 
     use d2r_macros::hypothesis_test;
+
+    #[hypothesis_test]
+    fn refactor_lifetime_thread_local_nested_and_dirty_unwind_restores_previous() {
+        let mut cases = 0;
+        for depth in [0, 10] {
+            for nested in [false, true] {
+                for dirty in [false, true] {
+                    let _state = DepthWitnessState::enter(depth, nested);
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        with_nested_property_depth(
+                            nested_property_depth_failure,
+                            || -> ParsingResult<()> {
+                                depth_witness_state(depth + 1, nested);
+                                let _flag = ThreadLocalValueScope::replace(
+                                    &crate::domain::header::entity::IN_NESTED_RECOVERY,
+                                    true,
+                                );
+                                {
+                                    let _inner_flag = ThreadLocalValueScope::replace(
+                                        &crate::domain::header::entity::IN_NESTED_RECOVERY,
+                                        false,
+                                    );
+                                    depth_witness_state(depth + 1, false);
+                                }
+                                depth_witness_state(depth + 1, true);
+                                if dirty {
+                                    NESTED_DEPTH.with(|cell| cell.set(123));
+                                    crate::domain::header::entity::IN_NESTED_RECOVERY
+                                        .with(|cell| cell.set(false));
+                                }
+                                std::panic::panic_any("thread-local scope sentinel");
+                            },
+                        )
+                    }));
+                    assert_eq!(
+                        outcome.unwrap_err().downcast_ref::<&str>(),
+                        Some(&"thread-local scope sentinel")
+                    );
+                    depth_witness_state(depth, nested);
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 8);
+    }
+
+    fn lifetime_probe_snapshot<R: BitRead>(recorder: &BitCursor<R>) -> serde_json::Value {
+        serde_json::json!({
+            "depth": NESTED_DEPTH.with(|value| value.get()),
+            "nested_flag": crate::domain::header::entity::IN_NESTED_RECOVERY.with(|value| value.get()),
+            "contexts": recorder.context_stack(),
+            "limit": recorder.limit(),
+            "position": recorder.pos(),
+            "bits": recorder.recorded_bits().iter().map(|bit| bit.bit).collect::<Vec<_>>(),
+            "segments": recorder.segments(),
+            "active_segments": recorder.active_segments(),
+        })
+    }
+
+    fn lifetime_probe_report(name: &str, rows: Vec<serde_json::Value>, count: usize) {
+        use std::io::Write;
+        assert_eq!(rows.len(), count);
+        let Ok(output_dir) = std::env::var("D2R_REFACTOR_LIFETIME_OUTPUT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(output_dir);
+        assert!(root.is_absolute() && root.is_dir());
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(root.join(format!("{name}.json")))
+            .unwrap();
+        let report = serde_json::json!({"schema": 1, "case_count": count, "rows": rows});
+        output
+            .write_all(serde_json::to_string_pretty(&report).unwrap().as_bytes())
+            .unwrap();
+    }
+
+    #[hypothesis_test]
+    fn refactor_lifetime_probe_actual_callback_unwind() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        for depth in [0, 10] {
+            for nested in [false, true] {
+                for offset in [0, 3] {
+                    for id in [Some(317u32), Some(320), Some(387), None] {
+                        let _state = DepthWitnessState::enter(depth, nested);
+                        let mut bits = depth_witness_prefix(offset);
+                        if let Some(id) = id {
+                            bits.extend((0..9).map(|index| id & (1 << index) != 0));
+                        }
+                        bits.extend((0..96).map(|index| index % 3 == 1));
+                        bits.extend([false, true, true, false, true]);
+                        let bytes = depth_witness_packed(&bits);
+                        let mut recorder =
+                            BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                        for bit in depth_witness_prefix(offset) {
+                            assert_eq!(recorder.read_bit().unwrap(), bit);
+                        }
+                        recorder.set_trace(true);
+                        recorder.set_limit(bits.len() as u64);
+                        recorder.push_context("owner");
+                        let before = lifetime_probe_snapshot(&recorder);
+                        let mut axiom = StatsAxiom::new(5, ItemQuality::Normal, true);
+                        axiom.code = "plain".into();
+                        axiom.is_socketed = true;
+                        let target = offset as u64 + if id.is_some() { 9 } else { 8 };
+                        let offsets = [target];
+                        let codes = std::collections::HashMap::from([(target, "r01".to_string())]);
+                        let mut calls = 0;
+                        let mut callback = |data: &[u8], position: u64, _: &HuffmanTree, index: usize, alpha: bool|
+                            -> ParsingResult<(crate::domain::item::Item, u64)> {
+                            calls += 1;
+                            depth_witness_state(depth + 1, if id.is_some() { nested } else { true });
+                            assert!(data.is_empty() && alpha);
+                            assert_eq!((position, index), (target, 0));
+                            std::panic::panic_any("lifetime probe panic");
+                        };
+                        let outcome =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let context = PropertyReaderContext {
+                                    bytes: &[],
+                                    item_start_bit: 0,
+                                };
+                                if id.is_some() {
+                                    let _ = parse_single_property(
+                                        &mut recorder,
+                                        5,
+                                        &tree,
+                                        true,
+                                        &axiom,
+                                        context,
+                                        &mut callback,
+                                    );
+                                } else {
+                                    let _ = read_property_list(
+                                        &mut recorder,
+                                        "plain",
+                                        5,
+                                        context,
+                                        &tree,
+                                        true,
+                                        false,
+                                        &axiom,
+                                        Some(&offsets),
+                                        Some(&codes),
+                                        &mut callback,
+                                    );
+                                }
+                            }));
+                        let payload = outcome.expect_err("callback must unwind");
+                        assert_eq!(
+                            payload.downcast_ref::<&str>(),
+                            Some(&"lifetime probe panic")
+                        );
+                        assert_eq!(calls, 1);
+                        // Cleanup restores lexical state while preserving the original unwind payload.
+                        depth_witness_state(depth, nested);
+                        assert_eq!(recorder.context_stack(), vec!["owner"]);
+                        assert_eq!(recorder.limit(), Some(bits.len() as u64));
+                        assert_eq!(recorder.pos(), target);
+                        assert_eq!(
+                            recorder
+                                .recorded_bits()
+                                .iter()
+                                .map(|bit| bit.bit)
+                                .collect::<Vec<_>>(),
+                            bits[..target as usize]
+                        );
+                        let after = lifetime_probe_snapshot(&recorder);
+                        for &bit in &bits[target as usize..] {
+                            assert_eq!(recorder.read_bit().unwrap(), bit);
+                        }
+                        rows.push(serde_json::json!({"route": if id.is_some() { "inline" } else { "scanner" }, "id": id, "initial_depth": depth, "initial_flag": nested, "offset": offset, "calls": calls, "before": before, "after": after, "panic_payload": "lifetime probe panic", "unread_tail_preserved": true}));
+                    }
+                }
+            }
+        }
+        lifetime_probe_report("actual-unwind", rows, 32);
+    }
+
+    #[hypothesis_test]
+    fn refactor_lifetime_probe_inline_post_callback_error() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        for depth in [0, 10] {
+            for nested in [false, true] {
+                for offset in [0, 3] {
+                    for id in [317u32, 320, 387] {
+                        let _state = DepthWitnessState::enter(depth, nested);
+                        let mut bits = depth_witness_prefix(offset);
+                        bits.extend((0..9).map(|index| id & (1 << index) != 0));
+                        bits.extend([true, false, true, false, true, false, true, false]);
+                        let bytes = depth_witness_packed(&bits);
+                        let mut recorder =
+                            BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                        for bit in depth_witness_prefix(offset) {
+                            assert_eq!(recorder.read_bit().unwrap(), bit);
+                        }
+                        recorder.set_trace(true);
+                        let limit = offset as u64 + 11;
+                        recorder.set_limit(limit);
+                        recorder.push_context("owner");
+                        let before = lifetime_probe_snapshot(&recorder);
+                        let mut axiom = StatsAxiom::new(5, ItemQuality::Normal, true);
+                        axiom.code = "plain".into();
+                        axiom.is_socketed = true;
+                        let mut calls = 0;
+                        let failure = parse_single_property(
+                            &mut recorder,
+                            5,
+                            &tree,
+                            true,
+                            &axiom,
+                            PropertyReaderContext {
+                                bytes: &[],
+                                item_start_bit: 0,
+                            },
+                            |data, position, _, index, alpha| {
+                                calls += 1;
+                                depth_witness_state(depth + 1, nested);
+                                assert!(data.is_empty() && alpha);
+                                assert_eq!((position, index), (offset as u64 + 9, 0));
+                                Ok((crate::domain::item::Item::default(), 5))
+                            },
+                        )
+                        .unwrap_err();
+                        assert_eq!(calls, 1);
+                        depth_witness_state(depth, nested);
+                        assert_eq!(recorder.context_stack(), vec!["owner"]);
+                        assert_eq!((recorder.pos(), recorder.limit()), (limit, Some(limit)));
+                        assert_eq!(
+                            failure.error,
+                            crate::error::ParsingError::Io(
+                                "Bit limit exceeded (possible section boundary violation)".into()
+                            )
+                        );
+                        assert_eq!(failure.context_stack, vec!["owner", "nested"]);
+                        assert_eq!(
+                            (failure.bit_offset, failure.context_relative_offset),
+                            (limit, 2)
+                        );
+                        assert_eq!(failure.hint.as_deref(), Some("The parser tried to read beyond the allocated bits for this item or section."));
+                        assert_eq!(
+                            recorder
+                                .recorded_bits()
+                                .iter()
+                                .map(|bit| bit.bit)
+                                .collect::<Vec<_>>(),
+                            bits[..limit as usize]
+                        );
+                        rows.push(serde_json::json!({"id": id, "initial_depth": depth, "initial_flag": nested, "offset": offset, "calls": calls, "before": before, "after": lifetime_probe_snapshot(&recorder), "failure": {"error": failure.error.to_string(), "contexts": failure.context_stack, "bit_offset": failure.bit_offset, "relative_offset": failure.context_relative_offset, "hint": failure.hint}}));
+                    }
+                }
+            }
+        }
+        lifetime_probe_report("inline-read-error", rows, 24);
+    }
+
+    #[hypothesis_test]
+    fn refactor_lifetime_probe_excessive_depth_limit_setup() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        for depth in [11, u32::MAX] {
+            for nested in [false, true] {
+                for initial_limit in [None, Some(64u64)] {
+                    for (alpha, runeword, socketed) in [
+                        (true, true, true),
+                        (false, true, true),
+                        (true, false, true),
+                        (true, true, false),
+                    ] {
+                        let _state = DepthWitnessState::enter(depth, nested);
+                        let bytes = [0b10101101; 16];
+                        let mut recorder =
+                            BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                        for _ in 0..3 {
+                            recorder.read_bit().unwrap();
+                        }
+                        if let Some(limit) = initial_limit {
+                            recorder.set_limit(limit);
+                        }
+                        recorder.push_context("owner");
+                        let before = lifetime_probe_snapshot(&recorder);
+                        let mut axiom = StatsAxiom::new(5, ItemQuality::Normal, alpha);
+                        axiom.code = "plain".into();
+                        axiom.is_socketed = socketed;
+                        let (props, complete, terminal, children) = read_property_list(
+                            &mut recorder,
+                            "plain",
+                            5,
+                            PropertyReaderContext {
+                                bytes: &[],
+                                item_start_bit: 0,
+                            },
+                            &tree,
+                            runeword,
+                            false,
+                            &axiom,
+                            None,
+                            None,
+                            |_, _, _, _, _| panic!("depth gate must reject before callback"),
+                        )
+                        .unwrap();
+                        assert!(props.is_empty() && !complete && !terminal && children.is_empty());
+                        depth_witness_state(depth, nested);
+                        assert_eq!(recorder.context_stack(), vec!["owner"]);
+                        assert_eq!(recorder.pos(), 3);
+                        assert_eq!(recorder.recorded_bits().len(), 3);
+                        let expected_limit =
+                            if alpha && runeword && socketed && initial_limit.is_none() {
+                                Some(u64::MAX)
+                            } else {
+                                initial_limit
+                            };
+                        assert_eq!(recorder.limit(), expected_limit);
+                        rows.push(serde_json::json!({"initial_depth": depth, "initial_flag": nested, "alpha": alpha, "runeword": runeword, "socketed": socketed, "before": before, "after": lifetime_probe_snapshot(&recorder)}));
+                    }
+                }
+            }
+        }
+        lifetime_probe_report("list-depth-limit", rows, 32);
+    }
+
+    #[hypothesis_test]
+    fn refactor_lifetime_probe_cursor_context_control() {
+        let mut rows = Vec::new();
+        for offset in [0, 3] {
+            for panics in [false, true] {
+                let _state = DepthWitnessState::enter(0, false);
+                let bytes = [0b10101101; 4];
+                let mut recorder =
+                    BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                for _ in 0..offset {
+                    recorder.read_bit().unwrap();
+                }
+                recorder.set_trace(true);
+                recorder.push_context("owner");
+                let before = lifetime_probe_snapshot(&recorder);
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    recorder.with_context::<u32, _>("nested", |cursor| {
+                        let _ = cursor.read_bits::<u32>(2)?;
+                        if panics {
+                            std::panic::panic_any("lifetime probe panic");
+                        }
+                        cursor.err(crate::error::ParsingError::Generic(
+                            "cursor control sentinel".into(),
+                        ))
+                    })
+                }));
+                let failure = if panics {
+                    let payload = outcome.expect_err("control must unwind");
+                    assert_eq!(
+                        payload.downcast_ref::<&str>(),
+                        Some(&"lifetime probe panic")
+                    );
+                    assert_eq!(recorder.context_stack(), vec!["owner"]);
+                    assert_eq!(recorder.segments().len(), 1);
+                    serde_json::Value::Null
+                } else {
+                    let failure = outcome.unwrap().unwrap_err();
+                    assert_eq!(failure.context_stack, vec!["owner", "nested"]);
+                    assert_eq!(
+                        (failure.bit_offset, failure.context_relative_offset),
+                        (offset + 2, 2)
+                    );
+                    assert_eq!(recorder.context_stack(), vec!["owner"]);
+                    assert_eq!(recorder.segments().len(), 1);
+                    let segment = &recorder.segments()[0];
+                    assert_eq!(
+                        (segment.start, segment.end, segment.depth),
+                        (offset, offset + 2, 1)
+                    );
+                    assert_eq!(segment.label, "nested");
+                    serde_json::json!({"contexts": failure.context_stack, "bit_offset": failure.bit_offset, "relative_offset": failure.context_relative_offset, "error": failure.error.to_string(), "hint": failure.hint})
+                };
+                depth_witness_state(0, false);
+                assert_eq!((recorder.pos(), recorder.limit()), (offset + 2, None));
+                rows.push(serde_json::json!({"offset": offset, "panics": panics, "before": before, "after": lifetime_probe_snapshot(&recorder), "failure": failure}));
+            }
+        }
+        lifetime_probe_report("cursor-context", rows, 4);
+    }
 
     // Operational snapshots exercise the actual callers; they are not game-format axioms.
     struct DepthWitnessState {
