@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::legacy_item_template_code_alias;
 use crate::data::item_codes::ItemTemplate;
 use crate::data::item_specs::Runeword;
 use crate::data::runes::RuneData;
@@ -26,4 +27,12 @@ impl DataRepository {
     pub fn get_runeword_runes(name: &str) -> Option<&'static RuneData> {
         runes::RUNES.iter().find(|r| r.name == name)
     }
+}
+
+/// Returns a template using the preserved legacy normalization policy.
+/// Exact callers can use DataRepository::get_item_template without normalization.
+pub fn legacy_item_template(code: &str) -> Option<&'static ItemTemplate> {
+    let trimmed = code.trim();
+    let normalized = legacy_item_template_code_alias(trimmed).unwrap_or(trimmed);
+    DataRepository::get_item_template(normalized)
 }

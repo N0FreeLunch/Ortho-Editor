@@ -1,8 +1,8 @@
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
-    legacy_item_template_code_alias, ALPHA_LEGACY_AUTHORITY_CODES,
-    ALPHA_LEGACY_AUTHORITY_HINT_CODES, ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
+    ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
+    ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
 };
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
@@ -4637,13 +4637,7 @@ pub fn is_v105_summary_code(code: &str) -> bool {
     crate::domain::forensic::v105::axioms::is_v105_summary_code(code)
 }
 
-pub fn item_template(code: &str) -> Option<&'static crate::data::item_codes::ItemTemplate> {
-    let trimmed = code.trim();
-    let normalized = legacy_item_template_code_alias(trimmed).unwrap_or(trimmed);
-    crate::data::item_codes::ITEM_TEMPLATES
-        .iter()
-        .find(|t| t.code == normalized)
-}
+pub use crate::data::repository::legacy_item_template as item_template;
 
 pub fn scan_socket_children(
     bytes: &[u8],
