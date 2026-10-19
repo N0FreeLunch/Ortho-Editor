@@ -3,6 +3,7 @@ use super::{
     ThreadLocalValueScope,
 };
 use crate::data::bit_cursor::BitCursor;
+use crate::data::generated::layout_policy::legacy_alpha_child_code_alias;
 use crate::domain::item::{HuffmanTree, Item};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
@@ -87,11 +88,8 @@ impl<'a> SocketRecovery<'a> {
                         _has_checksum,
                     ) = header_info;
                     let trimmed_peek = code_peek.trim();
-                    let normalized_peek = match trimmed_peek {
-                        "ww" => "r13",
-                        "gcw" => "r15",
-                        other => other,
-                    };
+                    let normalized_peek =
+                        legacy_alpha_child_code_alias(trimmed_peek).unwrap_or(trimmed_peek);
                     if crate::item::is_plausible_item_header(
                         mode,
                         loc,
@@ -191,10 +189,9 @@ impl<'a> SocketRecovery<'a> {
             let scanner_code = self
                 .child_marker_codes
                 .and_then(|codes| codes.get(&target_local_pos))
-                .map(|code| match code.trim() {
-                    "ww" => "r13",
-                    "gcw" => "r15",
-                    other => other,
+                .map(|code| {
+                    let trimmed = code.trim();
+                    legacy_alpha_child_code_alias(trimmed).unwrap_or(trimmed)
                 });
             let (normalized_code, force_from_scan) = if let Some(header_info) =
                 crate::item::peek_item_header_at(
@@ -217,11 +214,8 @@ impl<'a> SocketRecovery<'a> {
                     _has_checksum,
                 ) = header_info;
                 let trimmed_peek = code_peek.trim();
-                let normalized_peek = match trimmed_peek {
-                    "ww" => "r13",
-                    "gcw" => "r15",
-                    other => other,
-                };
+                let normalized_peek =
+                    legacy_alpha_child_code_alias(trimmed_peek).unwrap_or(trimmed_peek);
                 let force_alias = trimmed_peek == "ww" || trimmed_peek == "gcw";
                 let is_plausible = force_alias
                     || crate::item::is_plausible_item_header(
@@ -278,11 +272,9 @@ impl<'a> SocketRecovery<'a> {
                     // Recovery parse failed, but scanner confirmed this as a rune/gem.
                     // Create a minimal placeholder using the scanner-verified code.
                     let mut placeholder = crate::domain::item::Item::default();
-                    let sc = match normalized_code.as_str() {
-                        "ww" => "r13".to_string(),
-                        "gcw" => "r15".to_string(),
-                        c => c.to_string(),
-                    };
+                    let sc = legacy_alpha_child_code_alias(normalized_code.as_str())
+                        .unwrap_or(normalized_code.as_str())
+                        .to_string();
                     placeholder.code = sc.clone();
                     placeholder.body.code = sc;
                     // Estimate consumed bits: use gap to next marker, or fallback to 72
@@ -313,10 +305,9 @@ impl<'a> SocketRecovery<'a> {
                     normalized_code.clone()
                 } else {
                     let c = child.code.trim().to_string();
-                    match c.as_str() {
-                        "ww" => "r13".to_string(),
-                        "gcw" => "r15".to_string(),
-                        _ => c,
+                    match legacy_alpha_child_code_alias(c.as_str()) {
+                        Some(canonical) => canonical.to_string(),
+                        None => c,
                     }
                 };
                 let final_is_socketable = (final_code.starts_with('r') && final_code.len() <= 3)

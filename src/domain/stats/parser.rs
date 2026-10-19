@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::data::generated::layout_policy::legacy_alpha_child_code_alias;
 use crate::domain::header::entity::ItemSegmentType;
 use crate::domain::item::{HuffmanTree, ItemBitRange, ItemQuality};
 use crate::domain::stats::budget::PropertyListBudget;
@@ -348,11 +349,9 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
                     .get(&off)
                     .map(|s| s.as_str())
                     .unwrap_or("jew");
-                let normalized = match raw_code.trim() {
-                    "ww" => "r13",
-                    "gcw" => "r15",
-                    other => other,
-                };
+                let trimmed_code = raw_code.trim();
+                let normalized =
+                    legacy_alpha_child_code_alias(trimmed_code).unwrap_or(trimmed_code);
 
                 let mut child = crate::domain::item::Item::default();
                 child.code = normalized.to_string();
@@ -1157,6 +1156,7 @@ mod tests {
 
     include!("parser_budget_tests.rs");
     include!("parser_socket_tests.rs");
+    include!("parser_alias_tests.rs");
 
     fn stats_scope_snapshot<R: BitRead>(cursor: &BitCursor<R>) -> serde_json::Value {
         let mut value = lifetime_probe_snapshot(cursor);

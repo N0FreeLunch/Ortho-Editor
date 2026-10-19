@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
+use crate::data::generated::layout_policy::legacy_alpha_child_code_alias;
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
@@ -4708,11 +4709,9 @@ pub fn scan_socket_children(
                         if _is_compact {
                             forced_compact = Some(true);
                         }
-                        let normalized_code = match code.trim() {
-                            "gcw" => "r15",
-                            "ww" => "r13",
-                            other => other,
-                        };
+                        let trimmed_code = code.trim();
+                        let normalized_code =
+                            legacy_alpha_child_code_alias(trimmed_code).unwrap_or(trimmed_code);
                         code_hint = Some(normalized_code.to_string());
                     }
 
@@ -4757,16 +4756,11 @@ pub fn scan_socket_children(
                             if is_authority_final {
                                 consumed_bits = consumed_bits.min(512);
                             }
-                            match final_child.code.trim() {
-                                "gcw" => {
-                                    final_child.code = "r15".to_string();
-                                    final_child.body.code = "r15".to_string();
-                                }
-                                "ww" => {
-                                    final_child.code = "r13".to_string();
-                                    final_child.body.code = "r13".to_string();
-                                }
-                                _ => {}
+                            if let Some(canonical) =
+                                legacy_alpha_child_code_alias(final_child.code.trim())
+                            {
+                                final_child.code = canonical.to_string();
+                                final_child.body.code = canonical.to_string();
                             }
                         }
 
