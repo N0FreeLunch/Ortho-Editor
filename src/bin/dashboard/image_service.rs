@@ -105,21 +105,31 @@ pub struct ImageBatchResponse {
 }
 
 fn image_root() -> Option<PathBuf> {
-    let data = PathBuf::from(std::env::var_os("D2R_DATA_PATH")?);
+    let data = std::env::var_os("D2R_DATA_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-data"));
     let root = if data.is_absolute() {
         data
     } else {
-        PathBuf::from(std::env::var_os("D2R_SPEC_PATH")?).join(data)
+        std::env::var_os("D2R_SPEC_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-spec"))
+            .join(data)
     };
     Some(root.join("assets/item-images"))
 }
 
 fn vector_root() -> Option<PathBuf> {
-    let data = PathBuf::from(std::env::var_os("D2R_DATA_PATH")?);
+    let data = std::env::var_os("D2R_DATA_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-data"));
     let root = if data.is_absolute() {
         data
     } else {
-        PathBuf::from(std::env::var_os("D2R_SPEC_PATH")?).join(data)
+        std::env::var_os("D2R_SPEC_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-spec"))
+            .join(data)
     };
     Some(root.join("assets/item-vectors"))
 }
@@ -303,5 +313,54 @@ mod tests {
             serde_json::to_value(resolve_batch(request, Some(&catalog), None, None, None).unwrap()).unwrap();
         assert_eq!(result["images"][0]["delivery"]["reason"], "file-missing");
         assert!(result["images"][0]["delivery"].get("url").is_none());
+    }
+
+    #[settled_contract_test]
+    fn vector_delivery_resolves_when_present() {
+        let catalog: ItemImageCatalog = serde_json::from_value(json!({
+            "schema": "item-image-catalog/v1",
+            "base": { "hgl": { "family": "armor", "asset": "glove/gaunlets_h" } },
+            "assets": {}
+        }))
+        .unwrap();
+        let mut vector_catalog = ItemVectorCatalog {
+            schema: "item-vector-catalog/v1".to_owned(),
+            assets: std::collections::BTreeMap::new(),
+        };
+        vector_catalog.assets.insert(
+            "armor/glove/gaunlets_h".to_owned(),
+            VectorFileRecord {
+                file: "armor/glove/gaunlets_h.svg".to_owned(),
+            },
+        );
+
+        let temp_dir = std::env::temp_dir().join(format!("vtest_{}", std::process::id()));
+        let svg_path = temp_dir.join("armor/glove/gaunlets_h.svg");
+        std::fs::create_dir_all(svg_path.parent().unwrap()).unwrap();
+        std::fs::write(&svg_path, b"<svg></svg>").unwrap();
+
+        let request = br#"[{"code":"hgl"}]"#;
+        let result = serde_json::to_value(
+            resolve_batch(
+                request,
+                Some(&catalog),
+                Some(&vector_catalog),
+                None,
+                Some(&temp_dir),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result["images"][0]["vector_delivery"]["status"],
+            "available"
+        );
+        assert_eq!(
+            result["images"][0]["vector_delivery"]["url"],
+            "/item-vectors/armor/glove/gaunlets_h.svg"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
