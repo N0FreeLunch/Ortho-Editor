@@ -1,6 +1,8 @@
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::data::generated::layout_policy::{
-    legacy_alpha_child_code_alias, ALPHA_LEGACY_AUTHORITY_CODES,
+    legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
+    ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
+    ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
 };
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
@@ -4238,7 +4240,7 @@ impl Item {
                     || (alpha_mode && item.body.code.trim() == "hla"));
             let authority_runeword_hint = alpha_mode
                 && code_peek.map_or(false, |code| {
-                    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")
+                    ALPHA_LEGACY_AUTHORITY_HINT_CODES.contains(&code.trim())
                 });
             if crate::item::item_trace_enabled()
                 && (item.code.trim() == "xrs"
@@ -4277,7 +4279,7 @@ impl Item {
 
             if item.header.save_is_alpha {
                 let is_authority = code_peek.map_or(false, |code| {
-                    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw")
+                    ALPHA_LEGACY_AUTHORITY_HINT_CODES.contains(&code.trim())
                 });
                 if item.body.code.trim() == "buc" {
                     // Buckler keeps the compact-tail shape and must not consume the generic
@@ -4291,13 +4293,13 @@ impl Item {
                             cursor.pos()
                         );
                     }
-                    if item.header.version == 1 || item.header.version == 0 {
+                    if ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY
+                        .header_versions
+                        .contains(&item.header.version)
+                    {
                         // forensic-1363: Map the authority shadow block directly to the target property anchor.
-                        let target_stats_pos = match item.body.code.trim() {
-                            "wa2" => 8096u64,
-                            "xrs" | "c8xr" => 7845u64,
-                            _ => 7873u64,
-                        };
+                        let target_stats_pos =
+                            legacy_alpha_authority_cursor_target(item.body.code.trim());
                         if cursor.pos() < target_stats_pos {
                             let to_skip = (target_stats_pos - cursor.pos()) as u32;
                             for _ in 0..to_skip {
@@ -4521,10 +4523,7 @@ impl Item {
         .with_socketed(
             item.header.is_socketed
                 || (alpha_mode
-                    && matches!(
-                        item.body.code.trim(),
-                        "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw"
-                    )),
+                    && ALPHA_LEGACY_AUTHORITY_HINT_CODES.contains(&item.body.code.trim())),
         )
         .with_code(&item.code);
         let padding = if d2r_v3_mode || item.header.is_compact {

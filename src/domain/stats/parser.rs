@@ -1158,6 +1158,7 @@ mod tests {
     include!("parser_socket_tests.rs");
     include!("parser_alias_tests.rs");
     include!("parser_authority_tests.rs");
+    include!("parser_item_hint_tests.rs");
 
     fn stats_scope_snapshot<R: BitRead>(cursor: &BitCursor<R>) -> serde_json::Value {
         let mut value = lifetime_probe_snapshot(cursor);
