@@ -243,7 +243,7 @@ fn compare_v3_source_item(
     bytes: &[u8],
     label: String,
 ) -> ItemDiff {
-    use crate::domain::item::serialization::item_template;
+    use crate::data::repository::legacy_item_template as item_template;
     let mut diff = ItemDiff {
         label,
         code: item.code.trim().to_string(),

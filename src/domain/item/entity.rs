@@ -2237,7 +2237,7 @@ impl Item {
                     "rhd" => "cap ",
                     _ => &self.code,
                 };
-                let template = crate::domain::item::serialization::item_template(lookup_code);
+                let template = crate::data::repository::legacy_item_template(lookup_code);
                 let (reads_def, reads_dur, reads_qty) = if let Some(t) = template {
                     (t.is_armor, t.has_durability, t.is_stackable)
                 } else {
@@ -2719,7 +2719,7 @@ pub fn read_d2r_v3_compact_tail<R: BitRead>(
         return Ok(None);
     }
     let is_quest = save_version == 0x69
-        && crate::domain::item::serialization::item_template(code.trim())
+        && crate::data::repository::legacy_item_template(code.trim())
             .is_some_and(|template| template.has_quest_difficulty);
     let mut auxiliary = D2rV3AuxiliaryData {
         save_version,
@@ -2774,7 +2774,7 @@ pub fn read_d2r_v3_compact_tail<R: BitRead>(
     }
     if save_version > 99 {
         let present = if save_version <= 101 {
-            crate::domain::item::serialization::item_template(code)
+            crate::data::repository::legacy_item_template(code)
                 .is_some_and(|template| template.is_stackable)
         } else {
             cursor.read_bit()?
@@ -3307,7 +3307,7 @@ pub fn parse_item_body<R: BitRead>(
             }
         }
 
-        let body_is_template = crate::domain::item::serialization::item_template(&code).is_some();
+        let body_is_template = crate::data::repository::legacy_item_template(&code).is_some();
         let compact_template_nudge = body_is_template && code.trim() != "xrs";
         let mut alpha_nudge = None;
         if alpha_mode {
@@ -3593,7 +3593,7 @@ impl ExtendedStatsData {
             return Ok(data);
         }
 
-        let template = crate::domain::item::serialization::item_template(trimmed_code);
+        let template = crate::data::repository::legacy_item_template(trimmed_code);
         data.has_multiple_graphics = matches!(trimmed_code, "rin" | "amu" | "cm1" | "cm2" | "cm3");
         data.has_class_specific_data = false;
 
@@ -3908,7 +3908,7 @@ impl ExtendedStatsData {
         }
 
         let template =
-            crate::domain::item::serialization::item_template(trimmed_code).ok_or_else(|| {
+            crate::data::repository::legacy_item_template(trimmed_code).ok_or_else(|| {
                 cursor.fail(ParsingError::UnexpectedValue {
                     field: "D2R v3 item template".to_string(),
                     value: trimmed_code.to_string(),
