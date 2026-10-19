@@ -1,3 +1,5 @@
+mod code_recovery;
+
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
@@ -4022,24 +4024,8 @@ impl Item {
                     body.code = "xrs ".to_string();
                 }
             }
-            let trimmed_code = body.code.trim();
-            body.code = match trimmed_code {
-                // Capture-replay aliases for the live `jav` witness.
-                "g71" | "wl l" | "us g" | "k g" => "jav".to_string(),
-                "wucb" => "ucb8".to_string(),
-                other => {
-                    let mut code = other.to_string();
-                    if let Some(eff) = reg.effective_codes.get(other) {
-                        code = eff.clone();
-                    }
-                    let normalized_body_code =
-                        crate::item::normalize_alpha_code_hint(&code).to_string();
-                    if normalized_body_code != code {
-                        code = normalized_body_code;
-                    }
-                    code
-                }
-            };
+            body.code =
+                code_recovery::normalize_alpha_body_code(&body.code, &reg.effective_codes);
             if let Some(hint) = code_hint.or(code_peek) {
                 let trimmed_hint = hint.trim();
                 // Keep the final item owner aligned with the trusted UCB8 witness when
