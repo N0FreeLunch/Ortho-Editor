@@ -179,7 +179,8 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
 )> {
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
-    cursor.begin_segment(ItemSegmentType::Stats);
+    let mut stats_context = cursor.scoped_context(&format!("{:?}", ItemSegmentType::Stats));
+    let cursor = &mut *stats_context;
     let trimmed_code = code.trim();
 
     let quality_val = quality.unwrap_or(ItemQuality::Normal);
@@ -526,12 +527,11 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
         let w_axiom = crate::domain::forensic::v105::axioms::V105PropertyWidthAxiom::default();
         let needed = w_axiom.v5_runeword_extra_bits() as u32;
         if !is_authority_host || cursor.remaining() >= needed as u64 {
-            cursor.begin_segment(ItemSegmentType::ExtendedStats);
-            cursor.push_context("AlphaV5RunewordExtra");
-            let extra = cursor.read_bits::<u8>(needed)?;
+            let mut extended_context =
+                cursor.scoped_context(&format!("{:?}", ItemSegmentType::ExtendedStats));
+            let mut extra_context = extended_context.scoped_context("AlphaV5RunewordExtra");
+            let extra = extra_context.read_bits::<u8>(needed)?;
             alpha_v5_runeword_extra = Some(extra);
-            cursor.pop_context();
-            cursor.end_segment();
         }
     }
 
@@ -544,7 +544,6 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
             );
         }
     }
-    cursor.end_segment();
     Ok((
         props,
         complete,
@@ -1457,6 +1456,524 @@ mod tests {
     use std::io::Cursor;
 
     use d2r_macros::hypothesis_test;
+
+    fn stats_scope_snapshot<R: BitRead>(cursor: &BitCursor<R>) -> serde_json::Value {
+        let mut value = lifetime_probe_snapshot(cursor);
+        value["operations"] = serde_json::to_value(cursor.operation_events()).unwrap();
+        value["base_pos"] = serde_json::json!(cursor.base_pos);
+        value
+    }
+
+    fn stats_scope_read<R: BitRead>(
+        cursor: &mut BitCursor<R>,
+        tree: &HuffmanTree,
+        v3: bool,
+        code: &str,
+        version: u8,
+        alpha: bool,
+        flags: u32,
+        shadow: bool,
+        compact: bool,
+    ) -> ParsingResult<serde_json::Value> {
+        let result = if v3 {
+            read_item_stats_d2r_v3(
+                cursor,
+                code,
+                version,
+                None,
+                tree,
+                alpha,
+                Some(ItemQuality::Normal),
+                flags,
+                false,
+                shadow,
+                false,
+                compact,
+                false,
+            )
+        } else {
+            read_item_stats(
+                cursor,
+                code,
+                version,
+                None,
+                tree,
+                alpha,
+                Some(ItemQuality::Normal),
+                flags,
+                false,
+                shadow,
+                false,
+                compact,
+                false,
+            )
+        };
+        result.map(
+            |(properties, complete, term, extra, payload, skip, children)| {
+                serde_json::json!({"properties": properties, "complete": complete, "term": term,
+                "extra": extra, "payload": payload, "skip": skip, "children": children.len()})
+            },
+        )
+    }
+
+    fn stats_scope_finish(name: &str, rows: Vec<serde_json::Value>, count: usize) {
+        let leaks = rows
+            .iter()
+            .filter(|row| row["after"]["contexts"] != row["before"]["contexts"])
+            .count();
+        // Record the entire old-path matrix before enforcing the new cleanup contract.
+        lifetime_probe_report(name, rows, count);
+        assert_eq!(leaks, 0, "Stats scope must restore caller contexts");
+    }
+
+    #[hypothesis_test]
+    fn refactor_stats_scope_early_returns_restore_owner() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        let scenarios = [
+            ("unidentified", "plain", 5, false, 0, false, false),
+            ("empty", "", 5, true, 16, false, false),
+            ("potion", "hp1", 5, true, 16, false, false),
+            ("scroll", "tsc", 5, true, 16, false, false),
+            ("payload", "7mgw", 5, true, 16, false, true),
+            ("compact", "plain", 5, true, 16, true, false),
+            ("compact_payload", "7mgw", 1, true, 16, true, true),
+            ("compact_fragment", "xrs", 5, true, 16, true, false),
+        ];
+        for (name, code, version, alpha, flags, compact, has_payload) in scenarios {
+            for v3 in [false, true] {
+                if v3 && name == "unidentified" {
+                    continue;
+                }
+                for trace in [false, true] {
+                    for offset in [0usize, 3, 7] {
+                        let _state = DepthWitnessState::enter(0, false);
+                        let payload: Vec<bool> = (0..if has_payload { 28 } else { 0 })
+                            .map(|i| i % 3 == 1)
+                            .collect();
+                        let mut bits = depth_witness_prefix(offset);
+                        bits.extend_from_slice(&payload);
+                        let end = bits.len();
+                        bits.extend([false, true, true, false, true]);
+                        let bytes = depth_witness_packed(&bits);
+                        let mut cursor =
+                            BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                        for bit in depth_witness_prefix(offset) {
+                            assert_eq!(cursor.read_bit().unwrap(), bit);
+                        }
+                        cursor.base_pos = if offset == 7 { 37 } else { 0 };
+                        cursor.set_trace(trace);
+                        cursor.set_limit(bits.len() as u64);
+                        cursor.push_context("owner");
+                        let before = stats_scope_snapshot(&cursor);
+                        let result = stats_scope_read(
+                            &mut cursor,
+                            &tree,
+                            v3,
+                            code,
+                            version,
+                            alpha,
+                            flags,
+                            false,
+                            compact,
+                        )
+                        .unwrap();
+                        assert_eq!(result["properties"], serde_json::json!([]));
+                        assert_eq!(result["complete"], true);
+                        assert_eq!(result["term"], false);
+                        assert!(result["extra"].is_null() && result["skip"].is_null());
+                        assert_eq!(result["children"], 0);
+                        assert_eq!(
+                            result["payload"],
+                            if has_payload {
+                                serde_json::json!(payload)
+                            } else {
+                                serde_json::Value::Null
+                            }
+                        );
+                        assert_eq!(
+                            (cursor.pos(), cursor.limit()),
+                            (end as u64, Some(bits.len() as u64))
+                        );
+                        assert_eq!(
+                            cursor
+                                .recorded_bits()
+                                .iter()
+                                .map(|b| b.bit)
+                                .collect::<Vec<_>>(),
+                            bits[..end]
+                        );
+                        depth_witness_state(0, false);
+                        let after = stats_scope_snapshot(&cursor);
+                        for &bit in &bits[end..] {
+                            assert_eq!(cursor.read_bit().unwrap(), bit);
+                        }
+                        rows.push(serde_json::json!({"scenario": name, "v3": v3, "trace": trace, "offset": offset, "before": before, "after": after, "result": result, "unread_tail_preserved": true}));
+                    }
+                }
+            }
+        }
+        stats_scope_finish("stats-early", rows, 90);
+    }
+
+    #[hypothesis_test]
+    fn refactor_stats_scope_completed_paths_preserve_segments() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        for version in [1, 5] {
+            for fragment in [0, 1 << 26, 1 << 27] {
+                for v3 in [false, true] {
+                    for trace in [false, true] {
+                        for offset in [0usize, 3, 7] {
+                            for alpha in [false, true] {
+                                let _state = DepthWitnessState::enter(0, false);
+                                let mut bits = depth_witness_prefix(offset);
+                                bits.extend([true; 9]);
+                                if !alpha {
+                                    bits.push(true);
+                                    while bits.len() % 8 != 0 {
+                                        bits.push(false);
+                                    }
+                                }
+                                if alpha && version == 1 {
+                                    bits.extend([false; 9]);
+                                }
+                                let terminal_end = bits.len();
+                                let has_extra = alpha && fragment != 0;
+                                if has_extra {
+                                    bits.extend([true, false]);
+                                }
+                                let end = bits.len();
+                                bits.extend([false, true, true, false, true]);
+                                let bytes = depth_witness_packed(&bits);
+                                let mut cursor = BitCursor::new(BitReader::endian(
+                                    Cursor::new(&bytes),
+                                    LittleEndian,
+                                ));
+                                for bit in depth_witness_prefix(offset) {
+                                    assert_eq!(cursor.read_bit().unwrap(), bit);
+                                }
+                                cursor.base_pos = if offset == 7 { 37 } else { 0 };
+                                cursor.set_trace(trace);
+                                cursor.set_limit(bits.len() as u64);
+                                cursor.push_context("owner");
+                                let before = stats_scope_snapshot(&cursor);
+                                let result = stats_scope_read(
+                                    &mut cursor,
+                                    &tree,
+                                    v3,
+                                    "plain",
+                                    version,
+                                    alpha,
+                                    16 | fragment,
+                                    false,
+                                    false,
+                                )
+                                .unwrap();
+                                assert_eq!(result["properties"].as_array().unwrap().len(), 1);
+                                let property = &result["properties"][0];
+                                assert_eq!(property["stat_id"], 511);
+                                assert_eq!(property["range"]["start"], offset as u64);
+                                assert_eq!(property["range"]["end"], terminal_end as u64);
+                                assert_eq!(result["complete"], true);
+                                assert_eq!(result["term"], !alpha);
+                                assert_eq!(
+                                    result["extra"],
+                                    if has_extra {
+                                        serde_json::json!(1)
+                                    } else {
+                                        serde_json::Value::Null
+                                    }
+                                );
+                                assert!(result["payload"].is_null() && result["skip"].is_null());
+                                assert_eq!(result["children"], 0);
+                                assert_eq!(cursor.context_stack(), vec!["owner"]);
+                                assert_eq!(
+                                    (cursor.pos(), cursor.limit()),
+                                    (end as u64, Some(bits.len() as u64))
+                                );
+                                assert_eq!(
+                                    cursor
+                                        .recorded_bits()
+                                        .iter()
+                                        .map(|b| b.bit)
+                                        .collect::<Vec<_>>(),
+                                    bits[..end]
+                                );
+                                assert_eq!(
+                                    cursor.segments().len(),
+                                    if trace {
+                                        if has_extra {
+                                            3
+                                        } else {
+                                            1
+                                        }
+                                    } else {
+                                        0
+                                    }
+                                );
+                                if trace {
+                                    let stats = cursor.segments().last().unwrap();
+                                    assert_eq!(stats.label, "Stats");
+                                    assert_eq!(
+                                        (stats.start, stats.end, stats.depth),
+                                        (offset as u64, end as u64, 1)
+                                    );
+                                    if has_extra {
+                                        for (index, label, depth) in [
+                                            (0, "AlphaV5RunewordExtra", 3),
+                                            (1, "ExtendedStats", 2),
+                                        ] {
+                                            let segment = &cursor.segments()[index];
+                                            assert_eq!(segment.label, label);
+                                            assert_eq!(
+                                                (segment.start, segment.end, segment.depth),
+                                                (terminal_end as u64, end as u64, depth)
+                                            );
+                                        }
+                                    }
+                                }
+                                depth_witness_state(0, false);
+                                let after = stats_scope_snapshot(&cursor);
+                                for &bit in &bits[end..] {
+                                    assert_eq!(cursor.read_bit().unwrap(), bit);
+                                }
+                                rows.push(serde_json::json!({"version": version, "fragment": fragment, "v3": v3, "trace": trace, "offset": offset, "alpha": alpha, "before": before, "after": after, "result": result, "unread_tail_preserved": true}));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stats_scope_finish("stats-completed", rows, 144);
+    }
+
+    #[hypothesis_test]
+    fn refactor_stats_scope_returned_errors_preserve_failure() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        for route in ["payload", "shadow", "extra"] {
+            let versions = if route == "extra" {
+                vec![1, 5]
+            } else {
+                vec![5]
+            };
+            let available = if route == "extra" {
+                vec![1usize]
+            } else {
+                vec![0, 5]
+            };
+            for version in versions {
+                for &available in &available {
+                    for v3 in [false, true] {
+                        for trace in [false, true] {
+                            for offset in [0usize, 3, 7] {
+                                let _state = DepthWitnessState::enter(0, false);
+                                let mut bits = depth_witness_prefix(offset);
+                                if route == "extra" {
+                                    bits.extend([true; 9]);
+                                    if version == 1 {
+                                        bits.extend([false; 9]);
+                                    }
+                                }
+                                bits.extend((0..64).map(|i| i % 3 == 1));
+                                let prefix_bits = if route == "extra" {
+                                    if version == 1 {
+                                        18
+                                    } else {
+                                        9
+                                    }
+                                } else {
+                                    0
+                                };
+                                let limit = offset + prefix_bits + available;
+                                let bytes = depth_witness_packed(&bits);
+                                let mut cursor = BitCursor::new(BitReader::endian(
+                                    Cursor::new(&bytes),
+                                    LittleEndian,
+                                ));
+                                for bit in depth_witness_prefix(offset) {
+                                    assert_eq!(cursor.read_bit().unwrap(), bit);
+                                }
+                                cursor.base_pos = if offset == 7 { 37 } else { 0 };
+                                cursor.set_trace(trace);
+                                cursor.set_limit(limit as u64);
+                                cursor.push_context("owner");
+                                let before = stats_scope_snapshot(&cursor);
+                                let failure = stats_scope_read(
+                                    &mut cursor,
+                                    &tree,
+                                    v3,
+                                    if route == "payload" { "7mgw" } else { "plain" },
+                                    version,
+                                    true,
+                                    16 | if route == "extra" { 1 << 26 } else { 0 },
+                                    route == "shadow",
+                                    false,
+                                )
+                                .unwrap_err();
+                                assert_eq!(
+                                    failure.error,
+                                    crate::error::ParsingError::Io(
+                                        "Bit limit exceeded (possible section boundary violation)"
+                                            .into()
+                                    )
+                                );
+                                let contexts = match route {
+                                    "payload" => vec!["owner", "Stats"],
+                                    "shadow" => vec!["owner", "Stats", "AlphaShadowSkip"],
+                                    _ => vec![
+                                        "owner",
+                                        "Stats",
+                                        "ExtendedStats",
+                                        "AlphaV5RunewordExtra",
+                                    ],
+                                };
+                                assert_eq!(failure.context_stack, contexts);
+                                assert_eq!(
+                                    (failure.bit_offset, failure.context_relative_offset),
+                                    (limit as u64, available as u64)
+                                );
+                                assert_eq!(failure.hint.as_deref(), Some("The parser tried to read beyond the allocated bits for this item or section."));
+                                assert_eq!(
+                                    (cursor.pos(), cursor.limit()),
+                                    (limit as u64, Some(limit as u64))
+                                );
+                                assert_eq!(
+                                    cursor
+                                        .recorded_bits()
+                                        .iter()
+                                        .map(|b| b.bit)
+                                        .collect::<Vec<_>>(),
+                                    bits[..limit]
+                                );
+                                depth_witness_state(0, false);
+                                let after = stats_scope_snapshot(&cursor);
+                                cursor.set_limit(bits.len() as u64);
+                                for &bit in &bits[limit..] {
+                                    assert_eq!(cursor.read_bit().unwrap(), bit);
+                                }
+                                rows.push(serde_json::json!({"route": route, "version": version, "available": available, "v3": v3, "trace": trace, "offset": offset, "before": before, "after": after, "failure": {"error": failure.error.to_string(), "contexts": failure.context_stack, "bit_offset": failure.bit_offset, "relative_offset": failure.context_relative_offset, "hint": failure.hint}, "unread_tail_preserved": true}));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stats_scope_finish("stats-errors", rows, 72);
+    }
+
+    struct StatsScopePanicRead<'a> {
+        bytes: &'a [u8],
+        position: usize,
+        panic_at: usize,
+    }
+
+    impl std::io::Read for StatsScopePanicRead<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            if self.position >= self.panic_at {
+                std::panic::panic_any("stats reader panic sentinel");
+            }
+            let count = buffer
+                .len()
+                .min(self.bytes.len() - self.position)
+                .min(self.panic_at - self.position);
+            buffer[..count].copy_from_slice(&self.bytes[self.position..self.position + count]);
+            self.position += count;
+            Ok(count)
+        }
+    }
+
+    #[hypothesis_test]
+    fn refactor_stats_scope_io_unwind_preserves_payload_and_bits() {
+        let tree = HuffmanTree::new();
+        let mut rows = Vec::new();
+        let mut scenarios = Vec::new();
+        for route in ["payload", "shadow", "main"] {
+            for offset in [0usize, 3, 7] {
+                scenarios.push((route, 5, offset));
+            }
+        }
+        scenarios.extend([("extra", 1, 6), ("extra", 5, 7)]);
+        for (route, version, offset) in scenarios {
+            for v3 in [false, true] {
+                for trace in [false, true] {
+                    let _state = DepthWitnessState::enter(0, false);
+                    let mut bits = depth_witness_prefix(offset);
+                    if route == "extra" {
+                        bits.extend([true; 9]);
+                        if version == 1 {
+                            bits.extend([false; 9]);
+                        }
+                    }
+                    bits.extend((0..128).map(|i| i % 3 == 1));
+                    let bytes = depth_witness_packed(&bits);
+                    let panic_at = if route == "extra" {
+                        if version == 1 {
+                            3
+                        } else {
+                            2
+                        }
+                    } else {
+                        offset.div_ceil(8)
+                    };
+                    let reader = StatsScopePanicRead {
+                        bytes: &bytes,
+                        position: 0,
+                        panic_at,
+                    };
+                    let mut cursor = BitCursor::new(BitReader::endian(reader, LittleEndian));
+                    for bit in depth_witness_prefix(offset) {
+                        assert_eq!(cursor.read_bit().unwrap(), bit);
+                    }
+                    cursor.base_pos = if offset == 7 { 37 } else { 0 };
+                    cursor.set_trace(trace);
+                    if trace {
+                        cursor.set_limit(512);
+                    }
+                    cursor.push_context("owner");
+                    let before = stats_scope_snapshot(&cursor);
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        stats_scope_read(
+                            &mut cursor,
+                            &tree,
+                            v3,
+                            if route == "payload" { "7mgw" } else { "plain" },
+                            version,
+                            true,
+                            16 | if route == "extra" { 1 << 26 } else { 0 },
+                            route == "shadow",
+                            false,
+                        )
+                    }));
+                    let payload = outcome.expect_err("the configured IO read must unwind");
+                    assert_eq!(
+                        payload.downcast_ref::<&str>(),
+                        Some(&"stats reader panic sentinel")
+                    );
+                    let end = panic_at * 8;
+                    assert_eq!(
+                        (cursor.pos(), cursor.limit()),
+                        (end as u64, if trace { Some(512) } else { None })
+                    );
+                    assert_eq!(
+                        cursor
+                            .recorded_bits()
+                            .iter()
+                            .map(|b| b.bit)
+                            .collect::<Vec<_>>(),
+                        bits[..end]
+                    );
+                    depth_witness_state(0, false);
+                    rows.push(serde_json::json!({"route": route, "version": version, "offset": offset, "v3": v3, "trace": trace, "before": before, "after": stats_scope_snapshot(&cursor), "panic_payload": "stats reader panic sentinel"}));
+                }
+            }
+        }
+        stats_scope_finish("stats-panic", rows, 44);
+    }
 
     #[hypothesis_test]
     fn refactor_lifetime_thread_local_nested_and_dirty_unwind_restores_previous() {
