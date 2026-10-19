@@ -4051,7 +4051,7 @@ impl Item {
         }
 
         let body_is_template =
-            crate::domain::item::serialization::item_template(body.code.trim()).is_some();
+            crate::data::repository::legacy_item_template(body.code.trim()).is_some();
         let mut header = header.clone();
         if header.save_is_alpha
             && body_is_template
@@ -4074,7 +4074,7 @@ impl Item {
             .with_compact(header.is_compact)
             .with_code(&body.code);
         let hinted_template = code_hint
-            .map(|hint| crate::domain::item::serialization::item_template(hint.trim()))
+            .map(|hint| crate::data::repository::legacy_item_template(hint.trim()))
             .flatten();
         let detected_runeword = if d2r_v3_mode {
             header.is_runeword
@@ -4503,7 +4503,7 @@ impl Item {
                         }
                     }
                 } else if save_version > 99
-                    && crate::domain::item::serialization::item_template(&item.code)
+                    && crate::data::repository::legacy_item_template(&item.code)
                         .map(|template| template.is_stackable)
                         .unwrap_or(false)
                 {
