@@ -1,5 +1,7 @@
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
-use crate::data::generated::layout_policy::legacy_alpha_child_code_alias;
+use crate::data::generated::layout_policy::{
+    legacy_alpha_child_code_alias, ALPHA_LEGACY_AUTHORITY_CODES,
+};
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
@@ -28,7 +30,7 @@ pub fn calculate_property_residue(version: u8) -> usize {
 }
 
 fn is_alpha_v105_authority_code(code: &str) -> bool {
-    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+    ALPHA_LEGACY_AUTHORITY_CODES.contains(&code.trim())
 }
 
 pub fn find_next_item_match(
@@ -943,10 +945,8 @@ fn peek_item_header_at_with_base_and_gap_profile(
                                                     | "ww"
                                                     | "gcw"
                                             )))
-                                    || (matches!(
-                                        trimmed.trim(),
-                                        "xrs" | "c8xr" | "rhd" | "wa2"
-                                    ) && flags != 0
+                                    || (ALPHA_LEGACY_AUTHORITY_CODES.contains(&trimmed.trim())
+                                        && flags != 0
                                         && (version <= 2)))));
 
                     let geometry_resolution_started = timing.mark();

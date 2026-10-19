@@ -1,5 +1,7 @@
 use crate::data::bit_cursor::BitCursor;
-use crate::data::generated::layout_policy::legacy_alpha_child_code_alias;
+use crate::data::generated::layout_policy::{
+    legacy_alpha_child_code_alias, ALPHA_LEGACY_AUTHORITY_CODES,
+};
 use crate::domain::header::entity::ItemSegmentType;
 use crate::domain::item::{HuffmanTree, ItemBitRange, ItemQuality};
 use crate::domain::stats::budget::PropertyListBudget;
@@ -198,7 +200,7 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
 
     let is_v105_shadow_final = alpha_mode && is_v105_shadow;
     let is_authority_host =
-        alpha_mode && matches!(trimmed_code, "xrs" | "c8xr" | "rhd" | "wa2") && !is_compact;
+        alpha_mode && ALPHA_LEGACY_AUTHORITY_CODES.contains(&trimmed_code) && !is_compact;
     let is_shadow_container = alpha_mode && matches!(trimmed_code, "xrs" | "c8xr") && !is_compact;
 
     let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
@@ -280,7 +282,7 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
         );
         for m in markers.iter() {
             let t = m.code.trim();
-            if matches!(t, "xrs" | "c8xr" | "rhd" | "wa2") {
+            if ALPHA_LEGACY_AUTHORITY_CODES.contains(&t) {
                 authority_offsets.push(m.offset);
             }
             if (t.starts_with('r') && t.len() <= 3)
@@ -689,8 +691,7 @@ where
 
     let start_pos = recorder.pos();
 
-    let is_authority_host =
-        axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+    let is_authority_host = axiom.is_alpha() && ALPHA_LEGACY_AUTHORITY_CODES.contains(&code.trim());
     let is_actual_runeword =
         (alpha_runeword || code.trim() == "Þ." || is_authority_host) && axiom.is_socketed;
     let budget = PropertyListBudget::new(recorder.limit(), axiom.is_alpha() && is_actual_runeword);
@@ -803,8 +804,7 @@ where
         }
     }
 
-    let is_authority_host =
-        axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+    let is_authority_host = axiom.is_alpha() && ALPHA_LEGACY_AUTHORITY_CODES.contains(&code.trim());
     let needs_socket_recovery = axiom.is_alpha()
         && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw" || is_authority_host)
         && axiom.is_socketed
@@ -912,7 +912,7 @@ where
 
     if stat_id == terminator {
         let is_authority_host =
-            axiom.save_is_alpha && matches!(axiom.code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
+            axiom.save_is_alpha && ALPHA_LEGACY_AUTHORITY_CODES.contains(&axiom.code.trim());
         let mut term_bit = false;
         if rhythm.has_terminal_bit {
             if !is_authority_host || recorder.remaining() >= 1 {
@@ -1157,6 +1157,7 @@ mod tests {
     include!("parser_budget_tests.rs");
     include!("parser_socket_tests.rs");
     include!("parser_alias_tests.rs");
+    include!("parser_authority_tests.rs");
 
     fn stats_scope_snapshot<R: BitRead>(cursor: &BitCursor<R>) -> serde_json::Value {
         let mut value = lifetime_probe_snapshot(cursor);
