@@ -296,7 +296,7 @@ impl HeaderAxiom {
             }
 
             // Preserve normal alpha base templates from the broad v5/v1 fallback.
-            if crate::domain::item::serialization::item_template(trimmed).is_some() {
+            if crate::data::repository::legacy_item_template(trimmed).is_some() {
                 return false;
             }
             

@@ -458,7 +458,7 @@ fn scan_item_markers_internal(
                             let trimmed_code = code.trim();
                             let is_known =
                                 crate::domain::forensic::v105::axioms::is_v105_summary_code(&code)
-                                    || crate::domain::item::serialization::item_template(&code)
+                                    || crate::data::repository::legacy_item_template(&code)
                                         .is_some();
                             let reg = crate::domain::forensic::registry::get_registry();
                             let override_noncompact = reg
