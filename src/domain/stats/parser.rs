@@ -556,8 +556,41 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
     ))
 }
 
+// Legacy admission checks the caller depth: current depth 10 may enter depth 11.
+const NESTED_PROPERTY_DEPTH_THRESHOLD: u32 = 10;
+
 thread_local! {
     static NESTED_DEPTH: std::cell::Cell<u32> = std::cell::Cell::new(0);
+}
+
+fn nested_property_depth_exhausted(current_depth: u32) -> bool {
+    current_depth > NESTED_PROPERTY_DEPTH_THRESHOLD
+}
+
+fn nested_property_depth_failure() -> crate::error::ParsingFailure {
+    crate::error::ParsingFailure {
+        error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
+        context_stack: vec![],
+        bit_offset: 0,
+        context_relative_offset: 0,
+        hint: None,
+    }
+}
+
+fn with_nested_property_depth<T, E>(
+    overflow_error: impl FnOnce() -> E,
+    operation: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    NESTED_DEPTH.with(|depth| {
+        let previous = depth.get();
+        if nested_property_depth_exhausted(previous) {
+            return Err(overflow_error());
+        }
+        depth.set(previous + 1);
+        let result = operation();
+        depth.set(previous);
+        result
+    })
 }
 
 pub fn read_property_list<R: BitRead, F>(
@@ -657,7 +690,7 @@ where
     };
 
     let depth = NESTED_DEPTH.with(|d| d.get());
-    if depth > 10 {
+    if nested_property_depth_exhausted(depth) {
         return Ok((props, saw_terminator, terminator_bit, nested_items));
     }
 
@@ -953,20 +986,7 @@ where
                 break;
             }
 
-            let result = NESTED_DEPTH.with(|d| {
-                let prev = d.get();
-                if prev > 10 {
-                    return Err(crate::error::ParsingFailure {
-                        error: crate::error::ParsingError::Io(
-                            "Max nesting depth exceeded".to_string(),
-                        ),
-                        context_stack: vec![],
-                        bit_offset: 0,
-                        context_relative_offset: 0,
-                        hint: None,
-                    });
-                }
-                d.set(prev + 1);
+            let result = with_nested_property_depth(nested_property_depth_failure, || {
                 recorder.push_context("nested");
                 let prev_nested = crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| {
                     let p = v.get();
@@ -983,7 +1003,6 @@ where
                 );
                 crate::domain::header::entity::IN_NESTED_RECOVERY.with(|v| v.set(prev_nested));
                 recorder.pop_context();
-                d.set(prev);
                 res
             });
 
@@ -1309,27 +1328,14 @@ where
             }
         }
 
-        let result = NESTED_DEPTH.with(|d| {
-            let prev = d.get();
-            if prev > 10 {
-                return Err(crate::error::ParsingFailure {
-                    error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
-                    context_stack: vec![],
-                    bit_offset: 0,
-                    context_relative_offset: 0,
-                    hint: None,
-                });
-            }
-            d.set(prev + 1);
-            let res = recovery_fn(
+        let result = with_nested_property_depth(nested_property_depth_failure, || {
+            recovery_fn(
                 reader_ctx.bytes,
                 found_pos,
                 huffman,
                 nested_items.len(),
                 axiom.save_is_alpha,
-            );
-            d.set(prev);
-            res
+            )
         });
 
         if let Ok((child, end_pos)) = result {
@@ -1437,6 +1443,463 @@ mod tests {
     use super::*;
     use bitstream_io::{BitReader, LittleEndian};
     use std::io::Cursor;
+
+    use d2r_macros::hypothesis_test;
+
+    // Operational snapshots exercise the actual callers; they are not game-format axioms.
+    struct DepthWitnessState {
+        depth: u32,
+        nested: bool,
+    }
+
+    impl DepthWitnessState {
+        fn enter(depth: u32, nested: bool) -> Self {
+            let previous = Self {
+                depth: NESTED_DEPTH.with(|value| value.get()),
+                nested: crate::domain::header::entity::IN_NESTED_RECOVERY.with(|value| value.get()),
+            };
+            NESTED_DEPTH.with(|value| value.set(depth));
+            crate::domain::header::entity::IN_NESTED_RECOVERY.with(|value| value.set(nested));
+            previous
+        }
+    }
+
+    impl Drop for DepthWitnessState {
+        fn drop(&mut self) {
+            NESTED_DEPTH.with(|value| value.set(self.depth));
+            crate::domain::header::entity::IN_NESTED_RECOVERY.with(|value| value.set(self.nested));
+        }
+    }
+
+    fn depth_witness_prefix(offset: usize) -> Vec<bool> {
+        (0..offset).map(|index| index % 2 == 0).collect()
+    }
+
+    fn depth_witness_packed(bits: &[bool]) -> Vec<u8> {
+        bits.chunks(8)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .enumerate()
+                    .fold(0, |byte, (index, &bit)| byte | (u8::from(bit) << index))
+            })
+            .collect()
+    }
+
+    fn depth_witness_failure() -> crate::error::ParsingFailure {
+        crate::error::ParsingFailure {
+            error: crate::error::ParsingError::Io("depth callback sentinel".into()),
+            context_stack: vec!["callback sentinel".into()],
+            bit_offset: 77,
+            context_relative_offset: 3,
+            hint: Some("depth witness".into()),
+        }
+    }
+
+    fn depth_witness_state(depth: u32, nested: bool) {
+        assert_eq!(NESTED_DEPTH.with(|value| value.get()), depth);
+        assert_eq!(
+            crate::domain::header::entity::IN_NESTED_RECOVERY.with(|value| value.get()),
+            nested
+        );
+    }
+
+    #[hypothesis_test]
+    fn refactor_depth_legacy_list_entry_preserves_threshold_cursor_and_flags() {
+        let tree = HuffmanTree::new();
+        let mut cases = 0;
+        for depth in [0, 9, 10, 11, u32::MAX] {
+            for nested in [false, true] {
+                for alpha in [false, true] {
+                    for offset in [0, 3] {
+                        let _state = DepthWitnessState::enter(depth, nested);
+                        let mut bits = depth_witness_prefix(offset);
+                        bits.extend([true; 9]);
+                        if !alpha {
+                            bits.push(true);
+                            while bits.len() % 8 != 0 {
+                                bits.push(false);
+                            }
+                        }
+                        let terminal_end = bits.len();
+                        bits.extend([false, true, true, false, true]);
+                        let bytes = depth_witness_packed(&bits);
+                        let mut recorder =
+                            BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                        for bit in depth_witness_prefix(offset) {
+                            assert_eq!(recorder.read_bit().unwrap(), bit);
+                        }
+                        recorder.set_limit(bits.len() as u64);
+                        recorder.push_context("owner");
+                        let mut a = StatsAxiom::new(5, ItemQuality::Normal, alpha);
+                        a.code = "plain".into();
+                        let (props, complete, terminal_bit, children) = read_property_list(
+                            &mut recorder,
+                            "plain",
+                            5,
+                            PropertyReaderContext {
+                                bytes: &bytes,
+                                item_start_bit: 0,
+                            },
+                            &tree,
+                            false,
+                            false,
+                            &a,
+                            None,
+                            None,
+                            |_, _, _, _, _| panic!("terminal-only entry must not recover a child"),
+                        )
+                        .unwrap();
+                        let expected_end = if depth > 10 { offset } else { terminal_end };
+                        if depth > 10 {
+                            assert!(
+                                props.is_empty()
+                                    && !complete
+                                    && !terminal_bit
+                                    && children.is_empty()
+                            );
+                        } else {
+                            assert!(complete && children.is_empty());
+                            assert_eq!(terminal_bit, !alpha);
+                            assert_eq!(props.len(), 1);
+                            assert_eq!(props[0].stat_id, 511);
+                            assert_eq!(
+                                (props[0].range.start, props[0].range.end),
+                                (offset as u64, terminal_end as u64)
+                            );
+                        }
+                        depth_witness_state(depth, nested);
+                        assert_eq!(recorder.context_stack(), vec!["owner"]);
+                        assert_eq!(recorder.limit(), Some(bits.len() as u64));
+                        assert_eq!(recorder.pos(), expected_end as u64);
+                        assert_eq!(
+                            recorder
+                                .recorded_bits()
+                                .iter()
+                                .map(|bit| bit.bit)
+                                .collect::<Vec<_>>(),
+                            bits[..expected_end]
+                        );
+                        for bit in &bits[expected_end..] {
+                            assert_eq!(recorder.read_bit().unwrap(), *bit);
+                        }
+                        assert_eq!(
+                            recorder
+                                .recorded_bits()
+                                .iter()
+                                .map(|bit| bit.bit)
+                                .collect::<Vec<_>>(),
+                            bits
+                        );
+                        cases += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 40);
+    }
+
+    #[hypothesis_test]
+    fn refactor_depth_legacy_inline_child_preserves_origin_fallback_and_restoration() {
+        let registry = crate::domain::forensic::registry::get_registry();
+        assert!(!registry.stats.contains_key("320"));
+        for id in [317, 320, 387] {
+            assert!(!registry.mappings.contains_key(&id.to_string()));
+            assert!(
+                crate::data::stat_costs::STAT_COSTS
+                    .iter()
+                    .find(|stat| stat.id == id)
+                    .is_none_or(|stat| stat.save_param_bits == 0)
+            );
+            assert!(
+                registry
+                    .item_overrides
+                    .as_ref()
+                    .and_then(|items| items.get("plain"))
+                    .and_then(|row| row.get(&id.to_string()))
+                    .is_none()
+            );
+        }
+        let tree = HuffmanTree::new();
+        let mut cases = 0;
+        for depth in [0, 9, 10, 11, u32::MAX] {
+            for nested in [false, true] {
+                for callback_ok in [false, true] {
+                    for id in [317, 320, 387] {
+                        for offset in [0, 3] {
+                            for origin in [0, 40] {
+                                let _state = DepthWitnessState::enter(depth, nested);
+                                let mut bits = depth_witness_prefix(offset);
+                                bits.extend((0..9).map(|index| id & (1 << index) != 0));
+                                bits.extend([
+                                    true, false, true, false, true, false, true, false, true,
+                                ]);
+                                bits.extend([false, true, true, false, true]);
+                                let bytes = depth_witness_packed(&bits);
+                                let mut recorder = BitCursor::new(BitReader::endian(
+                                    Cursor::new(&bytes),
+                                    LittleEndian,
+                                ));
+                                for bit in depth_witness_prefix(offset) {
+                                    assert_eq!(recorder.read_bit().unwrap(), bit);
+                                }
+                                recorder.set_limit(bits.len() as u64);
+                                recorder.push_context("owner");
+                                let mut a = StatsAxiom::new(5, ItemQuality::Normal, true);
+                                a.code = "plain".into();
+                                a.is_socketed = true;
+                                let mut calls = 0;
+                                let (property, terminal, term_bit, children) =
+                                    parse_single_property(
+                                        &mut recorder,
+                                        5,
+                                        &tree,
+                                        true,
+                                        &a,
+                                        PropertyReaderContext {
+                                            bytes: &[],
+                                            item_start_bit: origin,
+                                        },
+                                        |data, position, _, index, alpha| {
+                                            calls += 1;
+                                            depth_witness_state(depth + 1, nested);
+                                            assert!(data.is_empty() && alpha);
+                                            assert_eq!(position, origin + offset as u64 + 9);
+                                            assert_eq!(index, 0);
+                                            if !callback_ok {
+                                                return Err(depth_witness_failure());
+                                            }
+                                            let mut child = crate::domain::item::Item::default();
+                                            child.code = "r09".into();
+                                            child.body.code = "r09".into();
+                                            child.header.id = Some(77);
+                                            Ok((child, 5))
+                                        },
+                                    )
+                                    .unwrap()
+                                    .unwrap();
+                                let handled = depth <= 10 && callback_ok;
+                                assert_eq!(calls, usize::from(depth <= 10));
+                                let field_bits = if handled {
+                                    5
+                                } else if id == 320 {
+                                    0
+                                } else {
+                                    9
+                                };
+                                let expected_end = offset + 9 + field_bits;
+                                assert!(!terminal && !term_bit);
+                                assert_eq!((property.stat_id, property.param), (id, 0));
+                                assert_eq!(
+                                    property.raw_value,
+                                    if handled || id == 320 { 0 } else { 341 }
+                                );
+                                assert_eq!(
+                                    (property.range.start, property.range.end),
+                                    (offset as u64, expected_end as u64)
+                                );
+                                assert_eq!(children.len(), usize::from(handled));
+                                if handled {
+                                    assert_eq!(children[0].code, "r09");
+                                    assert_eq!(children[0].header.id, Some(77));
+                                }
+                                depth_witness_state(depth, nested);
+                                assert_eq!(recorder.context_stack(), vec!["owner"]);
+                                assert_eq!(recorder.limit(), Some(bits.len() as u64));
+                                assert_eq!(recorder.pos(), expected_end as u64);
+                                assert_eq!(
+                                    recorder
+                                        .recorded_bits()
+                                        .iter()
+                                        .map(|bit| bit.bit)
+                                        .collect::<Vec<_>>(),
+                                    bits[..expected_end]
+                                );
+                                for bit in &bits[expected_end..] {
+                                    assert_eq!(recorder.read_bit().unwrap(), *bit);
+                                }
+                                assert_eq!(
+                                    recorder
+                                        .recorded_bits()
+                                        .iter()
+                                        .map(|bit| bit.bit)
+                                        .collect::<Vec<_>>(),
+                                    bits
+                                );
+                                cases += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 240);
+    }
+
+    #[hypothesis_test]
+    fn refactor_depth_legacy_scanner_fallback_preserves_flag_placeholder_and_cursor() {
+        let tree = HuffmanTree::new();
+        let mut cases = 0;
+        for depth in [0, 9, 10, 11, u32::MAX] {
+            for nested in [false, true] {
+                for callback_ok in [false, true] {
+                    for offset in [0, 3] {
+                        let _state = DepthWitnessState::enter(depth, nested);
+                        let mut bits = depth_witness_prefix(offset);
+                        bits.extend((0..96).map(|index| index % 3 == 1));
+                        bits.extend([false, true, true, false, true]);
+                        let bytes = depth_witness_packed(&bits);
+                        let mut recorder =
+                            BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                        for bit in depth_witness_prefix(offset) {
+                            assert_eq!(recorder.read_bit().unwrap(), bit);
+                        }
+                        recorder.set_limit(bits.len() as u64);
+                        recorder.push_context("owner");
+                        let mut a = StatsAxiom::new(5, ItemQuality::Normal, true);
+                        a.code = "plain".into();
+                        a.is_socketed = true;
+                        let target = offset as u64 + 8;
+                        let offsets = [target];
+                        let codes = std::collections::HashMap::from([(target, "r01".to_string())]);
+                        let mut calls = 0;
+                        let (props, complete, terminal_bit, children) = read_property_list(
+                            &mut recorder,
+                            "plain",
+                            5,
+                            PropertyReaderContext {
+                                bytes: &[],
+                                item_start_bit: 0,
+                            },
+                            &tree,
+                            true,
+                            false,
+                            &a,
+                            Some(&offsets),
+                            Some(&codes),
+                            |data, position, _, index, alpha| {
+                                calls += 1;
+                                depth_witness_state(depth + 1, true);
+                                assert!(data.is_empty() && alpha);
+                                assert_eq!((position, index), (target, 0));
+                                if !callback_ok {
+                                    return Err(depth_witness_failure());
+                                }
+                                let mut child = crate::domain::item::Item::default();
+                                child.code = "r09".into();
+                                child.body.code = "r09".into();
+                                child.header.id = Some(77);
+                                Ok((child, 5))
+                            },
+                        )
+                        .unwrap();
+                        assert!(props.is_empty() && !terminal_bit);
+                        let expected_end = if depth > 10 {
+                            offset
+                        } else {
+                            offset + 8 + if callback_ok { 5 } else { 72 }
+                        };
+                        assert_eq!(calls, usize::from(depth <= 10));
+                        assert_eq!(complete, depth <= 10);
+                        assert_eq!(children.len(), usize::from(depth <= 10));
+                        if depth <= 10 {
+                            assert_eq!(
+                                (
+                                    children[0].code.as_str(),
+                                    children[0].body.code.as_str(),
+                                    children[0].header.mode
+                                ),
+                                ("r01", "r01", 6)
+                            );
+                            assert_eq!(
+                                children[0].header.id,
+                                if callback_ok { Some(77) } else { None }
+                            );
+                        }
+                        depth_witness_state(depth, nested);
+                        assert_eq!(recorder.context_stack(), vec!["owner"]);
+                        assert_eq!(recorder.limit(), Some(bits.len() as u64));
+                        assert_eq!(recorder.pos(), expected_end as u64);
+                        assert_eq!(
+                            recorder
+                                .recorded_bits()
+                                .iter()
+                                .map(|bit| bit.bit)
+                                .collect::<Vec<_>>(),
+                            bits[..expected_end]
+                        );
+                        for bit in &bits[expected_end..] {
+                            assert_eq!(recorder.read_bit().unwrap(), *bit);
+                        }
+                        assert_eq!(
+                            recorder
+                                .recorded_bits()
+                                .iter()
+                                .map(|bit| bit.bit)
+                                .collect::<Vec<_>>(),
+                            bits
+                        );
+                        cases += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 40);
+    }
+
+    #[hypothesis_test]
+    fn refactor_depth_scope_contract_preserves_payload_and_overflow_metadata() {
+        let mut cases = 0;
+        for depth in [0, 9, 10, 11, u32::MAX] {
+            for nested in [false, true] {
+                for callback_ok in [false, true] {
+                    let _state = DepthWitnessState::enter(depth, nested);
+                    let sentinel = depth_witness_failure();
+                    let mut calls = 0;
+                    let result: ParsingResult<u32> =
+                        with_nested_property_depth(nested_property_depth_failure, || {
+                            calls += 1;
+                            depth_witness_state(depth + 1, nested);
+                            // A normal return must restore the caller even if child code changes depth.
+                            NESTED_DEPTH.with(|value| value.set(123));
+                            if callback_ok {
+                                Ok(7)
+                            } else {
+                                Err(sentinel.clone())
+                            }
+                        });
+                    assert_eq!(calls, usize::from(depth <= 10));
+                    if depth > 10 {
+                        let failure = result.unwrap_err();
+                        assert_eq!(
+                            failure.error,
+                            crate::error::ParsingError::Io("Max nesting depth exceeded".into())
+                        );
+                        assert!(failure.context_stack.is_empty() && failure.hint.is_none());
+                        assert_eq!(
+                            (failure.bit_offset, failure.context_relative_offset),
+                            (0, 0)
+                        );
+                    } else if callback_ok {
+                        assert_eq!(result.unwrap(), 7);
+                    } else {
+                        let failure = result.unwrap_err();
+                        assert_eq!(failure.error, sentinel.error);
+                        assert_eq!(failure.context_stack, sentinel.context_stack);
+                        assert_eq!(failure.bit_offset, sentinel.bit_offset);
+                        assert_eq!(
+                            failure.context_relative_offset,
+                            sentinel.context_relative_offset
+                        );
+                        assert_eq!(failure.hint, sentinel.hint);
+                    }
+                    depth_witness_state(depth, nested);
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 20);
+    }
 
     #[test]
     fn test_amazon_wa2_runeword_property_alignment() {
