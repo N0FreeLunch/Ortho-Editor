@@ -11,19 +11,27 @@ pub(crate) fn item_trace_enabled() -> bool {
 }
 
 pub fn normalize_alpha_code_hint(code: &str) -> &str {
+    use crate::data::generated::layout_policy::{
+        ALPHA_LEGACY_HINT_LOW_BYTE_PREFIXES, legacy_alpha_hint_alias_before_stealth,
+        legacy_alpha_hint_identity_after_stealth,
+    };
+
     let trimmed = code.trim();
-    if trimmed == "us g" || trimmed == "k g" { return "jav"; }
-    if trimmed == "7 p" || trimmed == "80sc" { return "ks d"; }
-    if trimmed == "lbl" { return "b7ts"; }
-    if trimmed == "whp1" { return "hp1"; }
-    if trimmed == "wmp1" { return "mp1"; }
-    
+    if let Some(alias) = legacy_alpha_hint_alias_before_stealth(trimmed) {
+        return alias;
+    }
+
     // Stealth codes (Alpha v105)
     let bytes: Vec<u8> = trimmed.chars().map(|c| c as u32 as u8).collect();
-    if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F { return "hp1"; }
-    if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4D { return "mp1"; }
-    if trimmed == "mp1" { return "mp1"; }
-    
+    for &(prefix, alias) in ALPHA_LEGACY_HINT_LOW_BYTE_PREFIXES {
+        if bytes.starts_with(&prefix) {
+            return alias;
+        }
+    }
+    if let Some(identity) = legacy_alpha_hint_identity_after_stealth(trimmed) {
+        return identity;
+    }
+
     trimmed
 }
 
