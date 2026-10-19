@@ -70,11 +70,31 @@ pub enum ImageDelivery {
     },
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct VectorFileRecord {
+    pub file: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ItemVectorCatalog {
+    pub schema: String,
+    pub assets: std::collections::BTreeMap<String, VectorFileRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum VectorDelivery {
+    Available { url: String },
+    Missing,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ImageResponse {
     pub key: ItemImageKey,
     pub binding: ItemImageBinding,
     pub delivery: ImageDelivery,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_delivery: Option<VectorDelivery>,
     pub tint_verified: bool,
 }
 
@@ -94,6 +114,16 @@ fn image_root() -> Option<PathBuf> {
     Some(root.join("assets/item-images"))
 }
 
+fn vector_root() -> Option<PathBuf> {
+    let data = PathBuf::from(std::env::var_os("D2R_DATA_PATH")?);
+    let root = if data.is_absolute() {
+        data
+    } else {
+        PathBuf::from(std::env::var_os("D2R_SPEC_PATH")?).join(data)
+    };
+    Some(root.join("assets/item-vectors"))
+}
+
 fn safe_filename(value: &str) -> bool {
     value.len() == 68
         && value.ends_with(".png")
@@ -105,7 +135,9 @@ fn safe_filename(value: &str) -> bool {
 fn response(
     key: ItemImageKey,
     catalog: Option<&ItemImageCatalog>,
+    vector_catalog: Option<&ItemVectorCatalog>,
     root: Option<&Path>,
+    vroot: Option<&Path>,
 ) -> ImageResponse {
     let binding = resolve_item_image(&key, catalog);
     let missing = |reason| ImageDelivery::Missing { reason };
@@ -139,10 +171,37 @@ fn response(
             }
         },
     };
+
+    let vector_delivery = binding.image().map(|image| {
+        match vector_catalog.and_then(|vc| vc.assets.get(&image.asset_key)) {
+            Some(record) => {
+                let exists = vroot
+                    .and_then(|vr| {
+                        Some((
+                            vr.canonicalize().ok()?,
+                            vr.join(&record.file).canonicalize().ok()?,
+                        ))
+                    })
+                    .is_some_and(|(vr, candidate)| {
+                        candidate.starts_with(vr) && candidate.is_file()
+                    });
+                if exists {
+                    VectorDelivery::Available {
+                        url: format!("/item-vectors/{}", record.file),
+                    }
+                } else {
+                    VectorDelivery::Missing
+                }
+            }
+            None => VectorDelivery::Missing,
+        }
+    });
+
     ImageResponse {
         key,
         binding,
         delivery,
+        vector_delivery,
         tint_verified: false,
     }
 }
@@ -150,7 +209,9 @@ fn response(
 fn resolve_batch(
     body: &[u8],
     catalog: Option<&ItemImageCatalog>,
+    vector_catalog: Option<&ItemVectorCatalog>,
     root: Option<&Path>,
+    vroot: Option<&Path>,
 ) -> Result<ImageBatchResponse, String> {
     let projections: Vec<ImageProjection> = serde_json::from_slice(body)
         .map_err(|_| "Expected an array of valid item projections".to_owned())?;
@@ -167,7 +228,7 @@ fn resolve_batch(
         schema: "item-image-bindings/v1",
         images: keys
             .into_iter()
-            .map(|key| response(key, catalog, root))
+            .map(|key| response(key, catalog, vector_catalog, root, vroot))
             .collect(),
     })
 }
@@ -178,7 +239,12 @@ pub fn resolve(body: &[u8]) -> Result<ImageBatchResponse, String> {
         .as_ref()
         .and_then(|root| std::fs::read(root.join("catalog.json")).ok())
         .and_then(|bytes| serde_json::from_slice::<ItemImageCatalog>(&bytes).ok());
-    resolve_batch(body, catalog.as_ref(), root.as_deref())
+    let vroot = vector_root();
+    let vcatalog = vroot
+        .as_ref()
+        .and_then(|vr| std::fs::read(vr.join("catalog.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<ItemVectorCatalog>(&bytes).ok());
+    resolve_batch(body, catalog.as_ref(), vcatalog.as_ref(), root.as_deref(), vroot.as_deref())
 }
 
 #[cfg(test)]
@@ -189,7 +255,14 @@ mod tests {
 
     #[settled_contract_test]
     fn missing_catalog_and_conflicting_typed_key_have_separate_outcomes() {
-        let batch=resolve_batch(br#"[{"code":"rin","quality":"Rare","has_multiple_graphics":true,"multi_graphics_bits":3}]"#,None,None).unwrap();
+        let batch = resolve_batch(
+            br#"[{"code":"rin","quality":"Rare","has_multiple_graphics":true,"multi_graphics_bits":3}]"#,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let result = serde_json::to_value(batch).unwrap();
         assert_eq!(
             result["images"][0]["key"]["graphic"],
@@ -200,11 +273,13 @@ mod tests {
             "catalog-unavailable"
         );
         assert_eq!(result["images"][0]["delivery"]["status"], "missing");
-        assert!(resolve_batch(br#"[{"code":"rin","image_key":{"code":"wrong","quality":{"kind":"base"},"graphic":{"kind":"unknown"},"is_residue":false}}]"#,None,None).is_err());
-        assert!(resolve_batch(br#"{"code":"rin"}"#, None, None).is_err());
+        assert!(resolve_batch(br#"[{"code":"rin","image_key":{"code":"wrong","quality":{"kind":"base"},"graphic":{"kind":"unknown"},"is_residue":false}}]"#,None,None,None,None).is_err());
+        assert!(resolve_batch(br#"{"code":"rin"}"#, None, None, None, None).is_err());
         assert!(
             resolve_batch(
                 &serde_json::to_vec(&vec![json!({"code":"rin"}); MAX_ITEMS + 1]).unwrap(),
+                None,
+                None,
                 None,
                 None
             )
@@ -217,7 +292,7 @@ mod tests {
         let mut catalog:ItemImageCatalog=serde_json::from_value(json!({"schema":"item-image-catalog/v1","base":{"x":{"family":"misc","asset":"known"}},"assets":{"misc/known":{"file":"../secret.png"}}})).unwrap();
         let request = br#"[{"code":"x"}]"#;
         let result =
-            serde_json::to_value(resolve_batch(request, Some(&catalog), None).unwrap()).unwrap();
+            serde_json::to_value(resolve_batch(request, Some(&catalog), None, None, None).unwrap()).unwrap();
         assert_eq!(result["images"][0]["binding"]["status"], "resolved");
         assert_eq!(
             result["images"][0]["delivery"]["reason"],
@@ -225,7 +300,7 @@ mod tests {
         );
         catalog.assets.get_mut("misc/known").unwrap().file = format!("{}.png", "a".repeat(64));
         let result =
-            serde_json::to_value(resolve_batch(request, Some(&catalog), None).unwrap()).unwrap();
+            serde_json::to_value(resolve_batch(request, Some(&catalog), None, None, None).unwrap()).unwrap();
         assert_eq!(result["images"][0]["delivery"]["reason"], "file-missing");
         assert!(result["images"][0]["delivery"].get("url").is_none());
     }

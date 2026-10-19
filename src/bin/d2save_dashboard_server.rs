@@ -114,6 +114,21 @@ fn handle(mut stream: TcpStream, observe: bool) -> std::io::Result<()> {
             frontend_root().join("item-model.mjs"),
             "text/javascript; charset=utf-8",
         ),
+        ("GET", "/item-images.mjs") => serve_file(
+            &mut stream,
+            frontend_root().join("item-images.mjs"),
+            "text/javascript; charset=utf-8",
+        ),
+        ("GET", path) if path.starts_with("/item-images/") && !path.contains("..") => serve_file(
+            &mut stream,
+            item_images_root().join(&path[13..]),
+            "image/png",
+        ),
+        ("GET", path) if path.starts_with("/item-vectors/") && !path.contains("..") => serve_file(
+            &mut stream,
+            item_vectors_root().join(&path[14..]),
+            "image/svg+xml; charset=utf-8",
+        ),
         ("GET", path) if path.starts_with("/fixtures/") && !path.contains("..") => serve_file(
             &mut stream,
             fixture_root().join(&path[10..]),
@@ -132,6 +147,36 @@ fn serve_file(stream: &mut TcpStream, path: PathBuf, content_type: &str) -> std:
 
 fn fixture_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/savegames/original")
+}
+
+fn item_images_root() -> PathBuf {
+    let data = std::env::var_os("D2R_DATA_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-data"));
+    let root = if data.is_absolute() {
+        data
+    } else {
+        std::env::var_os("D2R_SPEC_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-spec"))
+            .join(data)
+    };
+    root.join("assets/item-images")
+}
+
+fn item_vectors_root() -> PathBuf {
+    let data = std::env::var_os("D2R_DATA_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-data"));
+    let root = if data.is_absolute() {
+        data
+    } else {
+        std::env::var_os("D2R_SPEC_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-spec"))
+            .join(data)
+    };
+    root.join("assets/item-vectors")
 }
 
 fn frontend_root() -> PathBuf {
