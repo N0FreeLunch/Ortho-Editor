@@ -1,6 +1,7 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::header::entity::ItemSegmentType;
 use crate::domain::item::{HuffmanTree, ItemBitRange, ItemQuality};
+use crate::domain::stats::budget::PropertyListBudget;
 use crate::domain::stats::{ItemProperty, StatsAxiom};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
@@ -686,13 +687,13 @@ where
 
     let start_pos = recorder.pos();
 
-    let old_limit = recorder.limit();
     let is_authority_host =
         axiom.is_alpha() && matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2");
     let is_actual_runeword =
         (alpha_runeword || code.trim() == "Þ." || is_authority_host) && axiom.is_socketed;
-    if axiom.is_alpha() && is_actual_runeword && old_limit.is_none() {
-        recorder.set_limit(u64::MAX);
+    let budget = PropertyListBudget::new(recorder.limit(), axiom.is_alpha() && is_actual_runeword);
+    if let Some(limit) = budget.entry_extension() {
+        recorder.set_limit(limit);
     }
 
     let is_compact = axiom.is_compact || code.trim().is_empty();
@@ -814,7 +815,7 @@ where
             }
         }
 
-        if let Some(limit) = old_limit {
+        if let Some(limit) = budget.incoming_limit() {
             if recorder.pos()
                 + u64::from(crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits)
                 >= limit
@@ -1121,11 +1122,8 @@ where
         }
     }
 
-    if axiom.is_alpha() && is_actual_runeword {
-        let recovery_limit = recorder.pos().saturating_add(512);
-        recorder.set_limit(old_limit.map_or(recovery_limit, |limit| limit.min(recovery_limit)));
-    } else if let Some(l) = old_limit {
-        recorder.set_limit(l);
+    if let Some(limit) = budget.completion_limit(recorder.pos()) {
+        recorder.set_limit(limit);
     }
 
     Ok((props, saw_terminator, terminator_bit, nested_items))
@@ -1456,6 +1454,8 @@ mod tests {
     use std::io::Cursor;
 
     use d2r_macros::hypothesis_test;
+
+    include!("parser_budget_tests.rs");
 
     fn stats_scope_snapshot<R: BitRead>(cursor: &BitCursor<R>) -> serde_json::Value {
         let mut value = lifetime_probe_snapshot(cursor);
