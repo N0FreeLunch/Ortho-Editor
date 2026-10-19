@@ -648,7 +648,6 @@ where
     }
 
     let is_compact = axiom.is_compact || code.trim().is_empty();
-    let preserve_trailing_align = axiom.is_alpha() && (version == 0 || version == 1);
     let section_base_abs = if is_compact {
         recorder
             .base_pos
@@ -768,7 +767,10 @@ where
         }
 
         if let Some(limit) = old_limit {
-            if recorder.pos() + 9 >= limit {
+            if recorder.pos()
+                + u64::from(crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits)
+                >= limit
+            {
                 if axiom.is_alpha() && !saw_terminator {
                     saw_terminator = true;
                     terminator_bit = false;
@@ -784,7 +786,6 @@ where
             alpha_runeword,
             is_compact,
             is_v105_shadow,
-            preserve_trailing_align,
             consume_d2r_v3_paired_stats,
             axiom,
             _section_recovery.clone(),
@@ -1127,7 +1128,6 @@ where
         false,
         false,
         false,
-        false,
         axiom,
         reader_ctx,
         &mut recovery_fn,
@@ -1145,7 +1145,6 @@ fn parse_single_property_internal<R: BitRead, F>(
     alpha_runeword: bool,
     is_compact: bool,
     is_v105_shadow: bool,
-    preserve_trailing_align: bool,
     consume_d2r_v3_paired_stats: bool,
     axiom: &StatsAxiom,
     reader_ctx: PropertyReaderContext,
@@ -1168,7 +1167,9 @@ where
     ) -> ParsingResult<(crate::domain::item::Item, u64)>,
 {
     let entry_start = recorder.pos();
-    let id_bits = 9;
+    let id_bits = u32::from(
+        crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits,
+    );
     let stat_id = recorder.read_bits::<u32>(id_bits)?;
     if entry_start >= 7800 && entry_start <= 8305 && crate::item::item_trace_enabled() {
         eprintln!(
@@ -1195,13 +1196,11 @@ where
                     let _extra = recorder.read_bit()?;
                 }
             }
-            if !preserve_trailing_align {
-                while recorder.pos() % 8 != 0 {
-                    if is_authority_host && recorder.remaining() == 0 {
-                        break;
-                    }
-                    let _p = recorder.read_bit()?;
+            while recorder.pos() % 8 != 0 {
+                if is_authority_host && recorder.remaining() == 0 {
+                    break;
                 }
+                let _p = recorder.read_bit()?;
             }
         }
 

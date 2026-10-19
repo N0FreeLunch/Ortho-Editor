@@ -116,33 +116,20 @@ pub fn write_property_list(
     if properties_complete
         && !already_has_term
         && (!axiom.is_alpha()
-            || version == 5
-            || version == 0
-            || version == 1
-            || version == 2
-            || version == 4
-            || version == 6
-            || version == 7)
+            || crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY
+                .alpha_auto_terminator_header_versions
+                .contains(&version))
         && !is_rw
         && !is_compact
     {
         emitter.write_bits(terminator, id_bits)?;
     }
-    let preserve_trailing_align = axiom.is_alpha()
-        && (version == 0
-            || version == 1
-            || version == 2
-            || version == 4
-            || version == 6
-            || version == 7);
     if properties_complete && rhythm.has_terminal_bit {
         emitter.write_bit(terminator_bit)?;
         if rhythm.has_extra_terminal_bit {
             emitter.write_bit(terminator_bit)?;
         }
-        if !preserve_trailing_align {
-            emitter.byte_align()?;
-        }
+        emitter.byte_align()?;
     }
 
     // Axiom 0354: TVS (Terminator Value Slot) - Alpha v105 standard items
