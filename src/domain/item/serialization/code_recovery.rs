@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::legacy_alpha_body_capture_code_alias;
 use std::collections::HashMap;
 
 /// Normalize one body code with the caller-supplied effective-code map.
@@ -7,22 +8,18 @@ pub(super) fn normalize_alpha_body_code(
     effective_codes: &HashMap<String, String>,
 ) -> String {
     let trimmed_code = code.trim();
-    match trimmed_code {
-        // Capture-replay aliases for the live `jav` witness.
-        "g71" | "wl l" | "us g" | "k g" => "jav".to_string(),
-        "wucb" => "ucb8".to_string(),
-        other => {
-            let mut code = other.to_string();
-            if let Some(eff) = effective_codes.get(other) {
-                code = eff.clone();
-            }
-            let normalized_body_code = crate::item::normalize_alpha_code_hint(&code).to_string();
-            if normalized_body_code != code {
-                code = normalized_body_code;
-            }
-            code
-        }
+    if let Some(alias) = legacy_alpha_body_capture_code_alias(trimmed_code) {
+        return alias.to_string();
     }
+    let mut code = trimmed_code.to_string();
+    if let Some(eff) = effective_codes.get(trimmed_code) {
+        code = eff.clone();
+    }
+    let normalized_body_code = crate::item::normalize_alpha_code_hint(&code).to_string();
+    if normalized_body_code != code {
+        code = normalized_body_code;
+    }
+    code
 }
 
 #[cfg(test)]
