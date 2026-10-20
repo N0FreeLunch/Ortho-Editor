@@ -1033,4 +1033,138 @@ mod tests {
             ]
         );
     }
+
+    #[hypothesis_test]
+    fn v3_extended_payload_reader_observations() {
+        fn observe(
+            rows: &mut Vec<serde_json::Value>,
+            family: &str,
+            code: &str,
+            quality: u8,
+            version: u32,
+            pattern: u8,
+            prefix: u32,
+            limit: Option<u64>,
+        ) {
+            // Only the fixed quality nibble is selected; all other bits are arbitrary inputs.
+            let mut bytes: Vec<u8> = (0..192)
+                .map(|i| match pattern {
+                    0 => 0,
+                    1 => 255,
+                    _ => (i as u8).wrapping_mul(37).wrapping_add(91),
+                })
+                .collect();
+            for bit in 0..4 {
+                let offset = usize::try_from(prefix + 42 + bit).unwrap();
+                let mask = 1 << (offset % 8);
+                bytes[offset / 8] =
+                    (bytes[offset / 8] & !mask) | (((quality >> bit) & 1) << (offset % 8));
+            }
+            let header = ItemHeader {
+                is_socketed: pattern != 0,
+                is_runeword: pattern != 0,
+                is_personalized: pattern == 1,
+                ..Default::default()
+            };
+            let mut cursor = BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+            cursor.set_trace(true);
+            cursor.push_context("V3 payload witness");
+            cursor.read_bits_as_vec_up_to(prefix);
+            if let Some(limit) = limit {
+                cursor.set_limit(limit);
+            }
+            let result =
+                ExtendedStatsData::read_d2r_v3_from_cursor(&mut cursor, code, &header, version);
+            let before_following = state(&cursor);
+            let following = cursor.read_bits::<u8>(5);
+            rows.push(serde_json::json!({
+                "family": family, "code": code, "quality": quality, "version": version,
+                "pattern": pattern, "prefix": prefix, "limit": limit,
+                "success": result.is_ok(), "result": format!("{result:?}"),
+                "cursor": before_following, "following": format!("{following:?}"),
+                "cursor_after_following": state(&cursor)
+            }));
+        }
+        let codes = [
+            "rin", "amu", "cm1", "cm2", "cm3", "tsc", "isc", "tbk", "ibk", "gld", "cap", "hax",
+            "jav", "aqv", "hp1", "jew", "r01", "unlisted",
+        ];
+        let mut rows = Vec::new();
+        for code in codes {
+            for quality in 1..=8 {
+                for version in [93, 94, 96, 97, 98, 105] {
+                    for pattern in 0..3 {
+                        for prefix in [0, 3] {
+                            observe(
+                                &mut rows, "matrix", code, quality, version, pattern, prefix, None,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(rows.len(), 5184);
+        for code in ["rin", "cap", "hax"] {
+            for quality in 1..=8 {
+                for pattern in 0..2 {
+                    for limit in [
+                        0, 2, 3, 34, 35, 41, 42, 45, 46, 47, 50, 58, 64, 75, 96, 128, 256, 512,
+                    ] {
+                        for prefix in [0, 3] {
+                            observe(
+                                &mut rows,
+                                "truncated",
+                                code,
+                                quality,
+                                105,
+                                pattern,
+                                prefix,
+                                Some(limit),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(rows.len(), 6912);
+        for code in ["rin", "cap", "gld"] {
+            for raw_code in [format!(" \t{code}\u{2003}"), format!("{code}\0")] {
+                for quality in 1..=8 {
+                    for version in [97, 105] {
+                        for pattern in 0..3 {
+                            observe(
+                                &mut rows,
+                                "code-boundary",
+                                &raw_code,
+                                quality,
+                                version,
+                                pattern,
+                                0,
+                                None,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(rows.len(), 7200);
+        let successes = rows.iter().filter(|r| r["success"] == true).count();
+        let errors = rows.len() - successes;
+        assert!(successes > 0 && errors > 0);
+        if let Some(path) = std::env::var_os("D2R_V3_PAYLOAD_OUTPUT") {
+            let output = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            serde_json::to_writer_pretty(
+                output,
+                &serde_json::json!({
+                    "schema": 1, "cases": rows.len(), "codes": codes.len(),
+                    "successes": successes, "errors": errors, "rows": rows
+                }),
+            )
+            .unwrap();
+        }
+    }
 }
