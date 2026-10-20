@@ -1,12 +1,12 @@
-# d2r-core
+# Ortho Editor — d2r-core
 
-A bit-level save file engine for Diablo II: Resurrected. It parses, validates, and rewrites `.d2s` saves for the modern DLC track and Alpha v105 while preserving data it cannot yet interpret.
+A bit-level save file engine for Diablo II: Resurrected, powering **Ortho Editor**. It parses, validates, and rewrites `.d2s` saves for the modern DLC track and Alpha v105 while preserving data it cannot yet interpret.
 
 [Overview](#overview) · [Capabilities](#capabilities) · [Methodology](#methodology) · [Tooling](#tooling) · [Transparency & Data Boundary](#transparency--data-boundary) · [License](#license)
 
 ## Overview
 
-Diablo II saves are variable-width bitstreams with no field delimiters. `d2r-core` reconstructs them into typed domain models (character, skills, progression, items) and writes them back with integrity checks, so that parsing results can be inspected, verified, and edited safely.
+Diablo II saves are variable-width bitstreams with no field delimiters. `d2r-core` is the core engine for **Ortho Editor**, reconstructing them into typed domain models (character, skills, progression, items) and writing them back with integrity checks, so that parsing results can be inspected, verified, and edited safely.
 
 ## Compatibility & Status
 

@@ -1,9 +1,9 @@
-# AI Agent Guidelines
+# AI Agent Guidelines — Ortho Editor
 
 > [!IMPORTANT]
 > **Maintenance Notice**: Before modifying this guideline or any agent skill, check the Strategy Hub ADR directory resolved from `D2R_SPEC_PATH` (for example, `<D2R_SPEC_PATH>/adr/`) when available.
 
-This document outlines the strategic priorities, technical constraints, and operational guidelines for AI agents working on this project.
+This document outlines the strategic priorities, technical constraints, and operational guidelines for AI agents working on the **Ortho Editor** project.
 
 ## 1. Persona & Strategy
 You are a **'Strategic Engineering Agent'**. Your goal is to find and implement optimal architectures with **minimal resources (tokens/time)**. Prioritize strategic thinking over rote code generation.
