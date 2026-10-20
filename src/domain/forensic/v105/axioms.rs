@@ -916,3 +916,99 @@ mod tests {
         assert_eq!(width, 72, "lgl should have 72-bit compact width via registry override");
     }
 }
+
+// Keep shared-axiom queries lazy; header inputs are distinct from StatsAxiom state.
+impl crate::domain::item::subdomains::payload::LegacyExtendedPayloadReadPolicy
+    for crate::domain::stats::StatsAxiom
+{
+    fn class_specific_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.class_specific_bits()
+    }
+    fn has_v5_runeword_extra(&self, version: u8) -> bool {
+        V105PropertyWidthAxiom.has_v5_runeword_extra(version)
+    }
+    fn is_extended_stats_early_exit(&self, version: u8) -> bool {
+        V105PropertyWidthAxiom.is_extended_stats_early_exit(version)
+    }
+    fn is_player_name_alpha_style(&self, version: u8) -> bool {
+        V105PropertyWidthAxiom.is_player_name_alpha_style(version)
+    }
+    fn is_summary_item(&self, version: u8, code: &str) -> bool {
+        V105PropertyWidthAxiom.is_summary_item(version, code)
+    }
+    fn item_id_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.item_id_bits()
+    }
+    fn item_level_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.item_level_bits()
+    }
+    fn low_high_graphic_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.low_high_graphic_bits()
+    }
+    fn multi_graphics_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.multi_graphics_bits()
+    }
+    fn needs_player_name_byte_alignment(&self, version: u8) -> bool {
+        V105PropertyWidthAxiom.needs_player_name_byte_alignment(version)
+    }
+    fn quality_bits(&self, is_alpha: bool) -> u32 {
+        V105PropertyWidthAxiom.quality_bits(is_alpha)
+    }
+    fn quantity_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.quantity_bits()
+    }
+    fn runeword_id_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.runeword_id_bits()
+    }
+    fn runeword_level_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.runeword_level_bits()
+    }
+    fn set_list_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.set_list_bits()
+    }
+    fn socket_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.socket_bits()
+    }
+    fn stat_bits(&self, stat_id: u32) -> u32 {
+        V105PropertyWidthAxiom.stat_bits(stat_id)
+    }
+    fn teleport_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.teleport_bits()
+    }
+    fn v5_runeword_extra_bits(&self) -> u32 {
+        V105PropertyWidthAxiom.v5_runeword_extra_bits()
+    }
+    fn is_alpha(&self) -> bool {
+        crate::domain::stats::StatsAxiom::is_alpha(self)
+    }
+    fn is_runeword(&self, flags: u32) -> bool {
+        crate::domain::stats::StatsAxiom::is_runeword(self, flags)
+    }
+    fn reads_defense(&self) -> bool {
+        crate::domain::stats::StatsAxiom::reads_defense(self)
+    }
+    fn reads_durability(&self) -> bool {
+        crate::domain::stats::StatsAxiom::reads_durability(self)
+    }
+    fn reads_quantity(&self) -> bool {
+        crate::domain::stats::StatsAxiom::reads_quantity(self)
+    }
+    fn header_is_alpha(&self, version: u8, alpha_mode: bool) -> bool {
+        HeaderAxiom::new(version, alpha_mode).is_alpha()
+    }
+    fn header_is_v105_shadow(
+        &self,
+        version: u8,
+        alpha_mode: bool,
+        flags: u32,
+        code_hint: Option<&str>,
+    ) -> bool {
+        HeaderAxiom::new(version, alpha_mode).is_v105_shadow(flags, code_hint)
+    }
+    fn in_nested_recovery(&self) -> bool {
+        crate::domain::header::entity::IN_NESTED_RECOVERY.with(|value| value.get())
+    }
+    fn player_name_alignment_required(&self) -> bool {
+        crate::domain::item::entity::AlphaV105PersonalizedAlignment::align_required()
+    }
+}

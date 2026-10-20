@@ -1,4 +1,4 @@
-use crate::domain::item::serialization::BitEmitter;
+use crate::domain::item::bit_emitter::BitEmitter;
 use crate::data::bit_cursor::BitCursor;
 use bitstream_io::BitRead;
 use std::io;

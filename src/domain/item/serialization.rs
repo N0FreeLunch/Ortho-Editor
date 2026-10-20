@@ -6117,37 +6117,7 @@ pub use super::bit_emitter::BitEmitter;
 pub use crate::domain::stats::write_property_list;
 pub use super::huffman::HuffmanTree;
 
-pub fn read_player_name<R: BitRead>(
-    cursor: &mut BitCursor<R>,
-    _alpha_v5: bool,
-) -> ParsingResult<String> {
-    let mut name = String::new();
-    for _ in 0..15 {
-        let mut ch = 0u8;
-        for j in 0..7 {
-            if cursor.read_bit()? {
-                ch |= 1 << j;
-            }
-        }
-        if ch == 0 {
-            break;
-        }
-        name.push(ch as char);
-    }
-    Ok(name)
-}
-
-pub fn write_player_name(emitter: &mut BitEmitter, name: &str, _alpha_v5: bool) -> io::Result<()> {
-    let bytes = name.as_bytes();
-    for i in 0..15 {
-        let b = if i < bytes.len() { bytes[i] } else { 0 };
-        emitter.write_bits(b as u32, 7)?;
-        if b == 0 {
-            break;
-        }
-    }
-    Ok(())
-}
+pub use super::subdomains::payload::{read_player_name, write_player_name};
 
 #[cfg(test)]
 mod tests {

@@ -127,3 +127,111 @@ fn player_name_consumer_preserves_seven_bit_wire_with_prefix() {
         assert_eq!(emitter.into_bytes(), [13, 234, 1]);
     }
 }
+
+#[d2r_macros::hypothesis_test]
+fn player_name_payload_observations() {
+    use bitstream_io::{BitRead, BitReader, LittleEndian};
+    use d2r_core::data::bit_cursor::BitCursor;
+    use d2r_core::domain::item::serialization::read_player_name;
+    use std::io::Cursor;
+
+    fn state<R: BitRead>(cursor: &BitCursor<R>) -> String {
+        format!(
+            "{:?}",
+            (
+                cursor.pos(),
+                cursor.limit(),
+                cursor.remaining(),
+                cursor.recorded_bits(),
+                cursor.segments(),
+                cursor.active_segments(),
+                cursor.context_stack(),
+                cursor.operation_events(),
+                cursor.alpha_quality
+            )
+        )
+    }
+
+    let names = [
+        "",
+        "Az",
+        "A\0Z",
+        "\0",
+        "aaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbb",
+        "cccccccccccccccc",
+        "\u{00e9}",
+        "\u{0080}",
+        "\u{1f63a}",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "a\u{0001}z",
+    ];
+    assert_eq!(names.len(), 12);
+    let mut writers = Vec::new();
+    let mut readers = Vec::new();
+    let mut successes = 0;
+    let mut errors = 0;
+    for name in names {
+        for prefix in 0..8_usize {
+            for alpha in [false, true] {
+                let mut emitter = BitEmitter::new();
+                emitter
+                    .extend_bits((0..prefix).map(|i| i % 2 == 0))
+                    .unwrap();
+                write_player_name(&mut emitter, name, alpha).unwrap();
+                let name_end = emitter.written_bits();
+                emitter.extend_bits(wire("11010")).unwrap();
+                let written = emitter.written_bits();
+                let capture = emitter.bits().to_vec();
+                let bytes = emitter.into_bytes();
+                writers.push(serde_json::json!({"name": name, "prefix": prefix, "alpha": alpha, "name_end": name_end, "written": written, "capture": capture, "bytes": bytes}));
+                for limit in [
+                    None,
+                    Some(0),
+                    Some(1),
+                    Some(6),
+                    Some(7),
+                    Some(13),
+                    Some(14),
+                    Some(104),
+                    Some(105),
+                    Some(106),
+                ] {
+                    let mut cursor =
+                        BitCursor::new(BitReader::endian(Cursor::new(&bytes), LittleEndian));
+                    cursor.set_trace(true);
+                    cursor.push_context("player name payload witness");
+                    cursor.read_bits_as_vec(prefix as u32).unwrap();
+                    if let Some(limit) = limit {
+                        cursor.set_limit(prefix as u64 + limit);
+                    }
+                    let result = read_player_name(&mut cursor, alpha);
+                    if result.is_ok() {
+                        successes += 1;
+                    } else {
+                        errors += 1;
+                    }
+                    let after_name = state(&cursor);
+                    let following = if result.is_ok() {
+                        Some(format!("{:?}", cursor.read_bits::<u8>(5)))
+                    } else {
+                        None
+                    };
+                    readers.push(serde_json::json!({"name": name, "prefix": prefix, "alpha": alpha, "limit": limit, "result": format!("{result:?}"), "after_name": after_name, "following": following, "final_cursor": state(&cursor)}));
+                }
+            }
+        }
+    }
+    assert_eq!(writers.len(), 192);
+    assert_eq!(readers.len(), 1920);
+    assert_eq!(successes + errors, 1920);
+    assert!(successes > 0 && errors > 0);
+    if let Some(path) = std::env::var_os("D2R_PLAYER_NAME_CODEC_OUTPUT") {
+        let output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
+        serde_json::to_writer_pretty(output, &serde_json::json!({"schema": 1, "name_cases": 12, "writer_cases": writers.len(), "reader_cases": readers.len(), "successes": successes, "errors": errors, "writers": writers, "readers": readers})).unwrap();
+    }
+}
