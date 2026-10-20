@@ -1,12 +1,10 @@
 use crate::data::generated::layout_policy::legacy_alpha_body_capture_code_alias;
+use crate::domain::forensic::registry::AlphaForensics;
 use std::collections::HashMap;
 
 /// Normalize one body code with the caller-supplied effective-code map.
 /// The caller retains format admission and trusted hint handling.
-pub(super) fn normalize_alpha_body_code(
-    code: &str,
-    effective_codes: &HashMap<String, String>,
-) -> String {
+fn normalize_alpha_body_code(code: &str, effective_codes: &HashMap<String, String>) -> String {
     let trimmed_code = code.trim();
     if let Some(alias) = legacy_alpha_body_capture_code_alias(trimmed_code) {
         return alias.to_string();
@@ -20,6 +18,78 @@ pub(super) fn normalize_alpha_body_code(
         code = normalized_body_code;
     }
     code
+}
+
+/// Recover an Alpha body code within the caller's format admission.
+/// Classification retains its original guarded invocation through the callback.
+pub(super) fn recover_alpha_body_code(
+    code: &mut String,
+    code_hint: Option<&str>,
+    code_peek: Option<&str>,
+    reg: &AlphaForensics,
+    classify_summary: impl FnOnce(&str) -> bool,
+) {
+    promote_alpha_body_code_hint(code, code_hint, code_peek, reg, classify_summary);
+    *code = normalize_alpha_body_code(code, &reg.effective_codes);
+    repair_alpha_body_code_with_trusted_hint(code, code_hint, code_peek);
+}
+
+fn promote_alpha_body_code_hint(
+    code: &mut String,
+    code_hint: Option<&str>,
+    code_peek: Option<&str>,
+    reg: &AlphaForensics,
+    classify_summary: impl FnOnce(&str) -> bool,
+) {
+    if code.trim().is_empty() {
+        if let Some(hint) = code_hint.or(code_peek) {
+            let trimmed_hint = hint.trim();
+            let anchored_hint = !trimmed_hint.is_empty()
+                && (classify_summary(trimmed_hint)
+                    || reg
+                        .forced_compact_codes
+                        .as_ref()
+                        .map(|codes| codes.iter().any(|c| c == trimmed_hint))
+                        .unwrap_or(false)
+                    || reg
+                        .forced_runeword_codes
+                        .as_ref()
+                        .map(|codes| codes.iter().any(|c| c == trimmed_hint))
+                        .unwrap_or(false)
+                    || reg
+                        .item_overrides
+                        .as_ref()
+                        .and_then(|overrides| overrides.get(trimmed_hint))
+                        .and_then(|map| map.get("fixed_width"))
+                        .copied()
+                        .unwrap_or(0)
+                        > 0);
+            if anchored_hint {
+                *code = trimmed_hint.to_string();
+            }
+        }
+    }
+    if let Some(hint) = code_hint.or(code_peek) {
+        let trimmed_hint = hint.trim();
+        if (trimmed_hint == "xrs" || trimmed_hint == "c8xr") && code.trim().is_empty() {
+            *code = "xrs ".to_string();
+        }
+    }
+}
+
+fn repair_alpha_body_code_with_trusted_hint(
+    code: &mut String,
+    code_hint: Option<&str>,
+    code_peek: Option<&str>,
+) {
+    if let Some(hint) = code_hint.or(code_peek) {
+        let trimmed_hint = hint.trim();
+        // Keep the final item owner aligned with the trusted UCB8 witness when
+        // the serialized body still collapses to the drifted `wucb` alias.
+        if trimmed_hint == "ucb8" && code.trim() == "wucb" {
+            *code = trimmed_hint.to_string();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -124,6 +194,540 @@ mod tests {
             "rows": rows,
         });
         if let Some(output) = std::env::var_os("D2R_REFACTOR_BODY_OUTPUT") {
+            let path = std::path::PathBuf::from(output);
+            assert!(path.parent().unwrap().is_dir());
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            serde_json::to_writer_pretty(&mut file, &report).unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::{promote_alpha_body_code_hint, recover_alpha_body_code};
+    use crate::domain::forensic::registry::AlphaForensics;
+    use d2r_macros::hypothesis_test;
+    use serde_json::{Value, json};
+    use std::collections::{BTreeMap, HashMap};
+
+    #[derive(Clone, Copy, Debug)]
+    enum RegistryCase {
+        Empty,
+        Compact,
+        PaddedCompact,
+        Runeword,
+        WidthZero,
+        WidthOne,
+        WidthMax,
+        WrongWidthField,
+        WrongOverrideCode,
+        CompactXrs,
+        CompactC8xr,
+        EffectiveWucb,
+        EffectiveG71,
+        EffectiveUsG,
+        CompactAndEffectiveWucb,
+        WidthNul,
+        EmptyEffective,
+    }
+
+    fn registry(recipe: RegistryCase) -> AlphaForensics {
+        let mut reg = AlphaForensics::default();
+        match recipe {
+            RegistryCase::Empty => {}
+            RegistryCase::Compact => reg.forced_compact_codes = Some(vec!["probe".to_owned()]),
+            RegistryCase::PaddedCompact => {
+                reg.forced_compact_codes = Some(vec![" probe ".to_owned()]);
+            }
+            RegistryCase::Runeword => reg.forced_runeword_codes = Some(vec!["probe".to_owned()]),
+            RegistryCase::WidthZero
+            | RegistryCase::WidthOne
+            | RegistryCase::WidthMax
+            | RegistryCase::WrongWidthField
+            | RegistryCase::WrongOverrideCode
+            | RegistryCase::WidthNul => {
+                let (code, key, value) = match recipe {
+                    RegistryCase::WidthZero => ("probe", "fixed_width", 0),
+                    RegistryCase::WidthOne => ("probe", "fixed_width", 1),
+                    RegistryCase::WidthMax => ("probe", "fixed_width", u32::MAX),
+                    RegistryCase::WrongWidthField => ("probe", "width", 1),
+                    RegistryCase::WrongOverrideCode => (" probe ", "fixed_width", 1),
+                    RegistryCase::WidthNul => ("probe\0", "fixed_width", 1),
+                    _ => unreachable!(),
+                };
+                reg.item_overrides = Some(HashMap::from([(
+                    code.to_owned(),
+                    HashMap::from([(key.to_owned(), value)]),
+                )]));
+            }
+            RegistryCase::CompactXrs => reg.forced_compact_codes = Some(vec!["xrs".to_owned()]),
+            RegistryCase::CompactC8xr => reg.forced_compact_codes = Some(vec!["c8xr".to_owned()]),
+            RegistryCase::EffectiveWucb => {
+                reg.effective_codes
+                    .insert("unknown".to_owned(), " wucb ".to_owned());
+            }
+            RegistryCase::EffectiveG71 => {
+                reg.effective_codes
+                    .insert("unknown".to_owned(), "g71".to_owned());
+                reg.effective_codes
+                    .insert("wucb".to_owned(), "g71".to_owned());
+            }
+            RegistryCase::EffectiveUsG => {
+                reg.effective_codes
+                    .insert("unknown".to_owned(), " us g ".to_owned());
+            }
+            RegistryCase::CompactAndEffectiveWucb => {
+                reg.forced_compact_codes = Some(vec!["probe".to_owned()]);
+                reg.effective_codes
+                    .insert("probe".to_owned(), " wucb ".to_owned());
+            }
+            RegistryCase::EmptyEffective => {
+                reg.effective_codes
+                    .insert(String::new(), " wucb ".to_owned());
+            }
+        }
+        reg
+    }
+
+    fn fields(reg: &AlphaForensics) -> Value {
+        let effective: BTreeMap<_, _> = reg.effective_codes.iter().collect();
+        let overrides = reg.item_overrides.as_ref().map(|items| {
+            items
+                .iter()
+                .map(|(code, values)| (code, values.iter().collect::<BTreeMap<_, _>>()))
+                .collect::<BTreeMap<_, _>>()
+        });
+        json!({
+            "effective_codes": effective, "item_overrides": overrides,
+            "forced_compact_codes": reg.forced_compact_codes,
+            "forced_runeword_codes": reg.forced_runeword_codes,
+        })
+    }
+
+    fn padded(value: &str, mode: usize) -> String {
+        match mode {
+            0 => value.to_owned(),
+            1 => format!(" {value} "),
+            2 => format!("\t{value}\r\n"),
+            3 => format!("\u{2003}{value}\u{3000}"),
+            _ => unreachable!(),
+        }
+    }
+
+    #[hypothesis_test]
+    fn legacy_alpha_body_recovery_preserves_hint_stages() {
+        use RegistryCase::*;
+        // Source-observed expectations, independent of candidate Data policy.
+        // label, body, hint, peek, registry, summary reply, promotion, final, call.
+        let cases = [
+            ("no-hint", "", None, None, Empty, false, None, "", None),
+            (
+                "peek-summary",
+                "",
+                None,
+                Some("probe"),
+                Empty,
+                true,
+                Some("probe"),
+                "probe",
+                Some("probe"),
+            ),
+            (
+                "summary-accept",
+                "",
+                Some("probe"),
+                None,
+                Empty,
+                true,
+                Some("probe"),
+                "probe",
+                Some("probe"),
+            ),
+            (
+                "summary-deny",
+                "",
+                Some("probe"),
+                None,
+                Empty,
+                false,
+                None,
+                "",
+                Some("probe"),
+            ),
+            (
+                "empty-shadows-peek",
+                "",
+                Some(""),
+                Some("probe"),
+                Compact,
+                true,
+                None,
+                "",
+                None,
+            ),
+            (
+                "blank-shadows-peek",
+                "",
+                Some(" \t"),
+                Some("probe"),
+                Compact,
+                true,
+                None,
+                "",
+                None,
+            ),
+            (
+                "body-suppresses-summary",
+                "known",
+                Some("probe"),
+                None,
+                Compact,
+                true,
+                None,
+                "known",
+                None,
+            ),
+            (
+                "capture-suppresses-summary",
+                "g71",
+                Some("probe"),
+                None,
+                Compact,
+                true,
+                None,
+                "jav",
+                None,
+            ),
+            (
+                "compact-exact",
+                "",
+                Some("probe"),
+                None,
+                Compact,
+                false,
+                Some("probe"),
+                "probe",
+                Some("probe"),
+            ),
+            (
+                "compact-padded-key",
+                "",
+                Some("probe"),
+                None,
+                PaddedCompact,
+                false,
+                None,
+                "",
+                Some("probe"),
+            ),
+            (
+                "runeword-exact",
+                "",
+                Some("probe"),
+                None,
+                Runeword,
+                false,
+                Some("probe"),
+                "probe",
+                Some("probe"),
+            ),
+            (
+                "width-zero",
+                "",
+                Some("probe"),
+                None,
+                WidthZero,
+                false,
+                None,
+                "",
+                Some("probe"),
+            ),
+            (
+                "width-one",
+                "",
+                Some("probe"),
+                None,
+                WidthOne,
+                false,
+                Some("probe"),
+                "probe",
+                Some("probe"),
+            ),
+            (
+                "width-max",
+                "",
+                Some("probe"),
+                None,
+                WidthMax,
+                false,
+                Some("probe"),
+                "probe",
+                Some("probe"),
+            ),
+            (
+                "wrong-width-field",
+                "",
+                Some("probe"),
+                None,
+                WrongWidthField,
+                false,
+                None,
+                "",
+                Some("probe"),
+            ),
+            (
+                "wrong-override-code",
+                "",
+                Some("probe"),
+                None,
+                WrongOverrideCode,
+                false,
+                None,
+                "",
+                Some("probe"),
+            ),
+            (
+                "xrs-fallback-space",
+                "",
+                Some("xrs"),
+                None,
+                Empty,
+                false,
+                Some("xrs "),
+                "xrs",
+                Some("xrs"),
+            ),
+            (
+                "c8xr-fallback-space",
+                "",
+                Some("c8xr"),
+                None,
+                Empty,
+                false,
+                Some("xrs "),
+                "xrs",
+                Some("c8xr"),
+            ),
+            (
+                "anchored-xrs-no-space",
+                "",
+                Some("xrs"),
+                None,
+                CompactXrs,
+                false,
+                Some("xrs"),
+                "xrs",
+                Some("xrs"),
+            ),
+            (
+                "anchored-c8xr",
+                "",
+                Some("c8xr"),
+                None,
+                CompactC8xr,
+                false,
+                Some("c8xr"),
+                "c8xr",
+                Some("c8xr"),
+            ),
+            (
+                "plain-capture",
+                "us g",
+                None,
+                None,
+                Empty,
+                false,
+                None,
+                "jav",
+                None,
+            ),
+            (
+                "trusted-after-map",
+                "unknown",
+                Some("ucb8"),
+                None,
+                EffectiveWucb,
+                false,
+                None,
+                "ucb8",
+                None,
+            ),
+            (
+                "untrusted-after-map",
+                "unknown",
+                Some("other"),
+                None,
+                EffectiveWucb,
+                false,
+                None,
+                "wucb",
+                None,
+            ),
+            (
+                "repair-empty-shadows-peek",
+                "unknown",
+                Some(""),
+                Some("ucb8"),
+                EffectiveWucb,
+                false,
+                None,
+                "wucb",
+                None,
+            ),
+            (
+                "repair-peek",
+                "unknown",
+                None,
+                Some("ucb8"),
+                EffectiveWucb,
+                false,
+                None,
+                "ucb8",
+                None,
+            ),
+            (
+                "direct-capture-beats-map",
+                "wucb",
+                Some("other"),
+                None,
+                EffectiveG71,
+                false,
+                None,
+                "ucb8",
+                None,
+            ),
+            (
+                "no-capture-retry",
+                "unknown",
+                None,
+                None,
+                EffectiveG71,
+                false,
+                None,
+                "g71",
+                None,
+            ),
+            (
+                "global-alias-after-map",
+                "unknown",
+                None,
+                None,
+                EffectiveUsG,
+                false,
+                None,
+                "jav",
+                None,
+            ),
+            (
+                "selected-hint-precedence",
+                "",
+                Some("probe"),
+                Some("ucb8"),
+                CompactAndEffectiveWucb,
+                false,
+                Some("probe"),
+                "wucb",
+                Some("probe"),
+            ),
+            (
+                "nul-key-miss",
+                "",
+                Some("probe\0"),
+                None,
+                WidthOne,
+                false,
+                None,
+                "",
+                Some("probe\0"),
+            ),
+            (
+                "nul-key-exact",
+                "",
+                Some("probe\0"),
+                None,
+                WidthNul,
+                false,
+                Some("probe\0"),
+                "probe\0",
+                Some("probe\0"),
+            ),
+            (
+                "empty-code-registry",
+                "",
+                None,
+                None,
+                EmptyEffective,
+                false,
+                None,
+                "wucb",
+                None,
+            ),
+        ];
+        assert_eq!(cases.len(), 32);
+        let mut rows = Vec::new();
+        for (label, body, hint, peek, recipe, summary, promotion, expected, call) in cases {
+            for body_mode in 0..4 {
+                for hint_mode in 0..4 {
+                    for peek_mode in 0..4 {
+                        let input = padded(body, body_mode);
+                        let hint = hint.map(|value| padded(value, hint_mode));
+                        let peek = peek.map(|value| padded(value, peek_mode));
+                        let reg = registry(recipe);
+                        let before = fields(&reg);
+                        let expected_calls: Vec<_> = call.into_iter().map(str::to_owned).collect();
+                        let mut promoted = input.clone();
+                        let mut promotion_calls = Vec::new();
+                        promote_alpha_body_code_hint(
+                            &mut promoted,
+                            hint.as_deref(),
+                            peek.as_deref(),
+                            &reg,
+                            |code| {
+                                promotion_calls.push(code.to_owned());
+                                summary
+                            },
+                        );
+                        assert_eq!(promoted, promotion.unwrap_or(&input), "promotion {label}");
+                        assert_eq!(promotion_calls, expected_calls, "promotion calls {label}");
+                        let mut actual = input.clone();
+                        let mut calls = Vec::new();
+                        recover_alpha_body_code(
+                            &mut actual,
+                            hint.as_deref(),
+                            peek.as_deref(),
+                            &reg,
+                            |code| {
+                                calls.push(code.to_owned());
+                                summary
+                            },
+                        );
+                        assert_eq!(actual, expected, "final {label}");
+                        assert_eq!(calls, expected_calls, "full calls {label}");
+                        assert_eq!(fields(&reg), before, "registry mutation {label}");
+                        rows.push(json!({
+                            "case": label, "body_mode": body_mode, "hint_mode": hint_mode,
+                            "peek_mode": peek_mode, "body": input, "hint": hint, "peek": peek,
+                            "registry_recipe": format!("{recipe:?}"), "registry": before,
+                            "summary_reply": summary, "promotion": promoted,
+                            "expected_promotion": promotion, "actual": actual, "expected": expected,
+                            "summary_calls": calls, "promotion_calls": promotion_calls,
+                        }));
+                    }
+                }
+            }
+        }
+        assert_eq!(rows.len(), 2048);
+        let report = json!({
+            "schema": 1, "cases": rows.len(), "stage_cases": cases.len(),
+            "whitespace_modes": 4, "whitespace_axes": 3,
+            "evidence": "source-observed phase and callback contract; not universal item classification",
+            "rows": rows,
+        });
+        if let Some(output) = std::env::var_os("D2R_REFACTOR_RECOVERY_OUTPUT") {
             let path = std::path::PathBuf::from(output);
             assert!(path.parent().unwrap().is_dir());
             let mut file = std::fs::OpenOptions::new()

@@ -3988,52 +3988,13 @@ impl Item {
             };
         if header.save_is_alpha {
             let reg = crate::domain::forensic::registry::get_registry();
-            if body.code.trim().is_empty() {
-                if let Some(hint) = code_hint.or(code_peek) {
-                    let trimmed_hint = hint.trim();
-                    let anchored_hint = !trimmed_hint.is_empty()
-                        && (crate::domain::forensic::v105::axioms::is_v105_summary_code(
-                            trimmed_hint,
-                        ) || reg
-                            .forced_compact_codes
-                            .as_ref()
-                            .map(|codes| codes.iter().any(|c| c == trimmed_hint))
-                            .unwrap_or(false)
-                            || reg
-                                .forced_runeword_codes
-                                .as_ref()
-                                .map(|codes| codes.iter().any(|c| c == trimmed_hint))
-                                .unwrap_or(false)
-                            || reg
-                                .item_overrides
-                                .as_ref()
-                                .and_then(|overrides| overrides.get(trimmed_hint))
-                                .and_then(|map| map.get("fixed_width"))
-                                .copied()
-                                .unwrap_or(0)
-                                > 0);
-                    if anchored_hint {
-                        body.code = trimmed_hint.to_string();
-                    }
-                }
-            }
-            if let Some(hint) = code_hint.or(code_peek) {
-                let trimmed_hint = hint.trim();
-                if (trimmed_hint == "xrs" || trimmed_hint == "c8xr") && body.code.trim().is_empty()
-                {
-                    body.code = "xrs ".to_string();
-                }
-            }
-            body.code =
-                code_recovery::normalize_alpha_body_code(&body.code, &reg.effective_codes);
-            if let Some(hint) = code_hint.or(code_peek) {
-                let trimmed_hint = hint.trim();
-                // Keep the final item owner aligned with the trusted UCB8 witness when
-                // the serialized body still collapses to the drifted `wucb` alias.
-                if trimmed_hint == "ucb8" && body.code.trim() == "wucb" {
-                    body.code = trimmed_hint.to_string();
-                }
-            }
+            code_recovery::recover_alpha_body_code(
+                &mut body.code,
+                code_hint,
+                code_peek,
+                reg,
+                crate::domain::forensic::v105::axioms::is_v105_summary_code,
+            );
         }
 
         let body_is_template =
