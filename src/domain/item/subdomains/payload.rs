@@ -5,7 +5,7 @@ use crate::data::generated::layout_policy::{
 };
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
 use crate::domain::item::bit_emitter::BitEmitter;
-use crate::domain::item::entity::{D2rV3AuxiliaryData, ExtendedStatsData};
+use crate::domain::item::entity::{D2rV3AuxiliaryData, D2rV3ChronicleData, ExtendedStatsData};
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::subdomains::affix::{
     AffixCombinator, MagicAffixSegment, RareAffixSegment, UniqueAffixSegment,
@@ -13,6 +13,91 @@ use crate::domain::item::subdomains::affix::{
 use crate::error::{ParsingError, ParsingResult};
 use bitstream_io::BitRead;
 use std::io;
+
+/// Read the v105 source-bound Chronicle payload before advanced stash fields.
+/// Inactive dialects and compact items retain their previous consumption contract.
+pub fn read_d2r_v3_chronicle<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    save_version: u32,
+    flags: u32,
+    compact_item: bool,
+) -> ParsingResult<Option<D2rV3ChronicleData>> {
+    use crate::data::generated::layout_policy::D2rV3ChronicleLayout as W;
+    if !W::is_present(save_version, flags, compact_item) {
+        return Ok(None);
+    }
+    cursor.push_context("D2rV3Chronicle");
+    let source_id = cursor.read_bits::<u16>(W::SOURCE_ID)?;
+    let compact = flags & W::COMPACT_FLAG != 0;
+    let timestamp = if compact {
+        None
+    } else {
+        Some(cursor.read_bits::<u32>(W::TIMESTAMP)?)
+    };
+    let count = if compact {
+        1
+    } else {
+        cursor.read_bits::<u8>(W::COUNT)? as usize
+    };
+    if count > W::MAX_RECIPIENTS {
+        return Err(cursor.fail(ParsingError::UnexpectedValue {
+            field: "D2R v105 Chronicle recipient count".to_string(),
+            value: count.to_string(),
+            reason: "Unsupported count; recipient words must not be silently clamped".to_string(),
+        }));
+    }
+    let mut recipients = Vec::with_capacity(count);
+    for _ in 0..count {
+        recipients.push(cursor.read_bits::<u64>(W::RECIPIENT)?);
+    }
+    cursor.end_segment();
+    Ok(Some(D2rV3ChronicleData {
+        source_id,
+        timestamp,
+        recipients,
+    }))
+}
+
+pub(in crate::domain::item) fn write_d2r_v3_chronicle(
+    auxiliary: &D2rV3AuxiliaryData,
+    flags: u32,
+    compact_item: bool,
+) -> io::Result<Vec<bool>> {
+    use crate::data::generated::layout_policy::D2rV3ChronicleLayout as W;
+    let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+    if !W::is_present(auxiliary.save_version, flags, compact_item) {
+        return if auxiliary.chronicle.is_some() {
+            Err(invalid(
+                "Chronicle fields exist outside the v105 full-item presence contract",
+            ))
+        } else {
+            Ok(Vec::new())
+        };
+    }
+    let chronicle = auxiliary
+        .chronicle
+        .as_ref()
+        .ok_or_else(|| invalid("Missing source-required Chronicle fields"))?;
+    let compact = flags & W::COMPACT_FLAG != 0;
+    if chronicle.recipients.len() > W::MAX_RECIPIENTS
+        || (compact && (chronicle.timestamp.is_some() || chronicle.recipients.len() != 1))
+        || (!compact && chronicle.timestamp.is_none())
+    {
+        return Err(invalid(
+            "Chronicle form, timestamp and recipient count disagree",
+        ));
+    }
+    let mut emitter = BitEmitter::new();
+    emitter.write_bits(u32::from(chronicle.source_id), W::SOURCE_ID)?;
+    if let Some(timestamp) = chronicle.timestamp {
+        emitter.write_bits(timestamp, W::TIMESTAMP)?;
+        emitter.write_bits(chronicle.recipients.len() as u32, W::COUNT)?;
+    }
+    for recipient in &chronicle.recipients {
+        emitter.write_bits_u64(*recipient, W::RECIPIENT)?;
+    }
+    Ok(emitter.into_bits())
+}
 
 /// Executes the payload representation selected by the enclosing item parser.
 /// Recovery and item classification remain outside this codec interface.

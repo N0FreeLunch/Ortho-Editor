@@ -4408,7 +4408,7 @@ impl Item {
                     auxiliary.concealed_stats = Some(hidden);
                 }
 
-                let chronicle = crate::domain::item::entity::read_d2r_v3_chronicle(
+                let chronicle = crate::domain::item::subdomains::payload::read_d2r_v3_chronicle(
                     cursor,
                     save_version,
                     item.header.flags,
@@ -4886,42 +4886,10 @@ impl crate::domain::item::entity::D2rV3AuxiliaryData {
         flags: u32,
         compact_item: bool,
     ) -> io::Result<Vec<bool>> {
-        use crate::domain::item::entity::D2rV3ChronicleLayout as W;
-        let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
-        if !W::is_present(self.save_version, flags, compact_item) {
-            return if self.chronicle.is_some() {
-                Err(invalid(
-                    "Chronicle fields exist outside the v105 full-item presence contract",
-                ))
-            } else {
-                Ok(Vec::new())
-            };
-        }
-        let chronicle = self
-            .chronicle
-            .as_ref()
-            .ok_or_else(|| invalid("Missing source-required Chronicle fields"))?;
-        let compact = flags & W::COMPACT_FLAG != 0;
-        if chronicle.recipients.len() > W::MAX_RECIPIENTS
-            || (compact && (chronicle.timestamp.is_some() || chronicle.recipients.len() != 1))
-            || (!compact && chronicle.timestamp.is_none())
-        {
-            return Err(invalid(
-                "Chronicle form, timestamp and recipient count disagree",
-            ));
-        }
-        let mut emitter = BitEmitter::new();
-        emitter.write_bits(u32::from(chronicle.source_id), W::SOURCE_ID)?;
-        if let Some(timestamp) = chronicle.timestamp {
-            emitter.write_bits(timestamp, W::TIMESTAMP)?;
-            emitter.write_bits(chronicle.recipients.len() as u32, W::COUNT)?;
-        }
-        for recipient in &chronicle.recipients {
-            emitter.write_bits_u64(*recipient, W::RECIPIENT)?;
-        }
-        Ok(emitter.into_bits())
+        crate::domain::item::subdomains::payload::write_d2r_v3_chronicle(self, flags, compact_item)
     }
 }
+
 impl Item {
     /// Rebuild a stored v105 compact quest item from its source-owned field values.
     /// Whole-item bits, ranges and segment caches are never emission inputs.
@@ -6067,8 +6035,13 @@ impl Item {
             };
             d2r_v3_write_weapon_list(&mut emitter, properties)?;
         }
-        emitter
-            .extend_bits(auxiliary.to_bits_d2r_v3_chronicle(header.flags, header.is_compact)?)?;
+        emitter.extend_bits(
+            crate::domain::item::subdomains::payload::write_d2r_v3_chronicle(
+                auxiliary,
+                header.flags,
+                header.is_compact,
+            )?,
+        )?;
         emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
         if let Some(quantity) = auxiliary.advanced_stash_quantity {
             d2r_v3_write_checked(
@@ -6903,6 +6876,209 @@ mod chronicle_codec_tests {
                 reparsed[0].to_bits_d2r_v3_jewelry(&huffman).unwrap(),
                 emitted
             );
+        }
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn chronicle_public_codec_observations() {
+        use bitstream_io::{BitRead, BitReader, LittleEndian};
+        use std::io::Cursor;
+
+        fn state<R: BitRead>(cursor: &BitCursor<R>) -> String {
+            format!(
+                "{:?}",
+                (
+                    cursor.pos(),
+                    cursor.limit(),
+                    cursor.remaining(),
+                    cursor.recorded_bits(),
+                    cursor.segments(),
+                    cursor.active_segments(),
+                    cursor.context_stack(),
+                    cursor.operation_events(),
+                    cursor.alpha_quality,
+                )
+            )
+        }
+        let versions = [0u32, 104, 105, 106, u32::MAX];
+        let flags = [
+            0u32,
+            1 << 28,
+            1 << 29,
+            (1 << 28) | (1 << 29),
+            u32::MAX,
+            (1 << 28) | (1 << 21),
+            (1 << 29) | (1 << 21),
+            (1 << 28) | (1 << 29) | (1 << 21),
+        ];
+        let mut reader_rows = Vec::new();
+        let mut writer_rows = Vec::new();
+        let data_cases = [
+            None,
+            Some(D2rV3ChronicleData {
+                source_id: 0,
+                timestamp: Some(0),
+                recipients: vec![],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: u16::MAX,
+                timestamp: Some(u32::MAX),
+                recipients: vec![0xa5c3_6987_89ab_cdef, u64::MAX],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 0x79b5,
+                timestamp: Some(0x1234_5679),
+                recipients: (0..8)
+                    .map(|i| 0xa5c3_6987_89ab_cdefu64.wrapping_add(i))
+                    .collect(),
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 17,
+                timestamp: None,
+                recipients: vec![u64::MAX],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 17,
+                timestamp: None,
+                recipients: vec![],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 17,
+                timestamp: Some(19),
+                recipients: vec![0; 9],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 17,
+                timestamp: Some(19),
+                recipients: vec![0; 15],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 17,
+                timestamp: None,
+                recipients: vec![1, 2],
+            }),
+            Some(D2rV3ChronicleData {
+                source_id: 17,
+                timestamp: Some(19),
+                recipients: vec![3],
+            }),
+        ];
+        for version in versions {
+            for raw_flags in flags {
+                for compact_item in [false, true] {
+                    for buffer_case in 0..9 {
+                        for prefix in [0u32, 3] {
+                            let mut bytes: Vec<u8> = match buffer_case {
+                                0 => Vec::new(),
+                                1 => vec![0; 1],
+                                2 => vec![0; 128],
+                                3 => vec![255; 128],
+                                _ => (0..128)
+                                    .map(|i| (i as u8).wrapping_mul(37).wrapping_add(91))
+                                    .collect(),
+                            };
+                            if buffer_case >= 5 {
+                                // Select only the full-form count nibble; every other bit is arbitrary.
+                                let count = [1u8, 8, 9, 15][buffer_case - 5];
+                                for bit in 0..4 {
+                                    let offset = usize::try_from(prefix + 48 + bit).unwrap();
+                                    let mask = 1 << (offset % 8);
+                                    bytes[offset / 8] = (bytes[offset / 8] & !mask)
+                                        | (((count >> bit) & 1) << (offset % 8));
+                                }
+                            }
+                            for limit in [
+                                None,
+                                Some(0),
+                                Some(u64::from(prefix) + 15),
+                                Some(u64::from(prefix) + 51),
+                                Some(u64::from(prefix) + 564),
+                            ] {
+                                for parent in [false, true] {
+                                    let mut cursor = BitCursor::new(BitReader::endian(
+                                        Cursor::new(&bytes),
+                                        LittleEndian,
+                                    ));
+                                    cursor.set_trace(true);
+                                    cursor.read_bits_as_vec_up_to(prefix);
+                                    cursor.push_context("Chronicle public witness");
+                                    if parent {
+                                        cursor.begin_segment(crate::domain::header::entity::ItemSegmentType::ExtendedStats);
+                                        cursor.alpha_quality = Some(
+                                            crate::domain::item::quality::ItemQuality::Crafted,
+                                        );
+                                    }
+                                    if let Some(limit) = limit {
+                                        cursor.set_limit(limit);
+                                    }
+                                    let before = state(&cursor);
+                                    let result = read_d2r_v3_chronicle(
+                                        &mut cursor,
+                                        version,
+                                        raw_flags,
+                                        compact_item,
+                                    );
+                                    let after = state(&cursor);
+                                    let following = cursor.read_bits::<u8>(5);
+                                    reader_rows.push(serde_json::json!({
+                                        "version": version, "flags": raw_flags, "compact_item": compact_item,
+                                        "buffer_case": buffer_case, "prefix": prefix, "limit": limit, "parent": parent,
+                                        "before": before, "success": result.is_ok(), "result": format!("{result:?}"),
+                                        "after": after, "following": format!("{following:?}"), "after_following": state(&cursor),
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                    for (case, value) in data_cases.iter().enumerate() {
+                        for noise in [false, true] {
+                            let auxiliary = D2rV3AuxiliaryData {
+                                save_version: version,
+                                chronicle: value.clone(),
+                                stored_in: noise.then_some(4),
+                                filled_sockets: if noise { 3 } else { 0 },
+                                quest_difficulty: noise.then_some(42),
+                                realm_data: if noise { vec![0, u32::MAX] } else { vec![] },
+                                advanced_stash_quantity: noise.then_some(173),
+                                has_quantity: noise,
+                                ..Default::default()
+                            };
+                            let result =
+                                auxiliary.to_bits_d2r_v3_chronicle(raw_flags, compact_item);
+                            let success = result.is_ok();
+                            let observation = match result {
+                                Ok(bits) => serde_json::json!({"bits": bits}),
+                                Err(error) => {
+                                    serde_json::json!({"kind": format!("{:?}", error.kind()), "message": error.to_string()})
+                                }
+                            };
+                            writer_rows.push(serde_json::json!({
+                                "version": version, "flags": raw_flags, "compact_item": compact_item,
+                                "case": case, "data": format!("{value:?}"), "noise": noise,
+                                "success": success, "result": observation,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(reader_rows.len(), 14400);
+        assert_eq!(writer_rows.len(), 1600);
+        let reader_successes = reader_rows.iter().filter(|r| r["success"] == true).count();
+        let writer_successes = writer_rows.iter().filter(|r| r["success"] == true).count();
+        assert!(reader_successes > 0 && reader_successes < reader_rows.len());
+        assert!(writer_successes > 0 && writer_successes < writer_rows.len());
+        if let Some(path) = std::env::var_os("D2R_CHRONICLE_CODEC_OUTPUT") {
+            let output = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            serde_json::to_writer_pretty(output, &serde_json::json!({
+                "schema": 1, "reader_cases": reader_rows.len(), "writer_cases": writer_rows.len(),
+                "reader_successes": reader_successes, "writer_successes": writer_successes,
+                "reader_rows": reader_rows, "writer_rows": writer_rows,
+            })).unwrap();
         }
     }
 }

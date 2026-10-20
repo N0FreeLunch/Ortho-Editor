@@ -167,67 +167,9 @@ pub struct D2rV3ChronicleData {
     pub recipients: Vec<u64>,
 }
 
-/// Version-scoped layout shared by the explicit reader and payload inverse.
-pub(crate) struct D2rV3ChronicleLayout;
-
-impl D2rV3ChronicleLayout {
-    pub const SAVE_VERSION: u32 = 0x69;
-    pub const PRESENT_FLAG: u32 = 1 << 28;
-    pub const COMPACT_FLAG: u32 = 1 << 29;
-    pub const SOURCE_ID: u32 = 16;
-    pub const TIMESTAMP: u32 = 32;
-    pub const COUNT: u32 = 4;
-    pub const RECIPIENT: u32 = 64;
-    pub const MAX_RECIPIENTS: usize = 8;
-
-    pub fn is_present(save_version: u32, flags: u32, compact_item: bool) -> bool {
-        save_version == Self::SAVE_VERSION && !compact_item && flags & Self::PRESENT_FLAG != 0
-    }
-}
-
 /// Read the v105 source-bound Chronicle payload before advanced stash fields.
 /// Inactive dialects and compact items retain their previous consumption contract.
-pub fn read_d2r_v3_chronicle<R: BitRead>(
-    cursor: &mut BitCursor<R>,
-    save_version: u32,
-    flags: u32,
-    compact_item: bool,
-) -> ParsingResult<Option<D2rV3ChronicleData>> {
-    use D2rV3ChronicleLayout as W;
-    if !W::is_present(save_version, flags, compact_item) {
-        return Ok(None);
-    }
-    cursor.push_context("D2rV3Chronicle");
-    let source_id = cursor.read_bits::<u16>(W::SOURCE_ID)?;
-    let compact = flags & W::COMPACT_FLAG != 0;
-    let timestamp = if compact {
-        None
-    } else {
-        Some(cursor.read_bits::<u32>(W::TIMESTAMP)?)
-    };
-    let count = if compact {
-        1
-    } else {
-        cursor.read_bits::<u8>(W::COUNT)? as usize
-    };
-    if count > W::MAX_RECIPIENTS {
-        return Err(cursor.fail(ParsingError::UnexpectedValue {
-            field: "D2R v105 Chronicle recipient count".to_string(),
-            value: count.to_string(),
-            reason: "Unsupported count; recipient words must not be silently clamped".to_string(),
-        }));
-    }
-    let mut recipients = Vec::with_capacity(count);
-    for _ in 0..count {
-        recipients.push(cursor.read_bits::<u64>(W::RECIPIENT)?);
-    }
-    cursor.end_segment();
-    Ok(Some(D2rV3ChronicleData {
-        source_id,
-        timestamp,
-        recipients,
-    }))
-}
+pub use crate::domain::item::subdomains::payload::read_d2r_v3_chronicle;
 
 /// Auxiliary fields belonging to the explicitly selected D2R v3 dialect.
 /// These are field values, not a cached copy of the item stream.
