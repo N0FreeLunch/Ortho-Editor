@@ -4749,20 +4749,7 @@ impl D2rV3JewelryWidths {
     const TERMINATOR: u32 = 511;
 }
 
-fn d2r_v3_write_checked(
-    emitter: &mut BitEmitter,
-    value: u64,
-    width: u32,
-    field: &str,
-) -> io::Result<()> {
-    if width > 32 || value >= (1u64 << width) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("D2R v3 {field} value {value} does not fit {width} bits"),
-        ));
-    }
-    emitter.write_bits(value as u32, width)
-}
+use super::bit_emitter::d2r_v3_write_checked;
 
 fn d2r_v3_write_scalar_list(
     emitter: &mut BitEmitter,
@@ -6190,6 +6177,76 @@ mod tests {
         assert_eq!(carrier_fail.start_bit, 0);
         assert!(carrier_fail.final_bit > 0);
         assert!(!carrier_fail.segments.is_empty());
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn checked_scalar_writer_observations() {
+        let widths: [u32; 15] = [0, 1, 2, 3, 4, 7, 8, 9, 16, 31, 32, 33, 63, 64, u32::MAX];
+        let values: [u64; 14] = [
+            0,
+            1,
+            2,
+            3,
+            0x7f,
+            0x80,
+            0xff,
+            0x100,
+            0x7fff_ffff,
+            0x8000_0000,
+            0xffff_ffff,
+            0x1_0000_0000,
+            0x0123_4567_89ab_cdef,
+            u64::MAX,
+        ];
+        let prefixes = [
+            vec![],
+            vec![true, false, true],
+            (0..39).map(|i| i % 3 != 1).collect(),
+        ];
+        let mut rows = Vec::new();
+        let mut successes = 0usize;
+        for width in widths {
+            for value in values {
+                for (prefix_index, prefix) in prefixes.iter().enumerate() {
+                    for field in ["flags", "quest difficulty", ""] {
+                        let mut emitter = BitEmitter::new();
+                        emitter.extend_bits(prefix.iter().copied()).unwrap();
+                        let before = serde_json::json!({"bits":emitter.bits(),"written":emitter.written_bits()});
+                        let outcome = match super::d2r_v3_write_checked(
+                            &mut emitter,
+                            value,
+                            width,
+                            field,
+                        ) {
+                            Ok(()) => {
+                                successes += 1;
+                                serde_json::json!({"ok":true})
+                            }
+                            Err(error) => {
+                                serde_json::json!({"ok":false,"kind":format!("{:?}",error.kind()),"message":error.to_string()})
+                            }
+                        };
+                        let after = serde_json::json!({"bits":emitter.bits(),"written":emitter.written_bits()});
+                        emitter.write_bit(true).unwrap();
+                        emitter.write_bits(0b101, 3).unwrap();
+                        let following = serde_json::json!({"bits":emitter.bits(),"written":emitter.written_bits()});
+                        let bytes = emitter.into_bytes();
+                        rows.push(serde_json::json!({"width":width,"value":value,"prefix":prefix_index,"field":field,"before":before,"outcome":outcome,"after":after,"following":following,"bytes":bytes}));
+                    }
+                }
+            }
+        }
+        assert_eq!(rows.len(), 1890);
+        assert!(successes > 0 && successes < rows.len());
+        if let Ok(path) = std::env::var("D2R_CHECKED_SCALAR_OUTPUT") {
+            let output = serde_json::json!({"schema":1,"cases":rows.len(),"successes":successes,"errors":rows.len()-successes,"rows":rows});
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            serde_json::to_writer_pretty(file, &output).unwrap();
+        }
     }
 }
 
