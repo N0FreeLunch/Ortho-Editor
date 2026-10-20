@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::data::generated::layout_policy::legacy_extended_payload_code_policy;
 use crate::domain::forensic::registry::get_registry;
 use crate::domain::forensic::v105::{
     get_v105_target_width, V105HeaderGapAxiom, V105PropertyWidthAxiom,
@@ -3397,6 +3398,7 @@ impl ExtendedStatsData {
         cursor.begin_segment(ItemSegmentType::ExtendedStats);
         let mut data = Self::default();
         let trimmed_code = code.trim();
+        let code_policy = legacy_extended_payload_code_policy(trimmed_code);
         let version = header.version;
         let is_compact = header.is_compact;
         let is_socketed_flag = header.is_socketed;
@@ -3409,14 +3411,10 @@ impl ExtendedStatsData {
             && ((header.flags & (1 << 26)) != 0 || (header.flags & (1 << 27)) != 0);
         let mut is_alpha_early_exit =
             h_axiom.is_alpha() && w_axiom.is_extended_stats_early_exit(version);
-        if trimmed_code == "wa2" || trimmed_code == "rhd" {
+        if code_policy.continues_after_alpha_early_exit {
             is_alpha_early_exit = false;
         }
-        let soft_truncate_on_limit = alpha_mode
-            && matches!(
-                trimmed_code,
-                "jav" | "buc" | "ucb8" | "xrs" | "c8xr" | "rhd" | "wa2" | "bst"
-            );
+        let soft_truncate_on_limit = alpha_mode && code_policy.soft_truncate_on_io_boundary;
         trait IntoParsingError {
             fn into_parsing_error(self) -> crate::error::ParsingError;
         }
@@ -3520,8 +3518,7 @@ impl ExtendedStatsData {
                 data.alpha_quality_raw = Some(quality_raw);
                 data.quality = Some(quality);
 
-                let is_authority_runeword =
-                    alpha_mode && (trimmed_code == "xrs" || trimmed_code == "c8xr");
+                let is_authority_runeword = alpha_mode && code_policy.authority_container;
                 if w_axiom.has_v5_runeword_extra(version)
                     && (is_runeword
                         || is_fragment
@@ -3594,7 +3591,7 @@ impl ExtendedStatsData {
         }
 
         let template = crate::data::repository::legacy_item_template(trimmed_code);
-        data.has_multiple_graphics = matches!(trimmed_code, "rin" | "amu" | "cm1" | "cm2" | "cm3");
+        data.has_multiple_graphics = code_policy.has_multiple_graphics;
         data.has_class_specific_data = false;
 
         if data.has_multiple_graphics {
@@ -3704,7 +3701,7 @@ impl ExtendedStatsData {
                 )
             ));
         }
-        if trimmed_code == "tbk" || trimmed_code == "ibk" {
+        if code_policy.has_teleport_bits {
             let tp_bits = w_axiom.teleport_bits() as u32;
             data.tbk_ibk_teleport = Some(read_or_truncate!(
                 cursor,
@@ -3741,13 +3738,13 @@ impl ExtendedStatsData {
                 template.is_stackable,
             )
         } else {
-            let is_scroll = trimmed_code == "tsc" || trimmed_code == "isc";
-            let is_authority_xrs = alpha_mode && (trimmed_code == "xrs" || trimmed_code == "c8xr");
+            let is_scroll = code_policy.scroll_quantity_fallback;
+            let is_authority_xrs = alpha_mode && code_policy.authority_container;
             let armor_like_unknown =
                 data.has_class_specific_data || trimmed_code.contains(' ') || is_authority_xrs;
             (armor_like_unknown, armor_like_unknown, is_scroll)
         };
-        if trimmed_code == "wa2" || trimmed_code == "rhd" {
+        if code_policy.force_durability {
             reads_durability = true;
         }
         if reads_defense && axiom.reads_defense() {
