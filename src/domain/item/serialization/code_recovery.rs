@@ -1,4 +1,7 @@
-use crate::data::generated::layout_policy::legacy_alpha_body_capture_code_alias;
+use crate::data::generated::layout_policy::{
+    legacy_alpha_body_capture_code_alias, legacy_alpha_empty_body_hint_fallback,
+    legacy_alpha_trusted_body_repair_observation,
+};
 use crate::domain::forensic::registry::AlphaForensics;
 use std::collections::HashMap;
 
@@ -71,8 +74,10 @@ fn promote_alpha_body_code_hint(
     }
     if let Some(hint) = code_hint.or(code_peek) {
         let trimmed_hint = hint.trim();
-        if (trimmed_hint == "xrs" || trimmed_hint == "c8xr") && code.trim().is_empty() {
-            *code = "xrs ".to_string();
+        if let Some(fallback) =
+            legacy_alpha_empty_body_hint_fallback(trimmed_hint).filter(|_| code.trim().is_empty())
+        {
+            *code = fallback.to_string();
         }
     }
 }
@@ -84,9 +89,10 @@ fn repair_alpha_body_code_with_trusted_hint(
 ) {
     if let Some(hint) = code_hint.or(code_peek) {
         let trimmed_hint = hint.trim();
-        // Keep the final item owner aligned with the trusted UCB8 witness when
-        // the serialized body still collapses to the drifted `wucb` alias.
-        if trimmed_hint == "ucb8" && code.trim() == "wucb" {
+        // Copy the selected trusted hint only after its body observation matches.
+        if legacy_alpha_trusted_body_repair_observation(trimmed_hint)
+            .is_some_and(|observed_body| code.trim() == observed_body)
+        {
             *code = trimmed_hint.to_string();
         }
     }
