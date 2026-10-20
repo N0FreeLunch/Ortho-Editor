@@ -1,5 +1,8 @@
 use crate::data::bit_cursor::BitCursor;
-use crate::data::generated::layout_policy::legacy_extended_payload_code_policy;
+use crate::data::generated::layout_policy::{
+    D2rV3ExtendedPayloadWidths as V3W, d2r_v3_extended_version_policy,
+    d2r_v3_normal_payload_code_policy, legacy_extended_payload_code_policy,
+};
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
 use crate::domain::item::bit_emitter::BitEmitter;
 use crate::domain::item::entity::{D2rV3AuxiliaryData, ExtendedStatsData};
@@ -124,69 +127,71 @@ pub(in crate::domain::item) fn read_d2r_v3_extended_payload<R: BitRead>(
     cursor.begin_segment(ItemSegmentType::ExtendedStats);
     let mut data = ExtendedStatsData::default();
     let trimmed_code = code.trim();
+    let version_policy = d2r_v3_extended_version_policy(save_version);
 
     let mut auxiliary = D2rV3AuxiliaryData {
         save_version,
-        filled_sockets: cursor.read_bits::<u8>(3)?,
+        filled_sockets: cursor.read_bits::<u8>(V3W::FILLED_SOCKETS)?,
         ..Default::default()
     };
-    data.id = Some(cursor.read_bits::<u32>(32)?);
-    data.level = Some(cursor.read_bits::<u8>(7)?);
-    let quality_raw = cursor.read_bits::<u8>(4)?;
+    data.id = Some(cursor.read_bits::<u32>(V3W::ITEM_ID)?);
+    data.level = Some(cursor.read_bits::<u8>(V3W::LEVEL)?);
+    let quality_raw = cursor.read_bits::<u8>(V3W::QUALITY)?;
     let quality = ItemQuality::from(quality_raw);
     data.quality = Some(quality);
 
     data.has_multiple_graphics = cursor.read_bit()?;
     if data.has_multiple_graphics {
-        data.multi_graphics_bits = Some(cursor.read_bits::<u8>(3)?);
+        data.multi_graphics_bits = Some(cursor.read_bits::<u8>(V3W::GRAPHIC)?);
     }
     data.has_class_specific_data = cursor.read_bit()?;
     if data.has_class_specific_data {
-        data.class_specific_bits = Some(cursor.read_bits::<u16>(11)?);
+        data.class_specific_bits = Some(cursor.read_bits::<u16>(V3W::CLASS_DATA)?);
     }
 
     match quality {
         ItemQuality::Low => {
-            data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(3)?);
+            data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(V3W::QUALITY_SUBTYPE)?);
         }
         ItemQuality::Normal => {
-            if matches!(trimmed_code, "cm1" | "cm2" | "cm3") {
-                cursor.skip_and_record(12)?;
-            } else if matches!(trimmed_code, "tsc" | "isc" | "tbk" | "ibk") {
-                data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(5)?);
+            let code_policy = d2r_v3_normal_payload_code_policy(trimmed_code);
+            if code_policy.has_charm_reserved {
+                cursor.skip_and_record(V3W::CHARM_RESERVED)?;
+            } else if code_policy.has_tome_or_scroll_field {
+                data.tbk_ibk_teleport = Some(cursor.read_bits::<u8>(V3W::TOME_OR_SCROLL)?);
             }
         }
         ItemQuality::High => {
-            data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(3)?);
+            data.low_high_graphic_bits = Some(cursor.read_bits::<u8>(V3W::QUALITY_SUBTYPE)?);
         }
         ItemQuality::Magic => {
-            data.magic_prefix = Some(cursor.read_bits::<u16>(11)?);
-            data.magic_suffix = Some(cursor.read_bits::<u16>(11)?);
+            data.magic_prefix = Some(cursor.read_bits::<u16>(V3W::AFFIX)?);
+            data.magic_suffix = Some(cursor.read_bits::<u16>(V3W::AFFIX)?);
         }
         ItemQuality::Set => {
-            data.unique_id = Some(cursor.read_bits::<u16>(12)?);
+            data.unique_id = Some(cursor.read_bits::<u16>(V3W::UNIQUE_OR_SET_ID)?);
         }
         ItemQuality::Rare | ItemQuality::Crafted => {
-            data.rare_name_1 = Some(cursor.read_bits::<u8>(8)?);
-            data.rare_name_2 = Some(cursor.read_bits::<u8>(8)?);
+            data.rare_name_1 = Some(cursor.read_bits::<u8>(V3W::RARE_NAME)?);
+            data.rare_name_2 = Some(cursor.read_bits::<u8>(V3W::RARE_NAME)?);
             for affix in &mut data.rare_affixes {
                 if cursor.read_bit()? {
-                    *affix = Some(cursor.read_bits::<u16>(11)?);
+                    *affix = Some(cursor.read_bits::<u16>(V3W::AFFIX)?);
                 }
             }
         }
         ItemQuality::Unique => {
-            data.unique_id = Some(cursor.read_bits::<u16>(12)?);
+            data.unique_id = Some(cursor.read_bits::<u16>(V3W::UNIQUE_OR_SET_ID)?);
         }
     }
 
     if header.is_runeword {
-        data.runeword_id = Some(cursor.read_bits::<u16>(16)?);
+        data.runeword_id = Some(cursor.read_bits::<u16>(V3W::RUNEWORD_ID)?);
     }
     if header.is_personalized {
-        let bits_per_char = if save_version >= 0x62 { 8 } else { 7 };
+        let bits_per_char = version_policy.personalized_character_bits;
         let mut name = String::new();
-        for _ in 0..16 {
+        for _ in 0..V3W::PERSONALIZED_NAME_LIMIT {
             let ch = cursor.read_bits::<u8>(bits_per_char)?;
             if ch == 0 {
                 break;
@@ -198,21 +203,17 @@ pub(in crate::domain::item) fn read_d2r_v3_extended_payload<R: BitRead>(
 
     let has_realm_data = cursor.read_bit()?;
     if has_realm_data {
-        let realm_data_count = if save_version > 96 {
-            4
-        } else if save_version > 93 {
-            3
-        } else {
-            2
-        };
+        let realm_data_count = version_policy.realm_word_count;
         for _ in 0..realm_data_count {
-            auxiliary.realm_data.push(cursor.read_bits::<u32>(32)?);
+            auxiliary
+                .realm_data
+                .push(cursor.read_bits::<u32>(V3W::REALM_WORD)?);
         }
     }
 
     if trimmed_code == "gld" {
         let _not_gold = cursor.read_bit()?;
-        data.quantity = Some(cursor.read_bits::<u32>(12)?);
+        data.quantity = Some(cursor.read_bits::<u32>(V3W::GOLD_QUANTITY)?);
     }
 
     let template =
@@ -254,13 +255,13 @@ pub(in crate::domain::item) fn read_d2r_v3_extended_payload<R: BitRead>(
         }
     }
 
-    if save_version >= 0x69 {
+    if version_policy.quantity_presence_bit {
         auxiliary.has_quantity = cursor.read_bit()?;
         if auxiliary.has_quantity {
-            data.quantity = Some(cursor.read_bits::<u32>(9)?);
+            data.quantity = Some(cursor.read_bits::<u32>(V3W::QUANTITY)?);
         }
     } else if template.is_stackable {
-        data.quantity = Some(cursor.read_bits::<u32>(9)?);
+        data.quantity = Some(cursor.read_bits::<u32>(V3W::QUANTITY)?);
     }
     if header.is_socketed {
         let width = d2r_v3_stat_width(cursor, 194)?;

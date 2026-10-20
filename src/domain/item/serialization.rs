@@ -4744,21 +4744,6 @@ impl D2rV3JewelryWidths {
     const MODE: u32 = 3;
     const POSITION: u32 = 4;
     const STORED_IN: u32 = 3;
-    const FILLED_SOCKETS: u32 = 3;
-    const ITEM_ID: u32 = 32;
-    const LEVEL: u32 = 7;
-    const QUALITY: u32 = 4;
-    const GRAPHIC: u32 = 3;
-    const CLASS_DATA: u32 = 11;
-    const HIGH_SUBTYPE: u32 = 3;
-    const AFFIX: u32 = 11;
-    const RARE_NAME: u32 = 8;
-    const UNIQUE_ID: u32 = 12;
-    const RUNEWORD_ID: u32 = 16;
-    const PERSONALIZED_CHARACTER: u32 = 8;
-    const PERSONALIZED_NAME_LIMIT: usize = 16;
-    const TOME: u32 = 5;
-    const QUANTITY: u32 = 9;
     const STASH_QUANTITY: u32 = 8;
     const STAT_ID: u32 = 9;
     const TERMINATOR: u32 = 511;
@@ -5497,6 +5482,12 @@ impl Item {
                 }
             }
         }
+        let is_tome = stored_misc_layout
+            && crate::data::generated::layout_policy::d2r_v3_normal_payload_code_policy(
+                self.body.code.trim(),
+            )
+            .is_tome;
+
         if accessory_layout || stored_jewelry_layout || stored_misc_layout {
             let magic = quality == ItemQuality::Magic;
             let rare = quality == ItemQuality::Rare
@@ -5545,8 +5536,7 @@ impl Item {
                 || self.personalized_player_name.is_some()
                 || self.timestamp_flag
                 || if stored_misc_layout {
-                    self.tbk_ibk_teleport.is_some()
-                        != matches!(self.body.code.trim(), "tbk" | "ibk")
+                    self.tbk_ibk_teleport.is_some() != is_tome
                 } else {
                     self.tbk_ibk_teleport.is_some()
                 }
@@ -5798,6 +5788,10 @@ impl Item {
             99..=102 => (true, header.version - 99),
             _ => return Err(invalid("Unsupported D2R v3 item version")),
         };
+        use crate::data::generated::layout_policy::D2rV3ExtendedPayloadWidths as V3W;
+        let version_policy = crate::data::generated::layout_policy::d2r_v3_extended_version_policy(
+            auxiliary.save_version,
+        );
         let mut emitter = BitEmitter::new();
         use D2rV3JewelryWidths as W;
         d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
@@ -5816,29 +5810,29 @@ impl Item {
         d2r_v3_write_checked(
             &mut emitter,
             auxiliary.filled_sockets as u64,
-            W::FILLED_SOCKETS,
+            V3W::FILLED_SOCKETS,
             "filled sockets",
         )?;
         d2r_v3_write_checked(
             &mut emitter,
             header.id.ok_or_else(|| invalid("Missing item ID"))? as u64,
-            W::ITEM_ID,
+            V3W::ITEM_ID,
             "item ID",
         )?;
         d2r_v3_write_checked(
             &mut emitter,
             header.level.ok_or_else(|| invalid("Missing item level"))? as u64,
-            W::LEVEL,
+            V3W::LEVEL,
             "level",
         )?;
-        d2r_v3_write_checked(&mut emitter, quality as u64, W::QUALITY, "quality")?;
+        d2r_v3_write_checked(&mut emitter, quality as u64, V3W::QUALITY, "quality")?;
         emitter.write_bit(self.has_multiple_graphics)?;
         if self.has_multiple_graphics {
             d2r_v3_write_checked(
                 &mut emitter,
                 self.multi_graphics_bits
                     .ok_or_else(|| invalid("Missing graphic"))? as u64,
-                W::GRAPHIC,
+                V3W::GRAPHIC,
                 "graphic",
             )?;
         }
@@ -5848,7 +5842,7 @@ impl Item {
                 &mut emitter,
                 self.class_specific_bits
                     .ok_or_else(|| invalid("Missing class data"))? as u64,
-                W::CLASS_DATA,
+                V3W::CLASS_DATA,
                 "class data",
             )?;
         }
@@ -5859,19 +5853,17 @@ impl Item {
                     self.low_high_graphic_bits
                         .ok_or_else(|| invalid("Missing High armor subtype"))?
                         as u64,
-                    W::HIGH_SUBTYPE,
+                    V3W::QUALITY_SUBTYPE,
                     "High subtype",
                 )?;
             }
-            ItemQuality::Normal
-                if stored_misc_layout && matches!(self.body.code.trim(), "tbk" | "ibk") =>
-            {
+            ItemQuality::Normal if stored_misc_layout && is_tome => {
                 d2r_v3_write_checked(
                     &mut emitter,
                     self.tbk_ibk_teleport
                         .ok_or_else(|| invalid("Missing stored tome field"))?
                         as u64,
-                    W::TOME,
+                    V3W::TOME_OR_SCROLL,
                     "tome field",
                 )?;
             }
@@ -5879,13 +5871,13 @@ impl Item {
                 d2r_v3_write_checked(
                     &mut emitter,
                     self.magic_prefix.ok_or_else(|| invalid("Missing prefix"))? as u64,
-                    W::AFFIX,
+                    V3W::AFFIX,
                     "prefix",
                 )?;
                 d2r_v3_write_checked(
                     &mut emitter,
                     self.magic_suffix.ok_or_else(|| invalid("Missing suffix"))? as u64,
-                    W::AFFIX,
+                    V3W::AFFIX,
                     "suffix",
                 )?;
             }
@@ -5897,14 +5889,14 @@ impl Item {
                     d2r_v3_write_checked(
                         &mut emitter,
                         name.ok_or_else(|| invalid("Missing Rare name"))? as u64,
-                        W::RARE_NAME,
+                        V3W::RARE_NAME,
                         field,
                     )?;
                 }
                 for affix in self.rare_affixes {
                     emitter.write_bit(affix.is_some())?;
                     if let Some(id) = affix {
-                        d2r_v3_write_checked(&mut emitter, id as u64, W::AFFIX, "Rare affix")?;
+                        d2r_v3_write_checked(&mut emitter, id as u64, V3W::AFFIX, "Rare affix")?;
                     }
                 }
             }
@@ -5914,7 +5906,7 @@ impl Item {
                     self.unique_id
                         .ok_or_else(|| invalid("Missing unique or Set ID"))?
                         as u64,
-                    W::UNIQUE_ID,
+                    V3W::UNIQUE_OR_SET_ID,
                     "unique or Set ID",
                 )?;
             }
@@ -5926,7 +5918,7 @@ impl Item {
                 self.runeword_id
                     .ok_or_else(|| invalid("Missing socket host runeword ID"))?
                     as u64,
-                W::RUNEWORD_ID,
+                V3W::RUNEWORD_ID,
                 "runeword ID",
             )?;
         }
@@ -5936,7 +5928,7 @@ impl Item {
                 .as_deref()
                 .ok_or_else(|| invalid("Missing personalized equipment name"))?;
             let count = name.chars().count();
-            if count > W::PERSONALIZED_NAME_LIMIT
+            if count > V3W::PERSONALIZED_NAME_LIMIT
                 || name.chars().any(|ch| ch == '\0' || u32::from(ch) > 255)
             {
                 return Err(invalid(
@@ -5948,25 +5940,27 @@ impl Item {
                 d2r_v3_write_checked(
                     &mut emitter,
                     u32::from(ch) as u64,
-                    W::PERSONALIZED_CHARACTER,
+                    version_policy.personalized_character_bits,
                     "personalized character",
                 )?;
             }
-            if count < W::PERSONALIZED_NAME_LIMIT {
+            if count < V3W::PERSONALIZED_NAME_LIMIT {
                 d2r_v3_write_checked(
                     &mut emitter,
                     0,
-                    W::PERSONALIZED_CHARACTER,
+                    version_policy.personalized_character_bits,
                     "personalized terminator",
                 )?;
             }
         }
         emitter.write_bit(!auxiliary.realm_data.is_empty())?;
-        if !auxiliary.realm_data.is_empty() && auxiliary.realm_data.len() != 4 {
+        if !auxiliary.realm_data.is_empty()
+            && auxiliary.realm_data.len() != version_policy.realm_word_count
+        {
             return Err(invalid("D2R v3 realm data must contain four words"));
         }
         for &word in &auxiliary.realm_data {
-            d2r_v3_write_checked(&mut emitter, word as u64, 32, "realm word")?;
+            d2r_v3_write_checked(&mut emitter, word as u64, V3W::REALM_WORD, "realm word")?;
         }
         if armor_layout || weapon_layout {
             for (value, stat_id, name) in [
@@ -6009,7 +6003,7 @@ impl Item {
             d2r_v3_write_checked(
                 &mut emitter,
                 self.quantity.ok_or_else(|| invalid("Missing quantity"))? as u64,
-                W::QUANTITY,
+                V3W::QUANTITY,
                 "quantity",
             )?;
         } else if self.quantity.is_some() {
