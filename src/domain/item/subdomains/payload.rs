@@ -99,6 +99,144 @@ pub(in crate::domain::item) fn write_d2r_v3_chronicle(
     Ok(emitter.into_bits())
 }
 
+pub fn consume_d2r_v3_compact_tail<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    save_version: u32,
+    code: &str,
+    is_ear: bool,
+) -> ParsingResult<()> {
+    read_d2r_v3_compact_tail(cursor, save_version, code, is_ear).map(|_| ())
+}
+
+/// Retains source-owned compact tail fields of the verified v105 dialect.
+/// Other versions and ears preserve the existing consumption contract.
+pub fn read_d2r_v3_compact_tail<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    save_version: u32,
+    code: &str,
+    is_ear: bool,
+) -> ParsingResult<Option<D2rV3AuxiliaryData>> {
+    use crate::data::generated::layout_policy::{
+        D2rV3AuxiliaryPayloadLayout as W, D2rV3CompactStashPresence as Presence,
+        d2r_v3_compact_tail_version_policy,
+    };
+    if is_ear {
+        return Ok(None);
+    }
+    let policy = d2r_v3_compact_tail_version_policy(save_version);
+    let is_quest = policy.retains_auxiliary
+        && crate::data::repository::legacy_item_template(code.trim())
+            .is_some_and(|template| template.has_quest_difficulty);
+    let mut auxiliary = D2rV3AuxiliaryData {
+        save_version,
+        ..Default::default()
+    };
+    if is_quest {
+        cursor.push_context("D2rV3CompactQuest:Difficulty");
+        let width = crate::domain::stats::stat_save_bits(W::QUEST_DIFFICULTY_STAT_ID)
+            .filter(|&width| width > 0 && width <= 32)
+            .ok_or_else(|| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 quest difficulty metadata".to_string(),
+                    value: "missing or unsupported width".to_string(),
+                    reason: "Stat 356 must declare a supported save width".to_string(),
+                })
+            })?;
+        let add =
+            crate::domain::stats::stat_save_add(W::QUEST_DIFFICULTY_STAT_ID).ok_or_else(|| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 quest difficulty metadata".to_string(),
+                    value: "missing SaveAdd".to_string(),
+                    reason: "Stat 356 must declare its save bias".to_string(),
+                })
+            })?;
+        let raw = cursor.read_bits::<u32>(width)?;
+        auxiliary.quest_difficulty =
+            Some(u32::try_from(i64::from(raw) - i64::from(add)).map_err(|_| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "D2R v3 quest difficulty".to_string(),
+                    value: raw.to_string(),
+                    reason: "The biased source value cannot represent an unsigned difficulty"
+                        .to_string(),
+                })
+            })?);
+        cursor.end_segment();
+        cursor.push_context("D2rV3CompactQuest:Realm");
+    }
+    if cursor.read_bit()? {
+        let count = policy.realm_word_count;
+        for _ in 0..count {
+            auxiliary
+                .realm_data
+                .push(cursor.read_bits::<u32>(W::REALM_WORD)?);
+        }
+    }
+    if is_quest {
+        cursor.end_segment();
+        cursor.push_context("D2rV3CompactQuest:StashQuantity");
+    }
+    let present = match policy.stash_presence {
+        Presence::Absent => false,
+        Presence::TemplateStackable => crate::data::repository::legacy_item_template(code)
+            .is_some_and(|template| template.is_stackable),
+        Presence::ExplicitBit => cursor.read_bit()?,
+    };
+    if present {
+        auxiliary.advanced_stash_quantity = Some(cursor.read_bits::<u8>(W::STASH_QUANTITY)?);
+    }
+    if is_quest {
+        cursor.end_segment();
+    }
+    Ok(policy.retains_auxiliary.then_some(auxiliary))
+}
+
+pub(in crate::domain::item) fn prepare_d2r_v3_compact_quest_difficulty(
+    auxiliary: &D2rV3AuxiliaryData,
+    is_quest: bool,
+) -> io::Result<Option<(u64, u32)>> {
+    use crate::data::generated::layout_policy::D2rV3AuxiliaryPayloadLayout as W;
+    let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
+    Ok(if is_quest {
+        let difficulty = auxiliary
+            .quest_difficulty
+            .ok_or_else(|| invalid("Missing source-required quest difficulty"))?;
+        let width = crate::domain::stats::stat_save_bits(W::QUEST_DIFFICULTY_STAT_ID)
+            .filter(|&width| width > 0 && width <= 32)
+            .ok_or_else(|| invalid("Missing or unsupported quest difficulty save width"))?;
+        let add = crate::domain::stats::stat_save_add(W::QUEST_DIFFICULTY_STAT_ID)
+            .ok_or_else(|| invalid("Missing quest difficulty save bias"))?;
+        let raw = u64::try_from(i64::from(difficulty) + i64::from(add))
+            .map_err(|_| invalid("Negative encoded quest difficulty"))?;
+        Some((raw, width))
+    } else {
+        if auxiliary.quest_difficulty.is_some() {
+            return Err(invalid("Ordinary compact item contains quest difficulty"));
+        }
+        None
+    })
+}
+
+pub(in crate::domain::item) fn write_d2r_v3_compact_tail(
+    emitter: &mut BitEmitter,
+    auxiliary: &D2rV3AuxiliaryData,
+    difficulty_field: Option<(u64, u32)>,
+) -> io::Result<()> {
+    use crate::data::generated::layout_policy::D2rV3AuxiliaryPayloadLayout as W;
+    use crate::domain::item::bit_emitter::d2r_v3_write_checked;
+    if let Some((raw, width)) = difficulty_field {
+        d2r_v3_write_checked(emitter, raw, width, "quest difficulty")?;
+    }
+    emitter.write_bit(!auxiliary.realm_data.is_empty())?;
+    for word in &auxiliary.realm_data {
+        emitter.write_bits(*word, W::REALM_WORD)?;
+    }
+    emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
+    if let Some(quantity) = auxiliary.advanced_stash_quantity {
+        emitter.write_bits(quantity as u32, W::STASH_QUANTITY)?;
+    }
+    Ok(())
+}
+
 /// Executes the payload representation selected by the enclosing item parser.
 /// Recovery and item classification remain outside this codec interface.
 pub(in crate::domain::item) enum ExtendedPayloadReadPlan {

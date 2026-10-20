@@ -3978,7 +3978,7 @@ impl Item {
         let is_d2r_v3_compact = d2r_v3_save_version.is_some() && header.is_compact;
         let compact_auxiliary =
             if let Some(save_version) = d2r_v3_save_version.filter(|_| header.is_compact) {
-                crate::domain::item::entity::read_d2r_v3_compact_tail(
+                crate::domain::item::subdomains::payload::read_d2r_v3_compact_tail(
                     cursor,
                     save_version,
                     &body.code,
@@ -4744,7 +4744,6 @@ impl D2rV3JewelryWidths {
     const MODE: u32 = 3;
     const POSITION: u32 = 4;
     const STORED_IN: u32 = 3;
-    const STASH_QUANTITY: u32 = 8;
     const STAT_ID: u32 = 9;
     const TERMINATOR: u32 = 511;
 }
@@ -5005,24 +5004,10 @@ impl Item {
             99..=102 => (true, header.version - 99),
             _ => return Err(invalid("Unsupported compact quest item version")),
         };
-        let difficulty_field = if is_quest {
-            let difficulty = auxiliary
-                .quest_difficulty
-                .ok_or_else(|| invalid("Missing source-required quest difficulty"))?;
-            let width = crate::domain::stats::stat_save_bits(356)
-                .filter(|&width| width > 0 && width <= 32)
-                .ok_or_else(|| invalid("Missing or unsupported quest difficulty save width"))?;
-            let add = crate::domain::stats::stat_save_add(356)
-                .ok_or_else(|| invalid("Missing quest difficulty save bias"))?;
-            let raw = u64::try_from(i64::from(difficulty) + i64::from(add))
-                .map_err(|_| invalid("Negative encoded quest difficulty"))?;
-            Some((raw, width))
-        } else {
-            if auxiliary.quest_difficulty.is_some() {
-                return Err(invalid("Ordinary compact item contains quest difficulty"));
-            }
-            None
-        };
+        let difficulty_field =
+            crate::domain::item::subdomains::payload::prepare_d2r_v3_compact_quest_difficulty(
+                auxiliary, is_quest,
+            )?;
         let mut emitter = BitEmitter::new();
         use D2rV3JewelryWidths as W;
         d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
@@ -5038,17 +5023,11 @@ impl Item {
         }
         d2r_v3_write_checked(&mut emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
         emitter.extend_bits(huffman.encode(&format!("{} ", self.body.code.trim()))?)?;
-        if let Some((raw, width)) = difficulty_field {
-            d2r_v3_write_checked(&mut emitter, raw, width, "quest difficulty")?;
-        }
-        emitter.write_bit(!auxiliary.realm_data.is_empty())?;
-        for word in &auxiliary.realm_data {
-            emitter.write_bits(*word, 32)?;
-        }
-        emitter.write_bit(auxiliary.advanced_stash_quantity.is_some())?;
-        if let Some(quantity) = auxiliary.advanced_stash_quantity {
-            emitter.write_bits(quantity as u32, W::STASH_QUANTITY)?;
-        }
+        crate::domain::item::subdomains::payload::write_d2r_v3_compact_tail(
+            &mut emitter,
+            auxiliary,
+            difficulty_field,
+        )?;
         let padding = auxiliary
             .alignment_padding
             .as_ref()
@@ -5743,7 +5722,9 @@ impl Item {
             99..=102 => (true, header.version - 99),
             _ => return Err(invalid("Unsupported D2R v3 item version")),
         };
-        use crate::data::generated::layout_policy::D2rV3ExtendedPayloadWidths as V3W;
+        use crate::data::generated::layout_policy::{
+            D2rV3AuxiliaryPayloadLayout as AuxW, D2rV3ExtendedPayloadWidths as V3W,
+        };
         let version_policy = crate::data::generated::layout_policy::d2r_v3_extended_version_policy(
             auxiliary.save_version,
         );
@@ -6034,7 +6015,7 @@ impl Item {
             d2r_v3_write_checked(
                 &mut emitter,
                 quantity as u64,
-                W::STASH_QUANTITY,
+                AuxW::STASH_QUANTITY,
                 "stash quantity",
             )?;
         }
@@ -6568,6 +6549,351 @@ mod compact_quest_codec_tests {
         assert_eq!(data.advanced_stash_quantity, None);
         assert!(data.stored_in.is_some());
         assert!(data.alignment_padding.is_some());
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn compact_public_codec_observations() {
+        use bitstream_io::{BitRead, BitReader, LittleEndian};
+        use std::io::Cursor;
+
+        fn state<R: BitRead>(cursor: &BitCursor<R>) -> String {
+            format!(
+                "{:?}",
+                (
+                    cursor.pos(),
+                    cursor.limit(),
+                    cursor.remaining(),
+                    cursor.recorded_bits(),
+                    cursor.segments(),
+                    cursor.active_segments(),
+                    cursor.context_stack(),
+                    cursor.operation_events(),
+                    cursor.alpha_quality
+                )
+            )
+        }
+        let versions = [
+            0u32,
+            93,
+            94,
+            96,
+            97,
+            99,
+            100,
+            101,
+            102,
+            104,
+            105,
+            106,
+            u32::MAX,
+        ];
+        let codes = [
+            "bks", "bkd", "box", "jav", "tbk", "bks ", " bkd", "jav ", "JAV", "zzzz",
+        ];
+        let mut reader_rows = Vec::new();
+        for version in versions {
+            for code in codes {
+                for is_ear in [false, true] {
+                    for buffer_case in 0..4 {
+                        let bytes: Vec<u8> = match buffer_case {
+                            0 => vec![],
+                            1 => vec![0; 24],
+                            2 => vec![255; 24],
+                            _ => (0..24)
+                                .map(|i| (i as u8).wrapping_mul(37).wrapping_add(91))
+                                .collect(),
+                        };
+                        for prefix in [0u32, 3] {
+                            for limit in [
+                                None,
+                                Some(u64::from(prefix)),
+                                Some(u64::from(prefix) + 1),
+                                Some(u64::from(prefix) + 9),
+                                Some(u64::from(prefix) + 129),
+                            ] {
+                                for parent in [false, true] {
+                                    for consume_only in [false, true] {
+                                        let mut cursor = BitCursor::new(BitReader::endian(
+                                            Cursor::new(&bytes),
+                                            LittleEndian,
+                                        ));
+                                        cursor.set_trace(true);
+                                        cursor.read_bits_as_vec_up_to(prefix);
+                                        cursor.push_context("Compact public witness");
+                                        if parent {
+                                            cursor.begin_segment(crate::domain::header::entity::ItemSegmentType::ExtendedStats);
+                                            cursor.alpha_quality = Some(
+                                                crate::domain::item::quality::ItemQuality::Crafted,
+                                            );
+                                        }
+                                        if let Some(limit) = limit {
+                                            cursor.set_limit(limit);
+                                        }
+                                        let before = state(&cursor);
+                                        let (success, result) = if consume_only {
+                                            let result = crate::domain::item::entity::consume_d2r_v3_compact_tail(&mut cursor, version, code, is_ear);
+                                            (result.is_ok(), format!("{result:?}"))
+                                        } else {
+                                            let result = crate::domain::item::entity::read_d2r_v3_compact_tail(&mut cursor, version, code, is_ear);
+                                            (result.is_ok(), format!("{result:?}"))
+                                        };
+                                        let after = state(&cursor);
+                                        let following = cursor.read_bits::<u8>(5);
+                                        reader_rows.push(serde_json::json!({"version":version,"code":code,"ear":is_ear,"buffer":buffer_case,"prefix":prefix,"limit":limit,"parent":parent,"consume_only":consume_only,"before":before,"success":success,"result":result,"after":after,"following":format!("{following:?}"),"after_following":state(&cursor)}));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let huffman = HuffmanTree::new();
+        let pre = Item::read_player_items_d2r_v3(
+            &fixture("TESTDRUID_Quest3_ScrollObtained_PreAkara"),
+            &huffman,
+        )
+        .unwrap();
+        let post = Item::read_player_items_d2r_v3(
+            &fixture("TESTDRUID_Quest3_ScrollObtained_PostAkara"),
+            &huffman,
+        )
+        .unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let fresh_bytes = std::fs::read(root.join(
+            "tests/fixtures/savegames/gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s",
+        ))
+        .unwrap();
+        let fresh = Item::read_player_items_d2r_v3(&fresh_bytes, &huffman).unwrap();
+        let beta_bytes = std::fs::read(
+            root.join("tests/fixtures/savegames/beta/amazon_v105_slice2_equipment.d2s"),
+        )
+        .unwrap();
+        let beta = Item::read_player_items_d2r_v3(&beta_bytes, &huffman).unwrap();
+        fn child(items: &[Item]) -> Option<&Item> {
+            items.iter().find_map(|item| {
+                if item.header.mode == 6 && item.header.is_compact {
+                    Some(item)
+                } else {
+                    child(&item.socketed_items)
+                }
+            })
+        }
+        let seeds = [
+            &pre[11],
+            &post[25],
+            &fresh[0],
+            child(&beta).expect("bound socket child control"),
+        ];
+        assert_eq!(seeds[0].code.trim(), "bks");
+        assert_eq!(seeds[1].code.trim(), "bkd");
+        let mut writer_rows = Vec::new();
+        for (seed_index, seed) in seeds.into_iter().enumerate() {
+            for case in 0..44 {
+                for no_cache in [false, true] {
+                    let mut item = if no_cache {
+                        without_caches(seed)
+                    } else {
+                        seed.clone()
+                    };
+                    match case {
+                        0 => {}
+                        1 => item.body.d2r_v3_auxiliary = None,
+                        2 => item.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = 104,
+                        3 => item.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = u32::MAX,
+                        4 => item.header.save_is_alpha = true,
+                        5 => item.header.is_compact = false,
+                        6 => item.header.is_ear = true,
+                        7 => item.header.is_socketed = true,
+                        8 => item.header.is_personalized = true,
+                        9 => item.header.is_runeword = true,
+                        10 => {
+                            item.header.mode = 3;
+                            item.body.mode = 3;
+                        }
+                        11 => item.body.x ^= 1,
+                        12 => item.body.d2r_v3_auxiliary.as_mut().unwrap().stored_in = None,
+                        13 => item.body.d2r_v3_auxiliary.as_mut().unwrap().stored_in = Some(7),
+                        14 => item.header.version = 103,
+                        15 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = None
+                        }
+                        16 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = Some(0)
+                        }
+                        17 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = Some(1)
+                        }
+                        18 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = Some(3)
+                        }
+                        19 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = Some(4)
+                        }
+                        20 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = Some(u32::MAX)
+                        }
+                        21 => item
+                            .body
+                            .d2r_v3_auxiliary
+                            .as_mut()
+                            .unwrap()
+                            .realm_data
+                            .clear(),
+                        22 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 4],
+                        23 => {
+                            item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data =
+                                vec![u32::MAX, 0, 0x12345679, 0x89abcdef]
+                        }
+                        24 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 3],
+                        25 => item.body.d2r_v3_auxiliary.as_mut().unwrap().realm_data = vec![0; 5],
+                        26 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .advanced_stash_quantity = None
+                        }
+                        27 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .advanced_stash_quantity = Some(0)
+                        }
+                        28 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .advanced_stash_quantity = Some(255)
+                        }
+                        29 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .alignment_padding = None
+                        }
+                        30 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .alignment_padding = Some(vec![])
+                        }
+                        31 => {
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .alignment_padding = Some(vec![true; 7])
+                        }
+                        32 => item.code = "box".into(),
+                        33 => {
+                            item.code = "zzzz".into();
+                            item.body.code = "zzzz".into();
+                        }
+                        34 => {
+                            item.code = " bks ".into();
+                            item.body.code = "bks ".into();
+                        }
+                        35 => item.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 1,
+                        36 => {
+                            let aux = item.body.d2r_v3_auxiliary.as_mut().unwrap();
+                            aux.quest_difficulty = Some(4);
+                            aux.stored_in = None;
+                        }
+                        37 => {
+                            let aux = item.body.d2r_v3_auxiliary.as_mut().unwrap();
+                            aux.realm_data = vec![0; 3];
+                            aux.quest_difficulty = None;
+                        }
+                        38 => {
+                            item.header.flags ^= 1 << 21;
+                            item.body
+                                .d2r_v3_auxiliary
+                                .as_mut()
+                                .unwrap()
+                                .quest_difficulty = None;
+                        }
+                        39 => {
+                            let aux = item.body.d2r_v3_auxiliary.as_mut().unwrap();
+                            aux.alignment_padding = None;
+                            aux.quest_difficulty = Some(u32::MAX);
+                        }
+                        40 => {
+                            item.body.d2r_v3_auxiliary.as_mut().unwrap().stored_in = None;
+                            item.header.version = 103;
+                        }
+                        41 => {
+                            item.body.d2r_v3_auxiliary.as_mut().unwrap().save_version = 104;
+                            item.header.is_compact = false;
+                        }
+                        42 => item.body.d2r_v3_auxiliary.as_mut().unwrap().has_quantity = true,
+                        43 => {
+                            item.header.x = 16;
+                            item.body.x = 16;
+                        }
+                        _ => unreachable!(),
+                    }
+                    for quest_only in [false, true] {
+                        let result = if quest_only {
+                            item.to_bits_d2r_v3_compact_quest(&huffman)
+                        } else {
+                            item.to_bits_d2r_v3_compact(&huffman)
+                        };
+                        let (success, outcome) = match result {
+                            Ok(bits) => (true, serde_json::json!({"bits":bits})),
+                            Err(error) => (
+                                false,
+                                serde_json::json!({"kind":format!("{:?}",error.kind()),"message":error.to_string()}),
+                            ),
+                        };
+                        writer_rows.push(serde_json::json!({"seed":seed_index,"case":case,"no_cache":no_cache,"quest_only":quest_only,"success":success,"outcome":outcome}));
+                    }
+                }
+            }
+        }
+        let code_metadata: Vec<_> = codes.iter().map(|code| serde_json::json!({"code":code,"raw":crate::data::repository::legacy_item_template(code).map(|t|(t.has_quest_difficulty,t.is_stackable)),"trimmed":crate::data::repository::legacy_item_template(code.trim()).map(|t|(t.has_quest_difficulty,t.is_stackable))})).collect();
+        assert_eq!(reader_rows.len(), 41600);
+        assert_eq!(writer_rows.len(), 704);
+        let reader_successes = reader_rows.iter().filter(|r| r["success"] == true).count();
+        let writer_successes = writer_rows.iter().filter(|r| r["success"] == true).count();
+        assert!(reader_successes > 0 && reader_successes < reader_rows.len());
+        assert!(writer_successes > 0 && writer_successes < writer_rows.len());
+        if let Some(path) = std::env::var_os("D2R_COMPACT_CODEC_OUTPUT") {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            serde_json::to_writer_pretty(file, &serde_json::json!({"schema":1,"reader_cases":reader_rows.len(),"writer_cases":writer_rows.len(),"reader_successes":reader_successes,"writer_successes":writer_successes,"code_metadata":code_metadata,"reader_rows":reader_rows,"writer_rows":writer_rows})).unwrap();
+        }
     }
 }
 
