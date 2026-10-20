@@ -17,6 +17,7 @@ use crate::domain::item::axiom_meta::{
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use crate::domain::item::subdomains::nudge::NudgeCombinator;
+use crate::domain::item::subdomains::payload::ExtendedPayloadReadPlan;
 use crate::domain::item::subdomains::property::{AlphaPropertyCombinator, PropertyNormalizer};
 use crate::domain::item::subdomains::stats::StatsCombinator;
 use crate::domain::item::Item;
@@ -4035,34 +4036,16 @@ impl Item {
 
         let ext_axiom = axiom.clone();
 
-        let ext_data = if is_d2r_v3_compact {
-            crate::domain::item::entity::ExtendedStatsData {
-                d2r_v3_auxiliary: compact_auxiliary,
-                ..Default::default()
-            }
+        let ext_plan = if is_d2r_v3_compact {
+            ExtendedPayloadReadPlan::V3Compact(compact_auxiliary)
         } else if let Some(save_version) = d2r_v3_save_version {
-            crate::domain::item::entity::ExtendedStatsData::read_d2r_v3_from_cursor(
-                cursor,
-                &body.code,
-                &header,
-                save_version,
-            )?
+            ExtendedPayloadReadPlan::V3 { save_version }
         } else if !rhythm_recovery && !skip_ext_stats {
-            match crate::domain::item::entity::ExtendedStatsData::read_from_cursor(
-                cursor,
-                &body.code,
-                &header,
-                header.save_is_alpha,
-                &ext_axiom,
-            ) {
-                Ok(data) => data,
-                Err(e) => {
-                    return Err(e);
-                }
-            }
+            ExtendedPayloadReadPlan::Legacy
         } else {
-            crate::domain::item::entity::ExtendedStatsData::default()
+            ExtendedPayloadReadPlan::Omitted
         };
+        let ext_data = ext_plan.read(cursor, &body.code, &header, &ext_axiom)?;
 
         let mut final_header = header;
         final_header.is_runeword = detected_runeword;
