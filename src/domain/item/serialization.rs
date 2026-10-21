@@ -3732,7 +3732,7 @@ impl Item {
         cursor.set_trace(cursor.trace_enabled || crate::item::item_trace_enabled());
         cursor.begin_segment(ItemSegmentType::Root);
         let (header, stored_in) =
-            crate::domain::item::entity::parse_item_header_d2r_v3_with_storage(cursor)?;
+            crate::domain::header::canonical::read_d2r_v3_header_with_storage(cursor)?;
         Ok(ItemHeaderStage {
             header,
             alpha_header_gap: None,

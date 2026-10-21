@@ -1,3 +1,5 @@
+pub(crate) mod canonical;
+
 pub mod entity;
 pub mod parser;
 pub mod axiom;

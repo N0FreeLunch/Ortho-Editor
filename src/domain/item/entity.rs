@@ -2572,73 +2572,7 @@ pub fn parse_item_header_d2r_v3<R: BitRead>(
     parse_item_header_d2r_v3_with_storage(cursor).map(|(header, _)| header)
 }
 
-pub(crate) fn parse_item_header_d2r_v3_with_storage<R: BitRead>(
-    cursor: &mut BitCursor<R>,
-) -> ParsingResult<(ItemHeader, Option<u8>)> {
-    cursor.begin_segment(ItemSegmentType::Header);
-
-    let flags = cursor.read_bits::<u32>(32)?;
-    let has_extended_version = cursor.read_bits::<u8>(1)? != 0;
-    let version_low = cursor.read_bits::<u8>(2)?;
-    let version = if has_extended_version {
-        version_low.saturating_add(99)
-    } else {
-        version_low
-    };
-    let mode = cursor.read_bits::<u8>(3)?;
-
-    let mut raw_stored_in = None;
-    let (location, x, y, page) = if matches!(mode, 3 | 5) {
-        let column = cursor.read_bits::<u16>(16)?;
-        let row = cursor.read_bits::<u16>(16)?;
-        (
-            0,
-            column.min(u8::MAX as u16) as u8,
-            row.min(u8::MAX as u16) as u8,
-            0,
-        )
-    } else {
-        let position = cursor.read_bits::<u8>(4)?;
-        let column = cursor.read_bits::<u8>(4)?;
-        let row = cursor.read_bits::<u8>(4)?;
-        let stored_in = cursor.read_bits::<u8>(3)?;
-        raw_stored_in = Some(stored_in);
-        let stored_in = stored_in.saturating_sub(1);
-        (position, column, row, stored_in)
-    };
-
-    cursor.end_segment();
-
-    Ok((
-        ItemHeader {
-            flags,
-            version,
-            mode,
-            location,
-            x,
-            y,
-            page,
-            socket_hint: 0,
-            id: None,
-            level: None,
-            quality: None,
-            is_compact: flags & (1 << 21) != 0,
-            is_identified: flags & (1 << 4) != 0,
-            is_socketed: flags & (1 << 11) != 0,
-            is_personalized: flags & (1 << 24) != 0,
-            is_runeword: flags & (1 << 26) != 0,
-            is_ethereal: flags & (1 << 22) != 0,
-            is_ear: flags & (1 << 16) != 0,
-            has_checksum: false,
-            alpha_checksum: None,
-            alpha_quality_raw: None,
-            alpha_v5_runeword_extra: None,
-            alpha_unique_id_raw: None,
-            save_is_alpha: false,
-        },
-        raw_stored_in,
-    ))
-}
+pub(crate) use crate::domain::header::canonical::read_d2r_v3_header_with_storage as parse_item_header_d2r_v3_with_storage;
 
 pub use crate::domain::item::subdomains::payload::consume_d2r_v3_compact_tail;
 
@@ -3328,5 +3262,266 @@ mod tests {
             item.placement().is_none(),
             "opaque placement must return None"
         );
+    }
+}
+#[cfg(test)]
+mod v3_header_contract_tests {
+    use super::*;
+    use bitstream_io::{BitReader, LittleEndian};
+    use std::io::{Cursor, Write};
+
+    fn state<R: BitRead>(cursor: &BitCursor<R>) -> String {
+        format!(
+            "{:?}",
+            (
+                cursor.pos(),
+                cursor.base_pos,
+                cursor.limit(),
+                cursor.remaining(),
+                cursor.recorded_bits(),
+                cursor.segments(),
+                cursor.active_segments(),
+                cursor.context_stack(),
+                cursor.operation_events(),
+                cursor.alpha_quality,
+            )
+        )
+    }
+
+    fn expected(
+        flags: u32,
+        extended: bool,
+        low: u8,
+        mode: u8,
+        coordinates: (u8, u16, u16, u8),
+    ) -> ItemHeader {
+        let (location, x, y, stored) = coordinates;
+        let ground = matches!(mode, 3 | 5);
+        ItemHeader {
+            flags,
+            version: if extended { low + 99 } else { low },
+            mode,
+            location: if ground { 0 } else { location & 15 },
+            x: if ground {
+                x.min(255) as u8
+            } else {
+                (x & 15) as u8
+            },
+            y: if ground {
+                y.min(255) as u8
+            } else {
+                (y & 15) as u8
+            },
+            page: if ground { 0 } else { stored.saturating_sub(1) },
+            is_identified: flags & (1 << 4) != 0,
+            is_socketed: flags & (1 << 11) != 0,
+            is_ear: flags & (1 << 16) != 0,
+            is_compact: flags & (1 << 21) != 0,
+            is_ethereal: flags & (1 << 22) != 0,
+            is_personalized: flags & (1 << 24) != 0,
+            is_runeword: flags & (1 << 26) != 0,
+            ..ItemHeader::default()
+        }
+    }
+
+    fn encoded(
+        prefix: u32,
+        flags: u32,
+        extended: bool,
+        low: u8,
+        mode: u8,
+        coordinates: (u8, u16, u16, u8),
+    ) -> Vec<u8> {
+        fn push(bits: &mut Vec<bool>, value: u32, width: u32) {
+            bits.extend((0..width).map(|bit| value & (1 << bit) != 0));
+        }
+        let mut bits = vec![true; prefix as usize];
+        push(&mut bits, flags, 32);
+        push(&mut bits, u32::from(extended), 1);
+        push(&mut bits, u32::from(low), 2);
+        push(&mut bits, u32::from(mode), 3);
+        let (location, x, y, stored) = coordinates;
+        if matches!(mode, 3 | 5) {
+            push(&mut bits, u32::from(x), 16);
+            push(&mut bits, u32::from(y), 16);
+        } else {
+            push(&mut bits, u32::from(location), 4);
+            push(&mut bits, u32::from(x), 4);
+            push(&mut bits, u32::from(y), 4);
+            push(&mut bits, u32::from(stored), 3);
+        }
+        push(&mut bits, 21, 5);
+        let mut bytes = vec![0; bits.len().div_ceil(8)];
+        for (index, bit) in bits.into_iter().enumerate() {
+            if bit {
+                bytes[index / 8] |= 1 << (index % 8);
+            }
+        }
+        bytes
+    }
+
+    fn observe(
+        bytes: &[u8],
+        prefix: u32,
+        limit: Option<u64>,
+        parent: bool,
+        trace: bool,
+        storage_api: bool,
+        control: Option<(&ItemHeader, Option<u8>)>,
+    ) -> serde_json::Value {
+        let mut cursor = BitCursor::new(BitReader::endian(Cursor::new(bytes), LittleEndian));
+        cursor.set_trace(trace);
+        cursor.read_bits_as_vec_up_to(prefix);
+        cursor.push_context("V3 header witness");
+        if parent {
+            cursor.begin_segment(ItemSegmentType::Stats);
+            cursor.alpha_quality = Some(ItemQuality::Crafted);
+        }
+        if let Some(limit) = limit {
+            cursor.set_limit(limit);
+        }
+        let before = state(&cursor);
+        let (success, result) = if storage_api {
+            let result = parse_item_header_d2r_v3_with_storage(&mut cursor);
+            if let Some((expected, stored)) = control {
+                let (header, raw) = result.as_ref().expect("complete raw header control");
+                assert_eq!(header, expected);
+                assert_eq!(*raw, stored);
+            }
+            (result.is_ok(), format!("{result:?}"))
+        } else {
+            let result = parse_item_header_d2r_v3(&mut cursor);
+            if let Some((expected, _)) = control {
+                assert_eq!(
+                    result.as_ref().expect("complete public header control"),
+                    expected
+                );
+            }
+            (result.is_ok(), format!("{result:?}"))
+        };
+        if let Some((expected, _)) = control {
+            let bits = if matches!(expected.mode, 3 | 5) {
+                70
+            } else {
+                53
+            };
+            assert_eq!(cursor.pos(), u64::from(prefix) + bits);
+            assert_eq!(cursor.get_context_count(), if parent { 2 } else { 1 });
+        }
+        let after = state(&cursor);
+        let following = cursor.read_bits::<u8>(5);
+        if control.is_some() {
+            assert_eq!(*following.as_ref().expect("following marker"), 21);
+        }
+        serde_json::json!({
+            "bytes":bytes,"prefix":prefix,"limit":limit,"parent":parent,
+            "trace":trace,"storage_api":storage_api,"before":before,
+            "success":success,"result":result,"after":after,
+            "following":format!("{following:?}"),"after_following":state(&cursor),
+        })
+    }
+
+    #[d2r_macros::invariant_test]
+    fn header_public_reader_observations() {
+        let mut controls = Vec::new();
+        for mode in 0..8 {
+            for extended in [false, true] {
+                for low in 0..4 {
+                    for coordinates in [
+                        (0, 0, 0, 0),
+                        (15, 15, 15, 1),
+                        (7, 255, 256, 2),
+                        (2, 65535, 257, 7),
+                    ] {
+                        for flags in [
+                            0,
+                            u32::MAX,
+                            1 << 4,
+                            1 << 11,
+                            1 << 16,
+                            1 << 21,
+                            1 << 22,
+                            1 << 24,
+                            1 << 26,
+                            1 << 27,
+                        ] {
+                            let bytes = encoded(3, flags, extended, low, mode, coordinates);
+                            let expected = expected(flags, extended, low, mode, coordinates);
+                            let stored = if matches!(mode, 3 | 5) {
+                                None
+                            } else {
+                                Some(coordinates.3)
+                            };
+                            for storage_api in [false, true] {
+                                controls.push(observe(
+                                    &bytes,
+                                    3,
+                                    None,
+                                    true,
+                                    true,
+                                    storage_api,
+                                    Some((&expected, stored)),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut effects = Vec::new();
+        for mode in [0, 3, 5, 7] {
+            for flags in [0, u32::MAX, 1 << 27] {
+                for length in [0, 4, 6, 8, 12] {
+                    for prefix in [0, 3] {
+                        let mut bytes = encoded(prefix, flags, true, 2, mode, (15, 65535, 256, 1));
+                        bytes.resize(12, 0xa5);
+                        bytes.truncate(length);
+                        for limit in [
+                            None,
+                            Some(u64::from(prefix)),
+                            Some(u64::from(prefix) + 31),
+                            Some(u64::from(prefix) + 38),
+                            Some(u64::from(prefix) + 52),
+                            Some(u64::from(prefix) + 53),
+                            Some(u64::from(prefix) + 69),
+                            Some(u64::from(prefix) + 70),
+                        ] {
+                            for parent in [false, true] {
+                                for trace in [false, true] {
+                                    for storage_api in [false, true] {
+                                        effects.push(observe(
+                                            &bytes,
+                                            prefix,
+                                            limit,
+                                            parent,
+                                            trace,
+                                            storage_api,
+                                            None,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(controls.len(), 5120);
+        assert_eq!(effects.len(), 7680);
+        let successes = effects.iter().filter(|row| row["success"] == true).count();
+        assert!(successes > 0 && successes < effects.len());
+        let snapshot = serde_json::json!({
+            "schema":1,"control_cases":controls.len(),"effect_cases":effects.len(),
+            "effect_successes":successes,"controls":controls,"effects":effects,
+        });
+        if let Some(path) = std::env::var_os("D2R_V3_HEADER_CODEC_OUTPUT") {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            file.write_all(serde_json::to_string_pretty(&snapshot).unwrap().as_bytes())
+                .unwrap();
+        }
     }
 }
