@@ -24,7 +24,9 @@ pub use entity::{
 };
 pub use builder::ItemBuilder;
 // Removed redundant re-exports: ItemProperty, ItemStats moved to domain::stats
-pub use serialization::{BitEmitter, HuffmanTree, verify_marker_lookahead, peek_item_header_at};
+pub use bit_emitter::BitEmitter;
+pub(crate) use bit_emitter::d2r_v3_write_checked;
+pub use serialization::{HuffmanTree, verify_marker_lookahead, peek_item_header_at};
 pub use scanner::scan_item_markers;
 pub use axiom_meta::{Confidence, Intentionality, ForensicMetadata, ForensicAudit, ForensicResult};
 pub use editor::{ItemEditor, ItemEditorExt};

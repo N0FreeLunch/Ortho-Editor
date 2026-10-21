@@ -3,8 +3,10 @@ use crate::data::generated::layout_policy::{
     D2rV3ItemHeaderFlags as F, D2rV3ItemHeaderLayout as W,
 };
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
+use crate::domain::item::{BitEmitter, d2r_v3_write_checked};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
+use std::io;
 
 pub(crate) fn read_d2r_v3_header_with_storage<R: BitRead>(
     cursor: &mut BitCursor<R>,
@@ -72,4 +74,27 @@ pub(crate) fn read_d2r_v3_header_with_storage<R: BitRead>(
         },
         raw_stored_in,
     ))
+}
+
+/// Emits non-ground V3 header fields after caller-owned state/version admission.
+pub(crate) fn write_d2r_v3_stored_header(
+    emitter: &mut BitEmitter,
+    header: &ItemHeader,
+    extended_version: bool,
+    version_low: u8,
+    stored_in: u8,
+) -> io::Result<()> {
+    d2r_v3_write_checked(emitter, header.flags as u64, W::FLAGS, "flags")?;
+    emitter.write_bit(extended_version)?;
+    d2r_v3_write_checked(emitter, version_low as u64, W::VERSION_LOW, "version")?;
+    d2r_v3_write_checked(emitter, header.mode as u64, W::MODE, "mode")?;
+    for (value, name) in [
+        (header.location, "location"),
+        (header.x, "column"),
+        (header.y, "row"),
+    ] {
+        d2r_v3_write_checked(emitter, value as u64, W::POSITION, name)?;
+    }
+    d2r_v3_write_checked(emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
+    Ok(())
 }

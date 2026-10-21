@@ -4720,8 +4720,8 @@ pub fn scan_socket_children(
 
 pub use crate::domain::stats::PropertyReaderContext;
 
-/// Physical widths for the explicitly selected D2R v3 stored-item grammar.
-struct D2rV3JewelryWidths;
+/// Property ID width and terminator for the existing D2R v3 scalar-list writer.
+struct D2rV3ScalarPropertyLayout;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum D2rV3StoredLayout {
@@ -4738,12 +4738,7 @@ enum D2rV3StoredLayout {
     Weapon,
 }
 
-impl D2rV3JewelryWidths {
-    const FLAGS: u32 = 32;
-    const VERSION_LOW: u32 = 2;
-    const MODE: u32 = 3;
-    const POSITION: u32 = 4;
-    const STORED_IN: u32 = 3;
+impl D2rV3ScalarPropertyLayout {
     const STAT_ID: u32 = 9;
     const TERMINATOR: u32 = 511;
 }
@@ -4754,7 +4749,7 @@ fn d2r_v3_write_scalar_list(
     emitter: &mut BitEmitter,
     properties: &[crate::domain::stats::ItemProperty],
 ) -> io::Result<()> {
-    use D2rV3JewelryWidths as W;
+    use D2rV3ScalarPropertyLayout as W;
     let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
     let (terminal, scalar_properties) = properties
         .split_last()
@@ -4894,6 +4889,9 @@ impl Item {
         huffman: &HuffmanTree,
         quest_only: bool,
     ) -> io::Result<Vec<bool>> {
+        use crate::data::generated::layout_policy::{
+            D2rV3ItemHeaderFlags as F, D2rV3ItemHeaderLayout as H,
+        };
         let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
         let auxiliary = self
             .body
@@ -4911,7 +4909,7 @@ impl Item {
             || header.is_socketed
             || header.is_personalized
             || header.is_runeword
-            || matches!(header.mode, 3 | 5)
+            || H::GROUND_MODES.contains(&header.mode)
             || (header.mode == 6 && (quest_only || is_quest))
             || (quest_only && !is_quest)
             || self.code.trim() != self.body.code.trim()
@@ -4972,16 +4970,16 @@ impl Item {
         {
             return Err(invalid("Unsupported D2R v3 compact quest state"));
         }
-        for (flag, expected) in [
-            (4, header.is_identified),
-            (11, false),
-            (16, false),
-            (21, true),
-            (22, header.is_ethereal),
-            (24, false),
-            (26, false),
+        for (mask, expected) in [
+            (F::IDENTIFIED, header.is_identified),
+            (F::SOCKETED, false),
+            (F::EAR, false),
+            (F::COMPACT, true),
+            (F::ETHEREAL, header.is_ethereal),
+            (F::PERSONALIZED, false),
+            (F::RUNEWORD, false),
         ] {
-            if (header.flags & (1 << flag) != 0) != expected {
+            if (header.flags & mask != 0) != expected {
                 return Err(invalid("Compact quest header flags and fields disagree"));
             }
         }
@@ -5001,7 +4999,7 @@ impl Item {
         }
         let (extended_version, version_low) = match header.version {
             0..=3 => (false, header.version),
-            99..=102 => (true, header.version - 99),
+            99..=102 => (true, header.version - H::EXTENDED_VERSION_OFFSET),
             _ => return Err(invalid("Unsupported compact quest item version")),
         };
         let difficulty_field =
@@ -5009,19 +5007,13 @@ impl Item {
                 auxiliary, is_quest,
             )?;
         let mut emitter = BitEmitter::new();
-        use D2rV3JewelryWidths as W;
-        d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
-        emitter.write_bit(extended_version)?;
-        d2r_v3_write_checked(&mut emitter, version_low as u64, W::VERSION_LOW, "version")?;
-        d2r_v3_write_checked(&mut emitter, header.mode as u64, W::MODE, "mode")?;
-        for (value, name) in [
-            (header.location, "location"),
-            (header.x, "column"),
-            (header.y, "row"),
-        ] {
-            d2r_v3_write_checked(&mut emitter, value as u64, W::POSITION, name)?;
-        }
-        d2r_v3_write_checked(&mut emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
+        crate::domain::header::canonical::write_d2r_v3_stored_header(
+            &mut emitter,
+            header,
+            extended_version,
+            version_low,
+            stored_in,
+        )?;
         emitter.extend_bits(huffman.encode(&format!("{} ", self.body.code.trim()))?)?;
         crate::domain::item::subdomains::payload::write_d2r_v3_compact_tail(
             &mut emitter,
@@ -5124,6 +5116,9 @@ impl Item {
         huffman: &HuffmanTree,
         layout: D2rV3StoredLayout,
     ) -> io::Result<Vec<bool>> {
+        use crate::data::generated::layout_policy::{
+            D2rV3ItemHeaderFlags as F, D2rV3ItemHeaderLayout as H,
+        };
         let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
         let auxiliary = self
             .body
@@ -5261,7 +5256,7 @@ impl Item {
             || header.is_socketed != socket_layout
             || (header.is_personalized && !allows_personalized)
             || (header.is_runeword && !runeword_layout)
-            || matches!(header.mode, 3 | 5)
+            || H::GROUND_MODES.contains(&header.mode)
             || (header.mode == 6 && (!accessory_layout || self.body.code.trim() != "jew"))
             || (!socket_host_layout
                 && (auxiliary.filled_sockets != 0 || !self.socketed_items.is_empty()))
@@ -5363,7 +5358,7 @@ impl Item {
                 || header.alpha_quality_raw.is_some()
                 || header.alpha_v5_runeword_extra.is_some()
                 || header.alpha_unique_id_raw.is_some()
-                || (header.flags & (1 << 22) != 0) != header.is_ethereal
+                || (header.flags & F::ETHEREAL != 0) != header.is_ethereal
             {
                 return Err(invalid("Unsupported or inconsistent stored weapon state"));
             }
@@ -5492,7 +5487,7 @@ impl Item {
                 || (!self.stats.set_attributes.is_empty()
                     && (!stored_jewelry_layout || self.stats.set_attributes != self.set_attributes))
                 || !self.stats.runeword_attributes.is_empty()
-                || (header.flags & (1 << 22) != 0) != header.is_ethereal
+                || (header.flags & F::ETHEREAL != 0) != header.is_ethereal
             {
                 return Err(invalid(if stored_misc_layout {
                     "Unsupported or inconsistent stored miscellaneous state"
@@ -5606,7 +5601,7 @@ impl Item {
                         || self.stats.runeword_attributes != self.runeword_attributes))
                 || (!self.stats.set_attributes.is_empty()
                     && self.stats.set_attributes != self.set_attributes)
-                || (header.flags & (1 << 22) != 0) != header.is_ethereal
+                || (header.flags & F::ETHEREAL != 0) != header.is_ethereal
             {
                 return Err(invalid("Unsupported or inconsistent stored armor state"));
             }
@@ -5695,15 +5690,15 @@ impl Item {
                 "Non-Set jewelry contains D2R v3 Set property state",
             ));
         }
-        for (flag, expected) in [
-            (4, header.is_identified),
-            (11, socket_layout),
-            (16, false),
-            (21, false),
-            (24, header.is_personalized),
-            (26, runeword_layout),
+        for (mask, expected) in [
+            (F::IDENTIFIED, header.is_identified),
+            (F::SOCKETED, socket_layout),
+            (F::EAR, false),
+            (F::COMPACT, false),
+            (F::PERSONALIZED, header.is_personalized),
+            (F::RUNEWORD, runeword_layout),
         ] {
-            if (header.flags & (1 << flag) != 0) != expected {
+            if (header.flags & mask != 0) != expected {
                 return Err(invalid(
                     "D2R v3 header flags disagree with the selected layout",
                 ));
@@ -5719,7 +5714,7 @@ impl Item {
         }
         let (extended_version, version_low) = match header.version {
             0..=3 => (false, header.version),
-            99..=102 => (true, header.version - 99),
+            99..=102 => (true, header.version - H::EXTENDED_VERSION_OFFSET),
             _ => return Err(invalid("Unsupported D2R v3 item version")),
         };
         use crate::data::generated::layout_policy::{
@@ -5729,19 +5724,13 @@ impl Item {
             auxiliary.save_version,
         );
         let mut emitter = BitEmitter::new();
-        use D2rV3JewelryWidths as W;
-        d2r_v3_write_checked(&mut emitter, header.flags as u64, W::FLAGS, "flags")?;
-        emitter.write_bit(extended_version)?;
-        d2r_v3_write_checked(&mut emitter, version_low as u64, W::VERSION_LOW, "version")?;
-        d2r_v3_write_checked(&mut emitter, header.mode as u64, W::MODE, "mode")?;
-        for (value, name) in [
-            (header.location, "location"),
-            (header.x, "column"),
-            (header.y, "row"),
-        ] {
-            d2r_v3_write_checked(&mut emitter, value as u64, W::POSITION, name)?;
-        }
-        d2r_v3_write_checked(&mut emitter, stored_in as u64, W::STORED_IN, "stored-in")?;
+        crate::domain::header::canonical::write_d2r_v3_stored_header(
+            &mut emitter,
+            header,
+            extended_version,
+            version_low,
+            stored_in,
+        )?;
         emitter.extend_bits(huffman.encode(&format!("{} ", self.body.code.trim()))?)?;
         d2r_v3_write_checked(
             &mut emitter,

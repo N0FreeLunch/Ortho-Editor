@@ -80,7 +80,7 @@ impl BitEmitter {
     }
 }
 
-pub(in crate::domain::item) fn d2r_v3_write_checked(
+pub(crate) fn d2r_v3_write_checked(
     emitter: &mut BitEmitter,
     value: u64,
     width: u32,
