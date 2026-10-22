@@ -1,5 +1,6 @@
 use crate::data::generated::layout_policy::{
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS,
+    LEGACY_ITEM_HEADER_FLAG_POLICY, LegacyItemHeaderFlagPolicy, alpha_item_header_flag_policy,
 };
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -165,58 +166,37 @@ impl HeaderAxiom {
         }
     }
 
+    fn base_flag_policy(&self) -> &'static LegacyItemHeaderFlagPolicy {
+        if self.alpha_mode {
+            alpha_item_header_flag_policy(self.version)
+        } else {
+            &LEGACY_ITEM_HEADER_FLAG_POLICY
+        }
+    }
+
     pub fn is_identified(&self, flags: u32) -> bool {
-        (flags & (1 << 4)) != 0
+        (flags & self.base_flag_policy().identified_mask) != 0
     }
 
     pub fn is_ethereal(&self, flags: u32) -> bool {
-        if self.alpha_mode {
-            if self.version == 5 || self.version == 2 {
-                (flags & (1 << 24)) != 0
-            } else {
-                (flags & (1 << 22)) != 0
-            }
-        } else {
-            (flags & (1 << 22)) != 0
-        }
+        (flags & self.base_flag_policy().ethereal_mask) != 0
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool, code: Option<&str>) -> bool {
-        if self.alpha_mode {
-            if self.is_runeword(flags, code, false) {
-                return true;
-            }
-            if self.version == 5 {
-                !is_compact && (flags & (1 << 11)) != 0
-            } else if self.version == 1
-                || self.version == 2
-                || self.version == 0
-                || self.version == 7
-                || self.version == 4
-                || self.version == 6
-            {
-                (flags & (1 << 11)) != 0
-            } else {
-                (flags & (1 << 27)) != 0
-            }
-        } else {
-            (flags & (1 << 11)) != 0
+        if self.alpha_mode && self.is_runeword(flags, code, false) {
+            return true;
         }
+        let policy = self.base_flag_policy();
+        (!policy.socketed_requires_noncompact || !is_compact) && (flags & policy.socketed_mask) != 0
     }
 
     pub fn is_personalized(&self, flags: u32, is_compact: bool) -> bool {
         if is_compact {
             return false;
         }
-        if self.alpha_mode {
-            if self.version == 7 {
-                return false;
-            }
-            // Forensic (Axiom 0337): Personalization bit is 24 across most Alpha v105 variants.
-            (flags & (1 << 24)) != 0
-        } else {
-            (flags & (1 << 28)) != 0
-        }
+        self.base_flag_policy()
+            .personalized_mask
+            .is_some_and(|mask| (flags & mask) != 0)
     }
 
     pub fn is_runeword(&self, flags: u32, code: Option<&str>, has_checksum: bool) -> bool {
