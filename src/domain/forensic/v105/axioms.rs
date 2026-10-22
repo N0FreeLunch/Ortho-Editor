@@ -1,5 +1,8 @@
-use crate::domain::item::axiom_meta::{Confidence, ForensicAxiom, ForensicMetadata, Intentionality};
+use crate::data::generated::layout_policy::ALPHA_LEGACY_AUTHORITY_CODES;
 use crate::domain::forensic::header_policy::HeaderAxiom;
+use crate::domain::item::axiom_meta::{
+    Confidence, ForensicAxiom, ForensicMetadata, Intentionality,
+};
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -282,7 +285,7 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
     let trimmed = code.trim_matches(|c: char| c.is_whitespace() || c == '\0');
     let reg = crate::domain::forensic::registry::get_registry();
 
-    if matches!(trimmed, "xrs" | "c8xr" | "rhd" | "wa2") {
+    if ALPHA_LEGACY_AUTHORITY_CODES.contains(&trimmed) {
         return 0;
     }
 
@@ -297,14 +300,11 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
 
     let w_axiom = V105PropertyWidthAxiom::default();
     let is_summary = w_axiom.is_summary_item(version, code);
-    
+
     // Axiom 0718: Enforce registry-aware compactness check.
     // This ensures items like Leather Gloves `lgl` are correctly identified as compact when overridden in registry.
     let h_axiom = HeaderAxiom::new(version, true);
     let is_compact = h_axiom.is_compact(flags, Some(code));
-
-    let is_shadow = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
-    let is_personalized = (flags & (1 << 24)) != 0;
 
     if is_summary || is_compact {
         if is_summary {
@@ -323,33 +323,19 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
                 return rune_w as u32;
             }
         }
-        let base_width = reg.axioms.get("compact_item_fixed_width").cloned().unwrap_or(72) as u32;
+        let base_width = reg
+            .axioms
+            .get("compact_item_fixed_width")
+            .cloned()
+            .unwrap_or(72) as u32;
         if version == 4 {
             return base_width + 1; // Alpha v105 Version 4 compact items require 1-bit nudge (Slice 5)
         }
         return base_width;
     }
 
-    // Equipment items (non-compact, non-summary) have variable width based on property lists.
-    // We should NOT return a fixed width here unless it's a known shadow/personalized fixed container
-    // that does NOT contain variable properties.
-    if is_shadow || is_personalized {
-        // Authority runeword fixtures (`xrs` / `c8xr` / `rhd`) need variable-width handling.
-        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" {
-            return 0;
-        }
-        // Runewords and personalized items in Alpha v105 are OFTEN variable.
-        // Returning 80 here causes "swallowing" if the item is larger.
-        // We only return 80 if it's a known fixed shadow (e.g. from registry).
-        if let Some(overrides) = &reg.item_overrides {
-            if let Some(map) = overrides.get(trimmed) {
-                if let Some(&width) = map.get("fixed_width") { return width; }
-            }
-        }
-        return 0; // Default to variable
-    }
-
-    0 // Default to variable for standard equipment
+    // Fixed overrides and fixed containers have already returned.
+    0
 }
 /// JM Marker scanning axiom for Alpha v105.
 #[derive(Debug, Clone, Default)]
@@ -661,7 +647,8 @@ impl V105PropertyWidthAxiom {
         if let Some(overrides) = &reg.item_overrides {
             if let Some(map) = overrides.get(trimmed) {
                 if let Some(&is_shadow) = map.get("is_shadow") {
-                    let is_compact_override = map.get("is_compact").map(|&v| v != 0).unwrap_or(false);
+                    let is_compact_override =
+                        map.get("is_compact").map(|&v| v != 0).unwrap_or(false);
                     if is_shadow != 0 && !is_compact_override {
                         return false;
                     }
@@ -669,7 +656,7 @@ impl V105PropertyWidthAxiom {
             }
         }
 
-        if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
+        if ALPHA_LEGACY_AUTHORITY_CODES.contains(&trimmed) {
             return false; // Authority Runeword related items are NOT summary (Slice 7)
         }
         if trimmed.is_empty() && code.chars().any(|c| c.is_whitespace()) {
@@ -677,7 +664,7 @@ impl V105PropertyWidthAxiom {
             // in Alpha v105 to preserve the 80-bit rhythm and item count parity.
             return true;
         }
-        
+
         // Alpha v105 Summary Items: Potions, Scrolls, and small consumables (Slice 3040).
         // These items follow strict 72/80 bit slotted boundaries and use 16-bit IDs.
         let is_potion = trimmed.starts_with("hp")
@@ -687,8 +674,9 @@ impl V105PropertyWidthAxiom {
             || trimmed == "rvs"
             || trimmed == "rvl";
         let is_scroll = trimmed == "tsc" || trimmed == "isc";
-        let is_misc_summary = trimmed == "vps" || trimmed == "yps" || trimmed == "wms" || trimmed == "wuw8";
-        
+        let is_misc_summary =
+            trimmed == "vps" || trimmed == "yps" || trimmed == "wms" || trimmed == "wuw8";
+
         if is_potion || is_scroll || is_misc_summary {
             return true;
         }
