@@ -205,20 +205,10 @@ pub fn calculate_alpha_v105_checksum(flags: u32, version: u8) -> u8 {
         if (flags & (1u32 << i)) != 0 { bits_set += 1; }
     }
 
-    match version {
-        1 | 2 => {
-            // Version 1/2 rule: (sum * 24 + 106) % 256
-            bits_set.wrapping_mul(24).wrapping_add(106)
-        },
-        3 => {
-            // Version 3 rule: (sum * 16 + 181) % 256 (Observed in authority fixture)
-            bits_set.wrapping_mul(16).wrapping_add(181)
-        },
-        _ => {
-            // Version 0/4/5 rule: (sum * 16 + 213) % 256
-            bits_set.wrapping_mul(16).wrapping_add(213)
-        }
-    }
+    let policy = crate::data::generated::layout_policy::alpha_item_header_checksum_policy(version);
+    bits_set
+        .wrapping_mul(policy.multiplier)
+        .wrapping_add(policy.addend)
 }
 
 #[cfg(test)]
