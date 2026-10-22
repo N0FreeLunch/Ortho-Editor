@@ -40,7 +40,7 @@ Before execution, evaluate complexity. Pause and report if:
 
 ### 🛑 Stop & Escalation (Strategic Halt)
 - **Conservation**: If stuck in a loop or analysis is consuming excessive resources, **stop immediately**.
-- **Model Boundary Hard Stop**: If the next required phase is explicitly assigned to a different model class, stop at that boundary and report handoff-ready status instead of continuing.
+- **Delegated Model Boundary**: When the user has explicitly authorized delegation and assigned the next phase to another agent or model, stop at that handoff boundary and report readiness. In a single-agent workflow, model/role labels describe work phases; continue within existing authorization after the applicable planning and verification gates pass. Preserve capability, evidence, ownership, and external-authority stop conditions.
 - **User Confirmation Protocol**:
   1. If a task is resource-intensive, **pause and ask** the user whether to proceed or hand off.
   2. If progress remains slow after proceeding, **ask once more** before continuing.
@@ -86,7 +86,7 @@ Before execution, evaluate complexity. Pause and report if:
 - **Markdown (`.md`) Review**: After modifying any markdown document, check its overall formatting and logical consistency. If the modification was significant, ask the user if they want to review or restructure the entire document. If minor, perform a self-correction/polishing pass autonomously.
 - **Documentation Paths**: In `.md` files under the Strategy Hub resolved from `D2R_SPEC_PATH`, paths are acceptable but you MUST use **relative paths** from the project root instead of absolute paths whenever possible.
 - **Source Code Variables**: For actual application code, entirely avoid hardcoding paths or sensitive environment data. Always migrate these to `.env` configuration files or appropriate configuration injection mechanisms.
-- **Temporary Tools & Sanitation**: When creating scripts or temporary tools (e.g., for debugging, data verification, or manual extraction tasks), you MUST store them in the **`./tmp/`** directory. This directory is excluded from Git (except for `.gitkeep`). You MUST clear all contents (excluding `.gitkeep`) from this folder before finishing your task to maintain repository hygiene.
+- **Temporary Tools & Sanitation**: When creating scripts or temporary tools (e.g., for debugging, data verification, or manual extraction tasks), you MUST store them in the **`./tmp/`** directory. This directory is excluded from Git (except for `.gitkeep`). Use a uniquely named task directory under `./tmp/` and remove only that owned directory before finishing, after preserving required evidence. Keep `.gitkeep` and other tasks' files and directories intact.
 
 ## 6. System Directive Update Protocol ([CRITICAL])
 
