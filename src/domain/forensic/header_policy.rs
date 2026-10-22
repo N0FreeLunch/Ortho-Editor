@@ -1,6 +1,10 @@
 use crate::data::generated::layout_policy::{
-    ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS,
-    LEGACY_ITEM_HEADER_FLAG_POLICY, LegacyItemHeaderFlagPolicy, alpha_item_header_flag_policy,
+    ALPHA_ITEM_HEADER_KNOWN_CODE_MAX_VERSION, ALPHA_ITEM_HEADER_NONFORCED_RUNEWORD_EXCLUSIONS,
+    ALPHA_ITEM_HEADER_PLAUSIBILITY_LIMITS, ALPHA_LEGACY_AUTHORITY_CODES,
+    ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS, LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS,
+    LEGACY_ITEM_HEADER_FLAG_POLICY, LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT,
+    LEGACY_ITEM_HEADER_PLAUSIBILITY_LIMITS, LegacyItemHeaderFlagPolicy,
+    alpha_item_header_flag_policy, alpha_item_header_interpretation_policy,
 };
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -77,7 +81,8 @@ impl HeaderAxiom {
                 if self.alpha_mode {
                     let s_str = String::from_utf8_lossy(trimmed);
                     if crate::domain::forensic::v105::axioms::is_v105_summary_code(&s_str) {
-                        return mode <= 6 && location <= 5;
+                        return mode <= ALPHA_ITEM_HEADER_PLAUSIBILITY_LIMITS.max_mode
+                            && location <= ALPHA_ITEM_HEADER_PLAUSIBILITY_LIMITS.max_location;
                     }
                 }
                 return false;
@@ -85,11 +90,14 @@ impl HeaderAxiom {
         }
 
         if self.alpha_mode {
-            // mode <= 6 (standard), location <= 5 (standard).
-            // version <= 7 (3-bit field).
-            mode <= 6 && location <= 5 && self.version <= 7
+            // The known-code path also applies its separate Alpha version cap.
+            mode <= ALPHA_ITEM_HEADER_PLAUSIBILITY_LIMITS.max_mode
+                && location <= ALPHA_ITEM_HEADER_PLAUSIBILITY_LIMITS.max_location
+                && self.version <= ALPHA_ITEM_HEADER_KNOWN_CODE_MAX_VERSION
         } else {
-            if mode > 6 || location > 15 {
+            if mode > LEGACY_ITEM_HEADER_PLAUSIBILITY_LIMITS.max_mode
+                || location > LEGACY_ITEM_HEADER_PLAUSIBILITY_LIMITS.max_location
+            {
                 return false;
             }
             true
@@ -100,13 +108,10 @@ impl HeaderAxiom {
             return false;
         }
         if self.alpha_mode {
-            // Alpha v105 version 7 reuses the legacy compact bits for other header state.
-            // Treat compactness as opt-in there so code-aware overrides can drive the final decision.
-            let mut is_compact = if self.version == 7 {
-                false
-            } else {
-                (flags & (1 << 21)) != 0
-            };
+            // The policy selects the initial flag; code-aware overrides remain authoritative.
+            let policy = alpha_item_header_interpretation_policy(self.version);
+            let mut is_compact = policy.compact_flag_enabled
+                && (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.compact_mask) != 0;
 
             if let Some(c) = code {
                 let trimmed = c.trim();
@@ -141,8 +146,9 @@ impl HeaderAxiom {
                     }
                 }
             }
-            if self.version == 5 {
-                let is_fragment = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
+            if policy.compact_fragment_filter {
+                let is_fragment =
+                    (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.fragment_state_mask) != 0;
                 let mut fragment_override = false;
                 if let Some(c) = code {
                     let trimmed = c.trim();
@@ -162,7 +168,7 @@ impl HeaderAxiom {
                 is_compact
             }
         } else {
-            (flags & (1 << 21)) != 0
+            (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.compact_mask) != 0
         }
     }
 
@@ -215,19 +221,22 @@ impl HeaderAxiom {
             }
         }
 
-        if !is_forced_rw && ((flags & (1 << 23)) != 0 || (flags & (1 << 21)) != 0) {
+        if !is_forced_rw
+            && (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.nonforced_runeword_blocking_mask)
+                != 0
+        {
             return false;
         }
 
-        let has_bit_26 = (flags & (1 << 26)) != 0;
+        let has_runeword_flag =
+            (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.runeword_mask) != 0;
 
         if self.alpha_mode {
             if is_forced_rw {
                 return true;
             }
             if crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed)
-                || trimmed == "ucb8"
-                || trimmed == "bwcw"
+                || ALPHA_ITEM_HEADER_NONFORCED_RUNEWORD_EXCLUSIONS.contains(&trimmed)
             {
                 return false;
             }
@@ -237,24 +246,23 @@ impl HeaderAxiom {
                 return false;
             }
 
-            // Alpha Forensic (Slice 19): Only trust bit 26 if we have a valid checksum
-            // or if it's one of the known complex versions (1 or 5).
-            if has_bit_26 && (has_checksum || self.version == 5 || self.version == 1) {
+            // The checksum requirement and auxiliary fallback have separate policy roles.
+            let policy = alpha_item_header_interpretation_policy(self.version);
+            if has_runeword_flag && (has_checksum || policy.runeword_without_checksum) {
                 return true;
             }
 
-            if self.version == 5 || self.version == 1 {
-                let is_frag = (flags & (1 << 27)) != 0;
+            if policy.runeword_auxiliary_fallback {
+                let is_frag =
+                    (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.runeword_fragment_mask) != 0;
                 return !is_frag
-                    && ((flags & (1 << 11)) != 0
-                        || (flags & (1 << 12)) != 0
-                        || (flags & (1 << 13)) != 0
-                        || (flags & 0x800) != 0);
+                    && (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.runeword_auxiliary_mask)
+                        != 0;
             }
 
             return false;
         }
-        has_bit_26
+        has_runeword_flag
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
@@ -276,9 +284,9 @@ impl HeaderAxiom {
             return false;
         }
         if self.alpha_mode
-            && (self.version == 5 || self.version == 2 || self.version == 0 || self.version == 1)
+            && alpha_item_header_interpretation_policy(self.version).shadow_from_fragment
         {
-            if (flags & (1 << 27)) != 0 || (flags & (1 << 26)) != 0 {
+            if (flags & LEGACY_ITEM_HEADER_CLASSIFICATION_MASKS.fragment_state_mask) != 0 {
                 return true;
             }
         }
@@ -301,20 +309,15 @@ impl HeaderAxiom {
         if self.alpha_mode {
             let is_rw = self.is_runeword(flags, code_hint, false);
             let is_v105_shadow = self.is_v105_shadow(flags, code_hint);
-            let is_equipped = mode == Some(1);
+            let policy = alpha_item_header_interpretation_policy(self.version);
+            let is_equipped = mode == Some(LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.equipped_mode);
 
             let is_summary = if let Some(c) = code_hint {
                 crate::domain::forensic::v105::axioms::is_v105_summary_code(c)
             } else {
                 // Forensic Peek: In Alpha v105 (v0, v1, v2, v4, v5, v6), compact items are almost always
                 // summary items (potions, scrolls, etc.) which use 3-bit Y fields.
-                is_compact
-                    && (self.version == 0
-                        || self.version == 1
-                        || self.version == 2
-                        || self.version == 4
-                        || self.version == 5
-                        || self.version == 6)
+                is_compact && policy.summary_without_code_for_compact
             };
 
             let target_width = if is_summary {
@@ -331,7 +334,7 @@ impl HeaderAxiom {
                     0
                 }
             } else {
-                80
+                LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.unadmitted_alpha_target_width_bits
             };
 
             if is_rw || is_v105_shadow || is_personalized || is_equipped {
@@ -347,7 +350,7 @@ impl HeaderAxiom {
 
             if is_summary {
                 return HeaderGeometry {
-                    y_bits: 3,
+                    y_bits: LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.alpha_summary_y_bits,
                     page_bits: 0,
                     socket_hint_bits: 0,
                     has_header_gap: true,
@@ -357,12 +360,7 @@ impl HeaderAxiom {
             }
 
             if is_compact {
-                let has_header_gap = self.version == 5
-                    || self.version == 0
-                    || self.version == 1
-                    || self.version == 2
-                    || self.version == 4
-                    || self.version == 6;
+                let has_header_gap = policy.compact_header_gap;
                 return HeaderGeometry {
                     y_bits: 0,
                     page_bits: 0,
@@ -374,9 +372,9 @@ impl HeaderAxiom {
             }
 
             return HeaderGeometry {
-                y_bits: 4,
-                page_bits: 3,
-                socket_hint_bits: if self.version == 7 { 1 } else { 4 },
+                y_bits: LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.regular_y_bits,
+                page_bits: LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.regular_page_bits,
+                socket_hint_bits: policy.socket_hint_bits,
                 has_header_gap: true,
                 skip_geometry: false,
                 target_width,
@@ -395,8 +393,8 @@ impl HeaderAxiom {
             }
         } else {
             HeaderGeometry {
-                y_bits: 4,
-                page_bits: 3,
+                y_bits: LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.regular_y_bits,
+                page_bits: LEGACY_ITEM_HEADER_GEOMETRY_LAYOUT.regular_page_bits,
                 socket_hint_bits: 0,
                 has_header_gap: false,
                 skip_geometry: false,
