@@ -5,6 +5,7 @@ use crate::domain::item::axiom_meta::{
     Confidence, ForensicAxiom, ForensicMetadata, Intentionality,
 };
 use crate::domain::item::quality::ItemQuality;
+use crate::domain::header::legacy_flags::LegacyItemFlagContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsAxiom {
@@ -49,48 +50,7 @@ impl StatsAxiom {
 
     pub fn with_code(mut self, code: &str) -> Self {
         self.code = code.to_string();
-        let trimmed = self.code.trim();
-        if self.save_is_alpha {
-            let reg = get_registry();
-            let mut is_compact = self.is_compact
-                || crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
-
-            if trimmed.is_empty()
-                && (self.version == 5
-                    || self.version == 0
-                    || self.version == 1
-                    || self.version == 2
-                    || self.version == 4
-                    || self.version == 6)
-            {
-                is_compact = true;
-            } else {
-                if let Some(overrides) = &reg.item_overrides {
-                    if let Some(map) = overrides.get(trimmed) {
-                        if let Some(&val) = map.get("is_compact") {
-                            is_compact = val != 0;
-                            self.is_compact = is_compact;
-                            return self;
-                        }
-                    }
-                }
-
-                if let Some(codes) = &reg.forced_compact_codes {
-                    if codes.iter().any(|c| c == trimmed) {
-                        is_compact = true;
-                    }
-                }
-
-                if matches!(trimmed, "cm1" | "cm2" | "cm3")
-                    && (self.quality <= crate::domain::item::ItemQuality::Normal
-                        || self.quality == crate::domain::item::ItemQuality::Low)
-                {
-                    is_compact = true;
-                }
-            }
-
-            self.is_compact = is_compact;
-        }
+        self.is_compact = self.legacy_flag_context().with_code(&self.code).is_compact();
         self
     }
 
@@ -101,6 +61,16 @@ impl StatsAxiom {
 
     fn header_axiom(&self) -> HeaderAxiom {
         HeaderAxiom::new(self.version, self.save_is_alpha)
+    }
+
+    fn legacy_flag_context(&self) -> LegacyItemFlagContext<'_> {
+        LegacyItemFlagContext::new(
+            self.version,
+            self.quality,
+            self.save_is_alpha,
+            self.is_compact,
+            &self.code,
+        )
     }
 }
 
@@ -250,35 +220,7 @@ impl StatsAxiom {
     }
 
     pub fn is_runeword(&self, flags: u32) -> bool {
-        let trimmed = self.code.trim();
-        if trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" || trimmed == "xrs" || trimmed == "Þ." {
-            return true;
-        }
-        if (flags & (1 << 26)) != 0 {
-            return true;
-        }
-        if self.save_is_alpha {
-            if self.version == 5 || self.version == 1 {
-                let is_frag = (flags & (1 << 27)) != 0;
-                if !is_frag && ((flags & (1 << 11)) != 0 || (flags & (1 << 12)) != 0 || (flags & (1 << 13)) != 0 || (flags & 0x800) != 0) {
-                    return true;
-                }
-            }
-            let reg = get_registry();
-            if let Some(codes) = &reg.forced_runeword_codes {
-                if codes.iter().any(|c| c == trimmed) {
-                    return true;
-                }
-            }
-            if let Some(overrides) = &reg.item_overrides {
-                if let Some(map) = overrides.get(trimmed) {
-                    if let Some(&val) = map.get("is_runeword") {
-                        return val != 0;
-                    }
-                }
-            }
-        }
-        false
+        self.legacy_flag_context().is_runeword(flags)
     }
 
     pub fn is_socketed(&self, flags: u32, is_compact: bool, code: Option<&str>) -> bool {
@@ -302,10 +244,7 @@ impl StatsAxiom {
     }
 
     pub fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {
-        if self.is_compact {
-            return false;
-        }
-        self.header_axiom().is_v105_shadow(flags, code_hint)
+        self.legacy_flag_context().is_v105_shadow(flags, code_hint)
     }
 
     pub fn code_encoding(&self) -> CodeEncoding {

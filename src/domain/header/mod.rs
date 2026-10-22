@@ -1,4 +1,5 @@
 pub(crate) mod canonical;
+pub(crate) mod legacy_flags;
 
 pub mod entity;
 pub mod parser;
