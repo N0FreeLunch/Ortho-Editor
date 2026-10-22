@@ -3,8 +3,9 @@ use crate::domain::forensic::registry::get_registry;
 use crate::domain::forensic::v105::{
     get_v105_target_width, V105HeaderGapAxiom, V105PropertyWidthAxiom,
 };
+use crate::domain::forensic::header_policy::HeaderAxiom;
 use crate::domain::header::entity::{
-    calculate_alpha_v105_checksum, HeaderAxiom, ItemHeader, ItemSegmentType,
+    calculate_alpha_v105_checksum, ItemHeader, ItemSegmentType,
 };
 use crate::domain::item::axiom_meta::{FidelityContract, ForensicAudit};
 use crate::domain::item::quality::ItemQuality;

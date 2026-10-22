@@ -1,6 +1,6 @@
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
 use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105NudgeAxiom, V105ShadowAxiom};
-use crate::domain::header::entity::{HeaderAxiom, HeaderGeometry};
+use crate::domain::forensic::header_policy::{HeaderAxiom, HeaderGeometry};
 use crate::domain::item::axiom_meta::{
     Confidence, ForensicAxiom, ForensicMetadata, Intentionality,
 };

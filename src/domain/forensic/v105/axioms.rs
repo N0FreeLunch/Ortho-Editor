@@ -1,5 +1,5 @@
 use crate::domain::item::axiom_meta::{Confidence, ForensicAxiom, ForensicMetadata, Intentionality};
-use crate::domain::header::HeaderAxiom;
+use crate::domain::forensic::header_policy::HeaderAxiom;
 use std::fmt;
 
 #[derive(Debug, Clone)]

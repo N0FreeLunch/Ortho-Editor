@@ -10,7 +10,8 @@ use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
     V105ShadowAxiom,
 };
-use crate::domain::header::entity::{calculate_alpha_v105_checksum, HeaderAxiom, ItemSegmentType};
+use crate::domain::forensic::header_policy::HeaderAxiom;
+use crate::domain::header::entity::{calculate_alpha_v105_checksum, ItemSegmentType};
 use crate::domain::item::axiom_meta::{
     Confidence, ForensicAudit, ForensicAxiom, ForensicMetadata, Intentionality,
 };
@@ -648,7 +649,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
         u32,
         u8,
         String,
-        crate::domain::header::entity::HeaderGeometry,
+        crate::domain::forensic::header_policy::HeaderGeometry,
     )> = Vec::new();
     let header_setup_started = timing.mark();
     let mut reader = bitstream_io::BitReader::endian(Cursor::new(section_bytes), LittleEndian);

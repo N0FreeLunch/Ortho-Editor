@@ -520,7 +520,7 @@ fn scan_item_markers_internal(
 
                             let mut confidence = if is_known { 500 } else { 50 };
                             let header_axiom =
-                                crate::domain::header::entity::HeaderAxiom::new(version, alpha);
+                                crate::domain::forensic::header_policy::HeaderAxiom::new(version, alpha);
                             let is_alpha_runeword_candidate =
                                 alpha && header_axiom.is_runeword(flags, Some(&code), has_checksum);
                             if override_noncompact {
