@@ -3,7 +3,7 @@ use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError};
 use bitstream_io::BitRead;
 use serde::Serialize;
-use crate::domain::stats::axiom::StatsAxiom;
+use crate::domain::header::legacy_flags::LegacyItemFlagContext;
 
 thread_local! {
     pub static IN_NESTED_RECOVERY: std::cell::Cell<bool> = std::cell::Cell::new(false);
@@ -108,9 +108,11 @@ impl ItemHeader {
         };
         
         let axiom = HeaderAxiom::new(version, alpha_mode);
-        let mut s_axiom = StatsAxiom::new(version, ItemQuality::Normal, alpha_mode);
+        let mut flag_context = LegacyItemFlagContext::new(
+            version, ItemQuality::Normal, alpha_mode, false, code.unwrap_or(""),
+        );
         if let Some(c) = code {
-            s_axiom = s_axiom.with_code(c);
+            flag_context = flag_context.with_code(c);
         }
         
         let mut y = 0;
@@ -123,8 +125,8 @@ impl ItemHeader {
         let mut alpha_header_gap = None;
         if geometry.has_header_gap {
             if axiom.is_alpha() {
-                let is_v105_shadow = s_axiom.is_v105_shadow(flags, code);
-                let is_rw = s_axiom.is_runeword(flags);
+                let is_v105_shadow = flag_context.is_v105_shadow(flags, code);
+                let is_rw = flag_context.is_runeword(flags);
                 if is_rw || is_v105_shadow {
                     let is_v105_shadow_local = (flags & (1 << 26)) != 0 || (flags & (1 << 27)) != 0;
                     let gap_bits = if is_v105_shadow_local { 8 } else { 24 }; 
@@ -183,11 +185,11 @@ impl ItemHeader {
             level: None,
             quality: None,
             is_compact,
-            is_identified: s_axiom.is_identified(flags),
-            is_socketed: s_axiom.is_socketed(flags, is_compact, code),
+            is_identified: axiom.is_identified(flags),
+            is_socketed: axiom.is_socketed(flags, is_compact, code),
             is_personalized: axiom.is_personalized(flags, is_compact),
-            is_runeword: s_axiom.is_runeword(flags),
-            is_ethereal: s_axiom.is_ethereal(flags),
+            is_runeword: flag_context.is_runeword(flags),
+            is_ethereal: axiom.is_ethereal(flags),
             is_ear: (flags & (1 << 24)) != 0,
             has_checksum,
             alpha_checksum,
