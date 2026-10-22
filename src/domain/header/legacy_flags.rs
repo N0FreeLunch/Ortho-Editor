@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::LEGACY_ITEM_FLAG_POLICY as FLAG_POLICY;
 use crate::domain::forensic::header_policy::HeaderAxiom;
 use crate::domain::forensic::registry::get_registry;
 use crate::domain::item::quality::ItemQuality;
@@ -43,12 +44,9 @@ impl<'a> LegacyItemFlagContext<'a> {
                 || crate::domain::forensic::v105::axioms::is_v105_summary_code(code);
 
             if trimmed.is_empty()
-                && (self.version == 5
-                    || self.version == 0
-                    || self.version == 1
-                    || self.version == 2
-                    || self.version == 4
-                    || self.version == 6)
+                && FLAG_POLICY
+                    .empty_code_compact_versions
+                    .contains(&self.version)
             {
                 is_compact = true;
             } else {
@@ -68,7 +66,7 @@ impl<'a> LegacyItemFlagContext<'a> {
                     }
                 }
 
-                if matches!(trimmed, "cm1" | "cm2" | "cm3")
+                if FLAG_POLICY.low_quality_compact_codes.contains(&trimmed)
                     && (self.quality <= crate::domain::item::ItemQuality::Normal
                         || self.quality == crate::domain::item::ItemQuality::Low)
                 {
@@ -83,26 +81,19 @@ impl<'a> LegacyItemFlagContext<'a> {
 
     pub(crate) fn is_runeword(&self, flags: u32) -> bool {
         let trimmed = self.code.trim();
-        if trimmed == "c8xr"
-            || trimmed == "rhd"
-            || trimmed == "wa2"
-            || trimmed == "xrs"
-            || trimmed == "Þ."
-        {
+        if FLAG_POLICY.unconditional_runeword_codes.contains(&trimmed) {
             return true;
         }
-        if (flags & (1 << 26)) != 0 {
+        if (flags & FLAG_POLICY.runeword_mask) != 0 {
             return true;
         }
         if self.save_is_alpha {
-            if self.version == 5 || self.version == 1 {
-                let is_frag = (flags & (1 << 27)) != 0;
-                if !is_frag
-                    && ((flags & (1 << 11)) != 0
-                        || (flags & (1 << 12)) != 0
-                        || (flags & (1 << 13)) != 0
-                        || (flags & 0x800) != 0)
-                {
+            if FLAG_POLICY
+                .auxiliary_runeword_versions
+                .contains(&self.version)
+            {
+                let is_frag = (flags & FLAG_POLICY.runeword_fragment_mask) != 0;
+                if !is_frag && (flags & FLAG_POLICY.runeword_auxiliary_mask) != 0 {
                     return true;
                 }
             }
