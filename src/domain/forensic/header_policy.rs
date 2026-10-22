@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -21,21 +22,9 @@ static VALID_CODES: LazyLock<HashSet<&'static [u8]>> = LazyLock::new(|| {
             set.insert(trimmed);
         }
     }
-    // Axiom 0365: Explicit Alpha/Legacy white-listed codes (Forensic markers & Quest items)
-    set.insert(b"wuw8");
-    set.insert(b"\xCF\x4F"); // Legacy marker: `ÏO`.
-    set.insert(b"\x48\x04"); // H\x04
-    set.insert(b"acww"); // Shadow Item placeholder
-    set.insert(b"bwcw"); // Tome
-    set.insert(b"isc"); // Identify Scroll
-    set.insert(b"tsc"); // Town Portal Scroll
-    set.insert(b"us g"); // Javelin Alpha code
-    set.insert(b"k g"); // Javelin Alpha code (alternate)
-    set.insert(b"b7ts"); // Alpha v105 Battle Shield
-    set.insert(b"ks d"); // Alpha v105 forensic code
-    set.insert(b"    "); // Blank code (Slice 6)
-    set.insert(b"   "); // Blank code (3-char variant)
-    set.insert(b""); // Allow empty trim (Slice 6)
+    for &code in ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS {
+        set.insert(code);
+    }
     set
 });
 
