@@ -1,4 +1,8 @@
-use crate::data::generated::layout_policy::ALPHA_LEGACY_AUTHORITY_CODES;
+use crate::data::generated::layout_policy::{
+    ALPHA_LEGACY_AUTHORITY_CODES, V105_STAT_WIDTH_FALLBACKS, V105_SUMMARY_CODE_POLICY,
+    V105_SUMMARY_GAP_POLICY, V105_SUMMARY_STEALTH_LOW8_PREFIXES, V105_TARGET_WIDTH_POLICY,
+    V105_UNLISTED_STAT_WIDTH_BITS, V105PropertyLayout, v105_property_version_policy,
+};
 use crate::domain::forensic::header_policy::HeaderAxiom;
 use crate::domain::item::axiom_meta::{
     Confidence, ForensicAxiom, ForensicMetadata, Intentionality,
@@ -266,7 +270,8 @@ impl V105MarkerProximityAxiom {
 }
 
 pub fn is_v105_summary_code(code: &str) -> bool {
-    V105PropertyWidthAxiom::default().is_summary_item(5, code)
+    V105PropertyWidthAxiom::default()
+        .is_summary_item(V105_SUMMARY_CODE_POLICY.wrapper_header_version, code)
 }
 #[derive(Debug, Clone, Default)]
 pub struct V105AlignmentAxiom;
@@ -314,11 +319,13 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
 
             // Alpha v105 forensic: Potions and scrolls usually follow a 72-bit slotted rhythm (Slice 27).
             // Some summary items still use 80-bit rhythm via force_summary_rhythm_codes override.
-            return 72;
+            return V105_TARGET_WIDTH_POLICY.summary_default_bits;
         }
 
         // Alpha v105 Slice 20: 72-bit base slot for compact items.
-        if trimmed.starts_with('r') && trimmed.len() <= 3 {
+        if trimmed.starts_with(V105_TARGET_WIDTH_POLICY.rune_prefix)
+            && trimmed.len() <= V105_TARGET_WIDTH_POLICY.rune_max_code_bytes
+        {
             if let Some(&rune_w) = reg.axioms.get("rune_fixed_width") {
                 return rune_w as u32;
             }
@@ -327,9 +334,13 @@ pub fn get_v105_target_width(version: u8, code: &str, flags: u32, idx: Option<us
             .axioms
             .get("compact_item_fixed_width")
             .cloned()
-            .unwrap_or(72) as u32;
-        if version == 4 {
-            return base_width + 1; // Alpha v105 Version 4 compact items require 1-bit nudge (Slice 5)
+            .unwrap_or(V105_TARGET_WIDTH_POLICY.compact_default_bits)
+            as u32;
+        if V105_TARGET_WIDTH_POLICY
+            .compact_nudge_versions
+            .contains(&version)
+        {
+            return base_width + V105_TARGET_WIDTH_POLICY.compact_nudge_bits; // Alpha v105 Version 4 compact items require 1-bit nudge (Slice 5)
         }
         return base_width;
     }
@@ -667,15 +678,14 @@ impl V105PropertyWidthAxiom {
 
         // Alpha v105 Summary Items: Potions, Scrolls, and small consumables (Slice 3040).
         // These items follow strict 72/80 bit slotted boundaries and use 16-bit IDs.
-        let is_potion = trimmed.starts_with("hp")
-            || trimmed.starts_with("mp")
-            || trimmed.starts_with("gp")
-            || trimmed.starts_with("op")
-            || trimmed == "rvs"
-            || trimmed == "rvl";
-        let is_scroll = trimmed == "tsc" || trimmed == "isc";
-        let is_misc_summary =
-            trimmed == "vps" || trimmed == "yps" || trimmed == "wms" || trimmed == "wuw8";
+        let policy = &V105_SUMMARY_CODE_POLICY;
+        let is_potion = policy
+            .potion_prefixes
+            .iter()
+            .any(|&prefix| trimmed.starts_with(prefix))
+            || policy.potion_codes.contains(&trimmed);
+        let is_scroll = policy.scroll_codes.contains(&trimmed);
+        let is_misc_summary = policy.miscellaneous_codes.contains(&trimmed);
 
         if is_potion || is_scroll || is_misc_summary {
             return true;
@@ -690,11 +700,13 @@ impl V105PropertyWidthAxiom {
         if let Some(codes) = &reg.forced_compact_codes {
             if codes.iter().any(|c| c == trimmed) {
                 // Alpha v105 Forensic: ww/gcw in version 0/2 are often full equipment (Slice 48)
-                if (version == 0 || version == 2) && (trimmed == "ww" || trimmed == "gcw") {
+                if policy.forced_compact_excluded_versions.contains(&version)
+                    && policy.version_excluded_codes.contains(&trimmed)
+                {
                     return false;
                 }
                 // Exclude known non-summary equipment-like shadows even if in forced_compact
-                if trimmed == "jav" || trimmed == "buc" || trimmed == "ks d" || trimmed == "w8cs" {
+                if policy.forced_compact_excluded_codes.contains(&trimmed) {
                     return false;
                 }
                 return true;
@@ -709,80 +721,105 @@ impl V105PropertyWidthAxiom {
     }
 
     fn matches_stealth_pattern(&self, code: &str) -> bool {
-        // 1. Known Stealth-Compact patterns (Markers without bit 23 set)
-        // (Axiom 0365): Alpha summary items often use raw byte codes like 'H\x04'
-        // Forensic: Use raw u8 conversion to avoid UTF-8 mismatch for non-ASCII codes (Slice 24)
         let bytes: Vec<u8> = code.chars().map(|c| c as u32 as u8).collect();
-
-        // Pattern: `ÏO` (0xCF 0x4F)
-        if bytes.len() >= 2 && bytes[0] == 0xCF && bytes[1] == 0x4F {
-            return true;
-        }
-        // Pattern: H\x04 (0x48 0x04)
-        if bytes.len() >= 2 && bytes[0] == 0x48 && bytes[1] == 0x04 {
-            return true;
-        }
-        // Pattern: bH\x04 (0x62 0x48 0x04)
-        if bytes.len() >= 3 && bytes[0] == b'b' && bytes[1] == 0x48 && bytes[2] == 0x04 {
-            return true;
-        }
-        // Pattern: Q€ (0x51 0x80)
-        if bytes.len() >= 2 && bytes[0] == 0x51 && bytes[1] == 0x80 {
-            return true;
-        }
-        // Pattern: ~ (0x7E 0x02 0x80) observed in amazon_initial
-        if bytes.len() >= 2 && bytes[0] == 0x7E && bytes[1] == 0x02 {
-            return true;
-        }
-
-        // Pattern: "   9" (0x20 0x20 0x20 0x39)
-        if bytes.len() >= 4 && bytes[0] == 0x20 && bytes[1] == 0x20 && bytes[2] == 0x20 && bytes[3] == 0x39 {
-            return true;
-        }
-
-        // `Þ. Resolution: 0xDE 0x2E pattern for Alpha v105`
-        if bytes.len() >= 2 && bytes[0] == 0xDE && bytes[1] == 0x2E {
-            return true;
-        }
-
-        false
+        V105_SUMMARY_STEALTH_LOW8_PREFIXES
+            .iter()
+            .any(|prefix| bytes.starts_with(prefix))
     }
 
 
     /// The fixed width for summary items in Alpha v105 (80 bits).
     pub fn summary_item_fixed_width(&self) -> u32 {
-        80
+        V105PropertyLayout::SUMMARY_ITEM_FIXED_WIDTH
     }
 
-    pub fn quality_bits(&self, is_alpha: bool) -> u32 { if is_alpha { 3 } else { 4 } }
-    pub fn item_id_bits(&self) -> u32 { 32 }
-    pub fn item_level_bits(&self) -> u32 { 7 }
-    pub fn multi_graphics_bits(&self) -> u32 { 3 }
-    pub fn class_specific_bits(&self) -> u32 { 11 }
-    pub fn low_high_graphic_bits(&self) -> u32 { 3 }
-    pub fn magic_affix_bits(&self) -> u32 { 11 }
-    pub fn rare_name_bits(&self) -> u32 { 8 }
-    pub fn rare_affix_bits(&self) -> u32 { 11 }
-    pub fn unique_id_bits(&self) -> u32 { 12 }
-    pub fn runeword_id_bits(&self) -> u32 { 12 }
-    pub fn runeword_level_bits(&self) -> u32 { 4 }
-    pub fn quantity_bits(&self) -> u32 { 9 }
-    pub fn socket_bits(&self) -> u32 { 4 }
-    pub fn set_list_bits(&self) -> u32 { 5 }
-    pub fn teleport_bits(&self) -> u32 { 5 }
-    pub fn v5_runeword_extra_bits(&self) -> u32 { 2 }
-    pub fn ear_class_bits(&self) -> u32 { 3 }
-    pub fn ear_level_bits(&self) -> u32 { 7 }
+    pub fn quality_bits(&self, is_alpha: bool) -> u32 {
+        if is_alpha {
+            V105PropertyLayout::QUALITY_ALPHA_BITS
+        } else {
+            V105PropertyLayout::QUALITY_NONALPHA_BITS
+        }
+    }
+    pub fn item_id_bits(&self) -> u32 {
+        V105PropertyLayout::ITEM_ID_BITS
+    }
+    pub fn item_level_bits(&self) -> u32 {
+        V105PropertyLayout::ITEM_LEVEL_BITS
+    }
+    pub fn multi_graphics_bits(&self) -> u32 {
+        V105PropertyLayout::MULTI_GRAPHICS_BITS
+    }
+    pub fn class_specific_bits(&self) -> u32 {
+        V105PropertyLayout::CLASS_SPECIFIC_BITS
+    }
+    pub fn low_high_graphic_bits(&self) -> u32 {
+        V105PropertyLayout::LOW_HIGH_GRAPHIC_BITS
+    }
+    pub fn magic_affix_bits(&self) -> u32 {
+        V105PropertyLayout::MAGIC_AFFIX_BITS
+    }
+    pub fn rare_name_bits(&self) -> u32 {
+        V105PropertyLayout::RARE_NAME_BITS
+    }
+    pub fn rare_affix_bits(&self) -> u32 {
+        V105PropertyLayout::RARE_AFFIX_BITS
+    }
+    pub fn unique_id_bits(&self) -> u32 {
+        V105PropertyLayout::UNIQUE_ID_BITS
+    }
+    pub fn runeword_id_bits(&self) -> u32 {
+        V105PropertyLayout::RUNEWORD_ID_BITS
+    }
+    pub fn runeword_level_bits(&self) -> u32 {
+        V105PropertyLayout::RUNEWORD_LEVEL_BITS
+    }
+    pub fn quantity_bits(&self) -> u32 {
+        V105PropertyLayout::QUANTITY_BITS
+    }
+    pub fn socket_bits(&self) -> u32 {
+        V105PropertyLayout::SOCKET_BITS
+    }
+    pub fn set_list_bits(&self) -> u32 {
+        V105PropertyLayout::SET_LIST_BITS
+    }
+    pub fn teleport_bits(&self) -> u32 {
+        V105PropertyLayout::TELEPORT_BITS
+    }
+    pub fn v5_runeword_extra_bits(&self) -> u32 {
+        V105PropertyLayout::V5_RUNEWORD_EXTRA_BITS
+    }
+    pub fn ear_class_bits(&self) -> u32 {
+        V105PropertyLayout::EAR_CLASS_BITS
+    }
+    pub fn ear_level_bits(&self) -> u32 {
+        V105PropertyLayout::EAR_LEVEL_BITS
+    }
     
-    pub fn flags_bits(&self) -> u32 { 32 }
-    pub fn checksum_bits(&self) -> u32 { 8 }
-    pub fn version_bits(&self, _alpha_mode: bool) -> u32 { 3 }
-    pub fn mode_bits(&self, _alpha_mode: bool) -> u32 { 3 }
+    pub fn flags_bits(&self) -> u32 {
+        V105PropertyLayout::FLAGS_BITS
+    }
+    pub fn checksum_bits(&self) -> u32 {
+        V105PropertyLayout::CHECKSUM_BITS
+    }
+    pub fn version_bits(&self, _alpha_mode: bool) -> u32 {
+        V105PropertyLayout::VERSION_BITS
+    }
+    pub fn mode_bits(&self, _alpha_mode: bool) -> u32 {
+        V105PropertyLayout::MODE_BITS
+    }
     pub fn location_bits(&self, alpha_mode: bool, _version: u8) -> u32 {
-        if alpha_mode { 4 } else { 3 }
+        if alpha_mode {
+            V105PropertyLayout::LOCATION_ALPHA_BITS
+        } else {
+            V105PropertyLayout::LOCATION_NONALPHA_BITS
+        }
     }
     pub fn x_bits(&self, alpha_mode: bool, _version: u8) -> u32 {
-        if alpha_mode { 3 } else { 4 }
+        if alpha_mode {
+            V105PropertyLayout::X_ALPHA_BITS
+        } else {
+            V105PropertyLayout::X_NONALPHA_BITS
+        }
     }
 
     pub fn summary_gap_bits(&self, code: &str) -> u32 {
@@ -795,53 +832,55 @@ impl V105PropertyWidthAxiom {
                 }
             }
         }
-        
-        // Alpha v105 potions and scrolls use 0-bit gaps.
-        if trimmed == "tsc" || trimmed == "isc" 
-            || trimmed.starts_with('h') || trimmed.starts_with('m')
-            || trimmed == "rvs" || trimmed == "rvl"
+
+        let policy = &V105_SUMMARY_GAP_POLICY;
+        if policy.zero_gap_codes.contains(&trimmed)
+            || policy
+                .zero_gap_prefixes
+                .iter()
+                .any(|&prefix| trimmed.starts_with(prefix))
         {
-            0
+            policy.selected_gap_bits
         } else {
-            8
+            policy.default_gap_bits
         }
     }
 
     pub fn nudge_bits(&self, version: u8) -> u32 {
-        if version == 1 { 0 } else { 2 }
+        v105_property_version_policy(version).nudge_bits
     }
     
     pub fn is_extended_stats_early_exit(&self, version: u8) -> bool {
-        version == 6 || version == 7
+        v105_property_version_policy(version).extended_stats_early_exit
     }
     
     pub fn has_v5_runeword_extra(&self, version: u8) -> bool {
-        version == 5 || version == 6 || version == 7 || version == 1
+        v105_property_version_policy(version).has_runeword_extra
     }
     
     pub fn is_player_name_alpha_style(&self, version: u8) -> bool {
-        version == 5 || version == 0 || version == 1
+        v105_property_version_policy(version).player_name_alpha_style
     }
     
     pub fn needs_player_name_byte_alignment(&self, version: u8) -> bool {
-        version == 5 || version == 0 || version == 1
+        v105_property_version_policy(version).player_name_byte_alignment
     }
     
     pub fn is_ear_name_v5_style(&self, version: u8) -> bool {
-        version == 5
+        v105_property_version_policy(version).ear_name_v5_style
     }
     
     pub fn needs_ear_name_byte_alignment(&self, version: u8) -> bool {
-        version == 5
+        v105_property_version_policy(version).ear_name_byte_alignment
     }
     
     pub fn needs_post_body_byte_alignment(&self, version: u8, is_compact: bool) -> bool {
-        version == 5 && !is_compact
+        v105_property_version_policy(version).post_body_noncompact_byte_alignment && !is_compact
     }
     
     pub fn stat_bits(&self, stat_id: u32) -> u32 {
         let reg = crate::domain::forensic::registry::get_registry();
-        
+
         // Axiom 0812: Use registry truth for Alpha v105 stat widths (e.g. durability=14, defense=10).
         // 1. Try explicit stats section
         if let Some(info) = reg.stats.get(&stat_id.to_string()) {
@@ -856,11 +895,13 @@ impl V105PropertyWidthAxiom {
         }
 
         // 3. Fallback to retail defaults
-        match stat_id {
-            31 => crate::domain::stats::stat_save_bits(31).unwrap_or(11), // Defense
-            73 => crate::domain::stats::stat_save_bits(73).unwrap_or(8),  // Max Durability
-            72 => crate::domain::stats::stat_save_bits(72).unwrap_or(9),  // Current Durability
-            _ => 0,
+        if let Some(rule) = V105_STAT_WIDTH_FALLBACKS
+            .iter()
+            .find(|rule| rule.stat_id == stat_id)
+        {
+            crate::domain::stats::stat_save_bits(stat_id).unwrap_or(rule.default_bits)
+        } else {
+            V105_UNLISTED_STAT_WIDTH_BITS
         }
     }
 }
