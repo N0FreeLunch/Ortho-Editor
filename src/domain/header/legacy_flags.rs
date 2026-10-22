@@ -1,5 +1,5 @@
 use crate::data::generated::layout_policy::LEGACY_ITEM_FLAG_POLICY as FLAG_POLICY;
-use crate::domain::item::quality::ItemQuality;
+use crate::domain::header::quality::ItemQuality;
 
 /// Queries exposed at the compatibility algorithm's original registry stages.
 pub(crate) trait LegacyFlagRegistry {
@@ -79,8 +79,7 @@ impl<'a> LegacyItemFlagContext<'a> {
                 }
 
                 if FLAG_POLICY.low_quality_compact_codes.contains(&trimmed)
-                    && (self.quality <= crate::domain::item::ItemQuality::Normal
-                        || self.quality == crate::domain::item::ItemQuality::Low)
+                    && (self.quality <= ItemQuality::Normal || self.quality == ItemQuality::Low)
                 {
                     is_compact = true;
                 }

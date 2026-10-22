@@ -1,4 +1,4 @@
-use crate::domain::item::quality::ItemQuality;
+use crate::domain::header::quality::ItemQuality;
 use crate::data::bit_cursor::BitCursor;
 use crate::error::{ParsingResult, ParsingError};
 use bitstream_io::BitRead;
