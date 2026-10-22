@@ -1,4 +1,6 @@
-use crate::data::generated::layout_policy::ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS;
+use crate::data::generated::layout_policy::{
+    ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_HEADER_PLAUSIBLE_CODE_EXCEPTIONS,
+};
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -222,7 +224,7 @@ impl HeaderAxiom {
 
         let mut is_forced_rw = false;
         if self.alpha_mode {
-            if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "rhd" || trimmed == "wa2" {
+            if ALPHA_LEGACY_AUTHORITY_CODES.contains(&trimmed) {
                 is_forced_rw = true;
             }
             let reg = crate::domain::forensic::registry::get_registry();
