@@ -1,6 +1,9 @@
 pub(crate) mod canonical;
 pub(crate) mod legacy_flags;
 
+mod legacy;
+pub use legacy::parse_legacy_header;
+
 pub mod placement;
 pub use placement::ItemPlacement;
 
