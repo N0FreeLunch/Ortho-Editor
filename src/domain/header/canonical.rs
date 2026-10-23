@@ -3,8 +3,9 @@ use crate::data::generated::layout_policy::{
     D2rV3ItemHeaderFlags as F, D2rV3ItemHeaderLayout as W,
 };
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
-use crate::domain::item::{BitEmitter, d2r_v3_write_checked};
+use crate::domain::item::d2r_v3_write_checked;
 use crate::error::ParsingResult;
+use crate::wire::BitEmitter;
 use bitstream_io::BitRead;
 use std::io;
 
