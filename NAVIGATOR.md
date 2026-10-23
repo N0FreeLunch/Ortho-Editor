@@ -27,6 +27,7 @@ Domain names match the private overlay's map, so you can look them up by name th
 | :--- | :--- | :--- |
 | **Bitstream / Save Header** | `src/save.rs` | `d2save_map`, `d2save_verify` |
 | **Physical Bit Output** | [src/wire.rs](./src/wire.rs) | [bit_emitter_tests](./tests/bit_emitter_tests.rs) |
+| **Header-stage observations** | `src/domain/item/serialization.rs`, `src/domain/forensic/header_probe.rs` | [owning parity/radar test](./tests/item_header_stage_parity.rs), [request/artifact guide](./tests/support/HEADER-STAGE-OBSERVER.md) (explicit ignored radar) |
 | **Item parsing / Decrypt** | `src/item.rs`, `src/domain/stats/` | `d2item_inspect`, `d2stat_fidelity_radar`, `d2stat_probe_oracle`, `d2stat_tiling_prober`, `d2save_equipped_invariant` |
 | **Inventory / Grid** | `src/inventory.rs` | `d2save_inventory_check` |
 | **Status (Attrs/Skills)** | `src/save.rs` | `d2save_status_inspect` |
