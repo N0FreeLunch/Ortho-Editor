@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::data::generated::layout_policy::LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES;
 use crate::domain::item::serialization::peek_item_header_at_with_base;
 use crate::domain::payload::HuffmanTree;
 use bitstream_io::BitRead;
@@ -203,7 +204,11 @@ pub(crate) fn probe_header_hints<R: BitRead>(
         cursor.rollback(saved);
 
         // Resolve: Select the path that yields a valid summary code.
-        let is_trusted_compact_code = |code: &str| matches!(code.trim(), "jav" | "buc" | "us g");
+        let is_trusted_compact_code = |code: &str| {
+            HEADER_COMPACT_CODES
+                .trusted_compact_codes
+                .contains(&code.trim())
+        };
         let true_is_summary = true_result
             .as_ref()
             .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3))

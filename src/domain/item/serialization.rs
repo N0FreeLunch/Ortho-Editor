@@ -5,6 +5,7 @@ use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
     ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
+    LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
 };
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
@@ -2294,7 +2295,7 @@ impl Item {
                         if !trimmed.is_empty()
                             && (crate::domain::forensic::v105::axioms::is_v105_summary_code(
                                 &recovery_code,
-                            ) || matches!(trimmed, "jav" | "buc" | "us g"))
+                            ) || HEADER_COMPACT_CODES.trusted_compact_codes.contains(&trimmed))
                             && trimmed != "7pw"
                         {
                             found_item = Some((search_offset, recovery_code, recovery_is_compact));
@@ -2585,7 +2586,7 @@ impl Item {
             {
                 peek_code_hint = Some(code.clone());
                 is_compact_final = is_compact;
-                if matches!(code.trim(), "jav" | "buc" | "us g") {
+                if HEADER_COMPACT_CODES.trusted_compact_codes.contains(&code.trim()) {
                     is_compact_final = true;
                 }
                 let reg_check = crate::domain::forensic::registry::get_registry();
@@ -3474,7 +3475,7 @@ impl Item {
         let abs_start_bit = Some(start_bit);
         let mut forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
         if let Some(code) = code_peek {
-            if matches!(code.trim(), "jav" | "buc" | "us g" | "c8xr" | "rhd") {
+            if HEADER_COMPACT_CODES.forced_compact_hint_codes.contains(&code.trim()) {
                 forced_compact = Some(true);
             }
         }
@@ -4311,7 +4312,7 @@ impl Item {
 
                 let preserve_trusted_compact_tail = alpha_mode
                     && code_peek
-                        .map(|code| matches!(code.trim(), "jav" | "buc" | "us g"))
+                        .map(|code| HEADER_COMPACT_CODES.trusted_compact_codes.contains(&code.trim()))
                         .unwrap_or(false);
                 if alpha_mode {
                     if preserve_trusted_compact_tail {

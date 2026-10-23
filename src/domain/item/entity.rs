@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::data::generated::layout_policy::LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES;
 use crate::domain::forensic::registry::get_registry;
 use crate::domain::forensic::v105::{
     get_v105_target_width, V105HeaderGapAxiom, V105PropertyWidthAxiom,
@@ -3045,9 +3046,7 @@ pub fn parse_item_body<R: BitRead>(
             for i in 0..4 {
                 if alpha_mode && i == 3 {
                     let trimmed = code.trim();
-                    if trimmed == "us g"
-                        || trimmed == "jav"
-                        || trimmed == "buc"
+                    if HEADER_COMPACT_CODES.trusted_compact_codes.contains(&trimmed)
                         || crate::domain::forensic::v105::axioms::is_v105_summary_code(trimmed)
                     {
                         break;
@@ -3102,7 +3101,7 @@ pub fn parse_item_body<R: BitRead>(
                     || code.trim() == "wa2"
                     || code.trim() == "rhd")
                 && !w_axiom.is_summary_item(header.version, &code)
-                && !matches!(code.trim(), "us g" | "jav" | "buc")
+                && !HEADER_COMPACT_CODES.trusted_compact_codes.contains(&code.trim())
             {
                 if compact_template_nudge && header.is_compact && cursor.pos() > code_start {
                     cursor.rollback(cursor.pos() - 1);
