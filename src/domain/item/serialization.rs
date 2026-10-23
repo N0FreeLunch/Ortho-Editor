@@ -3454,7 +3454,7 @@ impl Item {
             header,
             alpha_header_gap,
             alpha_header_gap_bits,
-            peek,
+            peek: peek.map(Into::into),
             d2r_v3_stored_in: None,
         })
     }

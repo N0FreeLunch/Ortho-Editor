@@ -10,6 +10,68 @@ use std::io;
 
 pub type ItemHeaderPeek = (u8, u8, u8, String, u32, u8, bool, u64, i8, bool);
 
+/// Owned provisional observation inside the forensic Header boundary.
+/// Code bytes/allocation and the signed trial gap are preserved verbatim;
+/// this observation does not establish a canonical Header or new format truth.
+pub(crate) struct ProvisionalHeaderPeek {
+    mode: u8,
+    location: u8,
+    x: u8,
+    code: String,
+    flags: u32,
+    version: u8,
+    is_compact: bool,
+    consumed_bits: u64,
+    trial_gap_bits: i8,
+    has_checksum: bool,
+}
+
+impl From<ItemHeaderPeek> for ProvisionalHeaderPeek {
+    fn from(value: ItemHeaderPeek) -> Self {
+        let (
+            mode,
+            location,
+            x,
+            code,
+            flags,
+            version,
+            is_compact,
+            consumed_bits,
+            trial_gap_bits,
+            has_checksum,
+        ) = value;
+        Self {
+            mode,
+            location,
+            x,
+            code,
+            flags,
+            version,
+            is_compact,
+            consumed_bits,
+            trial_gap_bits,
+            has_checksum,
+        }
+    }
+}
+
+impl From<ProvisionalHeaderPeek> for ItemHeaderPeek {
+    fn from(value: ProvisionalHeaderPeek) -> Self {
+        (
+            value.mode,
+            value.location,
+            value.x,
+            value.code,
+            value.flags,
+            value.version,
+            value.is_compact,
+            value.consumed_bits,
+            value.trial_gap_bits,
+            value.has_checksum,
+        )
+    }
+}
+
 /// Obtains provisional hints with the inherited checksum trials and cursor effects.
 pub(crate) fn probe_header_hints<R: BitRead>(
     cursor: &mut BitCursor<R>,
@@ -18,11 +80,12 @@ pub(crate) fn probe_header_hints<R: BitRead>(
     alpha_mode: bool,
     idx: usize,
     start_bit: u64,
-) -> Option<ItemHeaderPeek> {
+) -> Option<ProvisionalHeaderPeek> {
     let is_first_item = idx == 0;
     let mut peek = if alpha_mode && ctx.is_some() {
         let (bytes, rel_start_bit) = ctx.unwrap();
         peek_item_header_at_with_base(bytes, rel_start_bit, Some(start_bit), huff, true, idx)
+            .map(ProvisionalHeaderPeek::from)
     } else {
         None
     };
@@ -101,18 +164,18 @@ pub(crate) fn probe_header_hints<R: BitRead>(
                         crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
                     let is_compact = header.is_compact || is_summary;
                     let consumed = cursor.pos() - start_bit;
-                    true_result = Some((
-                        header.mode,
-                        header.location,
-                        header.x,
-                        trimmed,
-                        header.flags,
-                        header.version,
+                    true_result = Some(ProvisionalHeaderPeek {
+                        mode: header.mode,
+                        location: header.location,
+                        x: header.x,
+                        code: trimmed,
+                        flags: header.flags,
+                        version: header.version,
                         is_compact,
-                        consumed,
-                        0i8,
-                        header.has_checksum,
-                    ));
+                        consumed_bits: consumed,
+                        trial_gap_bits: 0i8,
+                        has_checksum: header.has_checksum,
+                    });
                 }
             }
         }
@@ -189,18 +252,18 @@ pub(crate) fn probe_header_hints<R: BitRead>(
                         crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
                     let is_compact = header.is_compact || is_summary;
                     let consumed = cursor.pos() - start_bit;
-                    false_result = Some((
-                        header.mode,
-                        header.location,
-                        header.x,
-                        trimmed,
-                        header.flags,
-                        header.version,
+                    false_result = Some(ProvisionalHeaderPeek {
+                        mode: header.mode,
+                        location: header.location,
+                        x: header.x,
+                        code: trimmed,
+                        flags: header.flags,
+                        version: header.version,
                         is_compact,
-                        consumed,
-                        0i8,
-                        header.has_checksum,
-                    ));
+                        consumed_bits: consumed,
+                        trial_gap_bits: 0i8,
+                        has_checksum: header.has_checksum,
+                    });
                 }
             }
         }
@@ -214,19 +277,19 @@ pub(crate) fn probe_header_hints<R: BitRead>(
         };
         let true_is_summary = true_result
             .as_ref()
-            .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3))
+            .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.code))
             .unwrap_or(false);
         let false_is_summary = false_result
             .as_ref()
-            .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.3))
+            .map(|r| crate::domain::forensic::v105::axioms::is_v105_summary_code(&r.code))
             .unwrap_or(false);
         let true_is_trusted_compact = true_result
             .as_ref()
-            .map(|r| is_trusted_compact_code(&r.3))
+            .map(|r| is_trusted_compact_code(&r.code))
             .unwrap_or(false);
         let false_is_trusted_compact = false_result
             .as_ref()
-            .map(|r| is_trusted_compact_code(&r.3))
+            .map(|r| is_trusted_compact_code(&r.code))
             .unwrap_or(false);
 
         if true_is_summary && !false_is_summary {
@@ -235,8 +298,8 @@ pub(crate) fn probe_header_hints<R: BitRead>(
             peek = false_result;
         } else if true_is_summary && false_is_summary {
             // If both yield summary codes, prioritize the one with a standard version (< 7)
-            let true_v = true_result.as_ref().map(|r| r.5).unwrap_or(7);
-            let false_v = false_result.as_ref().map(|r| r.5).unwrap_or(7);
+            let true_v = true_result.as_ref().map(|r| r.version).unwrap_or(7);
+            let false_v = false_result.as_ref().map(|r| r.version).unwrap_or(7);
             if true_v < 7 && false_v == 7 {
                 peek = true_result;
             } else if false_v < 7 && true_v == 7 {
@@ -268,15 +331,15 @@ pub(crate) struct ResolvedHeaderHints<'a> {
 
 /// Resolve inherited hint precedence without reading or changing a bit cursor.
 pub(crate) fn resolve_header_hints<'a>(
-    peek: &'a Option<ItemHeaderPeek>,
+    peek: &'a Option<ProvisionalHeaderPeek>,
     code_hint: Option<&'a str>,
     forced_compact: Option<bool>,
     alpha_mode: bool,
 ) -> ResolvedHeaderHints<'a> {
-    let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
+    let is_compact_peek = peek.as_ref().map(|p| p.is_compact).unwrap_or(false);
     let code_peek = code_hint
         .filter(|hint| !hint.trim().is_empty())
-        .or(peek.as_ref().map(|p| p.3.as_str()));
+        .or(peek.as_ref().map(|p| p.code.as_str()));
     let gap_code = code_peek.map(crate::item::normalize_alpha_code_hint);
     let gap_override = peek.as_ref().and_then(|p| {
         if matches!(gap_code.map(|code| code.trim()), Some(code) if HEADER_GAP_HINTS.excluded_codes.contains(&code)) {
@@ -287,7 +350,7 @@ pub(crate) fn resolve_header_hints<'a>(
         // If peek produced a code with whitespace or length < 3, or if
         // an explicit code_hint was provided and peek's code does not match,
         // do not override the gap with peek's unverified 0-gap offset.
-        let p_code_trimmed = p.3.trim();
+        let p_code_trimmed = p.code.trim();
         if p_code_trimmed.contains(' ') || p_code_trimmed.len() < 3 {
             return None;
         }
@@ -298,17 +361,17 @@ pub(crate) fn resolve_header_hints<'a>(
             }
         }
 
-        let mut gap = p.8 as usize;
+        let mut gap = p.trial_gap_bits as usize;
         // Alpha v105 version 7 non-compact items reuse the legacy gap budget
         // differently from the earlier compact/summary cases. Keep the
         // original trial width for compact items, but trim the version-7
         // non-compact hints so other families stay aligned.
-        if alpha_mode && p.5 == HEADER_GAP_HINTS.alpha_noncompact_adjusted_header_version && !p.6 {
+        if alpha_mode && p.version == HEADER_GAP_HINTS.alpha_noncompact_adjusted_header_version && !p.is_compact {
             gap = gap.saturating_sub(HEADER_GAP_HINTS.alpha_noncompact_reduction_bits);
         }
         Some(gap)
     });
-    let has_checksum_peek = peek.as_ref().map(|p| p.9);
+    let has_checksum_peek = peek.as_ref().map(|p| p.has_checksum);
 
     let mut forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
     if let Some(code) = code_peek {
@@ -329,17 +392,28 @@ pub(crate) fn resolve_header_hints<'a>(
 
 #[cfg(test)]
 mod hint_resolution_tests {
-    use super::{resolve_header_hints, ItemHeaderPeek};
+    use super::{resolve_header_hints, ItemHeaderPeek, ProvisionalHeaderPeek};
 
-    fn peek(code: &str, compact: bool, gap: i8) -> Option<ItemHeaderPeek> {
-        Some((0, 0, 0, code.to_string(), 0, 7, compact, 0, gap, true))
+    fn peek(code: &str, compact: bool, gap: i8) -> Option<ProvisionalHeaderPeek> {
+        Some(ProvisionalHeaderPeek {
+            mode: 0,
+            location: 0,
+            x: 0,
+            code: code.to_string(),
+            flags: 0,
+            version: 7,
+            is_compact: compact,
+            consumed_bits: 0,
+            trial_gap_bits: gap,
+            has_checksum: true,
+        })
     }
 
     #[d2r_macros::hypothesis_test]
     fn hint_resolution_preserves_borrowed_code_and_explicit_priority() {
         let peek = peek("rin", false, 50);
         let explicit = String::from("rin");
-        let observed = &peek.as_ref().unwrap().3;
+        let observed = &peek.as_ref().unwrap().code;
         assert_ne!(explicit.as_ptr(), observed.as_ptr());
         let resolved = resolve_header_hints(&peek, Some(&explicit), Some(false), true);
         assert_eq!(resolved.code_peek, Some("rin"));
@@ -413,6 +487,58 @@ mod hint_resolution_tests {
         assert_eq!(
             resolve_header_hints(&internal_space, None, None, true).gap_override,
             None
+        );
+    }
+
+
+    #[d2r_macros::hypothesis_test]
+    fn provisional_peek_legacy_bridge_preserves_each_field_and_string_allocation() {
+        let mut code = String::with_capacity(64);
+        code.push_str("  raw\0\u{2003}");
+        let pointer = code.as_ptr();
+        let capacity = code.capacity();
+        let legacy: ItemHeaderPeek = (
+            0x12,
+            0x34,
+            0x56,
+            code,
+            0x12345678,
+            0x78,
+            true,
+            0x1020304050607080,
+            -113,
+            false,
+        );
+        let typed = ProvisionalHeaderPeek::from(legacy);
+        assert_eq!(typed.mode, 0x12);
+        assert_eq!(typed.location, 0x34);
+        assert_eq!(typed.x, 0x56);
+        assert_eq!(typed.code, "  raw\0\u{2003}");
+        assert_eq!(typed.code.as_ptr(), pointer);
+        assert_eq!(typed.code.capacity(), capacity);
+        assert_eq!(typed.flags, 0x12345678);
+        assert_eq!(typed.version, 0x78);
+        assert!(typed.is_compact);
+        assert_eq!(typed.consumed_bits, 0x1020304050607080);
+        assert_eq!(typed.trial_gap_bits, -113);
+        assert!(!typed.has_checksum);
+        let roundtrip: ItemHeaderPeek = typed.into();
+        assert_eq!(roundtrip.3.as_ptr(), pointer);
+        assert_eq!(roundtrip.3.capacity(), capacity);
+        assert_eq!(
+            roundtrip,
+            (
+                0x12,
+                0x34,
+                0x56,
+                "  raw\0\u{2003}".to_string(),
+                0x12345678,
+                0x78,
+                true,
+                0x1020304050607080,
+                -113,
+                false
+            )
         );
     }
 }
