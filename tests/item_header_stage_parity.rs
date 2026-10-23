@@ -124,3 +124,20 @@ fn shared_header_stage_matches_same_context_full_entry() {
         }
     }
 }
+
+#[path = "support/header_stage_observer.rs"]
+mod header_stage_observer;
+
+/// Explicitly requested ordered observations; diagnostic errors are not fidelity scores.
+#[d2r_macros::radar_test]
+fn export_header_stage_observations() {
+    let request = std::env::var_os("D2R_HEADER_STAGE_REQUEST")
+        .expect("Set D2R_HEADER_STAGE_REQUEST to an absolute JSON request path");
+    let summary = header_stage_observer::observe_file(std::path::Path::new(&request))
+        .unwrap_or_else(|error| panic!("{}", serde_json::to_string(&error).unwrap()));
+    println!("{}", serde_json::to_string(&summary).unwrap());
+    assert_ne!(
+        summary.status, "different",
+        "Full Header observation payload differs; inspect comparison.json and preserve both runs"
+    );
+}
