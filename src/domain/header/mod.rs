@@ -1,6 +1,9 @@
 pub(crate) mod canonical;
 pub(crate) mod legacy_flags;
 
+pub mod placement;
+pub use placement::ItemPlacement;
+
 pub mod quality;
 pub use quality::{ItemQuality, map_item_quality};
 

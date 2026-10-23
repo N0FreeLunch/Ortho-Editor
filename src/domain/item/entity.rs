@@ -369,14 +369,7 @@ pub enum LevelResult<T, E> {
     Opaque { raw_span: Vec<bool>, reason: E },
 }
 
-/// Item placement coordinates and container mapping.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ItemPlacement {
-    pub container: u8,
-    pub page: Option<u8>,
-    pub x: u8,
-    pub y: u8,
-}
+pub use crate::domain::header::placement::ItemPlacement;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Item {
