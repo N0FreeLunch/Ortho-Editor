@@ -6,6 +6,7 @@ use crate::data::generated::layout_policy::{
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
     ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
+    LEGACY_HEADER_GAP_HINT_POLICY as HEADER_GAP_HINTS,
 };
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
@@ -3441,7 +3442,7 @@ impl Item {
             .or(peek.as_ref().map(|p| p.3.as_str()));
         let gap_code = code_peek.map(crate::item::normalize_alpha_code_hint);
         let gap_override = peek.as_ref().and_then(|p| {
-            if matches!(gap_code.map(|code| code.trim()), Some("jav") | Some("buc")) {
+            if matches!(gap_code.map(|code| code.trim()), Some(code) if HEADER_GAP_HINTS.excluded_codes.contains(&code)) {
                 return None;
             }
 
@@ -3465,8 +3466,8 @@ impl Item {
             // differently from the earlier compact/summary cases. Keep the
             // original trial width for compact items, but trim the version-7
             // non-compact hints so other families stay aligned.
-            if alpha_mode && p.5 == 7 && !p.6 {
-                gap = gap.saturating_sub(45);
+            if alpha_mode && p.5 == HEADER_GAP_HINTS.alpha_noncompact_adjusted_header_version && !p.6 {
+                gap = gap.saturating_sub(HEADER_GAP_HINTS.alpha_noncompact_reduction_bits);
             }
             Some(gap)
         });
