@@ -1,6 +1,6 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
-use crate::domain::item::{HuffmanTree};
+use crate::domain::payload::HuffmanTree;
 use crate::error::{ParsingError, ParsingResult};
 use bitstream_io::{BitRead};
 use crate::domain::header::HeaderAxiom;
