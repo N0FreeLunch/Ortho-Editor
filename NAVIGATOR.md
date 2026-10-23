@@ -26,6 +26,7 @@ Domain names match the private overlay's map, so you can look them up by name th
 | Domain | Primary Implementation | Verification |
 | :--- | :--- | :--- |
 | **Bitstream / Save Header** | `src/save.rs` | `d2save_map`, `d2save_verify` |
+| **Physical Bit Output** | [src/wire.rs](./src/wire.rs) | [bit_emitter_tests](./tests/bit_emitter_tests.rs) |
 | **Item parsing / Decrypt** | `src/item.rs`, `src/domain/stats/` | `d2item_inspect`, `d2stat_fidelity_radar`, `d2stat_probe_oracle`, `d2stat_tiling_prober`, `d2save_equipped_invariant` |
 | **Inventory / Grid** | `src/inventory.rs` | `d2save_inventory_check` |
 | **Status (Attrs/Skills)** | `src/save.rs` | `d2save_status_inspect` |
