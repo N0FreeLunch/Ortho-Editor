@@ -12,6 +12,7 @@ pub mod spec;
 pub mod algo;
 pub mod report;
 pub mod verify;
+pub mod wire;
 
 #[cfg(test)]
 mod tests {
