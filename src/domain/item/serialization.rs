@@ -6,7 +6,6 @@ use crate::data::generated::layout_policy::{
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
     ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
-    LEGACY_HEADER_GAP_HINT_POLICY as HEADER_GAP_HINTS,
 };
 use crate::domain::forensic::v105::{
     V105HeaderGapAxiom, V105NudgeAxiom, V105PropertyNudgeAxiom, V105PropertyWidthAxiom,
@@ -3436,59 +3435,19 @@ impl Item {
         let peek = crate::domain::forensic::header_probe::probe_header_hints(
             cursor, huff, ctx, alpha_mode, idx, start_bit,
         );
-        let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
-        let code_peek = code_hint
-            .filter(|hint| !hint.trim().is_empty())
-            .or(peek.as_ref().map(|p| p.3.as_str()));
-        let gap_code = code_peek.map(crate::item::normalize_alpha_code_hint);
-        let gap_override = peek.as_ref().and_then(|p| {
-            if matches!(gap_code.map(|code| code.trim()), Some(code) if HEADER_GAP_HINTS.excluded_codes.contains(&code)) {
-                return None;
-            }
-
-            // Reject unreliable gap guesses from malformed peek codes.
-            // If peek produced a code with whitespace or length < 3, or if
-            // an explicit code_hint was provided and peek's code does not match,
-            // do not override the gap with peek's unverified 0-gap offset.
-            let p_code_trimmed = p.3.trim();
-            if p_code_trimmed.contains(' ') || p_code_trimmed.len() < 3 {
-                return None;
-            }
-            if let Some(hint) = code_hint {
-                let hint_trimmed = hint.trim();
-                if !hint_trimmed.is_empty() && hint_trimmed != p_code_trimmed {
-                    return None;
-                }
-            }
-
-            let mut gap = p.8 as usize;
-            // Alpha v105 version 7 non-compact items reuse the legacy gap budget
-            // differently from the earlier compact/summary cases. Keep the
-            // original trial width for compact items, but trim the version-7
-            // non-compact hints so other families stay aligned.
-            if alpha_mode && p.5 == HEADER_GAP_HINTS.alpha_noncompact_adjusted_header_version && !p.6 {
-                gap = gap.saturating_sub(HEADER_GAP_HINTS.alpha_noncompact_reduction_bits);
-            }
-            Some(gap)
-        });
-        let has_checksum_peek = peek.as_ref().map(|p| p.9);
-
+        let hints = crate::domain::forensic::header_probe::resolve_header_hints(
+            &peek, code_hint, forced_compact, alpha_mode,
+        );
         let abs_start_bit = Some(start_bit);
-        let mut forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
-        if let Some(code) = code_peek {
-            if HEADER_COMPACT_CODES.forced_compact_hint_codes.contains(&code.trim()) {
-                forced_compact = Some(true);
-            }
-        }
         let (header, alpha_header_gap, alpha_header_gap_bits) =
             crate::domain::item::entity::parse_item_header(
                 cursor,
                 alpha_mode,
-                code_peek,
-                gap_override,
+                hints.code_peek,
+                hints.gap_override,
                 is_first_item,
-                forced_compact,
-                has_checksum_peek,
+                hints.forced_compact,
+                hints.has_checksum_peek,
                 abs_start_bit,
             )?;
         Ok(ItemHeaderStage {

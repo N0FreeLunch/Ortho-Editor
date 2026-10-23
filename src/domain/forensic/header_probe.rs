@@ -1,5 +1,8 @@
 use crate::data::bit_cursor::BitCursor;
-use crate::data::generated::layout_policy::LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES;
+use crate::data::generated::layout_policy::{
+    LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
+    LEGACY_HEADER_GAP_HINT_POLICY as HEADER_GAP_HINTS,
+};
 use crate::domain::item::serialization::peek_item_header_at_with_base;
 use crate::domain::payload::HuffmanTree;
 use bitstream_io::BitRead;
@@ -252,4 +255,164 @@ pub(crate) fn probe_header_hints<R: BitRead>(
         }
     }
     peek
+}
+
+/// Borrowed, provisional parser arguments selected by forensic hint arbitration.
+/// The code retains its original input allocation and whitespace.
+pub(crate) struct ResolvedHeaderHints<'a> {
+    pub code_peek: Option<&'a str>,
+    pub gap_override: Option<usize>,
+    pub forced_compact: Option<bool>,
+    pub has_checksum_peek: Option<bool>,
+}
+
+/// Resolve inherited hint precedence without reading or changing a bit cursor.
+pub(crate) fn resolve_header_hints<'a>(
+    peek: &'a Option<ItemHeaderPeek>,
+    code_hint: Option<&'a str>,
+    forced_compact: Option<bool>,
+    alpha_mode: bool,
+) -> ResolvedHeaderHints<'a> {
+    let is_compact_peek = peek.as_ref().map(|p| p.6).unwrap_or(false);
+    let code_peek = code_hint
+        .filter(|hint| !hint.trim().is_empty())
+        .or(peek.as_ref().map(|p| p.3.as_str()));
+    let gap_code = code_peek.map(crate::item::normalize_alpha_code_hint);
+    let gap_override = peek.as_ref().and_then(|p| {
+        if matches!(gap_code.map(|code| code.trim()), Some(code) if HEADER_GAP_HINTS.excluded_codes.contains(&code)) {
+            return None;
+        }
+
+        // Reject unreliable gap guesses from malformed peek codes.
+        // If peek produced a code with whitespace or length < 3, or if
+        // an explicit code_hint was provided and peek's code does not match,
+        // do not override the gap with peek's unverified 0-gap offset.
+        let p_code_trimmed = p.3.trim();
+        if p_code_trimmed.contains(' ') || p_code_trimmed.len() < 3 {
+            return None;
+        }
+        if let Some(hint) = code_hint {
+            let hint_trimmed = hint.trim();
+            if !hint_trimmed.is_empty() && hint_trimmed != p_code_trimmed {
+                return None;
+            }
+        }
+
+        let mut gap = p.8 as usize;
+        // Alpha v105 version 7 non-compact items reuse the legacy gap budget
+        // differently from the earlier compact/summary cases. Keep the
+        // original trial width for compact items, but trim the version-7
+        // non-compact hints so other families stay aligned.
+        if alpha_mode && p.5 == HEADER_GAP_HINTS.alpha_noncompact_adjusted_header_version && !p.6 {
+            gap = gap.saturating_sub(HEADER_GAP_HINTS.alpha_noncompact_reduction_bits);
+        }
+        Some(gap)
+    });
+    let has_checksum_peek = peek.as_ref().map(|p| p.9);
+
+    let mut forced_compact = forced_compact.or(if is_compact_peek { Some(true) } else { None });
+    if let Some(code) = code_peek {
+        if HEADER_COMPACT_CODES
+            .forced_compact_hint_codes
+            .contains(&code.trim())
+        {
+            forced_compact = Some(true);
+        }
+    }
+    ResolvedHeaderHints {
+        code_peek,
+        gap_override,
+        forced_compact,
+        has_checksum_peek,
+    }
+}
+
+#[cfg(test)]
+mod hint_resolution_tests {
+    use super::{resolve_header_hints, ItemHeaderPeek};
+
+    fn peek(code: &str, compact: bool, gap: i8) -> Option<ItemHeaderPeek> {
+        Some((0, 0, 0, code.to_string(), 0, 7, compact, 0, gap, true))
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn hint_resolution_preserves_borrowed_code_and_explicit_priority() {
+        let peek = peek("rin", false, 50);
+        let explicit = String::from("rin");
+        let observed = &peek.as_ref().unwrap().3;
+        assert_ne!(explicit.as_ptr(), observed.as_ptr());
+        let resolved = resolve_header_hints(&peek, Some(&explicit), Some(false), true);
+        assert_eq!(resolved.code_peek, Some("rin"));
+        assert_eq!(resolved.code_peek.unwrap().as_ptr(), explicit.as_ptr());
+        assert_eq!(resolved.gap_override, Some(5));
+        assert_eq!(resolved.forced_compact, Some(false));
+        assert_eq!(resolved.has_checksum_peek, Some(true));
+
+        let padded = String::from("  rin  ");
+        let resolved = resolve_header_hints(&peek, Some(&padded), None, true);
+        assert_eq!(resolved.code_peek, Some("  rin  "));
+        assert_eq!(resolved.code_peek.unwrap().as_ptr(), padded.as_ptr());
+        assert_eq!(resolved.gap_override, Some(5));
+
+        let resolved = resolve_header_hints(&peek, Some(" \u{2003}\t"), None, true);
+        assert_eq!(resolved.code_peek.unwrap().as_ptr(), observed.as_ptr());
+        assert_eq!(resolved.gap_override, Some(5));
+        let missing = None;
+        let resolved = resolve_header_hints(&missing, None, Some(false), false);
+        assert_eq!(resolved.code_peek, None);
+        assert_eq!(resolved.gap_override, None);
+        assert_eq!(resolved.forced_compact, Some(false));
+        assert_eq!(resolved.has_checksum_peek, None);
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn hint_resolution_preserves_alias_gap_and_compact_precedence() {
+        // Existing source policy: normalized gap admission and raw compact
+        // admission intentionally use different representations of the code.
+        let alias = peek("k g", false, 50);
+        let resolved = resolve_header_hints(&alias, Some("k g"), Some(false), true);
+        assert_eq!(resolved.code_peek, Some("k g"));
+        assert_eq!(resolved.gap_override, None);
+        assert_eq!(resolved.forced_compact, Some(false));
+        let compact_code = peek("jav", false, -1);
+        let resolved = resolve_header_hints(&compact_code, None, Some(false), false);
+        assert_eq!(resolved.forced_compact, Some(true));
+        assert_eq!(resolved.gap_override, None);
+
+        let negative = peek("rin", false, -1);
+        let resolved = resolve_header_hints(&negative, None, None, true);
+        assert_eq!(
+            resolved.gap_override,
+            Some((-1_i8 as usize).saturating_sub(45))
+        );
+        let compact_peek = peek("rin", true, -1);
+        let resolved = resolve_header_hints(&compact_peek, None, Some(false), true);
+        assert_eq!(resolved.gap_override, Some(-1_i8 as usize));
+        assert_eq!(resolved.forced_compact, Some(false));
+        assert_eq!(
+            resolve_header_hints(&negative, Some("amu"), None, true).gap_override,
+            None
+        );
+
+        let byte_short = peek("\u{00e9}", false, 50);
+        let byte_three = peek("\u{6f22}", false, 50);
+        let internal_tab = peek("a\tb", false, 50);
+        let internal_space = peek("a b", false, 50);
+        assert_eq!(
+            resolve_header_hints(&byte_short, None, None, true).gap_override,
+            None
+        );
+        assert_eq!(
+            resolve_header_hints(&byte_three, None, None, true).gap_override,
+            Some(5)
+        );
+        assert_eq!(
+            resolve_header_hints(&internal_tab, None, None, true).gap_override,
+            Some(5)
+        );
+        assert_eq!(
+            resolve_header_hints(&internal_space, None, None, true).gap_override,
+            None
+        );
+    }
 }
