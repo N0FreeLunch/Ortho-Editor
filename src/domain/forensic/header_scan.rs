@@ -3,6 +3,7 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::{
     ALPHA_LEGACY_AUTHORITY_CODES, LegacyHeaderCodeTrialLayout as CodeTrialLayout,
+    LegacyMarkerCandidateAdmissionPolicy as CandidatePolicy,
     LegacyMarkerLookaheadPolicy as LookaheadPolicy,
 };
 use crate::data::repository::legacy_item_template as item_template;
@@ -40,7 +41,7 @@ pub fn find_next_item_match(
 
         let mut header_candidate = peek_item_header_at(bytes, probe, huffman, alpha, 0);
         if alpha {
-            for alt_gap in [6u64, 35, 46] {
+            for &alt_gap in CandidatePolicy::ALTERNATE_GAP_BITS {
                 if let Some((
                     mode,
                     location,
@@ -55,7 +56,7 @@ pub fn find_next_item_match(
                 )) = peek_item_header_at_specific_gap(bytes, probe, huffman, alpha, alt_gap)
                 {
                     let trimmed = code.trim();
-                    if matches!(trimmed, "xrs" | "c8xr" | "rhd") {
+                    if CandidatePolicy::ALTERNATE_GAP_OVERRIDE_CODES.contains(&trimmed) {
                         header_candidate = Some((
                             mode,
                             location,
@@ -102,7 +103,7 @@ pub fn find_next_item_match(
                 // often lack the is_compact flag but are strictly 80-bit intervals.
                 let mut forced_compact = false;
                 if alpha && !is_compact {
-                    let next_jm_at_80 = probe + 80;
+                    let next_jm_at_80 = probe + CandidatePolicy::FORCED_COMPACT_SUCCESSOR_BITS;
                     if next_jm_at_80 + 32 <= section_bits {
                         let mut jm_reader =
                             bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
@@ -138,7 +139,11 @@ pub fn find_next_item_match(
                     }
                 }
 
-                let required_tail_bits = if alpha { 16 } else { 80 };
+                let required_tail_bits = if alpha {
+                    CandidatePolicy::MINIMUM_ALPHA_TAIL_BITS
+                } else {
+                    CandidatePolicy::MINIMUM_NONALPHA_TAIL_BITS
+                };
                 if probe + header_len + required_tail_bits <= section_bits {
                     return Some(probe);
                 }
