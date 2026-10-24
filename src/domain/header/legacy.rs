@@ -1,4 +1,5 @@
 use crate::data::bit_cursor::BitCursor;
+use crate::data::generated::layout_policy::LegacyFixedHeaderLayout as L;
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
@@ -7,27 +8,27 @@ use bitstream_io::BitRead;
 pub fn parse_legacy_header<R: BitRead>(cursor: &mut BitCursor<R>) -> ParsingResult<ItemHeader> {
     cursor.begin_segment(ItemSegmentType::Header);
 
-    let flags = cursor.read_bits::<u32>(32)?;
-    let version = cursor.read_bits::<u8>(3)?;
-    let mode = cursor.read_bits::<u8>(3)?;
-    let location = cursor.read_bits::<u8>(3)?;
-    let x = cursor.read_bits::<u8>(4)?;
-    let y = cursor.read_bits::<u8>(4)?;
-    let page = cursor.read_bits::<u8>(3)?;
+    let flags = cursor.read_bits::<u32>(L::FLAGS_BITS)?;
+    let version = cursor.read_bits::<u8>(L::VERSION_BITS)?;
+    let mode = cursor.read_bits::<u8>(L::MODE_BITS)?;
+    let location = cursor.read_bits::<u8>(L::LOCATION_BITS)?;
+    let x = cursor.read_bits::<u8>(L::X_BITS)?;
+    let y = cursor.read_bits::<u8>(L::Y_BITS)?;
+    let page = cursor.read_bits::<u8>(L::PAGE_BITS)?;
 
     let mut socket_hint = 0;
-    if (flags & (1 << 11)) != 0 {
-        socket_hint = cursor.read_bits::<u8>(3)?;
+    if (flags & L::SOCKETED_MASK) != 0 {
+        socket_hint = cursor.read_bits::<u8>(L::SOCKET_HINT_BITS)?;
     }
 
-    let is_compact = (flags & (1 << 21)) != 0;
+    let is_compact = (flags & L::COMPACT_MASK) != 0;
 
-    let is_ear = (flags & (1 << 16)) != 0;
-    let is_identified = (flags & (1 << 4)) != 0;
-    let is_personalized = (flags & (1 << 24)) != 0;
-    let is_runeword = (flags & (1 << 26)) != 0;
-    let is_socketed = (flags & (1 << 11)) != 0;
-    let is_ethereal = (flags & (1 << 22)) != 0;
+    let is_ear = (flags & L::EAR_MASK) != 0;
+    let is_identified = (flags & L::IDENTIFIED_MASK) != 0;
+    let is_personalized = (flags & L::PERSONALIZED_MASK) != 0;
+    let is_runeword = (flags & L::RUNEWORD_MASK) != 0;
+    let is_socketed = (flags & L::SOCKETED_MASK) != 0;
+    let is_ethereal = (flags & L::ETHEREAL_MASK) != 0;
 
     cursor.end_segment();
 

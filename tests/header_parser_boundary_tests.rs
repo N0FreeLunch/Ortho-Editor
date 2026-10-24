@@ -151,3 +151,28 @@ fn alpha_fixture_adapter_keeps_legacy_absolute_cursor_behavior() {
         assert_eq!(cursor.segments().last().unwrap().end, start);
     }
 }
+
+// The fixed decoder exposes raw bit 24; interpreted Header policy uses bit 28.
+#[hypothesis_test]
+fn fixed_raw_personalization_preserves_both_public_entrypoints() {
+    let huffman = HuffmanTree::new();
+    let axiom = HeaderAxiom::new(255, false);
+    for flags in [0, 1 << 24, 1 << 28, (1 << 24) | (1 << 28)] {
+        for direct in [false, true] {
+            let (bytes, width) = frame(flags, 3);
+            let mut cursor = cursor(&bytes, 3, 3 + width + 2);
+            let header = if direct {
+                d2r_core::domain::header::parse_legacy_header(&mut cursor)
+            } else {
+                parse_header(&mut cursor, &axiom, &huffman, None)
+            }
+            .unwrap();
+            assert_eq!(header.is_personalized, flags & (1 << 24) != 0);
+            assert_eq!(axiom.is_personalized(flags, false), flags & (1 << 28) != 0);
+            assert_eq!(cursor.pos(), 3 + width);
+            assert_eq!(cursor.context_stack(), ["Root"]);
+            assert!(cursor.read_bit().unwrap());
+            assert!(!cursor.read_bit().unwrap());
+        }
+    }
+}
