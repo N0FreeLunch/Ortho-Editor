@@ -2,7 +2,8 @@
 //! Candidate observations do not establish canonical item identity or ownership.
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::{
-    LegacyHeaderCodeTrialLayout as CodeTrialLayout, ALPHA_LEGACY_AUTHORITY_CODES,
+    ALPHA_LEGACY_AUTHORITY_CODES, LegacyHeaderCodeTrialLayout as CodeTrialLayout,
+    LegacyMarkerLookaheadPolicy as LookaheadPolicy,
 };
 use crate::data::repository::legacy_item_template as item_template;
 use crate::domain::forensic::header_policy::HeaderAxiom;
@@ -206,67 +207,27 @@ pub fn verify_marker_lookahead(
     _huffman: &HuffmanTree,
     _alpha: bool,
 ) -> bool {
-    // Read 9-bit Stat ID (Dominant rhythm in Alpha v105)
-    let stat_id = match peek_bits_at(bytes, start_bit, 9) {
+    // Read the property-stream ID using the source-bound lookahead geometry.
+    let stat_id = match peek_bits_at(bytes, start_bit, LookaheadPolicy::STAT_ID_BITS) {
         Some(id) => id as u16,
         None => return false,
     };
 
-    // Terminator (511) is a valid "empty" or "finished" stats block.
-    if stat_id == 511 {
+    // A terminator remains valid before testing membership or tail capacity.
+    if stat_id == LookaheadPolicy::TERMINATOR_ID {
         return true;
     }
 
-    // For Alpha v105, check if the stat_id is one of the known/mapped IDs
-    // to reject random garbage.
-    let is_known_id = matches!(
-        stat_id,
-        0 | 1
-            | 2
-            | 4
-            | 8
-            | 13
-            | 16
-            | 21
-            | 25
-            | 26
-            | 31
-            | 68
-            | 69
-            | 70
-            | 72
-            | 73
-            | 99
-            | 106
-            | 108
-            | 112
-            | 114
-            | 127
-            | 128
-            | 140
-            | 152
-            | 160
-            | 194
-            | 199
-            | 207
-            | 256
-            | 287
-            | 289
-            | 309
-            | 310
-            | 311
-            | 312
-            | 317
-            | 320
-            | 380
-            | 496
-            | 499
-    );
+    // Preserve the manual filter for both values of the alpha argument.
+    let is_known_id = LookaheadPolicy::ACCEPTED_STAT_IDS.contains(&stat_id);
 
     if is_known_id {
-        // Most Alpha v105 properties are 9+6 or 9+9.
-        // We expect at least 6-9 more bits.
-        if start_bit + 9 + 6 <= (bytes.len() as u64) * 8 {
+        // Membership still requires the legacy minimum number of value bits.
+        if start_bit
+            + u64::from(LookaheadPolicy::STAT_ID_BITS)
+            + LookaheadPolicy::MINIMUM_VALUE_BITS
+            <= (bytes.len() as u64) * 8
+        {
             return true;
         }
     }
