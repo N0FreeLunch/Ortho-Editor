@@ -72,6 +72,101 @@ impl From<ProvisionalHeaderPeek> for ItemHeaderPeek {
     }
 }
 
+/// Decodes one provisional checksum hypothesis; the caller owns checkpoint rollback.
+fn probe_checksum_trial<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    huff: &HuffmanTree,
+    alpha_mode: bool,
+    is_first_item: bool,
+    start_bit: u64,
+    has_checksum: bool,
+) -> Option<ProvisionalHeaderPeek> {
+    let mut result = None;
+    if let Ok((header, _, _)) = crate::domain::item::entity::parse_item_header(
+        cursor,
+        alpha_mode,
+        None,
+        None,
+        is_first_item,
+        None,
+        Some(has_checksum),
+        Some(start_bit),
+    ) {
+        let s_axiom = crate::domain::stats::axiom::StatsAxiom::new(
+            header.version,
+            header
+                .quality
+                .unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
+            alpha_mode,
+        );
+        let is_ho = s_axiom.is_header_only(header.flags, "");
+        if !is_ho {
+            let huffman_pos = cursor.pos();
+            let mut decoded = String::new();
+            let mut ok = true;
+            for _ in 0..4 {
+                if let Ok(c) = huff.decode_internal(|| {
+                    cursor
+                        .read_bit()
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))
+                }) {
+                    decoded.push(c);
+                } else {
+                    ok = false;
+                    break;
+                }
+            }
+            if alpha_mode {
+                let saved_dec = cursor.checkpoint();
+                cursor.rollback(huffman_pos);
+                let mut ascii_code = String::new();
+                let mut success = true;
+                for _ in 0..3 {
+                    match cursor.read_bits::<u8>(8) {
+                        Ok(ch) => {
+                            ascii_code.push(ch as char);
+                        }
+                        Err(_) => {
+                            success = false;
+                            break;
+                        }
+                    }
+                }
+                let trimmed_ascii = ascii_code.trim();
+                if success
+                    && (trimmed_ascii == "xrs"
+                        || trimmed_ascii == "mp1"
+                        || crate::domain::forensic::v105::axioms::is_v105_summary_code(&ascii_code))
+                {
+                    decoded = ascii_code;
+                } else {
+                    cursor.rollback(saved_dec);
+                }
+            }
+            if ok {
+                let trimmed = decoded.trim().to_string();
+                let is_summary =
+                    crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
+                let is_compact = header.is_compact || is_summary;
+                let consumed = cursor.pos() - start_bit;
+                result = Some(ProvisionalHeaderPeek {
+                    mode: header.mode,
+                    location: header.location,
+                    x: header.x,
+                    code: trimmed,
+                    flags: header.flags,
+                    version: header.version,
+                    is_compact,
+                    consumed_bits: consumed,
+                    trial_gap_bits: 0i8,
+                    has_checksum: header.has_checksum,
+                });
+            }
+        }
+    }
+    result
+}
+
 /// Obtains provisional hints with the inherited checksum trials and cursor effects.
 pub(crate) fn probe_header_hints<R: BitRead>(
     cursor: &mut BitCursor<R>,
@@ -94,179 +189,13 @@ pub(crate) fn probe_header_hints<R: BitRead>(
         let saved = cursor.checkpoint();
 
         // Path A: Try parsing assuming has_checksum is true
-        let mut true_result = None;
-        if let Ok((header, _, _)) = crate::domain::item::entity::parse_item_header(
-            cursor,
-            alpha_mode,
-            None,
-            None,
-            is_first_item,
-            None,
-            Some(true),
-            Some(start_bit),
-        ) {
-            let s_axiom = crate::domain::stats::axiom::StatsAxiom::new(
-                header.version,
-                header
-                    .quality
-                    .unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
-                alpha_mode,
-            );
-            let is_ho = s_axiom.is_header_only(header.flags, "");
-            if !is_ho {
-                let huffman_pos = cursor.pos();
-                let mut decoded = String::new();
-                let mut ok = true;
-                for _ in 0..4 {
-                    if let Ok(c) = huff.decode_internal(|| {
-                        cursor
-                            .read_bit()
-                            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))
-                    }) {
-                        decoded.push(c);
-                    } else {
-                        ok = false;
-                        break;
-                    }
-                }
-                if alpha_mode {
-                    let saved_dec = cursor.checkpoint();
-                    cursor.rollback(huffman_pos);
-                    let mut ascii_code = String::new();
-                    let mut success = true;
-                    for _ in 0..3 {
-                        match cursor.read_bits::<u8>(8) {
-                            Ok(ch) => {
-                                ascii_code.push(ch as char);
-                            }
-                            Err(_) => {
-                                success = false;
-                                break;
-                            }
-                        }
-                    }
-                    let trimmed_ascii = ascii_code.trim();
-                    if success
-                        && (trimmed_ascii == "xrs"
-                            || trimmed_ascii == "mp1"
-                            || crate::domain::forensic::v105::axioms::is_v105_summary_code(
-                                &ascii_code,
-                            ))
-                    {
-                        decoded = ascii_code;
-                    } else {
-                        cursor.rollback(saved_dec);
-                    }
-                }
-                if ok {
-                    let trimmed = decoded.trim().to_string();
-                    let is_summary =
-                        crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
-                    let is_compact = header.is_compact || is_summary;
-                    let consumed = cursor.pos() - start_bit;
-                    true_result = Some(ProvisionalHeaderPeek {
-                        mode: header.mode,
-                        location: header.location,
-                        x: header.x,
-                        code: trimmed,
-                        flags: header.flags,
-                        version: header.version,
-                        is_compact,
-                        consumed_bits: consumed,
-                        trial_gap_bits: 0i8,
-                        has_checksum: header.has_checksum,
-                    });
-                }
-            }
-        }
+        let true_result =
+            probe_checksum_trial(cursor, huff, alpha_mode, is_first_item, start_bit, true);
         cursor.rollback(saved);
 
         // Path B: Try parsing assuming has_checksum is false
-        let mut false_result = None;
-        if let Ok((header, _, _)) = crate::domain::item::entity::parse_item_header(
-            cursor,
-            alpha_mode,
-            None,
-            None,
-            is_first_item,
-            None,
-            Some(false),
-            Some(start_bit),
-        ) {
-            let s_axiom = crate::domain::stats::axiom::StatsAxiom::new(
-                header.version,
-                header
-                    .quality
-                    .unwrap_or(crate::domain::item::quality::ItemQuality::Normal),
-                alpha_mode,
-            );
-            let is_ho = s_axiom.is_header_only(header.flags, "");
-            if !is_ho {
-                let huffman_pos = cursor.pos();
-                let mut decoded = String::new();
-                let mut ok = true;
-                for _ in 0..4 {
-                    if let Ok(c) = huff.decode_internal(|| {
-                        cursor
-                            .read_bit()
-                            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))
-                    }) {
-                        decoded.push(c);
-                    } else {
-                        ok = false;
-                        break;
-                    }
-                }
-                if alpha_mode {
-                    let saved_dec = cursor.checkpoint();
-                    cursor.rollback(huffman_pos);
-                    let mut ascii_code = String::new();
-                    let mut success = true;
-                    for _ in 0..3 {
-                        match cursor.read_bits::<u8>(8) {
-                            Ok(ch) => {
-                                ascii_code.push(ch as char);
-                            }
-                            Err(_) => {
-                                success = false;
-                                break;
-                            }
-                        }
-                    }
-                    let trimmed_ascii = ascii_code.trim();
-                    if success
-                        && (trimmed_ascii == "xrs"
-                            || trimmed_ascii == "mp1"
-                            || crate::domain::forensic::v105::axioms::is_v105_summary_code(
-                                &ascii_code,
-                            ))
-                    {
-                        decoded = ascii_code;
-                    } else {
-                        cursor.rollback(saved_dec);
-                    }
-                }
-                if ok {
-                    let trimmed = decoded.trim().to_string();
-                    let is_summary =
-                        crate::domain::forensic::v105::axioms::is_v105_summary_code(&trimmed);
-                    let is_compact = header.is_compact || is_summary;
-                    let consumed = cursor.pos() - start_bit;
-                    false_result = Some(ProvisionalHeaderPeek {
-                        mode: header.mode,
-                        location: header.location,
-                        x: header.x,
-                        code: trimmed,
-                        flags: header.flags,
-                        version: header.version,
-                        is_compact,
-                        consumed_bits: consumed,
-                        trial_gap_bits: 0i8,
-                        has_checksum: header.has_checksum,
-                    });
-                }
-            }
-        }
+        let false_result =
+            probe_checksum_trial(cursor, huff, alpha_mode, is_first_item, start_bit, false);
         cursor.rollback(saved);
 
         // Resolve: Select the path that yields a valid summary code.
