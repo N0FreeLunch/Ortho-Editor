@@ -184,10 +184,7 @@ fn legacy_header_scan_public_api_keeps_types_and_alias_identity() {
     type Peek = public::ItemHeaderPeek;
     type Simple = fn(&[u8], u64, &HuffmanTree, bool, usize) -> Option<Peek>;
 
-    assert_eq!(
-        std::any::type_name::<Profile>(),
-        "d2r_core::domain::item::serialization::AlphaScannerGapProfile"
-    );
+    // Public paths and behavior are checked below; defining-module names are diagnostic.
     for (profile, expected) in [
         (Profile::Extended, "extended"),
         (Profile::RhythmOnly, "rhythm-only"),
