@@ -4,7 +4,7 @@ use crate::domain::forensic::header_scan::{
     peek_item_header_at_with_gap_profile, peek_item_header_at_with_gap_profile_and_trial_gap,
     verify_marker_lookahead,
 };
-use crate::domain::item::serialization::AlphaScannerGapProfile;
+use crate::domain::forensic::header_types::AlphaScannerGapProfile;
 use serde::{Deserialize, Serialize};
 
 use rayon::prelude::*;

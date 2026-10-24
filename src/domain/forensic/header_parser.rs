@@ -1,5 +1,6 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::forensic::header_policy::HeaderAxiom;
+use crate::domain::forensic::header_scan::peek_item_header_at;
 use crate::domain::header::entity::{ItemHeader, ItemSegmentType};
 use crate::domain::payload::HuffmanTree;
 use crate::error::{ParsingError, ParsingResult};
@@ -32,13 +33,12 @@ fn alpha_sync<R: BitRead>(
         )));
     };
 
-    let header_info =
-        crate::item::peek_item_header_at(section_bytes, start_bit, huffman, axiom.alpha_mode, 0)
-            .ok_or_else(|| {
-                cursor.fail(ParsingError::Generic(
-                    "Alpha heuristic probe failed".to_string(),
-                ))
-            })?;
+    let header_info = peek_item_header_at(section_bytes, start_bit, huffman, axiom.alpha_mode, 0)
+        .ok_or_else(|| {
+        cursor.fail(ParsingError::Generic(
+            "Alpha heuristic probe failed".to_string(),
+        ))
+    })?;
     let (
         peek_m,
         peek_l,

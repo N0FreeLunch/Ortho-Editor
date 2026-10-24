@@ -84,15 +84,7 @@ pub use crate::domain::forensic::header_scan::{
     peek_item_header_at_with_gap_profile_and_trial_gap, verify_marker_lookahead,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AlphaScannerGapProfile {
-    Extended,
-    RhythmOnly,
-    WitnessSubset,
-    ExtendedExceptMask(u8),
-}
-
-pub use crate::domain::forensic::header_probe::ItemHeaderPeek;
+pub use crate::domain::forensic::header_types::{AlphaScannerGapProfile, ItemHeaderPeek};
 
 /// Provisional output of the full parser's shared header stage.
 ///

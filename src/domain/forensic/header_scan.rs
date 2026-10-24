@@ -8,11 +8,10 @@ use crate::data::generated::layout_policy::{
 };
 use crate::data::repository::legacy_item_template as item_template;
 use crate::domain::forensic::header_policy::HeaderAxiom;
-use crate::domain::forensic::header_probe::ItemHeaderPeek;
+use crate::domain::forensic::header_types::{AlphaScannerGapProfile, ItemHeaderPeek};
 use crate::domain::forensic::v105::axioms::is_v105_summary_code;
 use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105PropertyWidthAxiom};
 use crate::domain::header::entity::calculate_alpha_v105_checksum;
-use crate::domain::item::serialization::AlphaScannerGapProfile;
 use crate::domain::payload::HuffmanTree;
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use std::io::Cursor;
@@ -412,17 +411,6 @@ impl Drop for ScannerPeekTiming {
                 geometry_requests.saturating_sub(unique_geometry_inputs),
                 self.scoring_us.saturating_sub(self.geometry_resolution_us),
             );
-        }
-    }
-}
-
-impl AlphaScannerGapProfile {
-    pub fn label(self) -> String {
-        match self {
-            Self::Extended => "extended".to_string(),
-            Self::RhythmOnly => "rhythm-only".to_string(),
-            Self::WitnessSubset => "witness-subset".to_string(),
-            Self::ExtendedExceptMask(mask) => format!("extended-except-mask-{mask}"),
         }
     }
 }

@@ -9,7 +9,7 @@ use crate::domain::payload::HuffmanTree;
 use bitstream_io::BitRead;
 use std::io;
 
-pub type ItemHeaderPeek = (u8, u8, u8, String, u32, u8, bool, u64, i8, bool);
+pub use crate::domain::forensic::header_types::ItemHeaderPeek;
 
 /// Owned provisional observation inside the forensic Header boundary.
 /// Code bytes/allocation and the signed trial gap are preserved verbatim;
