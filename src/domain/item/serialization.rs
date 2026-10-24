@@ -4,7 +4,7 @@ use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
-    ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
+    ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY, LegacyHeaderCodeTrialLayout as CodeTrialLayout,
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
 };
 use crate::domain::forensic::v105::{
@@ -803,7 +803,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
                 // Trial 1: Huffman
                 let code_decode_started = timing.mark();
                 let huffman_pos = t_cursor.pos();
-                for _ in 0..4 {
+                for _ in 0..CodeTrialLayout::HUFFMAN_CODE_SYMBOLS {
                     if let Ok(ch) = huffman.decode_recorded(&mut t_cursor) {
                         t_code.push(ch);
                     } else {
@@ -811,13 +811,13 @@ fn peek_item_header_at_with_base_and_gap_profile(
                     }
                 }
 
-                // Trial 2: 3x8 ASCII (Alpha v105 specific)
+                // Trial 2: ASCII (Alpha v105 specific)
                 if alpha_mode {
                     t_cursor.rollback(huffman_pos);
                     let mut ascii_code = String::new();
                     let mut success = true;
-                    for _ in 0..3 {
-                        match t_cursor.read_bits::<u8>(8) {
+                    for _ in 0..CodeTrialLayout::ASCII_CODE_BYTES {
+                        match t_cursor.read_bits::<u8>(CodeTrialLayout::ASCII_BYTE_BITS) {
                             Ok(ch) => {
                                 ascii_code.push(ch as char);
                             }
@@ -829,8 +829,7 @@ fn peek_item_header_at_with_base_and_gap_profile(
                     }
                     let trimmed_ascii = ascii_code.trim();
                     if success
-                        && (trimmed_ascii == "xrs"
-                            || trimmed_ascii == "mp1"
+                        && (CodeTrialLayout::ASCII_OVERRIDE_CODES.contains(&trimmed_ascii)
                             || is_v105_summary_code(&ascii_code))
                     {
                         t_code = ascii_code;

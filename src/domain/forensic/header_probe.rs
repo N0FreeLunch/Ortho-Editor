@@ -1,5 +1,6 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::{
+    LegacyHeaderCodeTrialLayout as CodeTrialLayout,
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
     LEGACY_HEADER_GAP_HINT_POLICY as HEADER_GAP_HINTS,
 };
@@ -104,7 +105,7 @@ fn probe_checksum_trial<R: BitRead>(
             let huffman_pos = cursor.pos();
             let mut decoded = String::new();
             let mut ok = true;
-            for _ in 0..4 {
+            for _ in 0..CodeTrialLayout::HUFFMAN_CODE_SYMBOLS {
                 if let Ok(c) = huff.decode_internal(|| {
                     cursor
                         .read_bit()
@@ -121,8 +122,8 @@ fn probe_checksum_trial<R: BitRead>(
                 cursor.rollback(huffman_pos);
                 let mut ascii_code = String::new();
                 let mut success = true;
-                for _ in 0..3 {
-                    match cursor.read_bits::<u8>(8) {
+                for _ in 0..CodeTrialLayout::ASCII_CODE_BYTES {
+                    match cursor.read_bits::<u8>(CodeTrialLayout::ASCII_BYTE_BITS) {
                         Ok(ch) => {
                             ascii_code.push(ch as char);
                         }
@@ -134,8 +135,7 @@ fn probe_checksum_trial<R: BitRead>(
                 }
                 let trimmed_ascii = ascii_code.trim();
                 if success
-                    && (trimmed_ascii == "xrs"
-                        || trimmed_ascii == "mp1"
+                    && (CodeTrialLayout::ASCII_OVERRIDE_CODES.contains(&trimmed_ascii)
                         || crate::domain::forensic::v105::axioms::is_v105_summary_code(&ascii_code))
                 {
                     decoded = ascii_code;
