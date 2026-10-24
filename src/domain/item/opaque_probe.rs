@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::item::entity::{Item, ItemModule};
-use crate::domain::item::scanner::{ItemMarker, MarkerStatus};
+use crate::domain::forensic::marker_scan::{ItemMarker, MarkerStatus};
 use crate::domain::item::serialization::{
     parse_item_at_with_limit, parse_item_at_with_limit_with_carrier, HuffmanTree, ParseStatus,
     SegmentTraceCarrier,

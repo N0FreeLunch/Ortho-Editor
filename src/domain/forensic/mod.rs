@@ -1,6 +1,7 @@
 pub(crate) mod header_policy;
 pub(crate) mod header_probe;
 pub(crate) mod header_types;
+pub(crate) mod marker_scan;
 pub(crate) mod header_scan;
 pub(crate) mod header_parser;
 pub(crate) mod legacy_flags;

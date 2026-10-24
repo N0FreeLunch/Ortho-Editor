@@ -272,7 +272,7 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
         std::collections::HashMap::new();
     let mut authority_offsets = Vec::new();
     if let Some((bytes, _)) = ctx {
-        let markers = crate::domain::item::scanner::scan_item_markers(
+        let markers = crate::domain::forensic::marker_scan::scan_item_markers(
             bytes,
             huffman,
             axiom.is_alpha(),

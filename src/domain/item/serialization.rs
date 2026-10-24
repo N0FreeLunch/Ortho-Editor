@@ -888,7 +888,7 @@ impl Item {
         if trace_alpha {
             eprintln!("[read-section] phase=marker-scan-start");
         }
-        let mut markers = crate::domain::item::scanner::scan_item_markers(
+        let mut markers = crate::domain::forensic::marker_scan::scan_item_markers(
             section_bytes,
             huffman,
             alpha_mode,
