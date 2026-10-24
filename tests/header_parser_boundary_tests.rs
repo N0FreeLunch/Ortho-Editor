@@ -218,6 +218,54 @@ fn legacy_header_scan_public_api_keeps_types_and_alias_identity() {
         public::peek_item_header_at_specific_gap;
     let _: fn(&[u8], u64, &HuffmanTree, bool, u64) -> Option<Peek> =
         d2r_core::item::peek_item_header_at_specific_gap;
+    type Find = fn(&[u8], u64, &HuffmanTree, bool) -> Option<u64>;
+    type Lookahead = fn(&[u8], u64, &HuffmanTree, bool) -> bool;
+    let find: Find = public::find_next_item_match;
+    assert!(std::ptr::fn_addr_eq(
+        find,
+        d2r_core::item::find_next_item_match as Find
+    ));
+    let lookahead: Lookahead = public::verify_marker_lookahead;
+    for alias in [
+        d2r_core::item::verify_marker_lookahead as Lookahead,
+        d2r_core::domain::item::verify_marker_lookahead as Lookahead,
+    ] {
+        assert!(std::ptr::fn_addr_eq(lookahead, alias));
+    }
     let _: fn(u8, u8, &[u8], u32, u8, bool) -> bool = public::is_plausible_item_header;
     let _: fn(u8, u8, &[u8], u32, u8, bool) -> bool = d2r_core::item::is_plausible_item_header;
+}
+
+#[hypothesis_test]
+fn marker_lookahead_retains_terminator_and_tail_admission_across_offsets() {
+    let huffman = HuffmanTree::new();
+    for start in 0usize..16 {
+        let minimum_bytes = (start + 9).div_ceil(8);
+        for id in [0u16, 511u16] {
+            for padding in 0..=4 {
+                let mut bytes = vec![0xa5; minimum_bytes + padding];
+                for bit in 0..9 {
+                    let offset = start + bit;
+                    let mask = 1u8 << (offset % 8);
+                    bytes[offset / 8] = (bytes[offset / 8] & !mask)
+                        | (u8::from(id & (1u16 << bit) != 0) * mask);
+                }
+                let expected = id == 511 || start + 15 <= bytes.len() * 8;
+                for alpha in [false, true] {
+                    assert_eq!(
+                        d2r_core::item::verify_marker_lookahead(
+                            &bytes, start as u64, &huffman, alpha,
+                        ),
+                        expected,
+                        "start={start}, id={id}, padding={padding}, alpha={alpha}"
+                    );
+                    for cut in 0..minimum_bytes {
+                        assert!(!d2r_core::item::verify_marker_lookahead(
+                            &bytes[..cut], start as u64, &huffman, alpha,
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }

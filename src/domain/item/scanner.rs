@@ -1,7 +1,8 @@
-use crate::item::{verify_marker_lookahead, HuffmanTree};
+use crate::item::HuffmanTree;
 use crate::domain::forensic::header_scan::{
     is_plausible_item_header, peek_item_header_at_specific_gap,
     peek_item_header_at_with_gap_profile, peek_item_header_at_with_gap_profile_and_trial_gap,
+    verify_marker_lookahead,
 };
 use crate::domain::item::serialization::AlphaScannerGapProfile;
 use serde::{Deserialize, Serialize};
