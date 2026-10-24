@@ -176,3 +176,48 @@ fn fixed_raw_personalization_preserves_both_public_entrypoints() {
         }
     }
 }
+
+#[hypothesis_test]
+fn legacy_header_scan_public_api_keeps_types_and_alias_identity() {
+    use d2r_core::domain::item::serialization as public;
+    type Profile = public::AlphaScannerGapProfile;
+    type Peek = public::ItemHeaderPeek;
+    type Simple = fn(&[u8], u64, &HuffmanTree, bool, usize) -> Option<Peek>;
+
+    assert_eq!(
+        std::any::type_name::<Profile>(),
+        "d2r_core::domain::item::serialization::AlphaScannerGapProfile"
+    );
+    for (profile, expected) in [
+        (Profile::Extended, "extended"),
+        (Profile::RhythmOnly, "rhythm-only"),
+        (Profile::WitnessSubset, "witness-subset"),
+    ] {
+        assert_eq!(profile.label(), expected);
+    }
+    for mask in u8::MIN..=u8::MAX {
+        assert_eq!(
+            Profile::ExtendedExceptMask(mask).label(),
+            format!("extended-except-mask-{mask}")
+        );
+    }
+    let entry: Simple = public::peek_item_header_at;
+    for alias in [
+        d2r_core::item::peek_item_header_at as Simple,
+        d2r_core::domain::item::peek_item_header_at as Simple,
+    ] {
+        assert!(std::ptr::fn_addr_eq(entry, alias));
+    }
+    let _: fn(&[u8], u64, &HuffmanTree, bool, usize, Profile) -> Option<Peek> =
+        public::peek_item_header_at_with_gap_profile;
+    let _: fn(&[u8], u64, &HuffmanTree, bool, usize, Profile) -> Option<(Peek, u64, bool)> =
+        public::peek_item_header_at_with_gap_profile_and_trial_gap;
+    let _: fn(&[u8], u64, Option<u64>, &HuffmanTree, bool, usize) -> Option<Peek> =
+        public::peek_item_header_at_with_base;
+    let _: fn(&[u8], u64, &HuffmanTree, bool, u64) -> Option<Peek> =
+        public::peek_item_header_at_specific_gap;
+    let _: fn(&[u8], u64, &HuffmanTree, bool, u64) -> Option<Peek> =
+        d2r_core::item::peek_item_header_at_specific_gap;
+    let _: fn(u8, u8, &[u8], u32, u8, bool) -> bool = public::is_plausible_item_header;
+    let _: fn(u8, u8, &[u8], u32, u8, bool) -> bool = d2r_core::item::is_plausible_item_header;
+}

@@ -4,7 +4,7 @@ use crate::data::generated::layout_policy::{
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
     LEGACY_HEADER_GAP_HINT_POLICY as HEADER_GAP_HINTS,
 };
-use crate::domain::item::serialization::peek_item_header_at_with_base;
+use crate::domain::forensic::header_scan::peek_item_header_at_with_base;
 use crate::domain::payload::HuffmanTree;
 use bitstream_io::BitRead;
 use std::io;

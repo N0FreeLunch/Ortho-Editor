@@ -1,11 +1,9 @@
-use crate::item::{
-    is_plausible_item_header, peek_item_header_at_specific_gap, verify_marker_lookahead,
-    HuffmanTree,
-};
-use crate::domain::item::serialization::{
+use crate::item::{verify_marker_lookahead, HuffmanTree};
+use crate::domain::forensic::header_scan::{
+    is_plausible_item_header, peek_item_header_at_specific_gap,
     peek_item_header_at_with_gap_profile, peek_item_header_at_with_gap_profile_and_trial_gap,
-    AlphaScannerGapProfile,
 };
+use crate::domain::item::serialization::AlphaScannerGapProfile;
 use serde::{Deserialize, Serialize};
 
 use rayon::prelude::*;
