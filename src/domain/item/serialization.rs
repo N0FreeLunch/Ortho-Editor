@@ -2750,7 +2750,7 @@ impl Item {
 
             let combinator = StatsCombinator;
             let stats_result = if d2r_v3_mode {
-                crate::domain::stats::parser::read_item_stats_d2r_v3(
+                crate::domain::forensic::stats_recovery::read_item_stats_d2r_v3(
                     cursor,
                     &item.code,
                     stats_version,
@@ -2829,7 +2829,7 @@ impl Item {
                         continue;
                     }
                     let (mut set_props, _, _, _, _, _, _) =
-                        crate::domain::stats::parser::read_item_stats_d2r_v3(
+                        crate::domain::forensic::stats_recovery::read_item_stats_d2r_v3(
                             cursor,
                             &item.code,
                             save_version as u8,
@@ -2861,7 +2861,7 @@ impl Item {
                 }
                 if item.header.is_runeword {
                     let (mut runeword_props, _, _, _, _, _, _) =
-                        crate::domain::stats::parser::read_item_stats_d2r_v3(
+                        crate::domain::forensic::stats_recovery::read_item_stats_d2r_v3(
                             cursor,
                             &item.code,
                             save_version as u8,

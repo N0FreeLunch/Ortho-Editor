@@ -2,7 +2,7 @@ use bitstream_io::BitRead;
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::item::{Item, ItemQuality};
 use crate::domain::stats::entity::ItemProperty;
-use crate::domain::stats::parser::read_item_stats;
+use crate::domain::forensic::stats_recovery::read_item_stats;
 use crate::domain::stats::axiom::StatsAxiom;
 use crate::domain::item::subdomains::property::{PropertyNormalizer, AlphaPropertyCombinator};
 use crate::item::{HuffmanTree, ParsingResult};
