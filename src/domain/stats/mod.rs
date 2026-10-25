@@ -11,6 +11,8 @@ mod property_list_read;
 pub(crate) mod property_entry;
 pub mod parser;
 mod serialization;
+pub(crate) mod property_write;
+mod retail_write;
 pub mod attribute;
 pub mod tiling_solver;
 pub mod fusion_mapper;

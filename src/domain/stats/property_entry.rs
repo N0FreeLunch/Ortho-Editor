@@ -41,13 +41,56 @@ pub(crate) fn legacy_entry_value_width(
     selected_width: u32,
     mapped_id: impl FnOnce() -> u32,
 ) -> u32 {
+    legacy_property_value_width(code, stat_id, mapped_id, || selected_width)
+}
+
+pub(crate) fn legacy_property_value_width(
+    code: &str,
+    stat_id: u32,
+    mapped_id: impl FnOnce() -> u32,
+    selected_width: impl FnOnce() -> u32,
+) -> u32 {
     let rule = &crate::data::generated::layout_policy::LEGACY_ENTRY_VALUE_WIDTH_OVERRIDE;
     if code.trim() == rule.item_code
         && (stat_id == rule.raw_or_mapped_stat_id || mapped_id() == rule.raw_or_mapped_stat_id)
     {
         rule.value_bits
     } else {
-        selected_width
+        selected_width()
+    }
+}
+
+#[cfg(test)]
+mod width_override_tests {
+    use super::*;
+    use d2r_macros::hypothesis_test;
+    use std::cell::RefCell;
+    #[hypothesis_test]
+    fn writer_override_preserves_lazy_mapping_and_registry_fallback() {
+        for (code, raw, mapped, width, events) in [
+            ("wa2", 320, 0, 0, vec![]),
+            (" wa2 ", 7, 320, 0, vec!["map"]),
+            ("wa2", 7, 8, 19, vec!["map", "fallback"]),
+            ("other", 320, 320, 19, vec!["fallback"]),
+        ] {
+            let seen = RefCell::new(Vec::new());
+            assert_eq!(
+                legacy_property_value_width(
+                    code,
+                    raw,
+                    || {
+                        seen.borrow_mut().push("map");
+                        mapped
+                    },
+                    || {
+                        seen.borrow_mut().push("fallback");
+                        19
+                    }
+                ),
+                width
+            );
+            assert_eq!(*seen.borrow(), events);
+        }
     }
 }
 
