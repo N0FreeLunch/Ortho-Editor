@@ -3287,7 +3287,7 @@ fn d2r_v3_write_weapon_list(
     emitter: &mut BitEmitter,
     properties: &[crate::domain::stats::ItemProperty],
 ) -> io::Result<()> {
-    use crate::domain::stats::parser::D2R_V3_PAIRED_STAT_IDS;
+    use crate::data::generated::layout_policy::D2R_V3_PAIRED_STAT_IDS;
     let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
     let (terminal, values) = properties
         .split_last()

@@ -19,14 +19,6 @@ pub struct PropertyReaderContext<'a> {
 }
 
 pub const MAX_ALPHA_V105_ITEM_BITS: u64 = 1500;
-pub(crate) const D2R_V3_PAIRED_STAT_IDS: &[(u32, &[u32])] = &[
-    (17, &[18]),
-    (48, &[49]),
-    (50, &[51]),
-    (52, &[53]),
-    (54, &[55, 56]),
-    (57, &[58, 59]),
-];
 
 #[derive(Clone, Debug)]
 pub struct SocketRecoveryTraceEvent {
@@ -586,7 +578,7 @@ where
             recovered: handled,
             stat_cost,
         },
-        D2R_V3_PAIRED_STAT_IDS,
+        crate::data::generated::layout_policy::D2R_V3_PAIRED_STAT_IDS,
         || consume_d2r_v3_paired_stats && !axiom.is_alpha(),
         |id, known| axiom.stat_maturity(id, known),
     )?;
