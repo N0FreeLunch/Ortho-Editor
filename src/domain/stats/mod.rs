@@ -2,6 +2,7 @@ use crate::data::stat_costs::STAT_COSTS;
 pub mod entity;
 pub mod axiom;
 mod budget;
+mod property_value;
 pub mod parser;
 mod serialization;
 pub mod attribute;
