@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::LegacyScannerMarkerClassificationPolicy as MarkerPolicy;
 use crate::domain::payload::HuffmanTree;
 use crate::domain::forensic::header_scan::{
     is_plausible_item_header, peek_item_header_at_specific_gap,
@@ -18,25 +19,25 @@ thread_local! {
 fn is_alpha_v105_shadow_marker(code: &str) -> bool {
     let trimmed = code.trim();
     // Shadow markers observed in Alpha v105 runewords/socketed items.
-    matches!(trimmed, "c8xr" | "wa2" | "rhd")
+    MarkerPolicy::SHADOW_CODES.contains(&trimmed)
         || (trimmed.starts_with('r')
-            && trimmed.len() <= 3
+            && trimmed.len() <= MarkerPolicy::SHADOW_RUNE_MAX_CODE_BYTES
             && trimmed[1..].chars().all(|c| c.is_ascii_digit()))
 }
 
 fn is_alpha_v105_authority_marker(code: &str) -> bool {
-    matches!(code.trim(), "xrs" | "c8xr" | "rhd" | "wa2")
+    MarkerPolicy::AUTHORITY_CODES.contains(&code.trim())
 }
 
 fn is_alpha_v105_socket_child_marker(code: &str) -> bool {
     let trimmed = code.trim();
-    if matches!(trimmed, "jew" | "gcw" | "ww") {
+    if MarkerPolicy::SOCKET_CHILD_CODES.contains(&trimmed) {
         return true;
     }
 
     let bytes = trimmed.as_bytes();
-    bytes.len() >= 2
-        && bytes.len() <= 3
+    bytes.len() >= MarkerPolicy::SOCKET_RUNE_MIN_CODE_BYTES
+        && bytes.len() <= MarkerPolicy::SOCKET_RUNE_MAX_CODE_BYTES
         && bytes[0] == b'r'
         && bytes[1..].iter().all(|b| b.is_ascii_digit())
 }
@@ -926,7 +927,11 @@ fn scan_item_markers_internal(
                 last_code = best_code_str.clone();
 
                 if is_alpha_v105_authority_marker(&last_code) {
-                    let limit = if last_code.trim() == "rhd" { 128 } else { 512 };
+                    let limit = if last_code.trim() == MarkerPolicy::SHORT_AUTHORITY_WINDOW_CODE {
+                        MarkerPolicy::SHORT_AUTHORITY_WINDOW_BITS
+                    } else {
+                        MarkerPolicy::DEFAULT_AUTHORITY_WINDOW_BITS
+                    };
                     since_last_auth = Some((last_offset, limit));
                 } else if let Some((off, limit)) = since_last_auth {
                     if last_offset - off >= limit {
