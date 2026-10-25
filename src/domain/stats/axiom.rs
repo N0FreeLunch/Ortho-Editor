@@ -103,16 +103,6 @@ impl ForensicAxiom for StatsAxiom {
 
 pub use crate::domain::stats::property_entry::PropertyRhythm;
 
-impl PropertyRhythm {
-    fn from_layout(layout: &crate::data::generated::layout_policy::PropertyRhythmLayout) -> Self {
-        Self {
-            id_bits: u32::from(layout.id_bits),
-            value_bits: layout.value_bits.map(u32::from),
-            has_terminal_bit: layout.has_terminal_bit,
-            has_extra_terminal_bit: layout.has_extra_terminal_bit,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactLayoutPolicy {

@@ -3,6 +3,8 @@ pub mod entity;
 pub mod axiom;
 mod budget;
 mod property_value;
+mod retail_entry;
+mod property_read;
 pub(crate) mod property_entry;
 pub mod parser;
 mod serialization;

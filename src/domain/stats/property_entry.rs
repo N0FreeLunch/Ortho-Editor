@@ -13,6 +13,44 @@ pub struct PropertyRhythm {
     pub has_extra_terminal_bit: bool,
 }
 
+impl PropertyRhythm {
+    pub(crate) fn from_layout(
+        layout: &crate::data::generated::layout_policy::PropertyRhythmLayout,
+    ) -> Self {
+        Self {
+            id_bits: u32::from(layout.id_bits),
+            value_bits: layout.value_bits.map(u32::from),
+            has_terminal_bit: layout.has_terminal_bit,
+            has_extra_terminal_bit: layout.has_extra_terminal_bit,
+        }
+    }
+}
+
+pub(crate) fn trace_property_entry(entry_start: u64, stat_id: u32, code: &str) {
+    if entry_start >= 7800 && entry_start <= 8305 && crate::item::item_trace_enabled() {
+        eprintln!(
+            "[prop-read-any] pos={} stat_id={} code={}",
+            entry_start, stat_id, code
+        );
+    }
+}
+
+pub(crate) fn legacy_entry_value_width(
+    code: &str,
+    stat_id: u32,
+    selected_width: u32,
+    mapped_id: impl FnOnce() -> u32,
+) -> u32 {
+    let rule = &crate::data::generated::layout_policy::LEGACY_ENTRY_VALUE_WIDTH_OVERRIDE;
+    if code.trim() == rule.item_code
+        && (stat_id == rule.raw_or_mapped_stat_id || mapped_id() == rule.raw_or_mapped_stat_id)
+    {
+        rule.value_bits
+    } else {
+        selected_width
+    }
+}
+
 pub(crate) trait PropertyEntryPolicy {
     fn trace_entry(&self, entry_start: u64, stat_id: u32);
     fn rhythm(&self, stat_id: u32) -> PropertyRhythm;

@@ -7,13 +7,14 @@ use crate::domain::stats::parser::{
     PropertyReaderContext, nested_property_depth_failure, with_nested_property_depth,
 };
 use crate::domain::stats::property_entry::{
-    PropertyEntryPolicy, PropertyEntryRecovery, PropertyRhythm, read_property_entry,
+    PropertyEntryPolicy, PropertyEntryRecovery, PropertyRhythm, legacy_entry_value_width,
+    trace_property_entry,
 };
-use crate::domain::stats::{ItemProperty, StatMaturityTier, StatsAxiom};
+use crate::domain::stats::{StatMaturityTier, StatsAxiom};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 
-struct LegacyEntryPolicy<'a> {
+pub(crate) struct LegacyEntryPolicy<'a> {
     version: u8,
     alpha_runeword: bool,
     is_compact: bool,
@@ -22,14 +23,29 @@ struct LegacyEntryPolicy<'a> {
     axiom: &'a StatsAxiom,
 }
 
+impl<'a> LegacyEntryPolicy<'a> {
+    pub(crate) fn new(
+        version: u8,
+        alpha_runeword: bool,
+        is_compact: bool,
+        is_v105_shadow: bool,
+        consume_d2r_v3_paired_stats: bool,
+        axiom: &'a StatsAxiom,
+    ) -> Self {
+        Self {
+            version,
+            alpha_runeword,
+            is_compact,
+            is_v105_shadow,
+            consume_d2r_v3_paired_stats,
+            axiom,
+        }
+    }
+}
+
 impl PropertyEntryPolicy for LegacyEntryPolicy<'_> {
     fn trace_entry(&self, entry_start: u64, stat_id: u32) {
-        if entry_start >= 7800 && entry_start <= 8305 && crate::item::item_trace_enabled() {
-            eprintln!(
-                "[prop-read-any] pos={} stat_id={} code={}",
-                entry_start, stat_id, self.axiom.code
-            );
-        }
+        trace_property_entry(entry_start, stat_id, &self.axiom.code);
     }
 
     fn rhythm(&self, stat_id: u32) -> PropertyRhythm {
@@ -68,14 +84,10 @@ impl PropertyEntryPolicy for LegacyEntryPolicy<'_> {
             self.axiom
                 .default_property_value_width(self.version, stat_save_bits, rhythm);
 
-        let mut effective_width = self.axiom.stat_bit_width(stat_id, default_width);
-        if self.axiom.code.trim() == "wa2"
-            && (stat_id == 320 || self.axiom.map_alpha_id(stat_id) == 320)
-        {
-            effective_width = 0;
-        }
-
-        effective_width
+        let effective_width = self.axiom.stat_bit_width(stat_id, default_width);
+        legacy_entry_value_width(&self.axiom.code, stat_id, effective_width, || {
+            self.axiom.map_alpha_id(stat_id)
+        })
     }
 
     fn consume_paired_stats(&self) -> bool {
@@ -87,12 +99,30 @@ impl PropertyEntryPolicy for LegacyEntryPolicy<'_> {
     }
 }
 
-struct LegacyEntryRecovery<'a, 'f, F> {
+pub(crate) struct LegacyEntryRecovery<'a, 'f, F> {
     alpha_runeword: bool,
     axiom: &'a StatsAxiom,
     reader_ctx: PropertyReaderContext<'a>,
     huffman: &'a HuffmanTree,
     recovery_fn: &'f mut F,
+}
+
+impl<'a, 'f, F> LegacyEntryRecovery<'a, 'f, F> {
+    pub(crate) fn new(
+        alpha_runeword: bool,
+        axiom: &'a StatsAxiom,
+        reader_ctx: PropertyReaderContext<'a>,
+        huffman: &'a HuffmanTree,
+        recovery_fn: &'f mut F,
+    ) -> Self {
+        Self {
+            alpha_runeword,
+            axiom,
+            reader_ctx,
+            huffman,
+            recovery_fn,
+        }
+    }
 }
 
 impl<R: BitRead, F> PropertyEntryRecovery<R, Item> for LegacyEntryRecovery<'_, '_, F>
@@ -187,50 +217,4 @@ where
         }
         Ok(handled)
     }
-}
-
-pub(crate) fn parse_single_property_internal<R: BitRead, F>(
-    recorder: &mut BitCursor<R>,
-    _version: u8,
-    huffman: &HuffmanTree,
-    alpha_runeword: bool,
-    is_compact: bool,
-    is_v105_shadow: bool,
-    consume_d2r_v3_paired_stats: bool,
-    axiom: &StatsAxiom,
-    reader_ctx: PropertyReaderContext,
-    recovery_fn: &mut F,
-) -> ParsingResult<
-    Option<(
-        Vec<ItemProperty>,
-        bool,
-        bool,
-        Vec<crate::domain::item::Item>,
-    )>,
->
-where
-    F: FnMut(
-        &[u8],
-        u64,
-        &HuffmanTree,
-        usize,
-        bool,
-    ) -> ParsingResult<(crate::domain::item::Item, u64)>,
-{
-    let policy = LegacyEntryPolicy {
-        version: _version,
-        alpha_runeword,
-        is_compact,
-        is_v105_shadow,
-        consume_d2r_v3_paired_stats,
-        axiom,
-    };
-    let mut recovery = LegacyEntryRecovery {
-        alpha_runeword,
-        axiom,
-        reader_ctx,
-        huffman,
-        recovery_fn,
-    };
-    read_property_entry(recorder, &policy, &mut recovery)
 }

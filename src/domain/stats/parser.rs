@@ -3,7 +3,7 @@ use crate::data::generated::layout_policy::ALPHA_LEGACY_AUTHORITY_CODES;
 use crate::domain::item::HuffmanTree;
 #[cfg(test)]
 use crate::domain::item::ItemQuality;
-use crate::domain::forensic::property_entry::parse_single_property_internal;
+use crate::domain::stats::property_read::parse_single_property_internal;
 use crate::domain::stats::budget::PropertyListBudget;
 use crate::domain::stats::{ItemProperty, StatsAxiom};
 use crate::error::ParsingResult;
