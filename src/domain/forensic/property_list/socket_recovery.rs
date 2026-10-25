@@ -1,10 +1,10 @@
-use super::{
-    nested_property_depth_failure, push_socket_trace_event, with_nested_property_depth,
-    ThreadLocalValueScope,
-};
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::legacy_alpha_child_code_alias;
 use crate::domain::item::{HuffmanTree, Item};
+use crate::domain::stats::parser::{
+    ThreadLocalValueScope, nested_property_depth_failure, push_socket_trace_event,
+    with_nested_property_depth,
+};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 use std::collections::HashMap;

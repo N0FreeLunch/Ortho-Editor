@@ -4,6 +4,7 @@ pub(crate) mod header_types;
 pub(crate) mod marker_scan;
 pub(crate) mod stats_recovery;
 pub(crate) mod property_entry;
+pub(crate) mod property_list;
 pub(crate) mod header_scan;
 pub(crate) mod header_parser;
 pub(crate) mod legacy_flags;

@@ -1,17 +1,12 @@
 use crate::data::bit_cursor::BitCursor;
-use crate::data::generated::layout_policy::ALPHA_LEGACY_AUTHORITY_CODES;
 use crate::domain::item::HuffmanTree;
 #[cfg(test)]
 use crate::domain::item::ItemQuality;
 use crate::domain::stats::property_read::parse_single_property_internal;
-use crate::domain::stats::budget::PropertyListBudget;
 use crate::domain::stats::{ItemProperty, StatsAxiom};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 use std::cell::{Cell, RefCell};
-
-#[path = "socket_recovery.rs"]
-mod socket_recovery;
 
 #[derive(Debug, Clone)]
 pub struct PropertyReaderContext<'a> {
@@ -47,7 +42,7 @@ pub fn take_socket_recovery_trace_events() -> Vec<SocketRecoveryTraceEvent> {
     SOCKET_TRACE_EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
 }
 
-fn push_socket_trace_event(
+pub(crate) fn push_socket_trace_event(
     stage: &'static str,
     current_rel_pos: u64,
     next_marker: Option<u64>,
@@ -83,6 +78,11 @@ fn nested_property_depth_exhausted(current_depth: u32) -> bool {
     current_depth > NESTED_PROPERTY_DEPTH_THRESHOLD
 }
 
+pub(crate) fn property_list_depth_exhausted() -> bool {
+    let depth = NESTED_DEPTH.with(|d| d.get());
+    nested_property_depth_exhausted(depth)
+}
+
 pub(crate) fn nested_property_depth_failure() -> crate::error::ParsingFailure {
     crate::error::ParsingFailure {
         error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
@@ -93,13 +93,13 @@ pub(crate) fn nested_property_depth_failure() -> crate::error::ParsingFailure {
     }
 }
 
-struct ThreadLocalValueScope<T: Copy + 'static> {
+pub(crate) struct ThreadLocalValueScope<T: Copy + 'static> {
     key: &'static std::thread::LocalKey<std::cell::Cell<T>>,
     previous: T,
 }
 
 impl<T: Copy + 'static> ThreadLocalValueScope<T> {
-    fn replace(key: &'static std::thread::LocalKey<std::cell::Cell<T>>, value: T) -> Self {
+    pub(crate) fn replace(key: &'static std::thread::LocalKey<std::cell::Cell<T>>, value: T) -> Self {
         Self {
             key,
             previous: key.with(|cell| cell.replace(value)),
@@ -168,177 +168,7 @@ where
     )
 }
 
-pub(crate) fn read_property_list_with_pair_policy<R: BitRead, F>(
-    recorder: &mut BitCursor<R>,
-    code: &str,
-    version: u8,
-    _section_recovery: PropertyReaderContext,
-    huffman: &HuffmanTree,
-    alpha_runeword: bool,
-    is_v105_shadow: bool,
-    axiom: &StatsAxiom,
-    consume_d2r_v3_paired_stats: bool,
-    child_marker_offsets: Option<&[u64]>,
-    child_marker_codes: Option<&std::collections::HashMap<u64, String>>,
-    mut recovery_fn: F,
-) -> ParsingResult<(
-    Vec<ItemProperty>,
-    bool,
-    bool,
-    Vec<crate::domain::item::Item>,
-)>
-where
-    F: FnMut(
-        &[u8],
-        u64,
-        &HuffmanTree,
-        usize,
-        bool,
-    ) -> ParsingResult<(crate::domain::item::Item, u64)>,
-{
-    let mut props = Vec::new();
-    let mut nested_items = Vec::new();
-    let mut terminator_bit = false;
-    let mut saw_terminator = false;
-
-    let start_pos = recorder.pos();
-
-    let is_authority_host = axiom.is_alpha() && ALPHA_LEGACY_AUTHORITY_CODES.contains(&code.trim());
-    let is_actual_runeword =
-        (alpha_runeword || code.trim() == "Þ." || is_authority_host) && axiom.is_socketed;
-    let budget = PropertyListBudget::new(recorder.limit(), axiom.is_alpha() && is_actual_runeword);
-    if let Some(limit) = budget.entry_extension() {
-        recorder.set_limit(limit);
-    }
-
-    let is_compact = axiom.is_compact || code.trim().is_empty();
-    let section_base_abs = if is_compact {
-        recorder
-            .base_pos
-            .saturating_sub(_section_recovery.item_start_bit)
-    } else {
-        recorder.base_pos
-    };
-
-    let depth = NESTED_DEPTH.with(|d| d.get());
-    if nested_property_depth_exhausted(depth) {
-        return Ok((props, saw_terminator, terminator_bit, nested_items));
-    }
-
-    let socket_recovery = socket_recovery::SocketRecovery::new(
-        _section_recovery.bytes,
-        huffman,
-        section_base_abs,
-        child_marker_offsets,
-        child_marker_codes,
-    );
-
-    loop {
-        if is_compact && !is_actual_runeword {
-            if props.len() >= 1 {
-                break;
-            }
-        }
-        if axiom.is_alpha()
-            && !is_actual_runeword
-            && (recorder.pos() - start_pos) > MAX_ALPHA_V105_ITEM_BITS
-        {
-            return Err(
-                recorder.fail(crate::error::ParsingError::BitBudgetExceeded {
-                    bit_offset: recorder.pos(),
-                }),
-            );
-        }
-        if axiom.is_alpha() && is_actual_runeword {
-            let current_rel_pos = recorder.pos().saturating_sub(section_base_abs);
-            if socket_recovery.should_stop_before_child(current_rel_pos, is_authority_host) {
-                saw_terminator = true;
-                terminator_bit = false;
-                break;
-            }
-        }
-
-        if let Some(limit) = budget.incoming_limit() {
-            if recorder.pos()
-                + u64::from(crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits)
-                >= limit
-            {
-                if axiom.is_alpha() && !saw_terminator {
-                    saw_terminator = true;
-                    terminator_bit = false;
-                }
-                break;
-            }
-        }
-
-        let result = parse_single_property_internal(
-            recorder,
-            version,
-            huffman,
-            alpha_runeword,
-            is_compact,
-            is_v105_shadow,
-            consume_d2r_v3_paired_stats,
-            axiom,
-            _section_recovery.clone(),
-            &mut recovery_fn,
-        );
-
-        match result {
-            Ok(Some((parsed_properties, is_term, term_bit, items))) => {
-                props.extend(parsed_properties);
-                nested_items.extend(items);
-                if axiom.is_alpha() && is_actual_runeword && nested_items.len() >= 3 {
-                    saw_terminator = true;
-                    terminator_bit = false;
-                    break;
-                }
-                if is_term {
-                    saw_terminator = true;
-                    terminator_bit = term_bit;
-                    break;
-                }
-            }
-            Ok(None) => break,
-            Err(e) => {
-                let is_eof = match &e.error {
-                    crate::error::ParsingError::Io(msg) => {
-                        msg.contains("failed to fill whole buffer")
-                            || msg.contains("unexpected end of file")
-                    }
-                    _ => false,
-                };
-                if is_eof {
-                    return Ok((props, true, false, nested_items));
-                }
-                return Err(e);
-            }
-        }
-    }
-
-    let is_authority_host = axiom.is_alpha() && ALPHA_LEGACY_AUTHORITY_CODES.contains(&code.trim());
-    let needs_socket_recovery = axiom.is_alpha()
-        && (alpha_runeword || code.trim() == "ucb8" || code.trim() == "bwcw" || is_authority_host)
-        && axiom.is_socketed
-        && child_marker_offsets
-            .map(|offsets| nested_items.len() < offsets.len())
-            .unwrap_or(false);
-    if needs_socket_recovery {
-        socket_recovery.recover_children(
-            recorder,
-            code,
-            axiom.is_alpha(),
-            &mut nested_items,
-            &mut recovery_fn,
-        )?;
-    }
-
-    if let Some(limit) = budget.completion_limit(recorder.pos()) {
-        recorder.set_limit(limit);
-    }
-
-    Ok((props, saw_terminator, terminator_bit, nested_items))
-}
+pub(crate) use crate::domain::stats::property_list_read::read_property_list_with_pair_policy;
 
 pub fn parse_single_property<R, F>(
     recorder: &mut BitCursor<R>,
