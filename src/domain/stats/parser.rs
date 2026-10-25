@@ -1,8 +1,9 @@
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::ALPHA_LEGACY_AUTHORITY_CODES;
-use crate::domain::item::{HuffmanTree, ItemBitRange};
+use crate::domain::item::HuffmanTree;
 #[cfg(test)]
 use crate::domain::item::ItemQuality;
+use crate::domain::forensic::property_entry::parse_single_property_internal;
 use crate::domain::stats::budget::PropertyListBudget;
 use crate::domain::stats::{ItemProperty, StatsAxiom};
 use crate::error::ParsingResult;
@@ -82,7 +83,7 @@ fn nested_property_depth_exhausted(current_depth: u32) -> bool {
     current_depth > NESTED_PROPERTY_DEPTH_THRESHOLD
 }
 
-fn nested_property_depth_failure() -> crate::error::ParsingFailure {
+pub(crate) fn nested_property_depth_failure() -> crate::error::ParsingFailure {
     crate::error::ParsingFailure {
         error: crate::error::ParsingError::Io("Max nesting depth exceeded".to_string()),
         context_stack: vec![],
@@ -112,7 +113,7 @@ impl<T: Copy + 'static> Drop for ThreadLocalValueScope<T> {
     }
 }
 
-fn with_nested_property_depth<T, E>(
+pub(crate) fn with_nested_property_depth<T, E>(
     overflow_error: impl FnOnce() -> E,
     operation: impl FnOnce() -> Result<T, E>,
 ) -> Result<T, E> {
@@ -376,215 +377,6 @@ where
     }))
 }
 
-fn parse_single_property_internal<R: BitRead, F>(
-    recorder: &mut BitCursor<R>,
-    _version: u8,
-    huffman: &HuffmanTree,
-    alpha_runeword: bool,
-    is_compact: bool,
-    is_v105_shadow: bool,
-    consume_d2r_v3_paired_stats: bool,
-    axiom: &StatsAxiom,
-    reader_ctx: PropertyReaderContext,
-    recovery_fn: &mut F,
-) -> ParsingResult<
-    Option<(
-        Vec<ItemProperty>,
-        bool,
-        bool,
-        Vec<crate::domain::item::Item>,
-    )>,
->
-where
-    F: FnMut(
-        &[u8],
-        u64,
-        &HuffmanTree,
-        usize,
-        bool,
-    ) -> ParsingResult<(crate::domain::item::Item, u64)>,
-{
-    let entry_start = recorder.pos();
-    let id_bits = u32::from(
-        crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits,
-    );
-    let stat_id = recorder.read_bits::<u32>(id_bits)?;
-    if entry_start >= 7800 && entry_start <= 8305 && crate::item::item_trace_enabled() {
-        eprintln!(
-            "[prop-read-any] pos={} stat_id={} code={}",
-            entry_start, stat_id, axiom.code
-        );
-    }
-
-    let rhythm = axiom.property_rhythm(alpha_runeword, is_v105_shadow, is_compact, stat_id);
-
-    let id_bits = rhythm.id_bits;
-    let terminator = (1u32 << id_bits) - 1;
-
-    if stat_id == terminator {
-        let is_authority_host =
-            axiom.save_is_alpha && ALPHA_LEGACY_AUTHORITY_CODES.contains(&axiom.code.trim());
-        let mut term_bit = false;
-        if rhythm.has_terminal_bit {
-            if !is_authority_host || recorder.remaining() >= 1 {
-                term_bit = recorder.read_bit()?;
-            }
-            if rhythm.has_extra_terminal_bit {
-                if !is_authority_host || recorder.remaining() >= 1 {
-                    let _extra = recorder.read_bit()?;
-                }
-            }
-            while recorder.pos() % 8 != 0 {
-                if is_authority_host && recorder.remaining() == 0 {
-                    break;
-                }
-                let _p = recorder.read_bit()?;
-            }
-        }
-
-        if let Some(tvs_bits) = axiom.tvs_padding_bits(alpha_runeword) {
-            if !is_authority_host || recorder.remaining() >= u64::from(tvs_bits) {
-                let _tvs = recorder.read_bits::<u32>(tvs_bits)?;
-            }
-        }
-        return Ok(Some((
-            vec![ItemProperty {
-                stat_id,
-                raw_value: 0,
-                param: 0,
-                name: "terminator".to_string(),
-                value: 0,
-                range: ItemBitRange {
-                    start: entry_start,
-                    end: recorder.pos(),
-                },
-                is_opaque: false,
-                opaque_bits: None,
-                maturity: crate::domain::stats::StatMaturityTier::Verified,
-            }],
-            true,
-            term_bit,
-            Vec::new(),
-        )));
-    }
-
-    let mut param = 0;
-    let mut nested_items = Vec::new();
-    let mapped_id = axiom.map_alpha_id(stat_id);
-    let stat_cost = crate::data::stat_costs::STAT_COSTS
-        .iter()
-        .find(|s| s.id == mapped_id);
-    let suppress_authority_params = axiom.omits_property_parameter(&axiom.code, _version);
-    if let Some(stat) = stat_cost {
-        if stat.save_param_bits > 0 && !suppress_authority_params {
-            param = recorder.read_bits::<u32>(stat.save_param_bits as u32)?;
-        }
-    }
-
-    let default_width = axiom.default_property_value_width(
-        _version,
-        stat_cost.map(|stat| u32::from(stat.save_bits)),
-        rhythm,
-    );
-
-    let mut effective_width = axiom.stat_bit_width(stat_id, default_width);
-    if axiom.code.trim() == "wa2" && (stat_id == 320 || axiom.map_alpha_id(stat_id) == 320) {
-        effective_width = 0;
-    }
-
-    let is_stat_317 = stat_id == 317 || axiom.map_alpha_id(stat_id) == 317;
-    let is_stat_320 = stat_id == 320 || axiom.map_alpha_id(stat_id) == 320;
-    let is_stat_387 = stat_id == 387 || axiom.map_alpha_id(stat_id) == 387;
-    let is_already_nested = recorder.context_stack().iter().any(|s| s == "nested");
-    let mut handled = false;
-    if axiom.is_alpha()
-        && alpha_runeword
-        && axiom.is_socketed
-        && (is_stat_317 || is_stat_320 || is_stat_387)
-        && !is_already_nested
-    {
-        let entry_pos = recorder.pos();
-        let absolute_entry_pos = reader_ctx.item_start_bit + entry_pos;
-        let mut context = recorder.scoped_context("nested");
-        let recorder = &mut *context;
-
-        let mut found_pos = absolute_entry_pos;
-        if is_stat_320 {
-            for offset in 0..64 {
-                let probe_pos = absolute_entry_pos + offset;
-                if let Some(header_info) = crate::item::peek_item_header_at(
-                    reader_ctx.bytes,
-                    probe_pos,
-                    huffman,
-                    axiom.save_is_alpha,
-                    0,
-                ) {
-                    let (
-                        mode,
-                        loc,
-                        _x,
-                        code,
-                        flags,
-                        version,
-                        _is_compact,
-                        _header_bits,
-                        _nudge,
-                        _has_checksum,
-                    ) = header_info;
-                    if crate::item::is_plausible_item_header(
-                        mode,
-                        loc,
-                        code.as_bytes(),
-                        flags,
-                        version,
-                        axiom.save_is_alpha,
-                    ) {
-                        found_pos = probe_pos;
-                        break;
-                    }
-                }
-            }
-        }
-
-        let result = with_nested_property_depth(nested_property_depth_failure, || {
-            recovery_fn(
-                reader_ctx.bytes,
-                found_pos,
-                huffman,
-                nested_items.len(),
-                axiom.save_is_alpha,
-            )
-        });
-
-        if let Ok((child, end_pos)) = result {
-            nested_items.push(child);
-
-            let absolute_end = found_pos + end_pos;
-            if absolute_end > absolute_entry_pos {
-                let consumed = (absolute_end - absolute_entry_pos) as u32;
-                recorder.skip_and_record(consumed)?;
-            }
-            handled = true;
-        }
-    }
-
-    let properties = super::property_value::read_property_values(
-        recorder,
-        super::property_value::PropertyValueLayout {
-            entry_start,
-            stat_id,
-            param,
-            effective_width,
-            recovered: handled,
-            stat_cost,
-        },
-        crate::data::generated::layout_policy::D2R_V3_PAIRED_STAT_IDS,
-        || consume_d2r_v3_paired_stats && !axiom.is_alpha(),
-        |id, known| axiom.stat_maturity(id, known),
-    )?;
-
-    Ok(Some((properties, false, false, nested_items)))
-}
 
 #[cfg(test)]
 mod tests {

@@ -101,13 +101,7 @@ impl ForensicAxiom for StatsAxiom {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct PropertyRhythm {
-    pub id_bits: u32,
-    pub value_bits: Option<u32>,
-    pub has_terminal_bit: bool,
-    pub has_extra_terminal_bit: bool,
-}
+pub use crate::domain::stats::property_entry::PropertyRhythm;
 
 impl PropertyRhythm {
     fn from_layout(layout: &crate::data::generated::layout_policy::PropertyRhythmLayout) -> Self {
