@@ -1,5 +1,6 @@
 use std::io::{self, Cursor};
 use bitstream_io::{BitRead, BitReader, BitWrite, BitWriter, LittleEndian};
+use crate::data::generated::layout_policy::LEGACY_CHARACTER_ATTRIBUTE_WIRE_LAYOUT as CHARACTER_ATTRIBUTE_WIRE;
 use crate::data::stat_costs::{StatCost, STAT_COSTS};
 
 fn stat_cost(stat_id: u32) -> Option<&'static StatCost> {
@@ -50,7 +51,7 @@ impl AttributeSection {
         let is_alpha = version == 105;
         
         // Skip the 'gf' marker (2 bytes) before parsing the bitstream
-        let bitstream_start = gf_pos + 2;
+        let bitstream_start = gf_pos + CHARACTER_ATTRIBUTE_WIRE.marker.len();
         let bitstream_end = if_pos;
         
         let mut reader = BitReader::endian(
@@ -62,11 +63,11 @@ impl AttributeSection {
         let total_bits = ((bitstream_end - bitstream_start) * 8) as u64;
         loop {
             let pos = reader.position_in_bits()?;
-            if total_bits.saturating_sub(pos) < 9 {
+            if total_bits.saturating_sub(pos) < u64::from(CHARACTER_ATTRIBUTE_WIRE.stat_id_bits) {
                 break;
             }
-            let stat_id = reader.read::<9, u32>()?;
-            if stat_id == 0x1FF {
+            let stat_id = reader.read::<{ CHARACTER_ATTRIBUTE_WIRE.stat_id_bits }, u32>()?;
+            if stat_id == CHARACTER_ATTRIBUTE_WIRE.terminator_id {
                 break;
             }
             let cost = stat_cost(stat_id);
@@ -119,7 +120,7 @@ impl AttributeSection {
     }
 
     pub fn to_bytes_from_entries(&self, is_alpha: bool) -> io::Result<Vec<u8>> {
-        let mut buf = vec![b'g', b'f'];
+        let mut buf = CHARACTER_ATTRIBUTE_WIRE.marker.to_vec();
         let mut rest = self.to_bytes_bits(is_alpha).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         buf.append(&mut rest);
         Ok(buf)
@@ -133,8 +134,12 @@ impl AttributeSection {
             let mut written_bits: u64 = 0;
             for entry in &self.entries {
                 // Write Stat ID (9 bits)
-                write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
-                written_bits += 9;
+                write_bits_dynamic(
+                    &mut writer,
+                    CHARACTER_ATTRIBUTE_WIRE.stat_id_bits,
+                    entry.stat_id,
+                )?;
+                written_bits += u64::from(CHARACTER_ATTRIBUTE_WIRE.stat_id_bits);
 
                 // Get stat-specific bit widths for Alpha v105
                 let bits = char_stat_save_bits(entry.stat_id, true);
@@ -153,8 +158,12 @@ impl AttributeSection {
             }
 
             // Write terminator (9 bits: 0x1FF)
-            write_bits_dynamic(&mut writer, 9, 0x1FF as u32)?;
-            written_bits += 9;
+            write_bits_dynamic(
+                &mut writer,
+                CHARACTER_ATTRIBUTE_WIRE.stat_id_bits,
+                CHARACTER_ATTRIBUTE_WIRE.terminator_id,
+            )?;
+            written_bits += u64::from(CHARACTER_ATTRIBUTE_WIRE.stat_id_bits);
 
             // Apply forensic alignment padding for Alpha v105
             let bits_to_align = (8 - (written_bits % 8)) % 8;
@@ -177,7 +186,11 @@ impl AttributeSection {
                 }
 
                 if let Some(ref bits) = entry.opaque_bits {
-                    write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
+                    write_bits_dynamic(
+                        &mut writer,
+                        CHARACTER_ATTRIBUTE_WIRE.stat_id_bits,
+                        entry.stat_id,
+                    )?;
                     for &bit in bits {
                         writer.write_bit(bit)?;
                     }
@@ -188,7 +201,11 @@ impl AttributeSection {
                 let cost = stat_cost(entry.stat_id);
                 let param_bits = cost.map(|c| c.save_param_bits as u32).unwrap_or(0);
 
-                write_bits_dynamic(&mut writer, 9, entry.stat_id)?;
+                write_bits_dynamic(
+                    &mut writer,
+                    CHARACTER_ATTRIBUTE_WIRE.stat_id_bits,
+                    entry.stat_id,
+                )?;
                 if param_bits > 0 {
                     write_bits_dynamic(&mut writer, param_bits, entry.param)?;
                 }
@@ -196,7 +213,11 @@ impl AttributeSection {
             }
 
             // Terminator 0x1FF
-            write_bits_dynamic(&mut writer, 9, 0x1FFu32)?;
+            write_bits_dynamic(
+                &mut writer,
+                CHARACTER_ATTRIBUTE_WIRE.stat_id_bits,
+                CHARACTER_ATTRIBUTE_WIRE.terminator_id,
+            )?;
             writer.byte_align()?;
         }
 

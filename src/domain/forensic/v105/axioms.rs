@@ -453,7 +453,8 @@ impl V105SectionMarkerAxiom {
     pub const V105_NPC_OFFSET: usize = 0x30E;
     pub const V105_NPC_LEN: usize = 51;
 
-    pub const MARKER_GF: [u8; 2] = *b"gf";
+    pub const MARKER_GF: [u8; 2] =
+        crate::data::generated::layout_policy::LEGACY_CHARACTER_ATTRIBUTE_WIRE_LAYOUT.marker;
     pub const MARKER_IF: [u8; 2] = *b"if";
     pub const MARKER_WOO: [u8; 4] = *b"Woo!";
     pub const MARKER_WS: [u8; 2] = *b"WS";

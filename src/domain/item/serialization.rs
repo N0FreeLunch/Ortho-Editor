@@ -9,6 +9,7 @@ use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
     ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
+    LEGACY_CHARACTER_ATTRIBUTE_WIRE_LAYOUT as CHARACTER_ATTRIBUTE_WIRE,
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
 };
 use crate::domain::forensic::v105::{
@@ -729,19 +730,24 @@ pub fn read_player_items_d2r_v3(bytes: &[u8], huffman: &HuffmanTree) -> ParsingR
     }
     // Locate the player list by consuming its prefix, not by marker recovery.
     let gf_pos = crate::domain::forensic::v105::V105SectionMarkerAxiom::V105_HEADER_LEN;
-    if bytes.get(gf_pos..gf_pos + 2) != Some(b"gf".as_slice()) {
+    if bytes.get(gf_pos..gf_pos + CHARACTER_ATTRIBUTE_WIRE.marker.len())
+        != Some(CHARACTER_ATTRIBUTE_WIRE.marker.as_slice())
+    {
         return Err(d2r_v3_list_failure(
             "D2R v3 attribute marker",
             gf_pos as u64 * 8,
             "The verified fixed header must be followed by gf",
         ));
     }
-    let mut cursor = BitCursor::from_raw_at(bytes, (gf_pos as u64 + 2) * 8);
+    let mut cursor = BitCursor::from_raw_at(
+        bytes,
+        (gf_pos as u64 + CHARACTER_ATTRIBUTE_WIRE.marker.len() as u64) * 8,
+    );
     cursor.push_context("D2R v3 character attributes");
     loop {
         let id_start = cursor.pos();
-        let stat_id = cursor.read_bits::<u32>(9)?;
-        if stat_id == 511 {
+        let stat_id = cursor.read_bits::<u32>(CHARACTER_ATTRIBUTE_WIRE.stat_id_bits)?;
+        if stat_id == CHARACTER_ATTRIBUTE_WIRE.terminator_id {
             break;
         }
         // Character-stat widths are distinct from item-property widths.
