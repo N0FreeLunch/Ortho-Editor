@@ -3232,8 +3232,8 @@ pub fn scan_socket_children(
 
 pub use crate::domain::stats::PropertyReaderContext;
 
-/// Property ID width and terminator for the existing D2R v3 scalar-list writer.
-struct D2rV3ScalarPropertyLayout;
+/// Shared ID framing for the current D2R v3 property-list writers.
+struct D2rV3PropertyListLayout;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum D2rV3StoredLayout {
@@ -3250,9 +3250,10 @@ enum D2rV3StoredLayout {
     Weapon,
 }
 
-impl D2rV3ScalarPropertyLayout {
-    const STAT_ID: u32 = 9;
-    const TERMINATOR: u32 = 511;
+impl D2rV3PropertyListLayout {
+    const STAT_ID: u32 =
+        crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits as u32;
+    const TERMINATOR: u32 = (1u32 << Self::STAT_ID) - 1;
 }
 
 use super::bit_emitter::d2r_v3_write_checked;
@@ -3261,7 +3262,7 @@ fn d2r_v3_write_scalar_list(
     emitter: &mut BitEmitter,
     properties: &[crate::domain::stats::ItemProperty],
 ) -> io::Result<()> {
-    use D2rV3ScalarPropertyLayout as W;
+    use D2rV3PropertyListLayout as W;
     let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
     let (terminal, scalar_properties) = properties
         .split_last()
@@ -3272,7 +3273,10 @@ fn d2r_v3_write_scalar_list(
     for property in scalar_properties {
         if property.is_opaque
             || !property.is_verified()
-            || matches!(property.stat_id, 17 | 18 | 50 | 51 | 57 | 58 | 59 | 511)
+            || matches!(
+                property.stat_id,
+                17 | 18 | 50 | 51 | 57 | 58 | 59 | W::TERMINATOR
+            )
         {
             return Err(invalid(
                 "Opaque, unverified, paired or premature terminal property is unsupported",
@@ -3304,11 +3308,12 @@ fn d2r_v3_write_weapon_list(
     properties: &[crate::domain::stats::ItemProperty],
 ) -> io::Result<()> {
     use crate::data::generated::layout_policy::D2R_V3_PAIRED_STAT_IDS;
+    use D2rV3PropertyListLayout as W;
     let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidInput, message);
     let (terminal, values) = properties
         .split_last()
         .ok_or_else(|| invalid("Missing weapon property terminator"))?;
-    if terminal.stat_id != 511
+    if terminal.stat_id != W::TERMINATOR
         || terminal.is_opaque
         || !terminal.is_verified()
         || terminal.param != 0
@@ -3324,7 +3329,7 @@ fn d2r_v3_write_weapon_list(
         if property.is_opaque
             || !property.is_verified()
             || property.opaque_bits.is_some()
-            || property.stat_id == 511
+            || property.stat_id == W::TERMINATOR
             || (companion && property.param != 0)
         {
             return Err(invalid("Unsupported weapon property state"));
@@ -3337,7 +3342,12 @@ fn d2r_v3_write_weapon_list(
             return Err(invalid("Unsupported weapon property width"));
         }
         if !companion {
-            d2r_v3_write_checked(emitter, u64::from(property.stat_id), 9, "weapon stat ID")?;
+            d2r_v3_write_checked(
+                emitter,
+                u64::from(property.stat_id),
+                W::STAT_ID,
+                "weapon stat ID",
+            )?;
             d2r_v3_write_checked(
                 emitter,
                 u64::from(property.param),
@@ -3368,7 +3378,7 @@ fn d2r_v3_write_weapon_list(
             }
         }
     }
-    emitter.write_bits(511, 9)
+    emitter.write_bits(W::TERMINATOR, W::STAT_ID)
 }
 
 impl crate::domain::item::entity::D2rV3AuxiliaryData {
