@@ -2180,7 +2180,11 @@ impl Item {
                 } else {
                     (false, false, false)
                 };
-                if reads_def && s_axiom.reads_defense() {
+                let presence = crate::domain::payload::legacy_presence::LegacyPayloadPresence::new(
+                    s_axiom.is_compact,
+                    &s_axiom.code,
+                );
+                if reads_def && presence.allows_defense() {
                     if !alpha_mode
                         && !self.header.save_is_alpha
                         && self.body.d2r_v3_auxiliary.is_some()
@@ -2206,7 +2210,7 @@ impl Item {
                         emitter.write_bits(self.defense.unwrap_or(0), 11)?;
                     }
                 }
-                if reads_dur && s_axiom.reads_durability() {
+                if reads_dur && presence.allows_durability() {
                     let m_dur = self.max_durability.unwrap_or(0);
                     let max_bits = if self.header.save_is_alpha { 8 } else { w_axiom.stat_bits(73) };
                     let cur_bits = if self.header.save_is_alpha { 8 } else { w_axiom.stat_bits(72) };
@@ -2219,7 +2223,7 @@ impl Item {
                         emitter.write_bit(false)?;
                     }
                 }
-                if reads_qty && s_axiom.reads_quantity() {
+                if reads_qty && presence.allows_quantity() {
                     emitter.write_bits(self.quantity.unwrap_or(0), 9)?;
                 }
                 if self.header.is_socketed {

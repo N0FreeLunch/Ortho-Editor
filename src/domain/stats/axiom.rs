@@ -403,14 +403,23 @@ impl StatsAxiom {
     // Alpha v105 still stores these fields for the relevant templates; the
     // template gate in ExtendedStatsData already prevents unrelated items from
     // consuming the wrong widths.
+    fn payload_presence(
+        &self,
+    ) -> crate::domain::payload::legacy_presence::LegacyPayloadPresence<'_> {
+        crate::domain::payload::legacy_presence::LegacyPayloadPresence::new(
+            self.is_compact,
+            &self.code,
+        )
+    }
+
     pub fn reads_defense(&self) -> bool {
-        !self.is_compact
+        self.payload_presence().allows_defense()
     }
     pub fn reads_durability(&self) -> bool {
-        !self.is_compact || self.code.trim() == "wa2" || self.code.trim() == "rhd"
+        self.payload_presence().allows_durability()
     }
     pub fn reads_quantity(&self) -> bool {
-        !self.is_compact
+        self.payload_presence().allows_quantity()
     }
 
     pub fn lookup_alpha_map_by_raw(&self, raw_id: u32) -> Option<MappingInfo> {

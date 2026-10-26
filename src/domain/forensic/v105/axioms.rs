@@ -1014,13 +1014,25 @@ impl crate::domain::item::subdomains::payload::LegacyExtendedPayloadReadPolicy
         crate::domain::stats::StatsAxiom::is_runeword(self, flags)
     }
     fn reads_defense(&self) -> bool {
-        crate::domain::stats::StatsAxiom::reads_defense(self)
+        crate::domain::payload::legacy_presence::LegacyPayloadPresence::new(
+            self.is_compact,
+            &self.code,
+        )
+        .allows_defense()
     }
     fn reads_durability(&self) -> bool {
-        crate::domain::stats::StatsAxiom::reads_durability(self)
+        crate::domain::payload::legacy_presence::LegacyPayloadPresence::new(
+            self.is_compact,
+            &self.code,
+        )
+        .allows_durability()
     }
     fn reads_quantity(&self) -> bool {
-        crate::domain::stats::StatsAxiom::reads_quantity(self)
+        crate::domain::payload::legacy_presence::LegacyPayloadPresence::new(
+            self.is_compact,
+            &self.code,
+        )
+        .allows_quantity()
     }
     fn header_is_alpha(&self, version: u8, alpha_mode: bool) -> bool {
         HeaderAxiom::new(version, alpha_mode).is_alpha()
