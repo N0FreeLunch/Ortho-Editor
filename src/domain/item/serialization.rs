@@ -18,8 +18,7 @@ use crate::domain::item::axiom_meta::{
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use crate::domain::item::subdomains::payload::ExtendedPayloadReadPlan;
-use crate::domain::item::subdomains::property::{AlphaPropertyCombinator, PropertyNormalizer};
-use crate::domain::item::subdomains::stats::StatsCombinator;
+use crate::domain::forensic::stats_recovery::{self, LegacyItemStatsReadContext};
 use crate::domain::item::Item;
 #[cfg(test)]
 use crate::domain::stats::ItemProperty;
@@ -2759,7 +2758,6 @@ impl Item {
                 }
             }
 
-            let combinator = StatsCombinator;
             let stats_result = if d2r_v3_mode {
                 crate::domain::forensic::stats_recovery::read_item_stats_d2r_v3(
                     cursor,
@@ -2781,24 +2779,28 @@ impl Item {
                     item.header.is_socketed || (authority_runeword_hint && !item.header.is_compact),
                 )?
             } else {
-                combinator.read_stats(
+                stats_recovery::read_item_stats_normalized(
                     cursor,
-                    &item.code,
-                    stats_version,
-                    ctx,
-                    huff,
-                    item.header.save_is_alpha,
-                    item.header.quality,
-                    item.header.flags,
-                    item.header.is_runeword || (authority_runeword_hint && !item.header.is_compact),
-                    if authority_runeword_hint && !item.header.is_compact {
-                        false
-                    } else {
-                        is_v105_shadow || rhythm_recovery
+                    LegacyItemStatsReadContext {
+                        code: &item.code,
+                        version: stats_version,
+                        ctx,
+                        huffman: huff,
+                        alpha_mode: item.header.save_is_alpha,
+                        quality: item.header.quality,
+                        flags: item.header.flags,
+                        is_runeword: item.header.is_runeword
+                            || (authority_runeword_hint && !item.header.is_compact),
+                        is_v105_shadow: if authority_runeword_hint && !item.header.is_compact {
+                            false
+                        } else {
+                            is_v105_shadow || rhythm_recovery
+                        },
+                        is_personalized: item.header.is_personalized,
+                        is_compact: item.header.is_compact,
+                        is_socketed: item.header.is_socketed
+                            || (authority_runeword_hint && !item.header.is_compact),
                     },
-                    item.header.is_personalized,
-                    item.header.is_compact,
-                    item.header.is_socketed || (authority_runeword_hint && !item.header.is_compact),
                 )?
             };
             let (mut props, complete, term, _v5_extra, _unused_bits, shadow_bits, nested_items) =
@@ -2812,7 +2814,12 @@ impl Item {
                 let axiom = StatsAxiom::new(stats_version, quality_val, item.header.save_is_alpha)
                     .with_compact(item.header.is_compact)
                     .with_code(&item.code);
-                AlphaPropertyCombinator.normalize(&mut props, &item.code, &axiom);
+                stats_recovery::normalize_legacy_item_properties(
+                    &mut props,
+                    &item.code,
+                    axiom.version,
+                    axiom.save_is_alpha,
+                );
             }
 
             if d2r_v3_mode && props.iter().any(|property| property.name == "terminator") {

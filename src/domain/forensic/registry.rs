@@ -68,6 +68,18 @@ pub fn get_registry() -> &'static AlphaForensics {
     }
 }
 
+/// Preserve the legacy ID lookup and its lazy admission boundary.
+pub(crate) fn map_alpha_id_if_admitted(raw_id: u32, alpha_admitted: bool) -> u32 {
+    if !alpha_admitted {
+        return raw_id;
+    }
+    let reg = get_registry();
+    reg.mappings
+        .get(&raw_id.to_string())
+        .map(|m| m.effective_id)
+        .unwrap_or(raw_id)
+}
+
 /// Returns Err if any effective_id appears in both mappings and stats,
 /// or if duplicate effective_id exists within mappings.
 pub fn validate_registry(r: &AlphaForensics) -> Result<(), String> {

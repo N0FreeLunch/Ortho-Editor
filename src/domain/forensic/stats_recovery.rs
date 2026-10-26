@@ -14,6 +14,104 @@ use crate::domain::stats::{ItemProperty, StatsAxiom};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 
+pub(crate) struct LegacyItemStatsReadContext<'a> {
+    pub(crate) code: &'a str,
+    pub(crate) version: u8,
+    pub(crate) ctx: Option<(&'a [u8], u64)>,
+    pub(crate) huffman: &'a HuffmanTree,
+    pub(crate) alpha_mode: bool,
+    pub(crate) quality: Option<ItemQuality>,
+    pub(crate) flags: u32,
+    pub(crate) is_runeword: bool,
+    pub(crate) is_v105_shadow: bool,
+    pub(crate) is_personalized: bool,
+    pub(crate) is_compact: bool,
+    pub(crate) is_socketed: bool,
+}
+
+pub(crate) type LegacyItemStatsReadResult = (
+    Vec<ItemProperty>,
+    bool,
+    bool,
+    Option<u8>,
+    Option<Vec<bool>>,
+    Option<u64>,
+    Vec<crate::domain::item::Item>,
+);
+
+pub(crate) fn normalize_legacy_item_properties(
+    props: &mut [ItemProperty],
+    code: &str,
+    version: u8,
+    save_is_alpha: bool,
+) {
+    let alpha_admitted = save_is_alpha
+        && crate::data::generated::layout_policy::ALPHA_ITEM_HEADER_ADMISSION_POLICY
+            .stats_versions
+            .contains(&version);
+    crate::domain::stats::property_normalize::normalize_legacy_properties_using(
+        props,
+        code,
+        alpha_admitted,
+        |raw_id| {
+            crate::domain::forensic::registry::map_alpha_id_if_admitted(raw_id, alpha_admitted)
+        },
+    );
+}
+
+pub(crate) fn read_item_stats_normalized<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    request: LegacyItemStatsReadContext<'_>,
+) -> ParsingResult<LegacyItemStatsReadResult> {
+    let LegacyItemStatsReadContext {
+        code,
+        version,
+        ctx,
+        huffman,
+        alpha_mode,
+        quality,
+        flags,
+        is_runeword,
+        is_v105_shadow,
+        is_personalized,
+        is_compact,
+        is_socketed,
+    } = request;
+    let (mut props, complete, term, v5_extra, unused_bits, shadow_bits, nested_items) =
+        read_item_stats(
+            cursor,
+            code,
+            version,
+            ctx,
+            huffman,
+            alpha_mode,
+            quality,
+            flags,
+            is_runeword,
+            is_v105_shadow,
+            is_personalized,
+            is_compact,
+            is_socketed,
+        )?;
+
+    let quality_val = quality.unwrap_or(ItemQuality::Normal);
+    let axiom = StatsAxiom::new(version, quality_val, alpha_mode)
+        .with_compact(is_compact)
+        .with_code(code);
+
+    normalize_legacy_item_properties(&mut props, code, axiom.version, axiom.save_is_alpha);
+
+    Ok((
+        props,
+        complete,
+        term,
+        v5_extra,
+        unused_bits,
+        shadow_bits,
+        nested_items,
+    ))
+}
+
 pub fn read_item_stats<R: BitRead>(
     cursor: &mut BitCursor<R>,
     code: &str,

@@ -136,14 +136,10 @@ impl StatsAxiom {
 
     /// Maps an Alpha v105 raw stat ID to its effective (standard) ID.
     pub fn map_alpha_id(&self, raw_id: u32) -> u32 {
-        if !self.uses_alpha_mapping() {
-            return raw_id;
-        }
-        let reg = get_registry();
-        reg.mappings
-            .get(&raw_id.to_string())
-            .map(|m| m.effective_id)
-            .unwrap_or(raw_id)
+        crate::domain::forensic::registry::map_alpha_id_if_admitted(
+            raw_id,
+            self.uses_alpha_mapping(),
+        )
     }
 
     /// Tests the legacy parameter-omission policy using explicit caller inputs.
