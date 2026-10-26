@@ -16,7 +16,6 @@ use crate::domain::item::axiom_meta::{
     Confidence, ForensicAudit, ForensicAxiom, ForensicMetadata, Intentionality,
 };
 use crate::domain::item::quality::ItemQuality;
-use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use crate::domain::item::subdomains::payload::ExtendedPayloadReadPlan;
 use crate::domain::forensic::stats_recovery::{self, LegacyItemStatsReadContext};
 use crate::domain::item::Item;
@@ -2690,29 +2689,18 @@ impl Item {
             }
 
             // Slice 11: Handle JM-to-Body alignment gap
-            let gap_len = if item.code.trim() == "buc" || matches!(item.header.version, 1) {
-                0
-            } else {
-                LegacyItemLayoutContext::new(
+            legacy_layout::read_legacy_property_body_gap(
+                cursor,
+                item.header.version,
+                &item.code,
+                &LegacyItemLayoutContext::new(
                     axiom.version,
                     axiom.save_is_alpha,
                     axiom.is_compact,
                     axiom.idx,
-                )
-                .header_gap(&item.code)
-            };
-            if gap_len > 0 {
-                cursor.push_context("AlphaBodyGap");
-                let gap_seg = AlphaHeaderGap::parse(cursor, gap_len as usize).map_err(|e| {
-                    cursor.fail(ParsingError::UnexpectedValue {
-                        field: "AlphaBodyGap".to_string(),
-                        value: "".to_string(),
-                        reason: format!("Failed to parse body gap: {}", e),
-                    })
-                })?;
-                item.body.alpha_body_gap_bits.extend(gap_seg.bits);
-                cursor.pop_context();
-            }
+                ),
+                &mut item.body.alpha_body_gap_bits,
+            )?;
 
             if item.header.save_is_alpha {
                 let is_authority = code_peek.map_or(false, |code| {

@@ -3,9 +3,12 @@ use crate::data::bit_cursor::BitCursor;
 use crate::domain::forensic::v105::axioms::V105PropertyNudgeAxiom;
 use crate::domain::item::axiom_meta::{ForensicAudit, ForensicAxiom};
 use crate::item::ParsingResult;
+use crate::error::ParsingError;
+use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
 use bitstream_io::BitRead;
 use crate::data::generated::layout_policy::{
-    ALPHA_ITEM_HEADER_ADMISSION_POLICY, LEGACY_STATS_HEADER_GAP_POLICY,
+    ALPHA_ITEM_HEADER_ADMISSION_POLICY, LEGACY_PROPERTY_BODY_GAP_READ_POLICY,
+    LEGACY_STATS_HEADER_GAP_POLICY,
 };
 
 trait LegacyItemLayoutProvider {
@@ -69,6 +72,25 @@ impl LegacyItemLayoutContext {
             .unwrap_or(policy.default_gap_bits)
     }
 
+    fn body_gap_length(&self, header_version: u8, code: &str) -> u32 {
+        self.body_gap_length_using(header_version, code, &RegistryLayoutProvider)
+    }
+
+    fn body_gap_length_using<P: LegacyItemLayoutProvider>(
+        &self,
+        header_version: u8,
+        code: &str,
+        provider: &P,
+    ) -> u32 {
+        let policy = &LEGACY_PROPERTY_BODY_GAP_READ_POLICY;
+        if policy.suppressed_codes.contains(&code.trim())
+            || policy.suppressed_header_versions.contains(&header_version)
+        {
+            return policy.suppressed_gap_bits;
+        }
+        self.header_gap_using(code, provider)
+    }
+
     pub(crate) fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
         self.calculate_alignment_using(current_len, code, flags, &RegistryLayoutProvider)
     }
@@ -93,6 +115,31 @@ impl LegacyItemLayoutContext {
         }
         current_len
     }
+}
+
+/// Read the legacy pre-property gap with independent header and Stats versions.
+/// Keep the original partial-read, context, storage and unwind ordering.
+pub(crate) fn read_legacy_property_body_gap<R: BitRead>(
+    cursor: &mut BitCursor<R>,
+    header_version: u8,
+    code: &str,
+    layout: &LegacyItemLayoutContext,
+    stored_bits: &mut Vec<bool>,
+) -> ParsingResult<()> {
+    let gap_len = layout.body_gap_length(header_version, code);
+    if gap_len > 0 {
+        cursor.push_context("AlphaBodyGap");
+        let gap_seg = AlphaHeaderGap::parse(cursor, gap_len as usize).map_err(|e| {
+            cursor.fail(ParsingError::UnexpectedValue {
+                field: "AlphaBodyGap".to_string(),
+                value: "".to_string(),
+                reason: format!("Failed to parse body gap: {}", e),
+            })
+        })?;
+        stored_bits.extend(gap_seg.bits);
+        cursor.pop_context();
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_property_residue_nudge<R: BitRead>(
@@ -259,5 +306,269 @@ mod tests {
             assert_eq!(result.unwrap(), 0);
         }
         assert!(provider.queries.borrow().is_empty());
+    }
+
+    #[hypothesis_test]
+    fn body_gap_selector_preserves_header_stats_domains_and_lazy_queries() {
+        for (headers, stats) in [
+            ((0..=255).collect::<Vec<u8>>(), vec![1, 3, 5, 7, 96]),
+            (vec![0, 1, 5], (0..=255).collect::<Vec<u8>>()),
+        ] {
+            for header in &headers {
+                for version in &stats {
+                    for raw in [false, true] {
+                        for code in [
+                            "buc",
+                            "\u{2003}buc\u{2003}",
+                            "buc\0",
+                            "BUC",
+                            "ks d",
+                            "probe_gap",
+                            "unknown",
+                            "",
+                        ] {
+                            let actual_provider = Provider::new(Some(13), 80);
+                            let expected_provider = Provider::new(Some(13), 80);
+                            let context = LegacyItemLayoutContext::new(*version, raw, true, 9);
+                            let expected = if code.trim() == "buc" || *header == 1 {
+                                0
+                            } else {
+                                context.header_gap_using(code, &expected_provider)
+                            };
+                            assert_eq!(
+                                context.body_gap_length_using(*header, code, &actual_provider),
+                                expected
+                            );
+                            assert_eq!(
+                                *actual_provider.queries.borrow(),
+                                *expected_provider.queries.borrow()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    struct GapFaultReader {
+        bytes: std::io::Cursor<Vec<u8>>,
+        calls: std::rc::Rc<std::cell::Cell<usize>>,
+        armed: std::rc::Rc<std::cell::Cell<usize>>,
+        fault: u8,
+    }
+    impl std::io::Read for GapFaultReader {
+        fn read(&mut self, target: &mut [u8]) -> std::io::Result<usize> {
+            let call = self.calls.get() + 1;
+            self.calls.set(call);
+            if call == self.armed.get() {
+                if self.fault == 1 {
+                    return Err(std::io::Error::other("controlled body gap error"));
+                }
+                if self.fault == 2 {
+                    panic!("controlled body gap panic");
+                }
+            }
+            std::io::Read::read(&mut self.bytes, target)
+        }
+    }
+    type GapCursor = BitCursor<bitstream_io::BitReader<GapFaultReader, bitstream_io::LittleEndian>>;
+    fn gap_cursor(
+        bytes: &[u8],
+        prefix: u32,
+        limit: Option<u64>,
+        fault: u8,
+    ) -> (GapCursor, std::rc::Rc<std::cell::Cell<usize>>) {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let armed = std::rc::Rc::new(std::cell::Cell::new(usize::MAX));
+        let reader = GapFaultReader {
+            bytes: std::io::Cursor::new(bytes.to_vec()),
+            calls: calls.clone(),
+            armed: armed.clone(),
+            fault,
+        };
+        let mut cursor = BitCursor::new(bitstream_io::BitReader::endian(
+            reader,
+            bitstream_io::LittleEndian,
+        ));
+        cursor.set_trace(true);
+        cursor.push_context("outer body gap owner");
+        cursor.read_bits_as_vec_up_to(prefix);
+        cursor.set_pos(u64::from(prefix));
+        cursor.base_pos = u64::from(prefix.min(2));
+        if let Some(limit) = limit {
+            cursor.set_limit(limit);
+        }
+        armed.set(calls.get() + 1);
+        (cursor, calls)
+    }
+    fn gap_state(cursor: &GapCursor) -> String {
+        format!(
+            "{:?}",
+            (
+                cursor.pos(),
+                cursor.limit(),
+                cursor.remaining(),
+                cursor.base_pos,
+                cursor.recorded_bits(),
+                cursor.segments(),
+                cursor.active_segments(),
+                cursor.context_stack(),
+                cursor.operation_events(),
+                cursor.alpha_quality
+            )
+        )
+    }
+    fn gap_outcome<T: std::fmt::Debug>(f: impl FnOnce() -> T) -> String {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+            Ok(value) => format!("result:{value:?}"),
+            Err(payload) => format!(
+                "panic:{:?}",
+                payload
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+            ),
+        }
+    }
+    // Frozen pre-extraction stage; the generic public delegate is source-equivalent
+    // to the original private layout construction and remains unchanged by this slice.
+    fn original_body_gap(
+        cursor: &mut GapCursor,
+        header: u8,
+        code: &str,
+        version: u8,
+        raw: bool,
+        stored: &mut Vec<bool>,
+    ) -> ParsingResult<()> {
+        let mut axiom = crate::domain::stats::StatsAxiom::new(
+            version,
+            crate::domain::item::ItemQuality::Normal,
+            raw,
+        );
+        axiom.is_compact = true;
+        axiom.idx = 9;
+        let gap_len = if code.trim() == "buc" || header == 1 {
+            0
+        } else {
+            axiom.header_gap(code, 0)
+        };
+        if gap_len > 0 {
+            cursor.push_context("AlphaBodyGap");
+            let gap_seg = AlphaHeaderGap::parse(cursor, gap_len as usize).map_err(|e| {
+                cursor.fail(ParsingError::UnexpectedValue {
+                    field: "AlphaBodyGap".to_string(),
+                    value: "".to_string(),
+                    reason: format!("Failed to parse body gap: {}", e),
+                })
+            })?;
+            stored.extend(gap_seg.bits);
+            cursor.pop_context();
+        }
+        Ok(())
+    }
+    #[hypothesis_test]
+    fn body_gap_execution_matches_original_stage_with_io_faults() {
+        use std::io::Write;
+        let mut output = std::env::var_os("D2R_BODY_GAP_OBSERVATIONS").map(|path| {
+            std::io::BufWriter::new(
+                std::fs::OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(path)
+                    .expect("new body gap output"),
+            )
+        });
+        let mut cases = 0;
+        let mut panics = 0;
+        let mut appended = 0;
+        let mut operation_errors = 0;
+        for header in [0, 1, 5, 96] {
+            for version in [3, 5, 7] {
+                for raw in [false, true] {
+                    for code in [
+                        "buc",
+                        "\u{2003}buc\u{2003}",
+                        "buc\0",
+                        "ks d",
+                        "probe_gap",
+                        "unknown",
+                    ] {
+                        for prefix in [0u32, 6] {
+                            for limit in
+                                [None, Some(u64::from(prefix)), Some(u64::from(prefix + 1))]
+                            {
+                                for bytes in [vec![], vec![0x96, 0x69, 0xac]] {
+                                    for initial in [vec![], vec![true, false, true]] {
+                                        for fault in [0, 1, 2] {
+                                            let (mut old, old_calls) =
+                                                gap_cursor(&bytes, prefix, limit, fault);
+                                            let (mut actual, actual_calls) =
+                                                gap_cursor(&bytes, prefix, limit, fault);
+                                            let mut expected_bits = initial.clone();
+                                            let mut actual_bits = initial.clone();
+                                            let context =
+                                                LegacyItemLayoutContext::new(version, raw, true, 9);
+                                            let before = gap_state(&old);
+                                            let old_initial_calls = old_calls.get();
+                                            let expected = gap_outcome(|| {
+                                                original_body_gap(
+                                                    &mut old,
+                                                    header,
+                                                    code,
+                                                    version,
+                                                    raw,
+                                                    &mut expected_bits,
+                                                )
+                                            });
+                                            let result = gap_outcome(|| {
+                                                read_legacy_property_body_gap(
+                                                    &mut actual,
+                                                    header,
+                                                    code,
+                                                    &context,
+                                                    &mut actual_bits,
+                                                )
+                                            });
+                                            assert_eq!(result, expected);
+                                            assert_eq!(actual_bits, expected_bits);
+                                            assert_eq!(gap_state(&actual), gap_state(&old));
+                                            assert_eq!(actual_calls.get(), old_calls.get());
+                                            if result.starts_with("panic:") {
+                                                panics += 1;
+                                            }
+                                            if actual_bits.len() > initial.len() {
+                                                appended += 1;
+                                            }
+                                            if fault == 1 && old_calls.get() > old_initial_calls {
+                                                operation_errors += 1;
+                                            }
+                                            let after = gap_state(&actual);
+                                            let calls_after = actual_calls.get();
+                                            let old_follow = gap_outcome(|| old.read_bits::<u8>(3));
+                                            let follow = gap_outcome(|| actual.read_bits::<u8>(3));
+                                            assert_eq!(follow, old_follow);
+                                            assert_eq!(gap_state(&actual), gap_state(&old));
+                                            assert_eq!(actual_calls.get(), old_calls.get());
+                                            if let Some(file) = output.as_mut() {
+                                                serde_json::to_writer(&mut *file,&serde_json::json!({"kind":"case","header":header,"stats_version":version,"raw":raw,"code":code,"prefix":prefix,"limit":limit,"bytes":bytes,"initial":initial,"fault":fault,"before":before,"result":result,"stored":actual_bits,"after":after,"calls_after":calls_after,"follow":follow,"follow_state":gap_state(&actual),"final_calls":actual_calls.get()})).unwrap();
+                                                writeln!(file).unwrap();
+                                            }
+                                            cases += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 10368);
+        assert!(panics > 0 && appended > 0 && operation_errors > 0);
+        if let Some(file) = output.as_mut() {
+            serde_json::to_writer(&mut *file,&serde_json::json!({"kind":"summary","schema":1,"cases":cases,"operation_panics":panics,"appended":appended,"operation_io_errors":operation_errors})).unwrap();
+            writeln!(file).unwrap();
+            file.flush().unwrap();
+        }
     }
 }
