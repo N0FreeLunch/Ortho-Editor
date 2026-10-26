@@ -9,5 +9,6 @@ pub(crate) mod property_write;
 pub(crate) mod header_scan;
 pub(crate) mod header_parser;
 pub(crate) mod legacy_flags;
+pub(crate) mod legacy_layout;
 pub mod v105;
 pub mod registry;

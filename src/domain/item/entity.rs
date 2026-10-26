@@ -1,3 +1,4 @@
+use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES;
 use crate::domain::forensic::registry::get_registry;
@@ -1890,7 +1891,13 @@ impl Item {
             }
 
             let current_bits = emitter.written_bits();
-            let mut final_bits = s_axiom.calculate_alignment(
+            let mut final_bits = LegacyItemLayoutContext::new(
+                s_axiom.version,
+                s_axiom.save_is_alpha,
+                s_axiom.is_compact,
+                s_axiom.idx,
+            )
+            .calculate_alignment(
                 current_bits - start_bit,
                 &self.code,
                 self.header.flags,
@@ -2270,7 +2277,13 @@ impl Item {
                         || !self.properties.is_empty())
                 {
                     // Slice 11: Write JM-to-Body alignment gap
-                    let gap_len = s_axiom.header_gap(&self.code, self.header.flags);
+                    let gap_len = LegacyItemLayoutContext::new(
+                        s_axiom.version,
+                        s_axiom.save_is_alpha,
+                        s_axiom.is_compact,
+                        s_axiom.idx,
+                    )
+                    .header_gap(&self.code);
                     if gap_len > 0 || !self.body.alpha_body_gap_bits.is_empty() {
                         let gap_seg = AlphaHeaderGap {
                             bits: if !self.body.alpha_body_gap_bits.is_empty() {
@@ -2463,7 +2476,13 @@ impl Item {
         phase_start = emitter.written_bits();
         let current_bits = emitter.written_bits();
         let mut final_bits =
-            s_axiom.calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
+            LegacyItemLayoutContext::new(
+            s_axiom.version,
+            s_axiom.save_is_alpha,
+            s_axiom.is_compact,
+            s_axiom.idx,
+        )
+        .calculate_alignment(current_bits - start_bit, &self.code, self.header.flags);
 
         if alpha_mode
             && self.header.version == 3

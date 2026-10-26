@@ -1,5 +1,6 @@
 mod code_recovery;
 
+use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
@@ -1725,7 +1726,13 @@ impl Item {
                         .with_index(i)
                         .with_compact(final_item.header.is_compact)
                         .with_code(&final_item.code);
-                        let mut target_width = alignment_axiom.calculate_alignment(
+                        let mut target_width = LegacyItemLayoutContext::new(
+                            alignment_axiom.version,
+                            alignment_axiom.save_is_alpha,
+                            alignment_axiom.is_compact,
+                            alignment_axiom.idx,
+                        )
+                        .calculate_alignment(
                             consumed_bits,
                             &final_item.code,
                             final_item.header.flags,
@@ -2688,7 +2695,13 @@ impl Item {
             let gap_len = if item.code.trim() == "buc" || matches!(item.header.version, 1) {
                 0
             } else {
-                axiom.header_gap(&item.code, item.header.flags)
+                LegacyItemLayoutContext::new(
+                    axiom.version,
+                    axiom.save_is_alpha,
+                    axiom.is_compact,
+                    axiom.idx,
+                )
+                .header_gap(&item.code)
             };
             if gap_len > 0 {
                 cursor.push_context("AlphaBodyGap");
@@ -3157,7 +3170,13 @@ pub fn scan_socket_children(
                             )
                             .with_compact(final_child.header.is_compact)
                             .with_code(&final_child.code);
-                            let mut target_width = alignment_axiom.calculate_alignment(
+                            let mut target_width = LegacyItemLayoutContext::new(
+                                alignment_axiom.version,
+                                alignment_axiom.save_is_alpha,
+                                alignment_axiom.is_compact,
+                                alignment_axiom.idx,
+                            )
+                            .calculate_alignment(
                                 consumed_bits,
                                 &final_child.code,
                                 final_child.header.flags,

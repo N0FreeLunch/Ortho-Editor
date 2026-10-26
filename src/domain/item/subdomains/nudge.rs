@@ -1,3 +1,4 @@
+use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
 use bitstream_io::BitRead;
 use crate::data::bit_cursor::BitCursor;
 use crate::domain::stats::axiom::StatsAxiom;
@@ -43,7 +44,13 @@ impl NudgeCombinator {
         axiom: &StatsAxiom,
     ) -> ParsingResult<Vec<bool>> {
         let consumed_bits = cursor.pos() - start_bit;
-        let final_consumed = axiom.calculate_alignment(consumed_bits, code, flags);
+        let final_consumed = LegacyItemLayoutContext::new(
+            axiom.version,
+            axiom.save_is_alpha,
+            axiom.is_compact,
+            axiom.idx,
+        )
+        .calculate_alignment(consumed_bits, code, flags);
         
         if final_consumed > consumed_bits {
             let padding_count = (final_consumed - consumed_bits) as u32;

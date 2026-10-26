@@ -1,3 +1,4 @@
+use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
 use crate::domain::forensic::v105::{V105HeaderGapAxiom, V105NudgeAxiom, V105ShadowAxiom};
 use crate::domain::forensic::header_policy::{HeaderAxiom, HeaderGeometry};
@@ -254,23 +255,12 @@ impl StatsAxiom {
         false
     }
 
+    fn legacy_item_layout(&self) -> LegacyItemLayoutContext {
+        LegacyItemLayoutContext::new(self.version, self.save_is_alpha, self.is_compact, self.idx)
+    }
+
     pub fn header_gap(&self, _code: &str, _flags: u32) -> u32 {
-        if !self.is_alpha() {
-            return 0;
-        }
-        let trimmed = _code.trim();
-        if trimmed == "ks d" {
-            return 10;
-        }
-        let reg = get_registry();
-        if let Some(overrides) = &reg.item_overrides {
-            if let Some(map) = overrides.get(trimmed) {
-                if let Some(&gap) = map.get("header_gap") {
-                    return gap;
-                }
-            }
-        }
-        0
+        self.legacy_item_layout().header_gap(_code)
     }
 
     pub fn compact_layout_policy(&self) -> CompactLayoutPolicy {
@@ -382,22 +372,8 @@ impl StatsAxiom {
         padding
     }
     pub fn calculate_alignment(&self, current_len: u64, code: &str, flags: u32) -> u64 {
-        if self.save_is_alpha {
-            let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(
-                self.version,
-                code,
-                flags,
-                Some(self.idx),
-            ) as u64;
-            if target_width > 0 {
-                return target_width;
-            }
-        }
-        if !self.is_compact {
-            let aligned = (current_len + 7) / 8 * 8;
-            return aligned;
-        }
-        current_len
+        self.legacy_item_layout()
+            .calculate_alignment(current_len, code, flags)
     }
 
     // Alpha v105 still stores these fields for the relevant templates; the
