@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::ItemAffixWireWidths as W;
 use crate::domain::item::bit_emitter::BitEmitter;
 use crate::data::bit_cursor::BitCursor;
 use bitstream_io::BitRead;
@@ -19,14 +20,14 @@ pub struct MagicAffixSegment {
 
 impl AffixCombinator for MagicAffixSegment {
     fn emit(&self, emitter: &mut BitEmitter) -> io::Result<()> {
-        emitter.write_bits(self.prefix.unwrap_or(0) as u32, 11)?;
-        emitter.write_bits(self.suffix.unwrap_or(0) as u32, 11)?;
+        emitter.write_bits(self.prefix.unwrap_or(0) as u32, W::AFFIX_ID)?;
+        emitter.write_bits(self.suffix.unwrap_or(0) as u32, W::AFFIX_ID)?;
         Ok(())
     }
 
     fn parse<R: BitRead>(cursor: &mut BitCursor<R>) -> io::Result<Self> {
-        let prefix = cursor.read_bits::<u16>(11).ok();
-        let suffix = cursor.read_bits::<u16>(11).ok();
+        let prefix = cursor.read_bits::<u16>(W::AFFIX_ID).ok();
+        let suffix = cursor.read_bits::<u16>(W::AFFIX_ID).ok();
         Ok(Self { prefix, suffix })
     }
 }
@@ -40,13 +41,13 @@ pub struct UniqueAffixSegment {
 impl AffixCombinator for UniqueAffixSegment {
     fn emit(&self, emitter: &mut BitEmitter) -> io::Result<()> {
         if let Some(id) = self.unique_id {
-            emitter.write_bits(id as u32, 12)?;
+            emitter.write_bits(id as u32, W::UNIQUE_OR_SET_ID)?;
         }
         Ok(())
     }
 
     fn parse<R: BitRead>(cursor: &mut BitCursor<R>) -> io::Result<Self> {
-        let unique_id = cursor.read_bits::<u16>(12).ok();
+        let unique_id = cursor.read_bits::<u16>(W::UNIQUE_OR_SET_ID).ok();
         Ok(Self { unique_id })
     }
 }
@@ -60,13 +61,13 @@ pub struct RareAffixSegment {
 
 impl AffixCombinator for RareAffixSegment {
     fn emit(&self, emitter: &mut BitEmitter) -> io::Result<()> {
-        emitter.write_bits(self.names[0].unwrap_or(0) as u32, 8)?;
-        emitter.write_bits(self.names[1].unwrap_or(0) as u32, 8)?;
+        emitter.write_bits(self.names[0].unwrap_or(0) as u32, W::RARE_NAME)?;
+        emitter.write_bits(self.names[1].unwrap_or(0) as u32, W::RARE_NAME)?;
 
         for affix in self.affixes {
             if let Some(a) = affix {
                 emitter.write_bit(true)?;
-                emitter.write_bits(a as u32, 11)?;
+                emitter.write_bits(a as u32, W::AFFIX_ID)?;
             } else {
                 emitter.write_bit(false)?;
             }
@@ -75,12 +76,12 @@ impl AffixCombinator for RareAffixSegment {
     }
 
     fn parse<R: BitRead>(cursor: &mut BitCursor<R>) -> io::Result<Self> {
-        let n1 = cursor.read_bits::<u8>(8).ok();
-        let n2 = cursor.read_bits::<u8>(8).ok();
+        let n1 = cursor.read_bits::<u8>(W::RARE_NAME).ok();
+        let n2 = cursor.read_bits::<u8>(W::RARE_NAME).ok();
         let mut affixes = [None; 6];
-        for i in 0..6 {
+        for i in 0..affixes.len() {
             if cursor.read_bit().unwrap_or(false) {
-                affixes[i] = cursor.read_bits::<u16>(11).ok();
+                affixes[i] = cursor.read_bits::<u16>(W::AFFIX_ID).ok();
             }
         }
         Ok(Self { names: [n1, n2], affixes })
