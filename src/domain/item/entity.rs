@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::ItemPayloadFieldWidths as PW;
 use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
 use crate::data::bit_cursor::BitCursor;
 use crate::data::generated::layout_policy::LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES;
@@ -2048,8 +2049,8 @@ impl Item {
                         || self.header.version == 3)))
                 && !self.header.is_compact
             {
-                emitter.write_bits(self.id.unwrap_or(0), 32)?;
-                emitter.write_bits(self.level.unwrap_or(0) as u32, 7)?;
+                emitter.write_bits(self.id.unwrap_or(0), PW::ITEM_ID)?;
+                emitter.write_bits(self.level.unwrap_or(0) as u32, PW::LEVEL)?;
                 emitter.write_bits(quality_val as u32, 4)?;
             }
             if !is_v105_summary {
@@ -2075,7 +2076,8 @@ impl Item {
                 let has_multi_graphics_to_write =
                     matches!(trimmed_code, "rin" | "amu" | "cm1" | "cm2" | "cm3");
                 if has_multi_graphics_to_write {
-                    emitter.write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, 3)?;
+                    emitter
+                        .write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, PW::GRAPHIC)?;
                     if trace_alpha && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
                         eprintln!(
                             "[to-emitter-field] after multi_graphics pos={}",
@@ -2085,7 +2087,10 @@ impl Item {
                 }
                 let has_class_specific_to_write = false;
                 if has_class_specific_to_write {
-                    emitter.write_bits(self.class_specific_bits.unwrap_or(0) as u16 as u32, 11)?;
+                    emitter.write_bits(
+                        self.class_specific_bits.unwrap_or(0) as u16 as u32,
+                        PW::CLASS_DATA,
+                    )?;
                     if alpha_mode && (self.code.trim() == "xrs" || self.code.trim() == "wa2") {
                         eprintln!(
                             "[to-emitter-field] after class_specific pos={}",
@@ -2095,7 +2100,10 @@ impl Item {
                 }
                 match quality_val {
                     ItemQuality::Low | ItemQuality::High => {
-                        emitter.write_bits(self.low_high_graphic_bits.unwrap_or(0) as u32, 3)?;
+                        emitter.write_bits(
+                            self.low_high_graphic_bits.unwrap_or(0) as u32,
+                            PW::QUALITY_SUBTYPE,
+                        )?;
                     }
                     ItemQuality::Magic => {
                         let seg = MagicAffixSegment {
