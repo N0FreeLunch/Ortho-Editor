@@ -311,7 +311,9 @@ fn trim_d2r_v3_property_terminator<R: BitRead>(
                         .to_string(),
             })
         })?;
-    let end = terminator.range.start.saturating_add(9);
+    let end = terminator.range.start.saturating_add(u64::from(
+        crate::data::generated::layout_policy::LEGACY_PROPERTY_STREAM_POLICY.stat_id_bits,
+    ));
     if cursor.pos() < end {
         return Err(cursor.fail(ParsingError::UnexpectedValue {
             field: "D2R v3 property terminator end".to_string(),
