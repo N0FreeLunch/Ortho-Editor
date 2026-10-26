@@ -9,7 +9,6 @@ use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
     ALPHA_LEGACY_AUTHORITY_CODES, ALPHA_LEGACY_AUTHORITY_HINT_CODES,
     ALPHA_LEGACY_AUTHORITY_PRELUDE_POLICY,
-    LEGACY_CHARACTER_ATTRIBUTE_WIRE_LAYOUT as CHARACTER_ATTRIBUTE_WIRE,
     LEGACY_HEADER_COMPACT_CODE_POLICY as HEADER_COMPACT_CODES,
 };
 use crate::domain::forensic::v105::{
@@ -699,78 +698,8 @@ pub fn read_counted_list_d2r_v3(
 }
 
 pub fn read_player_items_d2r_v3(bytes: &[u8], huffman: &HuffmanTree) -> ParsingResult<Vec<Item>> {
-    let save_version = bytes
-        .get(4..8)
-        .and_then(|raw| <[u8; 4]>::try_from(raw).ok())
-        .map(u32::from_le_bytes)
-        .ok_or_else(|| ParsingFailure {
-            error: ParsingError::UnexpectedValue {
-                field: "D2R v3 save version".to_string(),
-                value: "missing".to_string(),
-                reason: "The save header does not contain a complete version field".to_string(),
-            },
-            context_stack: vec!["read_player_items_d2r_v3".to_string()],
-            bit_offset: 32,
-            context_relative_offset: 0,
-            hint: None,
-        })?;
-    if save_version != 0x69 {
-        return Err(d2r_v3_list_failure(
-            "D2R v3 prefix version",
-            32,
-            "Only the fixture-verified version 0x69 prefix is supported",
-        ));
-    }
-    if bytes.get(..4) != Some(crate::save::D2S_MAGIC.to_le_bytes().as_slice()) {
-        return Err(d2r_v3_list_failure(
-            "D2R v3 save magic",
-            0,
-            "A full save header is required; use the explicit-offset API for list fragments",
-        ));
-    }
-    // Locate the player list by consuming its prefix, not by marker recovery.
-    let gf_pos = crate::domain::forensic::v105::V105SectionMarkerAxiom::V105_HEADER_LEN;
-    if bytes.get(gf_pos..gf_pos + CHARACTER_ATTRIBUTE_WIRE.marker.len())
-        != Some(CHARACTER_ATTRIBUTE_WIRE.marker.as_slice())
-    {
-        return Err(d2r_v3_list_failure(
-            "D2R v3 attribute marker",
-            gf_pos as u64 * 8,
-            "The verified fixed header must be followed by gf",
-        ));
-    }
-    let mut cursor = BitCursor::from_raw_at(
-        bytes,
-        (gf_pos as u64 + CHARACTER_ATTRIBUTE_WIRE.marker.len() as u64) * 8,
-    );
-    cursor.push_context("D2R v3 character attributes");
-    loop {
-        let id_start = cursor.pos();
-        let stat_id = cursor.read_bits::<u32>(CHARACTER_ATTRIBUTE_WIRE.stat_id_bits)?;
-        if stat_id == CHARACTER_ATTRIBUTE_WIRE.terminator_id {
-            break;
-        }
-        // Character-stat widths are distinct from item-property widths.
-        // Unverified character IDs must not turn into a guessed section boundary.
-        if stat_id > 15 {
-            return Err(d2r_v3_list_failure(
-                "D2R v3 character attribute ID",
-                id_start,
-                "The full-save locator currently supports only verified character IDs 0..15",
-            ));
-        }
-        cursor.skip(crate::domain::stats::attribute::char_stat_save_bits(stat_id, false) as u64)?;
-    }
-    cursor.byte_align()?;
-    let if_pos = (cursor.pos() / 8) as usize;
-    if bytes.get(if_pos..if_pos + 2) != Some(b"if".as_slice()) {
-        return Err(d2r_v3_list_failure(
-            "D2R v3 skill marker",
-            cursor.pos(),
-            "The character-stat terminator and alignment must end immediately before if",
-        ));
-    }
-    let player_pos = if_pos + 2 + crate::save::SKILL_SECTION_LEN;
+    let (player_pos, save_version) =
+        crate::domain::character::locate_v3_player_list(bytes, d2r_v3_list_failure)?;
     read_counted_list_d2r_v3(bytes, player_pos, huffman, save_version)
 }
 

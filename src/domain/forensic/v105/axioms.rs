@@ -445,7 +445,8 @@ impl ForensicAxiom for V105SectionMarkerAxiom {
 }
 
 impl V105SectionMarkerAxiom {
-    pub const V105_HEADER_LEN: usize = 833;
+    pub const V105_HEADER_LEN: usize =
+        crate::data::generated::layout_policy::LEGACY_V105_SAVE_HEADER_LEN_BYTES;
     pub const V105_QUEST_OFFSET: usize = 0x193;
     pub const V105_QUEST_LEN: usize = 298;
     pub const V105_WAYPOINT_OFFSET: usize = 0x2BD;
