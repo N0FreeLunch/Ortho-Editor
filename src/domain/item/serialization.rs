@@ -1,6 +1,6 @@
 mod code_recovery;
 
-use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
+use crate::domain::forensic::legacy_layout::{self, LegacyItemLayoutContext};
 use crate::data::bit_cursor::{BitCursor, BitReadTraceEvent};
 use crate::data::generated::layout_policy::{
     legacy_alpha_authority_cursor_target, legacy_alpha_child_code_alias,
@@ -17,7 +17,6 @@ use crate::domain::item::axiom_meta::{
 };
 use crate::domain::item::quality::ItemQuality;
 use crate::domain::item::subdomains::gap::{AlphaHeaderGap, GapCombinator};
-use crate::domain::item::subdomains::nudge::NudgeCombinator;
 use crate::domain::item::subdomains::payload::ExtendedPayloadReadPlan;
 use crate::domain::item::subdomains::property::{AlphaPropertyCombinator, PropertyNormalizer};
 use crate::domain::item::subdomains::stats::StatsCombinator;
@@ -2749,8 +2748,7 @@ impl Item {
                         cursor.set_limit(u64::MAX);
                     }
                 } else {
-                    let nudge_comb = NudgeCombinator;
-                    nudge_comb.apply_property_residue_nudge(
+                    legacy_layout::apply_property_residue_nudge(
                         cursor,
                         item.header.version,
                         rhythm_recovery,
@@ -2968,13 +2966,17 @@ impl Item {
         let padding = if d2r_v3_mode || item.header.is_compact {
             Vec::new()
         } else {
-            let nudge_comb = NudgeCombinator;
-            nudge_comb.apply_alignment_padding(
+            legacy_layout::apply_alignment_padding(
                 cursor,
                 start_bit,
                 &item.code,
                 item.header.flags,
-                &axiom,
+                &LegacyItemLayoutContext::new(
+                    axiom.version,
+                    axiom.save_is_alpha,
+                    axiom.is_compact,
+                    axiom.idx,
+                ),
             )?
         };
         let padding_len = padding.len() as u64;
