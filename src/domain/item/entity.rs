@@ -1,3 +1,4 @@
+use crate::data::generated::layout_policy::legacy_extended_payload_code_policy;
 use crate::data::generated::layout_policy::ItemPayloadFieldWidths as PW;
 use crate::domain::forensic::legacy_layout::LegacyItemLayoutContext;
 use crate::data::bit_cursor::BitCursor;
@@ -2074,7 +2075,7 @@ impl Item {
                     );
                 }
                 let has_multi_graphics_to_write =
-                    matches!(trimmed_code, "rin" | "amu" | "cm1" | "cm2" | "cm3");
+                    legacy_extended_payload_code_policy(trimmed_code).has_multiple_graphics;
                 if has_multi_graphics_to_write {
                     emitter
                         .write_bits(self.multi_graphics_bits.unwrap_or(0) as u32, PW::GRAPHIC)?;
