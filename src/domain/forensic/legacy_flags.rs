@@ -1,10 +1,16 @@
 use crate::domain::forensic::header_policy::HeaderAxiom;
 use crate::domain::forensic::registry::{get_registry, AlphaForensics};
 use crate::domain::header::legacy_flags::{
-    LegacyFlagProvider, LegacyFlagRegistry, LegacyItemFlagContext,
+    LegacyCodeEncodingRegistry, LegacyFlagProvider, LegacyFlagRegistry, LegacyItemFlagContext,
 };
 
 struct ForensicLegacyFlagProvider;
+
+impl LegacyCodeEncodingRegistry for AlphaForensics {
+    fn compact_code_encoding(&self) -> Option<&str> {
+        self.compact_code_encoding.as_deref()
+    }
+}
 
 impl LegacyFlagRegistry for AlphaForensics {
     fn compact_override(&self, code: &str) -> Option<bool> {
@@ -59,6 +65,10 @@ impl<'a> LegacyItemFlagContext<'a> {
 
     pub(crate) fn is_runeword(&self, flags: u32) -> bool {
         self.is_runeword_using(flags, &ForensicLegacyFlagProvider)
+    }
+
+    pub(crate) fn uses_ascii_3x8(&self) -> bool {
+        self.uses_ascii_3x8_using(&ForensicLegacyFlagProvider)
     }
 
     pub(crate) fn is_v105_shadow(&self, flags: u32, code_hint: Option<&str>) -> bool {

@@ -1,6 +1,11 @@
 use crate::data::generated::layout_policy::LEGACY_ITEM_FLAG_POLICY as FLAG_POLICY;
 use crate::domain::header::quality::ItemQuality;
 
+/// Optional encoding query at the compatibility algorithm's original stage.
+pub(crate) trait LegacyCodeEncodingRegistry {
+    fn compact_code_encoding(&self) -> Option<&str>;
+}
+
 /// Queries exposed at the compatibility algorithm's original registry stages.
 pub(crate) trait LegacyFlagRegistry {
     fn compact_override(&self, code: &str) -> Option<bool>;
@@ -118,6 +123,36 @@ impl<'a> LegacyItemFlagContext<'a> {
             }
             if let Some(value) = reg.runeword_override(trimmed) {
                 return value;
+            }
+        }
+        false
+    }
+
+    /// Preserve the legacy code decision and the original lazy query stages.
+    pub(crate) fn uses_ascii_3x8_using<P: LegacyFlagProvider>(&self, provider: &P) -> bool
+    where
+        P::Registry: LegacyCodeEncodingRegistry,
+    {
+        let policy = &crate::data::generated::layout_policy::LEGACY_CODE_ENCODING_POLICY;
+        if self.save_is_alpha {
+            let trimmed = self.code.trim();
+            if policy.always_ascii_codes.contains(&trimmed) {
+                return true;
+            }
+            if self.is_compact {
+                if self.version != policy.summary_shortcut_excluded_version
+                    && provider.is_summary_code(self.code)
+                {
+                    if policy.compact_summary_ascii_codes.contains(&trimmed) {
+                        return true;
+                    }
+                }
+                let reg = provider.registry();
+                if let Some(enc) = reg.compact_code_encoding() {
+                    if enc == policy.registry_ascii_encoding {
+                        return true;
+                    }
+                }
             }
         }
         false
@@ -267,5 +302,148 @@ mod tests {
         assert!(probe.take().is_empty());
         assert!(context.is_v105_shadow_using(9, Some(" hint "), &probe));
         assert_eq!(probe.take(), ["shadow:5:true:9:Some(\" hint \")"]);
+    }
+}
+
+#[cfg(test)]
+mod code_encoding_tests {
+    use super::*;
+    use std::cell::RefCell;
+    struct Probe {
+        summary: bool,
+        encoding: Option<&'static str>,
+        events: RefCell<Vec<&'static str>>,
+        argument: RefCell<Option<String>>,
+    }
+    impl LegacyFlagRegistry for Probe {
+        fn compact_override(&self, _: &str) -> Option<bool> {
+            unreachable!("encoding does not query compact overrides")
+        }
+        fn forced_compact(&self, _: &str) -> bool {
+            unreachable!("encoding does not query compact flags")
+        }
+        fn forced_runeword(&self, _: &str) -> bool {
+            unreachable!("encoding does not query runeword flags")
+        }
+        fn runeword_override(&self, _: &str) -> Option<bool> {
+            unreachable!("encoding does not query runeword overrides")
+        }
+    }
+    impl LegacyCodeEncodingRegistry for Probe {
+        fn compact_code_encoding(&self) -> Option<&str> {
+            self.events.borrow_mut().push("encoding");
+            self.encoding
+        }
+    }
+    impl LegacyFlagProvider for Probe {
+        type Registry = Self;
+        fn registry(&self) -> &Self {
+            self.events.borrow_mut().push("registry");
+            self
+        }
+        fn is_summary_code(&self, code: &str) -> bool {
+            self.events.borrow_mut().push("summary");
+            *self.argument.borrow_mut() = Some(code.to_string());
+            self.summary
+        }
+        fn is_shadow(&self, _: u8, _: bool, _: u32, _: Option<&str>) -> bool {
+            unreachable!("encoding does not query shadow state")
+        }
+    }
+    #[d2r_macros::hypothesis_test]
+    fn encoding_preserves_untrimmed_queries_and_short_circuit_precedence() {
+        let cases: &[(&str, u8, bool, bool, bool, Option<&str>, bool, &[&str])] = &[
+            (" tsc ", 0, true, false, false, None, true, &[]),
+            (" isc ", 255, true, true, false, None, true, &[]),
+            (
+                "xrs",
+                0,
+                true,
+                true,
+                true,
+                None,
+                false,
+                &["registry", "encoding"],
+            ),
+            (" xrs ", 5, true, true, true, None, true, &["summary"]),
+            (
+                "xrs\0",
+                5,
+                true,
+                true,
+                true,
+                None,
+                false,
+                &["summary", "registry", "encoding"],
+            ),
+            (
+                "plain",
+                5,
+                true,
+                true,
+                true,
+                Some("ascii_3x8"),
+                true,
+                &["summary", "registry", "encoding"],
+            ),
+            (
+                "scs",
+                5,
+                true,
+                true,
+                false,
+                Some("ascii_3x8"),
+                true,
+                &["summary", "registry", "encoding"],
+            ),
+            (
+                "c8xr",
+                0,
+                true,
+                true,
+                false,
+                Some("ascii_3x8"),
+                true,
+                &["registry", "encoding"],
+            ),
+            (
+                "xrs",
+                255,
+                true,
+                true,
+                false,
+                Some("ascii_3x8 "),
+                false,
+                &["summary", "registry", "encoding"],
+            ),
+            ("tsc", 5, false, true, true, Some("ascii_3x8"), false, &[]),
+            ("xrs", 5, true, false, true, Some("ascii_3x8"), false, &[]),
+            (
+                "scs",
+                5,
+                true,
+                true,
+                true,
+                Some("ascii_3x8 "),
+                true,
+                &["summary"],
+            ),
+        ];
+        for &(code, version, alpha, compact, summary, encoding, expected, events) in cases {
+            let probe = Probe {
+                summary,
+                encoding,
+                events: RefCell::new(Vec::new()),
+                argument: RefCell::new(None),
+            };
+            let context =
+                LegacyItemFlagContext::new(version, ItemQuality::Normal, alpha, compact, code);
+            assert_eq!(context.uses_ascii_3x8_using(&probe), expected);
+            assert_eq!(*probe.events.borrow(), events);
+            assert_eq!(
+                *probe.argument.borrow(),
+                events.contains(&"summary").then(|| code.to_string())
+            );
+        }
     }
 }

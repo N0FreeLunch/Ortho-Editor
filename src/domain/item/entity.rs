@@ -2993,14 +2993,17 @@ pub fn parse_item_body<R: BitRead>(
                         "jav" => "us g".to_string(),
                         _ => trimmed_hint.to_string(),
                     };
-                    let hint_axiom =
-                        StatsAxiom::new(header.version, ItemQuality::Normal, alpha_mode)
-                            .with_compact(header.is_compact)
-                            .with_code(trimmed_hint);
+                    let hint_context =
+                        crate::domain::header::legacy_flags::LegacyItemFlagContext::new(
+                            header.version,
+                            ItemQuality::Normal,
+                            alpha_mode,
+                            header.is_compact,
+                            "",
+                        )
+                        .with_code(trimmed_hint);
 
-                    let consume_len = if hint_axiom.code_encoding()
-                        == crate::domain::stats::axiom::CodeEncoding::Ascii3x8
-                    {
+                    let consume_len = if hint_context.uses_ascii_3x8() {
                         24
                     } else if let Ok(bits) = huff.encode(normalized_hint.as_str()) {
                         bits.len() as u32

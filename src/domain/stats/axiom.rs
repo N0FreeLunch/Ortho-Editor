@@ -232,36 +232,11 @@ impl StatsAxiom {
     }
 
     pub fn code_encoding(&self) -> CodeEncoding {
-        if self.save_is_alpha {
-            let trimmed = self.code.trim();
-            if trimmed == "tsc" || trimmed == "isc" {
-                return CodeEncoding::Ascii3x8;
-            }
-
-            if self.is_compact {
-                // Axiom 0391: Encoding Duality for Alpha v105 summary items.
-                // Items identified as summary codes use raw 3x8 bit ASCII encoding
-                // ONLY if they are explicitly compact or in higher versions.
-                // In Version 0, they often remain Huffman encoded.
-                if self.version != 0
-                    && crate::domain::forensic::v105::axioms::is_v105_summary_code(&self.code)
-                {
-                    // Forensic (Slice 3): Potions and some markers often use Huffman even in Version 1/2.
-                    // ASCII 3x8 is typically used for 'xrs' and specific quest items.
-                    if trimmed == "xrs" || trimmed == "c8xr" || trimmed == "scs" {
-                        return CodeEncoding::Ascii3x8;
-                    }
-                }
-
-                let reg = get_registry();
-                if let Some(enc) = &reg.compact_code_encoding {
-                    if enc == "ascii_3x8" {
-                        return CodeEncoding::Ascii3x8;
-                    }
-                }
-            }
+        if self.legacy_flag_context().uses_ascii_3x8() {
+            CodeEncoding::Ascii3x8
+        } else {
+            CodeEncoding::Huffman
         }
-        CodeEncoding::Huffman
     }
 
     pub fn is_header_only(&self, _flags: u32, _code: &str) -> bool {
