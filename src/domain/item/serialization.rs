@@ -2678,19 +2678,29 @@ impl Item {
                     })?;
                     auxiliary.chronicle = Some(chronicle);
                 }
-                if save_version > 101 {
-                    if cursor.read_bit()? {
-                        let stack_size = cursor.read_bits::<u8>(8)?;
-                        if let Some(auxiliary) = item.body.d2r_v3_auxiliary.as_mut() {
-                            auxiliary.advanced_stash_quantity = Some(stack_size);
+                use crate::data::generated::layout_policy::{
+                    D2rV3AuxiliaryPayloadLayout as W, D2rV3CompactStashPresence as Presence,
+                    d2r_v3_compact_tail_version_policy,
+                };
+                match d2r_v3_compact_tail_version_policy(save_version).stash_presence {
+                    Presence::ExplicitBit => {
+                        if cursor.read_bit()? {
+                            let stack_size = cursor.read_bits::<u8>(W::STASH_QUANTITY)?;
+                            if let Some(auxiliary) = item.body.d2r_v3_auxiliary.as_mut() {
+                                auxiliary.advanced_stash_quantity = Some(stack_size);
+                            }
                         }
                     }
-                } else if save_version > 99
-                    && crate::data::repository::legacy_item_template(&item.code)
-                        .map(|template| template.is_stackable)
-                        .unwrap_or(false)
-                {
-                    let _advanced_stash_stack_size = cursor.read_bits::<u8>(8)?;
+                    Presence::TemplateStackable => {
+                        if crate::data::repository::legacy_item_template(&item.code)
+                            .map(|template| template.is_stackable)
+                            .unwrap_or(false)
+                        {
+                            let _advanced_stash_stack_size =
+                                cursor.read_bits::<u8>(W::STASH_QUANTITY)?;
+                        }
+                    }
+                    Presence::Absent => {}
                 }
             }
         }
