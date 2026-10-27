@@ -13,45 +13,76 @@ impl<'a> ItemEditor<'a> {
         Self { item }
     }
 
+    fn ensure_extended(&mut self) {
+        self.item.header.is_compact = false;
+        self.item.is_compact = false;
+        self.item.header.flags &= !(1 << 5);
+        self.item.bits.clear();
+        self.item.body.alpha_alignment_padding.clear();
+        self.item.body.alpha_header_gap_bits.clear();
+        self.item.body.alpha_header_gap = None;
+        self.item.body.alpha_body_gap_bits.clear();
+    }
+
     /// Sets the item's defense value.
     pub fn set_defense(&mut self, value: u32) -> &mut Self {
+        self.ensure_extended();
         self.item.set_defense(Some(value));
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Sets the current and maximum durability.
     pub fn set_durability(&mut self, current: u32, max: u32) -> &mut Self {
+        self.ensure_extended();
         self.item.set_durability(Some(current), Some(max));
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Sets the stack quantity for stackable items.
     pub fn set_quantity(&mut self, value: u32) -> &mut Self {
         self.item.set_quantity(Some(value));
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Sets or updates a specific stat value by its ID.
     /// Handles Alpha v105 stat mapping internally.
     pub fn set_stat(&mut self, stat_id: u32, value: i32) -> &mut Self {
+        self.ensure_extended();
         // ItemStatValue::new returns a Result. For the editor API, we unwrap
         // as we expect the provided values to be valid for the given stat ID.
         if let Ok(v) = ItemStatValue::new(value) {
             self.item.set_property_value(stat_id, v);
         }
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Configures the total number of sockets.
     pub fn set_sockets(&mut self, count: u8) -> &mut Self {
+        self.ensure_extended();
         self.item.set_sockets(count);
+        let mask = 1 << 11;
+        if count > 0 {
+            self.item.header.flags |= mask;
+            self.item.header.is_socketed = true;
+        } else {
+            self.item.header.flags &= !mask;
+            self.item.header.is_socketed = false;
+        }
+        self.item.bits.clear();
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Adds a nested item into a socket.
     /// Automatically synchronizes the payload and updates socket flags.
     pub fn add_socketed_item(&mut self, child: Item) -> &mut Self {
+        self.ensure_extended();
         self.item.add_socketed_item(child);
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
@@ -61,14 +92,24 @@ impl<'a> ItemEditor<'a> {
         let removed = std::mem::take(&mut self.item.socketed_items);
         self.item.sync_socket_payload();
         self.item.bits.clear();
+        self.item.body.alpha_alignment_padding.clear();
         removed
     }
 
     /// Sets the ethereal status of the item.
     pub fn set_ethereal(&mut self, is_ethereal: bool) -> &mut Self {
+        self.ensure_extended();
         self.item.is_ethereal = is_ethereal;
         self.item.header.is_ethereal = is_ethereal;
+        let is_alpha = self.item.header.save_is_alpha;
+        let mask = if is_alpha { 1 << 24 } else { 1 << 22 };
+        if is_ethereal {
+            self.item.header.flags |= mask;
+        } else {
+            self.item.header.flags &= !mask;
+        }
         self.item.bits.clear();
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
@@ -76,20 +117,30 @@ impl<'a> ItemEditor<'a> {
     pub fn set_identified(&mut self, is_identified: bool) -> &mut Self {
         self.item.is_identified = is_identified;
         self.item.header.is_identified = is_identified;
+        let mask = 1 << 4;
+        if is_identified {
+            self.item.header.flags |= mask;
+        } else {
+            self.item.header.flags &= !mask;
+        }
         self.item.bits.clear();
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Sets the item quality.
     pub fn set_quality(&mut self, quality: crate::domain::item::ItemQuality) -> &mut Self {
+        self.ensure_extended();
         self.item.quality = Some(quality);
         self.item.header.quality = Some(quality);
         self.item.bits.clear();
+        self.item.body.alpha_alignment_padding.clear();
         self
     }
 
     /// Appends a new property to the item.
     pub fn add_property(&mut self, stat_id: u32, value: i32) -> &mut Self {
+        self.ensure_extended();
         let cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id);
         let name = cost.map(|c| c.name.to_string()).unwrap_or_else(|| format!("stat_{}", stat_id));
         let raw_value = cost.map(|c| value.wrapping_add(c.save_add)).unwrap_or(value);

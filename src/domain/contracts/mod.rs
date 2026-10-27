@@ -1,12 +1,18 @@
 //! Domain contract definitions and wire DTOs for save mutation.
 
 pub mod character;
+pub mod item;
 pub mod progression;
 pub mod validation;
 
 pub use character::{
     CharacterBoundaryValidator, CharacterMutationContract, CharacterSnapshot, CharacterWireDto,
     ContractError, LevelValue, NumericOp, StashGoldValue, StatPointValue,
+};
+
+pub use item::{
+    ItemBoundaryValidator, ItemContractError, ItemMutationContract, ItemStatOpWireDto, ItemTarget,
+    ItemWireDto,
 };
 
 pub use progression::{

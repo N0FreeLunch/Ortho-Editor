@@ -584,6 +584,117 @@ pub fn apply_waypoint_mutation(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))
 }
 
+/// Result of attempting to apply an item mutation.
+/// Either the modified save bytes or a structured domain ItemContractError.
+pub fn try_apply_item_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::ItemMutationContract,
+    huffman: &HuffmanTree,
+) -> Result<Vec<u8>, crate::domain::contracts::ItemContractError> {
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version == 105;
+
+    // Read player items with version-aware detection (supports modern v3, alpha, legacy)
+    let (mut items, slot_lookup): (Vec<Item>, Box<dyn Fn(usize) -> Option<&'static str>>) =
+        if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
+            let slots: Vec<Option<&'static str>> = stream.items.iter().map(|it| stream.placement(it).equipment_slot).collect();
+            (stream.items, Box::new(move |idx| slots.get(idx).copied().flatten()))
+        } else {
+            let fallback_items = Item::read_player_items(bytes, huffman, is_alpha)
+                .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?;
+            (fallback_items, Box::new(|_| None))
+        };
+
+    let mut matched_idx = None;
+    for (idx, item) in items.iter().enumerate() {
+        let equipment_slot = slot_lookup(idx);
+
+        if contract.target.matches(idx, item, equipment_slot) {
+            matched_idx = Some(idx);
+            break;
+        }
+    }
+
+    let target_idx = matched_idx.ok_or_else(|| {
+        crate::domain::contracts::ItemContractError::ItemNotFound(format!(
+            "No item matched criteria: index={:?}, code={:?}, slot={:?}",
+            contract.target.index, contract.target.code, contract.target.slot
+        ))
+    })?;
+
+    // Mutate the target item using ItemEditor
+    {
+        let item = &mut items[target_idx];
+        let original_cur_durability = item.current_durability.unwrap_or(0);
+        let original_max_durability = item.max_durability.unwrap_or(original_cur_durability);
+        let existing_stats: Vec<u32> = item.stats.properties.iter().map(|p| p.stat_id).collect();
+
+        let mut editor = crate::domain::item::editor::ItemEditor::new(item);
+
+        if let Some(defense) = contract.defense {
+            editor.set_defense(defense);
+        }
+
+        if contract.durability.is_some() || contract.max_durability.is_some() {
+            let cur = contract.durability.unwrap_or(original_cur_durability);
+            let max = contract.max_durability.unwrap_or(original_max_durability);
+            editor.set_durability(cur, max);
+        }
+
+        if let Some(quantity) = contract.quantity {
+            editor.set_quantity(quantity);
+        }
+
+        if let Some(sockets) = contract.sockets {
+            editor.set_sockets(sockets);
+        }
+
+        if let Some(ethereal) = contract.is_ethereal {
+            editor.set_ethereal(ethereal);
+        }
+
+        if let Some(identified) = contract.is_identified {
+            editor.set_identified(identified);
+        }
+
+        for &(stat_id, value) in &contract.stats {
+            let exists = existing_stats.contains(&stat_id);
+            if exists {
+                editor.set_stat(stat_id, value);
+            } else {
+                editor.add_property(stat_id, value);
+            }
+        }
+    }
+
+    // Rebuild save with modified items
+    let mut working = rebuild_status_and_player_items(
+        bytes,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &items,
+        huffman,
+    ).map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to rebuild save: {}", e)))?;
+
+    finalize_save_bytes(&mut working, false)
+        .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to finalize checksum: {}", e)))?;
+
+    Ok(working)
+}
+
+/// Applies item mutation to save bytes, converting domain errors to standard io::Error.
+pub fn apply_item_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::ItemMutationContract,
+    huffman: &HuffmanTree,
+) -> io::Result<Vec<u8>> {
+    try_apply_item_mutation(bytes, contract, huffman)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))
+}
+
 
 pub fn parse_skill_section(bytes: &[u8], map: &SaveSectionMap) -> io::Result<SkillSection> {
     crate::domain::character::skills::parse_skill_section(bytes, map.if_pos, map.jm_positions.first().cloned())
@@ -963,11 +1074,6 @@ pub fn rebuild_item_section(
     let section_start = jm1 + jm_axiom.header_len();
     let original_section_len = section_end - section_start;
     let _original_section = &bytes[section_start..section_end];
-    let serialized_len_before_padding = serialized_section.len();
-    if serialized_len_before_padding < original_section_len {
-        let missing_start = section_start + serialized_len_before_padding;
-        serialized_section.extend_from_slice(&bytes[missing_start..section_end]);
-    }
     // Research Hack: Allow serialized section to differ from original.
     /*
     if serialized_section != original_section {

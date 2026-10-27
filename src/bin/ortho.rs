@@ -7,11 +7,13 @@ use std::process::exit;
 
 use serde::Serialize;
 use d2r_core::domain::contracts::{
-    CharacterMutationContract, CharacterWireDto, NumericOp, ValidationErrorResponse,
-    WaypointMutationContract, WaypointWireDto,
+    CharacterMutationContract, CharacterWireDto, ItemBoundaryValidator, ItemStatOpWireDto,
+    ItemWireDto, NumericOp, ValidationErrorResponse, WaypointMutationContract, WaypointWireDto,
 };
-use d2r_core::item::HuffmanTree;
-use d2r_core::save::{try_apply_character_mutation, try_apply_waypoint_mutation, Save};
+use d2r_core::item::{HuffmanTree, Item};
+use d2r_core::save::{
+    try_apply_character_mutation, try_apply_item_mutation, try_apply_waypoint_mutation, Save,
+};
 
 #[derive(Debug, Serialize)]
 struct MutationCliReport {
@@ -28,6 +30,7 @@ struct MutationCliReport {
     stat_points: Option<u32>,
     gold_stash: Option<u32>,
     waypoints_unlocked: Option<bool>,
+    item_mutated: Option<bool>,
     new_checksum: Option<String>,
     error: Option<String>,
 }
@@ -38,7 +41,7 @@ fn print_usage() {
 
 Usage: ortho <save_file> [OPTIONS]
 
-Options:
+Character Options:
     --name <string>        Set character name (2-15 chars)
     --level <1-99>         Set character level
     --strength <1-1023>    Set base strength
@@ -48,9 +51,26 @@ Options:
     --stat-points <0-1023> Set unspent stat points
     --gold-stash <0-2.5m>  Set private stash gold
     --gold-char <uint>     Set inventory gold
+
+Waypoint Options:
     --unlock-all-wps       Unlock all waypoints for selected or all difficulties
     --difficulty <0-2>     Select difficulty (0: Normal, 1: Nightmare, 2: Hell)
     --activate-wp <name>   Activate a specific waypoint by name
+
+Item Options:
+    --item-index <uint>    Target item by 0-based index
+    --item-code <string>   Target item by 3-letter code (e.g. amu, rin, mau)
+    --item-slot <string>   Target item by slot (e.g. head, neck, torso)
+    --item-defense <val>   Set or shift item defense (e.g. 250, +50, -10)
+    --item-durability <v>  Set or shift current durability (e.g. 50, +10)
+    --item-max-durability  Set or shift max durability
+    --item-quantity <val>  Set or shift item stack quantity
+    --item-sockets <0-6>   Set item socket count
+    --item-ethereal <bool> Set ethereal status (true/false)
+    --item-identified <b>  Set identified status (true/false)
+    --item-stat <id:op>    Set/shift stat property (e.g. 9:+20, 127:=2, 31:-5)
+
+General Options:
     --out <path>           Output path (default: <input>.mutated.d2s to protect original)
     --force-overwrite      Explicitly allow overwriting input file in-place
     --dry-run              Simulate mutation without writing to disk
@@ -77,6 +97,9 @@ fn main() {
     let mut wp_dto = WaypointWireDto::default();
     let mut mutate_waypoints = false;
 
+    let mut item_dto = ItemWireDto::default();
+    let mut mutate_item = false;
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -99,6 +122,91 @@ fn main() {
                 if i < args.len() {
                     wp_dto.activate_waypoints.push(args[i].clone());
                     mutate_waypoints = true;
+                }
+            }
+            "--item-index" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.target.index = args[i].parse::<usize>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-code" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.target.code = Some(args[i].clone());
+                    mutate_item = true;
+                }
+            }
+            "--item-slot" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.target.slot = Some(args[i].clone());
+                    mutate_item = true;
+                }
+            }
+            "--item-defense" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.defense = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-durability" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.durability = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-max-durability" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.max_durability = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-quantity" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.quantity = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-sockets" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.sockets = args[i].parse::<u8>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-ethereal" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.is_ethereal = args[i].parse::<bool>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-identified" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.is_identified = args[i].parse::<bool>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-stat" => {
+                i += 1;
+                if i < args.len() {
+                    match args[i].parse::<ItemStatOpWireDto>() {
+                        Ok(op_dto) => {
+                            item_dto.stats.push(op_dto);
+                            mutate_item = true;
+                        }
+                        Err(err) => {
+                            eprintln!("Invalid --item-stat parameter: {}", err);
+                            exit(1);
+                        }
+                    }
                 }
             }
             "--out" => {
@@ -240,8 +348,53 @@ fn main() {
         }
     };
 
-    // 3. Apply mutation contracts sequentially
+    let version = u32::from_le_bytes(save_bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version == 105;
     let huffman = HuffmanTree::new();
+
+    // 3. Convert item wire DTO to domain contract against source item state
+    let item_contract = if mutate_item {
+        let stream = d2r_core::domain::item::stream::PlayerItemStream::read(&save_bytes, &huffman).ok();
+        let fallback_items = Item::read_player_items(&save_bytes, &huffman, is_alpha).ok();
+
+        let target_item = if let Some(ref s) = stream {
+            s.items.iter().enumerate().find_map(|(idx, item)| {
+                let slot = s.placement(item).equipment_slot;
+                if item_dto.target.matches(idx, item, slot) {
+                    Some(item)
+                } else {
+                    None
+                }
+            })
+        } else if let Some(ref items) = fallback_items {
+            items.iter().enumerate().find_map(|(idx, item)| {
+                if item_dto.target.matches(idx, item, None) {
+                    Some(item)
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
+        match ItemBoundaryValidator::validate(&item_dto, target_item) {
+            Ok(c) => Some(c),
+            Err(err) => {
+                if json_mode {
+                    let err_resp = ValidationErrorResponse::from(err);
+                    println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
+                } else {
+                    eprintln!("Item validation error: {}", err);
+                }
+                exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    // 4. Apply mutation contracts sequentially
     let after_char_bytes = match try_apply_character_mutation(&save_bytes, &char_contract, &huffman) {
         Ok(b) => b,
         Err(err) => {
@@ -255,7 +408,7 @@ fn main() {
         }
     };
 
-    let mutated_bytes = if let Some(ref wpc) = wp_contract {
+    let after_wp_bytes = if let Some(ref wpc) = wp_contract {
         match try_apply_waypoint_mutation(&after_char_bytes, wpc) {
             Ok(b) => b,
             Err(err) => {
@@ -270,6 +423,23 @@ fn main() {
         }
     } else {
         after_char_bytes
+    };
+
+    let mutated_bytes = if let Some(ref itc) = item_contract {
+        match try_apply_item_mutation(&after_wp_bytes, itc, &huffman) {
+            Ok(b) => b,
+            Err(err) => {
+                if json_mode {
+                    let err_resp = ValidationErrorResponse::from(err);
+                    println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
+                } else {
+                    eprintln!("Failed to apply item mutation: {}", err);
+                }
+                exit(1);
+            }
+        }
+    } else {
+        after_wp_bytes
     };
 
     // 4. Parse modified save for reporting and verification
@@ -317,6 +487,7 @@ fn main() {
             stat_points: final_pts,
             gold_stash: final_gold_stash,
             waypoints_unlocked: if mutate_waypoints { Some(wp_dto.unlock_all) } else { None },
+            item_mutated: if mutate_item { Some(true) } else { None },
             new_checksum: Some(format!("{:#010X}", modified_save.header.checksum)),
             error: None,
         };
