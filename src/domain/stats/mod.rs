@@ -18,6 +18,7 @@ mod retail_write;
 pub mod attribute;
 pub mod tiling_solver;
 pub mod fusion_mapper;
+pub mod semantics;
 
 pub use entity::{ItemProperty, ItemStats, ItemStatList, StatMaturityTier};
 pub use attribute::{AttributeSection, AttributeEntry};
@@ -26,6 +27,7 @@ pub use parser::{read_property_list, parse_single_property, PropertyReaderContex
 pub use serialization::write_property_list;
 pub use tiling_solver::BitSpaceTilingSolver;
 pub use fusion_mapper::{StatFusionMapper, FusedStatView};
+pub use semantics::{PropertySemantics, decode_property_semantics, decode_stat_semantics};
 use crate::domain::forensic::registry::{get_registry, MappingInfo};
 
 pub fn lookup_alpha_map_by_raw(raw_id: u32) -> Option<MappingInfo> {

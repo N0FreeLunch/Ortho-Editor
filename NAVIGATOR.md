@@ -32,7 +32,7 @@ Domain names match the private overlay's map, so you can look them up by name th
 | **Inventory / Grid** | `src/inventory.rs` | `d2save_inventory_check` |
 | **Status (Attrs/Skills)** | `src/save.rs` | `d2save_status_inspect` |
 | **Save / Item Mutation API** | `src/domain/contracts/`, `src/save.rs`, `src/bin/ortho.rs` | `tests/item_mutation_contract_test.rs`, `ortho --dry-run --json` |
-| **Option Logic / Display** | `src/engine/validation.rs`, `src/engine/formatter.rs` | `tests/item_validation_test.rs`, `tests/option_rendering_test.rs` |
+| **Option Logic / Display / Semantics** | `src/engine/validation.rs`, `src/engine/formatter.rs`, `src/domain/stats/semantics.rs` | `tests/item_validation_test.rs`, `tests/option_rendering_test.rs`, `tests/semantic_skill_options_test.rs` |
 | **Quest / Waypoint (v105)** | `src/save.rs` | `d2save_progression_audit` |
 | **Save Verification** | - | `d2save_verify`, `d2save_equipped_invariant` |
 | **Game Data / Copyright Boundary** | `src/data/mod.rs` (gateway only) | `cargo check`; see [d2r-data/NAVIGATOR.md](./d2r-data/NAVIGATOR.md) |

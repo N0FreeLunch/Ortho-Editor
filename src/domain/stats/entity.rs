@@ -77,6 +77,11 @@ impl ItemProperty {
         }
     }
 
+    /// Resolves high-level semantic meaning (class skill, skill tab, charges) if applicable.
+    pub fn semantics(&self) -> Option<crate::domain::stats::semantics::PropertySemantics> {
+        crate::domain::stats::semantics::decode_property_semantics(self)
+    }
+
     pub fn new_opaque(
         stat_id_candidate: u32,
         raw_bits: Vec<bool>,

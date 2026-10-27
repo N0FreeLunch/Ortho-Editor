@@ -607,9 +607,7 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
         }
         14 => {
             let (class_id, tab_index) = decode_skill_tab_param(prop.param);
-            if class_id == 0 && tab_index == 0 && loc_str.contains('%') {
-                format_template(loc_str, &[display_value.to_string()])
-            } else if let Some(tab_name) = skill_tab_name(class_id, tab_index, language) {
+            if let Some(tab_name) = skill_tab_name(class_id, tab_index, language) {
                 format_template(tab_name, &[display_value.to_string()])
             } else {
                 format!(
@@ -808,7 +806,7 @@ fn format_skill_charges(level: u32, skill: &str, cur: u32, max: u32, language: &
     }
 }
 
-fn format_template(template: &str, args: &[String]) -> String {
+pub fn format_template(template: &str, args: &[String]) -> String {
     let mut out = String::new();
     let chars: Vec<char> = template.chars().collect();
     let mut i = 0;
@@ -995,11 +993,11 @@ fn base_item_name<'a>(item: &'a Item, language: &str) -> &'a str {
         .unwrap_or_else(|| get_loc(template.name, language))
 }
 
-fn get_loc(key: &str, language: &str) -> &'static str {
+pub fn get_loc(key: &str, language: &str) -> &'static str {
     get_loc_optional(key, language).unwrap_or_else(|| Box::leak(key.to_string().into_boxed_str()))
 }
 
-fn get_loc_optional(key: &str, language: &str) -> Option<&'static str> {
+pub fn get_loc_optional(key: &str, language: &str) -> Option<&'static str> {
     LOCALIZATIONS
         .iter()
         .find(|l| l.key == key)
@@ -1197,10 +1195,26 @@ mod tests {
 
     #[test]
     fn test_descfunc_14_skill_tab() {
-        let prop = make_prop(188, 0, 3);
+        // Amazon Tab 0: Bow and Crossbow Skills (StrSklTabItem3)
+        let bow_prop = make_prop(188, 0, 3);
         assert_eq!(
-            format_property(&prop, 99, "en"),
+            format_property(&bow_prop, 99, "en"),
+            "+3 to Bow and Crossbow Skills"
+        );
+        assert_eq!(
+            format_property(&bow_prop, 99, "ko"),
+            "+3 보우 & 크로스보우 스킬"
+        );
+
+        // Amazon Tab 2: Javelin and Spear Skills (StrSklTabItem1)
+        let jav_prop = make_prop(188, 2, 3);
+        assert_eq!(
+            format_property(&jav_prop, 99, "en"),
             "+3 to Javelin and Spear Skills"
+        );
+        assert_eq!(
+            format_property(&jav_prop, 99, "ko"),
+            "+3 재벌린 & 스피어 스킬"
         );
     }
 

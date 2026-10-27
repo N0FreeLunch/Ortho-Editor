@@ -584,6 +584,9 @@ fn properties(items: &[ItemProperty]) -> Vec<Value> {
                         .unwrap_or_else(|| format!("stat_{}", item.stat_id))
                 );
             }
+            if let Some(semantics) = item.semantics() {
+                value["semantics"] = serde_json::to_value(semantics).expect("semantics serialization");
+            }
             value
         })
         .collect()
