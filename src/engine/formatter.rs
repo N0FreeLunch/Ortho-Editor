@@ -572,14 +572,11 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
                 }
             } else if stat_id == 126 {
                 // item_elemskill (prop.param: 0=Fire, 1=Lightning, 2=Magic, 3=Cold, 4=Poison)
-                let elem_name = match prop.param {
-                    0 => if language == "ko" { "화염" } else { "Fire" },
-                    1 => if language == "ko" { "번개" } else { "Lightning" },
-                    2 => if language == "ko" { "마법" } else { "Magic" },
-                    3 => if language == "ko" { "냉기" } else { "Cold" },
-                    4 => if language == "ko" { "독" } else { "Poison" },
-                    _ => if language == "ko" { "원소" } else { "Elemental" },
-                };
+                let elem_name = crate::data::skills::ELEMENT_NAMES
+                    .iter()
+                    .find(|(id, _, _)| *id == prop.param)
+                    .map(|(_, en, ko)| if language == "ko" { *ko } else { *en })
+                    .unwrap_or(if language == "ko" { "원소" } else { "Elemental" });
                 if loc_str.contains('%') {
                     format_template(loc_str, &[signed_value, elem_name.to_string()])
                 } else if language == "ko" {
@@ -995,13 +992,12 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
 
     // 7. Low Quality
     if item.quality == Some(ItemQuality::Low) {
-        let prefix = match item.low_high_graphic_bits {
-            Some(0) => get_loc("Crude", language),
-            Some(1) => get_loc("Cracked", language),
-            Some(2) => get_loc("Damaged", language),
-            Some(3) => get_loc("Low Quality", language),
-            _ => get_loc("Low Quality", language),
-        };
+        let sub_idx = item.low_high_graphic_bits.unwrap_or(3) as usize;
+        let prefix = crate::data::quality_items::LOW_QUALITY_SUBTYPES
+            .get(sub_idx)
+            .or_else(|| crate::data::quality_items::LOW_QUALITY_SUBTYPES.last())
+            .map(|(en, ko)| if language == "ko" { *ko } else { *en })
+            .unwrap_or("Low Quality");
         return format!("{} {}", prefix, base);
     }
 
@@ -1010,52 +1006,20 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
 }
 
 pub fn quality_display_name(quality: Option<ItemQuality>, language: &str) -> String {
-    match quality {
-        Some(ItemQuality::Low) => get_loc("Low Quality", language).to_string(),
-        Some(ItemQuality::Normal) | None => {
-            if language == "ko" {
-                "노멀".to_string()
-            } else {
-                "Normal".to_string()
-            }
-        }
-        Some(ItemQuality::High) => get_loc("Hiquality", language).to_string(),
-        Some(ItemQuality::Magic) => {
-            if language == "ko" {
-                "매직".to_string()
-            } else {
-                "Magic".to_string()
-            }
-        }
-        Some(ItemQuality::Set) => {
-            if language == "ko" {
-                "세트".to_string()
-            } else {
-                "Set".to_string()
-            }
-        }
-        Some(ItemQuality::Rare) => {
-            if language == "ko" {
-                "레어".to_string()
-            } else {
-                "Rare".to_string()
-            }
-        }
-        Some(ItemQuality::Unique) => {
-            if language == "ko" {
-                "유니크".to_string()
-            } else {
-                "Unique".to_string()
-            }
-        }
-        Some(ItemQuality::Crafted) => {
-            if language == "ko" {
-                "크래프트".to_string()
-            } else {
-                "Crafted".to_string()
-            }
-        }
+    let q_idx = match quality {
+        Some(ItemQuality::Low) => 1,
+        Some(ItemQuality::Normal) | None => 2,
+        Some(ItemQuality::High) => 3,
+        Some(ItemQuality::Magic) => 4,
+        Some(ItemQuality::Set) => 5,
+        Some(ItemQuality::Rare) => 6,
+        Some(ItemQuality::Unique) => 7,
+        Some(ItemQuality::Crafted) => 8,
+    };
+    if let Some(&(_, en, ko)) = crate::data::quality_items::QUALITY_DISPLAY_NAMES.iter().find(|(idx, _, _)| *idx == q_idx) {
+        return if language == "ko" { ko.to_string() } else { en.to_string() };
     }
+    "Normal".to_string()
 }
 
 fn base_item_name<'a>(item: &'a Item, language: &str) -> &'a str {

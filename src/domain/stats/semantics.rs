@@ -113,49 +113,10 @@ pub fn decode_skill_param(param: u32) -> (u32, u32) {
 
 /// Returns clean human-readable title for a skill tab (English, Korean).
 pub fn skill_tab_clean_title(class_id: usize, tab_index: usize) -> Option<(&'static str, &'static str)> {
-    match (class_id, tab_index) {
-        // Amazon (0)
-        (0, 0) => Some(("Bow and Crossbow", "보우 & 크로스보우")),
-        (0, 1) => Some(("Passive and Magic", "패시브 & 마법")),
-        (0, 2) => Some(("Javelin and Spear", "재벌린 & 스피어")),
-
-        // Sorceress (1)
-        (1, 0) => Some(("Fire Spells", "파이어 스펠")),
-        (1, 1) => Some(("Lightning Spells", "라이트닝 스펠")),
-        (1, 2) => Some(("Cold Spells", "콜드 스펠")),
-
-        // Necromancer (2)
-        (2, 0) => Some(("Curses", "저주")),
-        (2, 1) => Some(("Poison and Bone", "포이즌 & 본")),
-        (2, 2) => Some(("Summoning", "소환")),
-
-        // Paladin (3)
-        (3, 0) => Some(("Combat Skills", "전투 스킬")),
-        (3, 1) => Some(("Offensive Auras", "공격 오오라")),
-        (3, 2) => Some(("Defensive Auras", "방어 오오라")),
-
-        // Barbarian (4)
-        (4, 0) => Some(("Combat Skills", "전투 스킬")),
-        (4, 1) => Some(("Combat Masteries", "전투 마스터리")),
-        (4, 2) => Some(("Warcries", "함성")),
-
-        // Druid (5)
-        (5, 0) => Some(("Summoning", "소환")),
-        (5, 1) => Some(("Shape Shifting", "변신")),
-        (5, 2) => Some(("Elemental", "원소")),
-
-        // Assassin (6)
-        (6, 0) => Some(("Traps", "트랩")),
-        (6, 1) => Some(("Shadow Disciplines", "쉐도우 디서플린")),
-        (6, 2) => Some(("Martial Arts", "마샬 아트")),
-
-        // Warlock (7)
-        (7, 0) => Some(("Demon", "악마")),
-        (7, 1) => Some(("Eldritch", "엘드리치")),
-        (7, 2) => Some(("Chaos", "혼돈")),
-
-        _ => None,
-    }
+    crate::data::char_stats::SKILL_TAB_TITLES
+        .get(class_id)
+        .and_then(|tabs| tabs.get(tab_index))
+        .copied()
 }
 
 /// Retrieves localized template for a skill tab.
@@ -330,14 +291,11 @@ pub fn decode_stat_semantics(stat_id: u32, param: u32, value: i32) -> Option<Pro
         }
         126 => {
             // item_elemskill (e.g. +1 to Fire Skills on Magefist)
-            let (elem_en, elem_ko) = match param {
-                0 => ("Fire", "화염"),
-                1 => ("Lightning", "번개"),
-                2 => ("Magic", "마법"),
-                3 => ("Cold", "냉기"),
-                4 => ("Poison", "독"),
-                _ => ("Elemental", "원소"),
-            };
+            let (elem_en, elem_ko) = crate::data::skills::ELEMENT_NAMES
+                .iter()
+                .find(|(id, _, _)| *id == param)
+                .map(|(_, en, ko)| (*en, *ko))
+                .unwrap_or(("Elemental", "원소"));
             Some(PropertySemantics::ElementalSkills {
                 element_id: param,
                 element_name_en: elem_en.to_string(),
