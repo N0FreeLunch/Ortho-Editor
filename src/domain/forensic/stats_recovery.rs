@@ -29,6 +29,13 @@ impl StatsMarkerView for crate::domain::forensic::marker_scan::ItemMarker {
     }
 }
 
+#[derive(Default)]
+struct StatsMarkerObservation {
+    child_offsets: Vec<u64>,
+    child_offset_codes: std::collections::HashMap<u64, String>,
+    authority_offsets: Vec<u64>,
+}
+
 struct ItemStatsReadPolicy<F> {
     consume_unidentified: bool,
     scan_markers: F,
@@ -39,10 +46,33 @@ fn scan_stats_markers(
     huffman: &HuffmanTree,
     alpha: bool,
     start: u64,
-) -> Vec<crate::domain::forensic::marker_scan::ItemMarker> {
-    crate::domain::forensic::marker_scan::scan_item_markers(
+    observation: &mut StatsMarkerObservation,
+) {
+    let markers = crate::domain::forensic::marker_scan::scan_item_markers(
         bytes, huffman, alpha, start, None, false,
-    )
+    );
+    classify_stats_markers(&markers, observation);
+}
+
+fn classify_stats_markers<M: StatsMarkerView>(
+    markers: &[M],
+    observation: &mut StatsMarkerObservation,
+) {
+    for m in markers.iter() {
+        let t = m.code().trim();
+        if ALPHA_LEGACY_AUTHORITY_CODES.contains(&t) {
+            observation.authority_offsets.push(m.offset());
+        }
+        if (t.starts_with('r') && t.len() <= 3)
+            || (t.starts_with('g') && t.len() == 3)
+            || t == "jew"
+        {
+            observation.child_offsets.push(m.offset());
+            observation
+                .child_offset_codes
+                .insert(m.offset(), m.code().trim().to_string());
+        }
+    }
 }
 
 pub(crate) struct LegacyItemStatsReadContext<'a> {
@@ -231,7 +261,7 @@ pub fn read_item_stats_d2r_v3<R: BitRead>(
     )
 }
 
-fn read_item_stats_with_unidentified_policy<R: BitRead, F, M>(
+fn read_item_stats_with_unidentified_policy<R: BitRead, F>(
     cursor: &mut BitCursor<R>,
     code: &str,
     version: u8,
@@ -256,8 +286,7 @@ fn read_item_stats_with_unidentified_policy<R: BitRead, F, M>(
     Vec<crate::domain::item::Item>,
 )>
 where
-    F: FnOnce(&[u8], &HuffmanTree, bool, u64) -> Vec<M>,
-    M: StatsMarkerView,
+    F: FnOnce(&[u8], &HuffmanTree, bool, u64, &mut StatsMarkerObservation),
 {
     let ItemStatsReadPolicy {
         consume_unidentified,
@@ -346,31 +375,21 @@ where
         alpha_shadow_skip_bits = Some(skip_bits);
     }
 
-    let mut child_offsets = Vec::new();
-    let mut child_offset_codes: std::collections::HashMap<u64, String> =
-        std::collections::HashMap::new();
-    let mut authority_offsets = Vec::new();
+    let mut observation = StatsMarkerObservation::default();
     if let Some((bytes, _)) = ctx {
-        let markers = scan_markers(
+        scan_markers(
             bytes,
             huffman,
             axiom.is_alpha(),
             section_recovery.item_start_bit,
+            &mut observation,
         );
-        for m in markers.iter() {
-            let t = m.code().trim();
-            if ALPHA_LEGACY_AUTHORITY_CODES.contains(&t) {
-                authority_offsets.push(m.offset());
-            }
-            if (t.starts_with('r') && t.len() <= 3)
-                || (t.starts_with('g') && t.len() == 3)
-                || t == "jew"
-            {
-                child_offsets.push(m.offset());
-                child_offset_codes.insert(m.offset(), m.code().trim().to_string());
-            }
-        }
     }
+    let StatsMarkerObservation {
+        child_offsets,
+        child_offset_codes,
+        authority_offsets,
+    } = observation;
 
     crate::item_trace!(
         "[socket-recovery] code={} alpha={} runeword={} authority_host={} socketed={} compact={} item_start_rel={} child_offsets={} authority_offsets={}",
@@ -671,6 +690,61 @@ mod marker_port_tests {
     }
 
     #[hypothesis_test]
+    fn marker_classification_preserves_order_duplicates_and_trim() {
+        let markers = [
+            Marker {
+                code: " r01 ",
+                offset: 11,
+            },
+            Marker {
+                code: "jew",
+                offset: 11,
+            },
+            Marker {
+                code: "g12",
+                offset: 12,
+            },
+            Marker {
+                code: "r123",
+                offset: 13,
+            },
+            Marker {
+                code: "g123",
+                offset: 14,
+            },
+            Marker {
+                code: "rhd",
+                offset: 15,
+            },
+            Marker {
+                code: " xrs ",
+                offset: 16,
+            },
+            Marker {
+                code: "",
+                offset: 17,
+            },
+        ];
+        let mut observation = StatsMarkerObservation::default();
+        classify_stats_markers(&markers, &mut observation);
+        assert_eq!(observation.child_offsets, [11, 11, 12, 15]);
+        assert_eq!(observation.authority_offsets, [15, 16]);
+        assert_eq!(observation.child_offset_codes.len(), 3);
+        assert_eq!(
+            observation.child_offset_codes.get(&11).map(String::as_str),
+            Some("jew")
+        );
+        assert_eq!(
+            observation.child_offset_codes.get(&12).map(String::as_str),
+            Some("g12")
+        );
+        assert_eq!(
+            observation.child_offset_codes.get(&15).map(String::as_str),
+            Some("rhd")
+        );
+    }
+
+    #[hypothesis_test]
     fn injected_marker_scan_respects_context_early_return_and_unwind() {
         let huffman = HuffmanTree::new();
         let section = [0x31, 0x42, 0x53];
@@ -707,7 +781,8 @@ mod marker_port_tests {
                         scan_markers: |bytes: &[u8],
                                        tree: &HuffmanTree,
                                        admitted: bool,
-                                       start: u64| {
+                                       start: u64,
+                                       observation: &mut StatsMarkerObservation| {
                             calls.set(calls.get() + 1);
                             assert_eq!(bytes, section);
                             assert!(std::ptr::eq(tree, &huffman));
@@ -716,10 +791,13 @@ mod marker_port_tests {
                             if case == 3 {
                                 panic!("injected marker scanner panic");
                             }
-                            vec![Marker {
-                                code: "jew",
-                                offset: 21,
-                            }]
+                            classify_stats_markers(
+                                &[Marker {
+                                    code: "jew",
+                                    offset: 21,
+                                }],
+                                observation,
+                            );
                         },
                     },
                 )
