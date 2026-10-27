@@ -14,6 +14,37 @@ use crate::domain::stats::{ItemProperty, StatsAxiom};
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 
+trait StatsMarkerView {
+    fn code(&self) -> &str;
+    fn offset(&self) -> u64;
+}
+
+impl StatsMarkerView for crate::domain::forensic::marker_scan::ItemMarker {
+    fn code(&self) -> &str {
+        &self.code
+    }
+
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+}
+
+struct ItemStatsReadPolicy<F> {
+    consume_unidentified: bool,
+    scan_markers: F,
+}
+
+fn scan_stats_markers(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    alpha: bool,
+    start: u64,
+) -> Vec<crate::domain::forensic::marker_scan::ItemMarker> {
+    crate::domain::forensic::marker_scan::scan_item_markers(
+        bytes, huffman, alpha, start, None, false,
+    )
+}
+
 pub(crate) struct LegacyItemStatsReadContext<'a> {
     pub(crate) code: &'a str,
     pub(crate) version: u8,
@@ -149,7 +180,10 @@ pub fn read_item_stats<R: BitRead>(
         is_personalized,
         is_compact,
         is_socketed,
-        false,
+        ItemStatsReadPolicy {
+            consume_unidentified: false,
+            scan_markers: scan_stats_markers,
+        },
     )
 }
 
@@ -190,11 +224,14 @@ pub fn read_item_stats_d2r_v3<R: BitRead>(
         is_personalized,
         is_compact,
         is_socketed,
-        true,
+        ItemStatsReadPolicy {
+            consume_unidentified: true,
+            scan_markers: scan_stats_markers,
+        },
     )
 }
 
-fn read_item_stats_with_unidentified_policy<R: BitRead>(
+fn read_item_stats_with_unidentified_policy<R: BitRead, F, M>(
     cursor: &mut BitCursor<R>,
     code: &str,
     version: u8,
@@ -208,7 +245,7 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
     is_personalized: bool,
     is_compact: bool,
     is_socketed: bool,
-    consume_unidentified: bool,
+    policy: ItemStatsReadPolicy<F>,
 ) -> ParsingResult<(
     Vec<ItemProperty>,
     bool,
@@ -217,7 +254,15 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
     Option<Vec<bool>>,
     Option<u64>,
     Vec<crate::domain::item::Item>,
-)> {
+)>
+where
+    F: FnOnce(&[u8], &HuffmanTree, bool, u64) -> Vec<M>,
+    M: StatsMarkerView,
+{
+    let ItemStatsReadPolicy {
+        consume_unidentified,
+        scan_markers,
+    } = policy;
     let mut alpha_v5_runeword_extra = None;
     let mut alpha_shadow_skip_bits = None;
     let mut stats_context = cursor.scoped_context(&format!("{:?}", ItemSegmentType::Stats));
@@ -306,25 +351,23 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
         std::collections::HashMap::new();
     let mut authority_offsets = Vec::new();
     if let Some((bytes, _)) = ctx {
-        let markers = crate::domain::forensic::marker_scan::scan_item_markers(
+        let markers = scan_markers(
             bytes,
             huffman,
             axiom.is_alpha(),
             section_recovery.item_start_bit,
-            None,
-            false,
         );
         for m in markers.iter() {
-            let t = m.code.trim();
+            let t = m.code().trim();
             if ALPHA_LEGACY_AUTHORITY_CODES.contains(&t) {
-                authority_offsets.push(m.offset);
+                authority_offsets.push(m.offset());
             }
             if (t.starts_with('r') && t.len() <= 3)
                 || (t.starts_with('g') && t.len() == 3)
                 || t == "jew"
             {
-                child_offsets.push(m.offset);
-                child_offset_codes.insert(m.offset, m.code.trim().to_string());
+                child_offsets.push(m.offset());
+                child_offset_codes.insert(m.offset(), m.code().trim().to_string());
             }
         }
     }
@@ -604,3 +647,93 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
     ))
 }
 
+#[cfg(test)]
+mod marker_port_tests {
+    use super::*;
+    use bitstream_io::{BitReader, LittleEndian};
+    use d2r_macros::hypothesis_test;
+    use std::cell::Cell;
+    use std::io::Cursor;
+
+    struct Marker {
+        code: &'static str,
+        offset: u64,
+    }
+
+    impl StatsMarkerView for Marker {
+        fn code(&self) -> &str {
+            self.code
+        }
+
+        fn offset(&self) -> u64 {
+            self.offset
+        }
+    }
+
+    #[hypothesis_test]
+    fn injected_marker_scan_respects_context_early_return_and_unwind() {
+        let huffman = HuffmanTree::new();
+        let section = [0x31, 0x42, 0x53];
+        for case in 0..4 {
+            let bytes = [0xff, 0x03];
+            let reader = BitReader::endian(Cursor::new(bytes), LittleEndian);
+            let mut cursor = BitCursor::new(reader);
+            cursor.set_limit(18);
+            cursor.push_context("caller");
+            let before = cursor.context_stack().to_vec();
+            let calls = Cell::new(0);
+            let ctx = (case != 0).then_some((&section[..], 37));
+            let alpha = case == 3;
+            let version = if alpha { 3 } else { 105 };
+            let flags = if case == 1 || case == 2 { 0 } else { 1 << 4 };
+            let consume = case != 1;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                read_item_stats_with_unidentified_policy(
+                    &mut cursor,
+                    "jew",
+                    version,
+                    ctx,
+                    &huffman,
+                    alpha,
+                    Some(ItemQuality::Normal),
+                    flags,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    ItemStatsReadPolicy {
+                        consume_unidentified: consume,
+                        scan_markers: |bytes: &[u8],
+                                       tree: &HuffmanTree,
+                                       admitted: bool,
+                                       start: u64| {
+                            calls.set(calls.get() + 1);
+                            assert_eq!(bytes, section);
+                            assert!(std::ptr::eq(tree, &huffman));
+                            assert!(!admitted);
+                            assert_eq!(start, 37);
+                            if case == 3 {
+                                panic!("injected marker scanner panic");
+                            }
+                            vec![Marker {
+                                code: "jew",
+                                offset: 21,
+                            }]
+                        },
+                    },
+                )
+            }));
+            assert_eq!(calls.get(), usize::from(case >= 2));
+            assert_eq!(cursor.context_stack(), before);
+            if case == 3 {
+                assert!(result.is_err());
+            } else {
+                let (_, complete, _, _, _, _, children) = result.unwrap().unwrap();
+                assert!(complete);
+                assert!(children.is_empty());
+                assert_eq!(cursor.pos(), if case == 1 { 0 } else { 16 });
+            }
+        }
+    }
+}
