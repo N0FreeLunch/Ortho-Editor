@@ -329,3 +329,64 @@ fn test_monster_bonus_and_reanimate_semantics() {
         _ => panic!("Expected Reanimate variant"),
     }
 }
+
+#[test]
+fn test_item_quality_localization_and_superior_low_prefixes() {
+    use d2r_core::domain::header::quality::ItemQuality;
+    use d2r_core::engine::formatter::{format_item, quality_display_name, resolve_item_name};
+    use d2r_core::item::Item;
+
+    // 1. Localized quality names
+    assert_eq!(quality_display_name(Some(ItemQuality::Low), "en"), "Low Quality");
+    assert_eq!(quality_display_name(Some(ItemQuality::Low), "ko"), "로우 퀄리티");
+    assert_eq!(quality_display_name(Some(ItemQuality::Normal), "en"), "Normal");
+    assert_eq!(quality_display_name(Some(ItemQuality::Normal), "ko"), "노멀");
+    assert_eq!(quality_display_name(Some(ItemQuality::High), "en"), "Superior");
+    assert_eq!(quality_display_name(Some(ItemQuality::High), "ko"), "슈페리어");
+    assert_eq!(quality_display_name(Some(ItemQuality::Magic), "en"), "Magic");
+    assert_eq!(quality_display_name(Some(ItemQuality::Magic), "ko"), "매직");
+    assert_eq!(quality_display_name(Some(ItemQuality::Rare), "en"), "Rare");
+    assert_eq!(quality_display_name(Some(ItemQuality::Rare), "ko"), "레어");
+    assert_eq!(quality_display_name(Some(ItemQuality::Set), "en"), "Set");
+    assert_eq!(quality_display_name(Some(ItemQuality::Set), "ko"), "세트");
+    assert_eq!(quality_display_name(Some(ItemQuality::Unique), "en"), "Unique");
+    assert_eq!(quality_display_name(Some(ItemQuality::Unique), "ko"), "유니크");
+    assert_eq!(quality_display_name(Some(ItemQuality::Crafted), "en"), "Crafted");
+    assert_eq!(quality_display_name(Some(ItemQuality::Crafted), "ko"), "크래프트");
+
+    // 2. Superior item prefix: Mage Plate (xtp)
+    let mut superior_item = Item::empty_for_tests();
+    superior_item.code = "xtp ".to_string();
+    superior_item.quality = Some(ItemQuality::High);
+    assert_eq!(resolve_item_name(&superior_item, "en"), "Superior Mage Plate");
+    assert_eq!(resolve_item_name(&superior_item, "ko"), "슈페리어 메이지플레이트");
+
+    let formatted_sup = format_item(&superior_item, "ko", 0, 99);
+    assert_eq!(formatted_sup.quality_name, "슈페리어");
+    assert_eq!(formatted_sup.name, "슈페리어 메이지플레이트");
+
+    // 3. Low Quality item prefixes: Short Sword (ssd)
+    let mut low_item = Item::empty_for_tests();
+    low_item.code = "ssd ".to_string();
+    low_item.quality = Some(ItemQuality::Low);
+
+    // 0: Crude / `크루드`
+    low_item.low_high_graphic_bits = Some(0);
+    assert_eq!(resolve_item_name(&low_item, "en"), "Crude Short Sword");
+    assert_eq!(resolve_item_name(&low_item, "ko"), "크루드 숏소드");
+
+    // 1: Cracked / `크랙트`
+    low_item.low_high_graphic_bits = Some(1);
+    assert_eq!(resolve_item_name(&low_item, "en"), "Cracked Short Sword");
+    assert_eq!(resolve_item_name(&low_item, "ko"), "크랙트 숏소드");
+
+    // 2: Damaged / `데미지드`
+    low_item.low_high_graphic_bits = Some(2);
+    assert_eq!(resolve_item_name(&low_item, "en"), "Damaged Short Sword");
+    assert_eq!(resolve_item_name(&low_item, "ko"), "데미지드 숏소드");
+
+    // 3: Low Quality / `로우 퀄리티`
+    low_item.low_high_graphic_bits = Some(3);
+    assert_eq!(resolve_item_name(&low_item, "en"), "Low Quality Short Sword");
+    assert_eq!(resolve_item_name(&low_item, "ko"), "로우 퀄리티 숏소드");
+}

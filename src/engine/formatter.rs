@@ -229,7 +229,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     FormattedItem {
         name: strip_d2_color_codes(&resolve_item_name(item, language)),
         level: item.level.unwrap_or(0),
-        quality_name: format!("{:?}", item.quality),
+        quality_name: quality_display_name(item.quality, language),
         base_attributes,
         properties,
         set_bonuses,
@@ -985,8 +985,77 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
         return name;
     }
 
+    let base = base_item_name(item, language);
+
+    // 6. Superior (High) Quality
+    if item.quality == Some(ItemQuality::High) {
+        let prefix = get_loc("Hiquality", language);
+        return format!("{} {}", prefix, base);
+    }
+
+    // 7. Low Quality
+    if item.quality == Some(ItemQuality::Low) {
+        let prefix = match item.low_high_graphic_bits {
+            Some(0) => get_loc("Crude", language),
+            Some(1) => get_loc("Cracked", language),
+            Some(2) => get_loc("Damaged", language),
+            Some(3) => get_loc("Low Quality", language),
+            _ => get_loc("Low Quality", language),
+        };
+        return format!("{} {}", prefix, base);
+    }
+
     // Default: Base Name
-    base_item_name(item, language).to_string()
+    base.to_string()
+}
+
+pub fn quality_display_name(quality: Option<ItemQuality>, language: &str) -> String {
+    match quality {
+        Some(ItemQuality::Low) => get_loc("Low Quality", language).to_string(),
+        Some(ItemQuality::Normal) | None => {
+            if language == "ko" {
+                "노멀".to_string()
+            } else {
+                "Normal".to_string()
+            }
+        }
+        Some(ItemQuality::High) => get_loc("Hiquality", language).to_string(),
+        Some(ItemQuality::Magic) => {
+            if language == "ko" {
+                "매직".to_string()
+            } else {
+                "Magic".to_string()
+            }
+        }
+        Some(ItemQuality::Set) => {
+            if language == "ko" {
+                "세트".to_string()
+            } else {
+                "Set".to_string()
+            }
+        }
+        Some(ItemQuality::Rare) => {
+            if language == "ko" {
+                "레어".to_string()
+            } else {
+                "Rare".to_string()
+            }
+        }
+        Some(ItemQuality::Unique) => {
+            if language == "ko" {
+                "유니크".to_string()
+            } else {
+                "Unique".to_string()
+            }
+        }
+        Some(ItemQuality::Crafted) => {
+            if language == "ko" {
+                "크래프트".to_string()
+            } else {
+                "Crafted".to_string()
+            }
+        }
+    }
 }
 
 fn base_item_name<'a>(item: &'a Item, language: &str) -> &'a str {
