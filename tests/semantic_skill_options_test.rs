@@ -233,3 +233,99 @@ fn test_json_serialization_payload_integrity() {
     assert_eq!(json_val["semantics"]["tab_title_ko"], "전투 스킬");
     assert_eq!(json_val["semantics"]["level"], 2);
 }
+
+#[test]
+fn test_aura_and_elemental_skills_semantics() {
+    // Aura: Stat 151 (item_aura), Param 123 (Conviction), Value 12
+    let sem_aura = decode_stat_semantics(151, 123, 12).expect("Aura should decode");
+    match sem_aura {
+        PropertySemantics::Aura {
+            skill_id,
+            skill_name_en,
+            skill_name_ko,
+            level,
+        } => {
+            assert_eq!(skill_id, 123);
+            assert_eq!(skill_name_en, "Conviction");
+            assert_eq!(skill_name_ko, "컨빅션");
+            assert_eq!(level, 12);
+        }
+        _ => panic!("Expected Aura variant"),
+    }
+
+    // Elemental Skills: Stat 126 (item_elemskill), Param 0 (Fire), Value 1
+    let sem_elem = decode_stat_semantics(126, 0, 1).expect("ElementalSkills should decode");
+    match sem_elem {
+        PropertySemantics::ElementalSkills {
+            element_id,
+            element_name_en,
+            element_name_ko,
+            level,
+        } => {
+            assert_eq!(element_id, 0);
+            assert_eq!(element_name_en, "Fire");
+            assert_eq!(element_name_ko, "화염");
+            assert_eq!(level, 1);
+        }
+        _ => panic!("Expected ElementalSkills variant"),
+    }
+}
+
+#[test]
+fn test_non_class_skill_semantics() {
+    // NonClassSkill: Stat 97 (item_nonclassskill), Param 149 (Battle Orders), Value 6
+    let sem_oskill = decode_stat_semantics(97, 149, 6).expect("NonClassSkill should decode");
+    match sem_oskill {
+        PropertySemantics::NonClassSkill {
+            skill_id,
+            skill_name_en,
+            skill_name_ko,
+            level,
+        } => {
+            assert_eq!(skill_id, 149);
+            assert_eq!(skill_name_en, "Battle Orders");
+            assert_eq!(skill_name_ko, "배틀 오더스");
+            assert_eq!(level, 6);
+        }
+        _ => panic!("Expected NonClassSkill variant"),
+    }
+}
+
+#[test]
+fn test_monster_bonus_and_reanimate_semantics() {
+    // MonsterBonus: Stat 179 (attack_vs_montype), Param 1 (Undead), Value 100
+    let sem_bonus = decode_stat_semantics(179, 1, 100).expect("MonsterBonus should decode");
+    match sem_bonus {
+        PropertySemantics::MonsterBonus {
+            montype_id,
+            montype_name_en,
+            montype_name_ko,
+            is_attack,
+            value,
+        } => {
+            assert_eq!(montype_id, 1);
+            assert_eq!(montype_name_en, "Undead");
+            assert_eq!(montype_name_ko, "언데드");
+            assert!(is_attack);
+            assert_eq!(value, 100);
+        }
+        _ => panic!("Expected MonsterBonus variant"),
+    }
+
+    // Reanimate: Stat 155 (item_reanimate), Param 1 (Returned), Value 10
+    let sem_reanim = decode_stat_semantics(155, 1, 10).expect("Reanimate should decode");
+    match sem_reanim {
+        PropertySemantics::Reanimate {
+            monster_id,
+            monster_name_en,
+            monster_name_ko,
+            chance_percent,
+        } => {
+            assert_eq!(monster_id, 1);
+            assert_eq!(monster_name_en, "Returned");
+            assert_eq!(monster_name_ko, "리턴드");
+            assert_eq!(chance_percent, 10);
+        }
+        _ => panic!("Expected Reanimate variant"),
+    }
+}

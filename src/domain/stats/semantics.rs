@@ -1,11 +1,12 @@
 use crate::data::char_stats::CHAR_STATS;
+use crate::data::monsters::{MONSTERS, MONSTER_TYPES};
 use crate::data::skills::SKILLS;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::stats::ItemProperty;
 use crate::engine::formatter::{format_template, get_loc};
 
-/// Semantic interpretation of item properties (skills, skill tabs, class skills, charges).
+/// Semantic interpretation of item properties (skills, skill tabs, class skills, charges, auras, monster bonuses).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PropertySemantics {
@@ -35,6 +36,42 @@ pub enum PropertySemantics {
         skill_name_ko: String,
         level: i32,
     },
+    /// Non-class skill bonus / Oskill (Stat 97: `item_nonclassskill`).
+    NonClassSkill {
+        skill_id: u32,
+        skill_name_en: String,
+        skill_name_ko: String,
+        level: i32,
+    },
+    /// Aura granted when equipped (Stat 151: `item_aura`).
+    Aura {
+        skill_id: u32,
+        skill_name_en: String,
+        skill_name_ko: String,
+        level: i32,
+    },
+    /// Elemental skill bonus (Stat 126: `item_elemskill`).
+    ElementalSkills {
+        element_id: u32,
+        element_name_en: String,
+        element_name_ko: String,
+        level: i32,
+    },
+    /// Attack rating or damage bonus against monster types (Stat 179: `attack_vs_montype`, Stat 180: `damage_vs_montype`).
+    MonsterBonus {
+        montype_id: u32,
+        montype_name_en: String,
+        montype_name_ko: String,
+        is_attack: bool,
+        value: i32,
+    },
+    /// Reanimate as monster on kill (Stat 155: `item_reanimate`).
+    Reanimate {
+        monster_id: u32,
+        monster_name_en: String,
+        monster_name_ko: String,
+        chance_percent: i32,
+    },
     /// Charged skill (Stat 204: `item_charged_skill`).
     ChargedSkill {
         skill_id: u32,
@@ -44,7 +81,7 @@ pub enum PropertySemantics {
         current_charges: u32,
         max_charges: u32,
     },
-    /// Chance to cast on striking / attacking / struck (Stat 195, 198, 201).
+    /// Chance to cast on striking / attacking / struck (Stat 195, 196, 197, 198, 199, 201).
     ChanceToCast {
         skill_id: u32,
         skill_name_en: String,
@@ -141,6 +178,68 @@ pub fn skill_name(skill_id: u32, language: &str) -> String {
     }
 }
 
+/// Retrieves human-readable name for monster type ID.
+pub fn monster_type_name(montype_id: u32, language: &str) -> String {
+    let (en, ko) = match montype_id {
+        1 => ("Undead", "언데드"),
+        2 => ("Demons", "악마"),
+        3 => ("Insects", "곤충"),
+        4 => ("Humans", "인간"),
+        5 => ("Constructs", "구조물"),
+        6 => ("Low Undead", "하급 언데드"),
+        7 => ("High Undead", "상급 언데드"),
+        8 => ("Skeletons", "해골"),
+        9 => ("Zombies", "좀비"),
+        10 => ("Big Heads", "빅헤드"),
+        11 => ("Foul Crows", "파울 크로우"),
+        12 => ("Fallens", "폴른"),
+        13 => ("Brutes", "브루트"),
+        14 => ("Sand Raiders", "샌드 레이더"),
+        15 => ("Wraiths", "레이스"),
+        16 => ("Corrupt Rogues", "타락한 로그"),
+        17 => ("Baboons", "바분"),
+        18 => ("Goatmen", "염소인간"),
+        19 => ("Quill Rats", "가시 쥐"),
+        20 => ("Sand Maggots", "모래 구더기"),
+        21 => ("Claw Vipers", "클로 바이퍼"),
+        22 => ("Sand Leapers", "샌드 리퍼"),
+        23 => ("Panther Women", "판서 우먼"),
+        24 => ("Swarms", "스웜"),
+        25 => ("Scarabs", "스카라브"),
+        _ => {
+            if let Some(m) = MONSTER_TYPES.iter().find(|m| m.id == montype_id) {
+                return m.key.to_string();
+            }
+            if language == "ko" {
+                return format!("몬스터 유형 #{}", montype_id);
+            } else {
+                return format!("Monster Type #{}", montype_id);
+            }
+        }
+    };
+    if language == "ko" {
+        ko.to_string()
+    } else {
+        en.to_string()
+    }
+}
+
+/// Retrieves human-readable name for monster ID.
+pub fn monster_name(monster_id: u32, language: &str) -> String {
+    if let Some(m) = MONSTERS.iter().find(|m| m.id == monster_id) {
+        let loc = get_loc(m.key, language);
+        if !loc.is_empty() && loc != m.key {
+            return loc.to_string();
+        }
+        return m.key.to_string();
+    }
+    if language == "ko" {
+        format!("몬스터 #{}", monster_id)
+    } else {
+        format!("Monster #{}", monster_id)
+    }
+}
+
 /// Decodes semantic meaning from an `ItemProperty`.
 pub fn decode_property_semantics(prop: &ItemProperty) -> Option<PropertySemantics> {
     decode_stat_semantics(prop.stat_id, prop.param, prop.value)
@@ -205,6 +304,70 @@ pub fn decode_stat_semantics(stat_id: u32, param: u32, value: i32) -> Option<Pro
                 level: value,
             })
         }
+        97 => {
+            // item_nonclassskill (Oskill, e.g. Battle Orders, Teleport)
+            let skill_id = param;
+            let skill_name_en = skill_name(skill_id, "en");
+            let skill_name_ko = skill_name(skill_id, "ko");
+            Some(PropertySemantics::NonClassSkill {
+                skill_id,
+                skill_name_en,
+                skill_name_ko,
+                level: value,
+            })
+        }
+        151 => {
+            // item_aura (e.g. Conviction, Fanaticism, Holy Fire when equipped)
+            let skill_id = param;
+            let skill_name_en = skill_name(skill_id, "en");
+            let skill_name_ko = skill_name(skill_id, "ko");
+            Some(PropertySemantics::Aura {
+                skill_id,
+                skill_name_en,
+                skill_name_ko,
+                level: value,
+            })
+        }
+        126 => {
+            // item_elemskill (e.g. +1 to Fire Skills on Magefist)
+            let (elem_en, elem_ko) = match param {
+                0 => ("Fire", "화염"),
+                1 => ("Lightning", "번개"),
+                2 => ("Magic", "마법"),
+                3 => ("Cold", "냉기"),
+                4 => ("Poison", "독"),
+                _ => ("Elemental", "원소"),
+            };
+            Some(PropertySemantics::ElementalSkills {
+                element_id: param,
+                element_name_en: elem_en.to_string(),
+                element_name_ko: elem_ko.to_string(),
+                level: value,
+            })
+        }
+        179 | 180 => {
+            // attack_vs_montype (179) / damage_vs_montype (180)
+            let montype_name_en = monster_type_name(param, "en");
+            let montype_name_ko = monster_type_name(param, "ko");
+            Some(PropertySemantics::MonsterBonus {
+                montype_id: param,
+                montype_name_en,
+                montype_name_ko,
+                is_attack: stat_id == 179,
+                value,
+            })
+        }
+        155 => {
+            // item_reanimate (e.g. Tomb Reaver: 10% Reanimate as Returned)
+            let monster_name_en = monster_name(param, "en");
+            let monster_name_ko = monster_name(param, "ko");
+            Some(PropertySemantics::Reanimate {
+                monster_id: param,
+                monster_name_en,
+                monster_name_ko,
+                chance_percent: value,
+            })
+        }
         204 => {
             // item_charged_skill
             let (skill_id, skill_level) = decode_skill_param(param);
@@ -221,14 +384,17 @@ pub fn decode_stat_semantics(stat_id: u32, param: u32, value: i32) -> Option<Pro
                 max_charges,
             })
         }
-        195 | 198 | 201 => {
+        195..=201 => {
             // Chance to cast
             let (skill_id, skill_level) = decode_skill_param(param);
             let skill_name_en = skill_name(skill_id, "en");
             let skill_name_ko = skill_name(skill_id, "ko");
             let trigger = match stat_id {
                 195 => "on_attack",
+                196 => "on_kill",
+                197 => "on_death",
                 198 => "on_striking",
+                199 => "on_levelup",
                 201 => "when_struck",
                 _ => "custom",
             };
@@ -242,112 +408,5 @@ pub fn decode_stat_semantics(stat_id: u32, param: u32, value: i32) -> Option<Pro
             })
         }
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_class_skills_semantics() {
-        // Amazon (0), Paladin (3), Sorceress (1)
-        let sem_ama = decode_stat_semantics(83, 0, 2).unwrap();
-        match sem_ama {
-            PropertySemantics::ClassSkills { class_id, class_name_en, class_name_ko, level } => {
-                assert_eq!(class_id, 0);
-                assert_eq!(class_name_en, "Amazon");
-                assert_eq!(class_name_ko, "아마존");
-                assert_eq!(level, 2);
-            }
-            _ => panic!("Expected ClassSkills"),
-        }
-
-        let sem_pal = decode_stat_semantics(83, 3, 1).unwrap();
-        match sem_pal {
-            PropertySemantics::ClassSkills { class_id, class_name_en, class_name_ko, level } => {
-                assert_eq!(class_id, 3);
-                assert_eq!(class_name_en, "Paladin");
-                assert_eq!(class_name_ko, "팔라딘");
-                assert_eq!(level, 1);
-            }
-            _ => panic!("Expected ClassSkills"),
-        }
-    }
-
-    #[test]
-    fn test_skill_tab_semantics() {
-        // Amazon Bow (0, 0): param = 0
-        let sem_bow = decode_stat_semantics(188, 0, 3).unwrap();
-        match sem_bow {
-            PropertySemantics::SkillTab {
-                class_id,
-                class_name_en,
-                class_name_ko,
-                tab_index,
-                tab_name_en,
-                tab_name_ko,
-                tab_title_en,
-                tab_title_ko,
-                level,
-            } => {
-                assert_eq!(class_id, 0);
-                assert_eq!(class_name_en, "Amazon");
-                assert_eq!(class_name_ko, "아마존");
-                assert_eq!(tab_index, 0);
-                assert_eq!(tab_name_en, "+3 to Bow and Crossbow Skills");
-                assert_eq!(tab_name_ko, "+3 보우 & 크로스보우 스킬");
-                assert_eq!(tab_title_en, "Bow and Crossbow");
-                assert_eq!(tab_title_ko, "보우 & 크로스보우");
-                assert_eq!(level, 3);
-            }
-            _ => panic!("Expected SkillTab"),
-        }
-
-        // Amazon Javelin (0, 2): param = 2
-        let sem_jav = decode_stat_semantics(188, 2, 2).unwrap();
-        match sem_jav {
-            PropertySemantics::SkillTab {
-                class_id,
-                tab_index,
-                tab_name_en,
-                tab_name_ko,
-                tab_title_en,
-                tab_title_ko,
-                level,
-                ..
-            } => {
-                assert_eq!(class_id, 0);
-                assert_eq!(tab_index, 2);
-                assert_eq!(tab_name_en, "+2 to Javelin and Spear Skills");
-                assert_eq!(tab_name_ko, "+2 재벌린 & 스피어 스킬");
-                assert_eq!(tab_title_en, "Javelin and Spear");
-                assert_eq!(tab_title_ko, "재벌린 & 스피어");
-                assert_eq!(level, 2);
-            }
-            _ => panic!("Expected SkillTab"),
-        }
-
-        // Paladin Combat Skills: param = (3 << 3) | 0 = 24
-        let sem_pal_combat = decode_stat_semantics(188, 24, 1).unwrap();
-        match sem_pal_combat {
-            PropertySemantics::SkillTab {
-                class_id,
-                class_name_en,
-                tab_index,
-                tab_title_en,
-                tab_title_ko,
-                level,
-                ..
-            } => {
-                assert_eq!(class_id, 3);
-                assert_eq!(class_name_en, "Paladin");
-                assert_eq!(tab_index, 0);
-                assert_eq!(tab_title_en, "Combat Skills");
-                assert_eq!(tab_title_ko, "전투 스킬");
-                assert_eq!(level, 1);
-            }
-            _ => panic!("Expected SkillTab"),
-        }
     }
 }

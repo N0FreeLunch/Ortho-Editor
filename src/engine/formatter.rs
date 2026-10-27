@@ -570,6 +570,23 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
                 } else {
                     format!("{} [Level {}]", loc_str, display_value)
                 }
+            } else if stat_id == 126 {
+                // item_elemskill (prop.param: 0=Fire, 1=Lightning, 2=Magic, 3=Cold, 4=Poison)
+                let elem_name = match prop.param {
+                    0 => if language == "ko" { "화염" } else { "Fire" },
+                    1 => if language == "ko" { "번개" } else { "Lightning" },
+                    2 => if language == "ko" { "마법" } else { "Magic" },
+                    3 => if language == "ko" { "냉기" } else { "Cold" },
+                    4 => if language == "ko" { "독" } else { "Poison" },
+                    _ => if language == "ko" { "원소" } else { "Elemental" },
+                };
+                if loc_str.contains('%') {
+                    format_template(loc_str, &[signed_value, elem_name.to_string()])
+                } else if language == "ko" {
+                    format!("{} {} 스킬 레벨 상승", signed_value, elem_name)
+                } else {
+                    format!("{} to {} Skills", signed_value, elem_name)
+                }
             } else {
                 f(format!("{} {}", signed_value, loc_str))
             }
@@ -645,7 +662,7 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
             if loc_str.contains('%') {
                 format_template(loc_str, &[display_value.to_string(), skill.to_string()])
             } else {
-                let template = get_loc_optional("ModStr16", language).unwrap_or("Level %d %s Aura When Equipped");
+                let template = get_loc_optional("ModitemAura", language).unwrap_or("Level %d %s Aura When Equipped");
                 format_template(template, &[display_value.to_string(), skill])
             }
         }
@@ -672,12 +689,14 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
             format!("{} {}", base, monster)
         }
         23 => {
-            let monster = if language == "ko" {
-                format!("몬스터 #{}", prop.param)
+            let monster = crate::domain::stats::semantics::monster_name(prop.param, language);
+            if loc_str.contains('%') {
+                format_template(loc_str, &[display_value.to_string(), monster])
+            } else if language == "ko" {
+                format!("{}% {} ({})", display_value, loc_str, monster)
             } else {
-                format!("Monster #{}", prop.param)
-            };
-            format!("{}% {} {}", display_value, loc_str, monster)
+                format!("{}% {} as {}", display_value, loc_str, monster)
+            }
         }
         24 => {
             let (skill_id, skill_level) = decode_skill_param(prop.param);
@@ -763,18 +782,7 @@ fn skill_name(skill_id: u32, language: &str) -> String {
 }
 
 fn monster_type_name(montype_id: u32, language: &str) -> String {
-    /*
-    let key = MONSTER_TYPES.iter().find(|m| m.id == montype_id).map(|m| m.key);
-    if let Some(k) = key {
-        return get_loc(k, language).to_string();
-    }
-    */
-
-    if language == "ko" {
-        format!("몬스터 유형 #{}", montype_id)
-    } else {
-        format!("Monster Type #{}", montype_id)
-    }
+    crate::domain::stats::semantics::monster_type_name(montype_id, language)
 }
 
 fn decode_skill_param(param: u32) -> (u32, u32) {
@@ -1245,7 +1253,11 @@ mod tests {
         let prop = make_prop(179, 4, 120);
         assert_eq!(
             format_property(&prop, 99, "en"),
-            "+120% to Attack Rating versus Monster Type #4"
+            "+120% to Attack Rating versus Humans"
+        );
+        assert_eq!(
+            format_property(&prop, 99, "ko"),
+            "+120 에 대한 공격 등급 인간"
         );
     }
 
