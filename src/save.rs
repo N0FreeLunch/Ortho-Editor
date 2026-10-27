@@ -12,6 +12,7 @@ pub use crate::domain::header::axiom::{
     EXPANSION_FLAG_OFFSET,
 };
 pub use crate::domain::stats::{AttributeSection, AttributeEntry};
+pub use crate::domain::stats::attribute::char_stat_save_add;
 pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 pub use crate::domain::progression::{QuestSection, WaypointSection};
 use crate::domain::gateway::ItemGateway;
@@ -391,6 +392,196 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
     working[CHAR_LEVEL_OFFSET] = new_level;
     finalize_save_bytes(&mut working, false)?;
     Ok(working)
+}
+
+/// Result of attempting to apply a character mutation.
+/// Either the modified save bytes or a structured domain ContractError.
+pub fn try_apply_character_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::CharacterMutationContract,
+    huffman: &HuffmanTree,
+) -> Result<Vec<u8>, crate::domain::contracts::ContractError> {
+    let map = map_core_sections(bytes)
+        .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to map sections: {}", e)))?;
+    let mut attrs = AttributeSection::parse(bytes, map.gf_pos, map.if_pos)
+        .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to parse attributes: {}", e)))?;
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version == 105;
+
+    // Snapshot existing character attributes for resulting-value boundary validation
+    let snapshot = crate::domain::contracts::CharacterSnapshot {
+        level: attrs.actual_value(12, is_alpha).unwrap_or(1).clamp(1, 99) as u8,
+        experience: attrs.actual_value(13, is_alpha).unwrap_or(0).max(0) as u32,
+        strength: attrs.actual_value(0, is_alpha).unwrap_or(1).max(0) as u32,
+        energy: attrs.actual_value(1, is_alpha).unwrap_or(1).max(0) as u32,
+        dexterity: attrs.actual_value(2, is_alpha).unwrap_or(1).max(0) as u32,
+        vitality: attrs.actual_value(3, is_alpha).unwrap_or(1).max(0) as u32,
+        stat_points: attrs.actual_value(4, is_alpha).unwrap_or(0).max(0) as u32,
+        gold_character: attrs.actual_value(14, is_alpha).unwrap_or(0).max(0) as u32,
+        gold_stash: attrs.actual_value(15, is_alpha).unwrap_or(0).max(0) as u32,
+    };
+
+    // Pre-flight boundary and invariant validation
+    let evaluated = crate::domain::contracts::CharacterBoundaryValidator::validate_mutation(
+        &snapshot,
+        contract,
+    )?;
+
+    // Apply validated resulting values
+    let mut final_level: Option<u8> = None;
+    if contract.level.is_some() {
+        let save_add = char_stat_save_add(12, is_alpha);
+        attrs.set_value(12, evaluated.level as i32, save_add);
+        final_level = Some(evaluated.level);
+    }
+    if contract.strength.is_some() {
+        let save_add = char_stat_save_add(0, is_alpha);
+        attrs.set_value(0, evaluated.strength as i32, save_add);
+    }
+    if contract.energy.is_some() {
+        let save_add = char_stat_save_add(1, is_alpha);
+        attrs.set_value(1, evaluated.energy as i32, save_add);
+    }
+    if contract.dexterity.is_some() {
+        let save_add = char_stat_save_add(2, is_alpha);
+        attrs.set_value(2, evaluated.dexterity as i32, save_add);
+    }
+    if contract.vitality.is_some() {
+        let save_add = char_stat_save_add(3, is_alpha);
+        attrs.set_value(3, evaluated.vitality as i32, save_add);
+    }
+    if contract.stat_points.is_some() {
+        let save_add = char_stat_save_add(4, is_alpha);
+        attrs.set_value(4, evaluated.stat_points as i32, save_add);
+    }
+    if contract.experience.is_some() {
+        let save_add = char_stat_save_add(13, is_alpha);
+        attrs.set_value(13, evaluated.experience as i32, save_add);
+    }
+    if contract.gold_character.is_some() {
+        let save_add = char_stat_save_add(14, is_alpha);
+        attrs.set_value(14, evaluated.gold_character as i32, save_add);
+    }
+    if contract.gold_stash.is_some() {
+        let save_add = char_stat_save_add(15, is_alpha);
+        attrs.set_value(15, evaluated.gold_stash as i32, save_add);
+    }
+
+    // Rebuild sections
+    let mut working = rebuild_status_and_player_items(
+        bytes,
+        Some(&attrs),
+        None,
+        None,
+        None,
+        None,
+        &Item::read_player_items(bytes, huffman, is_alpha)
+            .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?,
+        huffman,
+    ).map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to rebuild save: {}", e)))?;
+
+    // Synchronize header level
+    if let Some(lvl) = final_level {
+        if working.len() > CHAR_LEVEL_OFFSET {
+            working[CHAR_LEVEL_OFFSET] = lvl;
+        }
+    }
+
+    // Synchronize header name
+    if let Some(ref new_name) = contract.name {
+        if working.len() >= CHAR_NAME_OFFSET + CHAR_NAME_LEN {
+            let name_bytes = new_name.as_bytes();
+            let copy_len = name_bytes.len().min(CHAR_NAME_LEN - 1);
+            working[CHAR_NAME_OFFSET..CHAR_NAME_OFFSET + CHAR_NAME_LEN].fill(0);
+            working[CHAR_NAME_OFFSET..CHAR_NAME_OFFSET + copy_len].copy_from_slice(&name_bytes[..copy_len]);
+        }
+    }
+
+    finalize_save_bytes(&mut working, false)
+        .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to finalize checksum: {}", e)))?;
+    Ok(working)
+}
+
+/// Applies character profile and attribute mutations to save bytes based on a verified contract,
+/// supporting both absolute assignment and relative delta (+/-) operations.
+pub fn apply_character_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::CharacterMutationContract,
+    huffman: &HuffmanTree,
+) -> io::Result<Vec<u8>> {
+    try_apply_character_mutation(bytes, contract, huffman)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))
+}
+
+/// Result of attempting to apply a waypoint mutation.
+/// Either the modified save bytes or a structured domain ProgressionContractError.
+pub fn try_apply_waypoint_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::WaypointMutationContract,
+) -> Result<Vec<u8>, crate::domain::contracts::ProgressionContractError> {
+    let map = map_core_sections(bytes).map_err(|e| {
+        crate::domain::contracts::ProgressionContractError::ValidationFailed(format!("Failed to map sections: {}", e))
+    })?;
+    let ws_pos = map.ws_pos.ok_or_else(|| {
+        crate::domain::contracts::ProgressionContractError::ValidationFailed("WS (Waypoint Section) marker not found".to_string())
+    })?;
+
+    let w4_pos = map.w4_pos.ok_or_else(|| {
+        crate::domain::contracts::ProgressionContractError::ValidationFailed("w4 marker not found after WS section".to_string())
+    })?;
+
+    if w4_pos <= ws_pos || w4_pos > bytes.len() {
+        return Err(crate::domain::contracts::ProgressionContractError::ValidationFailed(
+            "Invalid waypoint section boundaries".to_string(),
+        ));
+    }
+
+    let mut working = bytes.to_vec();
+    let is_expansion = true; // LOD default for modern/alpha v105 saves
+
+    let difficulties: Vec<u8> = match contract.target_difficulty {
+        Some(diff) => vec![diff.to_u8()],
+        None => vec![0, 1, 2], // Normal, Nightmare, Hell
+    };
+
+    let wp_anchor = ws_pos;
+
+    for &diff in &difficulties {
+        let mut wp_set = crate::domain::progression::WaypointSet::from_bytes(
+            &working[ws_pos..w4_pos],
+            diff,
+            wp_anchor,
+            is_expansion,
+        );
+
+        if contract.unlock_all {
+            for wp in wp_set.waypoints_mut() {
+                wp.set_active(true);
+            }
+        }
+
+        for target_name in &contract.activate_waypoints {
+            if let Some(wp) = wp_set.waypoints_mut().iter_mut().find(|w| w.name() == target_name) {
+                wp.set_active(true);
+            }
+        }
+
+        wp_set.sync_to_bytes(&mut working[ws_pos..w4_pos], wp_anchor);
+    }
+
+    finalize_save_bytes(&mut working, false).map_err(|e| {
+        crate::domain::contracts::ProgressionContractError::ValidationFailed(format!("Failed to finalize checksum: {}", e))
+    })?;
+    Ok(working)
+}
+
+/// Applies waypoint mutations to a character save file based on a verified contract.
+pub fn apply_waypoint_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::WaypointMutationContract,
+) -> io::Result<Vec<u8>> {
+    try_apply_waypoint_mutation(bytes, contract)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))
 }
 
 
