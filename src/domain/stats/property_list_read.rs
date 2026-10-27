@@ -11,7 +11,7 @@ use crate::domain::stats::parser::{
 use crate::domain::stats::property_list::{
     ListReadConfig, ParsedPropertyList, read_property_stream,
 };
-use crate::domain::stats::retail_list::RetailListReader;
+use crate::domain::stats::retail_list::read_retail_property_list;
 use crate::error::ParsingResult;
 use bitstream_io::BitRead;
 use std::collections::HashMap;
@@ -33,8 +33,17 @@ pub(crate) fn read_property_list_with_pair_policy<R: BitRead, F>(
 where
     F: FnMut(&[u8], u64, &HuffmanTree, usize, bool) -> ParsingResult<(Item, u64)>,
 {
-    let start_pos = recorder.pos();
     // Raw format selection must also retain legacy behavior for unadmitted versions.
+    if !axiom.save_is_alpha {
+        return read_retail_property_list(
+            recorder,
+            code,
+            alpha_runeword,
+            axiom,
+            consume_d2r_v3_paired_stats,
+        );
+    }
+    let start_pos = recorder.pos();
     let alpha = axiom.save_is_alpha && axiom.is_alpha();
     let is_authority_host = alpha && ALPHA_LEGACY_AUTHORITY_CODES.contains(&code.trim());
     let actual_runeword =
@@ -58,13 +67,7 @@ where
             None
         },
     };
-    if !axiom.save_is_alpha {
-        if property_list_depth_exhausted() {
-            return Ok((Vec::new(), false, false, Vec::new()));
-        }
-        let mut reader = RetailListReader::new(&axiom.code, consume_d2r_v3_paired_stats);
-        return read_property_stream(recorder, start_pos, config, budget, &mut reader);
-    }
+
     let section_base_abs = if is_compact {
         recorder.base_pos.saturating_sub(reader_ctx.item_start_bit)
     } else {

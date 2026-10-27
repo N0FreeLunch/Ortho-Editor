@@ -471,71 +471,81 @@ fn read_item_stats_with_unidentified_policy<R: BitRead>(
             cursor.base_pos
         );
     }
-    let (props, complete, term, nested_items) = read_property_list_with_pair_policy(
-        cursor,
-        trimmed_code,
-        version,
-        section_recovery.clone(),
-        huffman,
-        is_runeword,
-        is_v105_shadow_final || is_shadow_container || is_runeword,
-        &axiom,
-        consume_unidentified && !alpha_mode,
-        Some(&child_offsets),
-        Some(&child_offset_codes),
-        |bytes, pos, huff, idx, alpha| {
-            // Use scanner-verified code as hint to ensure correct item identification
-            let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
-            let peek_res = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0);
-            let peek_code = peek_res.as_ref().map(|p| p.3.as_str());
-            let code_hint = scanner_code.or(peek_code);
+    let (props, complete, term, nested_items) = if !axiom.save_is_alpha {
+        crate::domain::stats::read_retail_property_list(
+            cursor,
+            trimmed_code,
+            is_runeword,
+            &axiom,
+            consume_unidentified && !alpha_mode,
+        )
+    } else {
+        read_property_list_with_pair_policy(
+            cursor,
+            trimmed_code,
+            version,
+            section_recovery.clone(),
+            huffman,
+            is_runeword,
+            is_v105_shadow_final || is_shadow_container || is_runeword,
+            &axiom,
+            consume_unidentified && !alpha_mode,
+            Some(&child_offsets),
+            Some(&child_offset_codes),
+            |bytes, pos, huff, idx, alpha| {
+                // Use scanner-verified code as hint to ensure correct item identification
+                let scanner_code = child_offset_codes.get(&pos).map(|s| s.as_str());
+                let peek_res = crate::item::peek_item_header_at(bytes, pos, huff, alpha, 0);
+                let peek_code = peek_res.as_ref().map(|p| p.3.as_str());
+                let code_hint = scanner_code.or(peek_code);
 
-            let mut limit = None;
-            let mut forced_compact = None;
-            if alpha {
-                if let Some((_, _, _, code, flags, version, is_compact, _, _, _)) = &peek_res {
-                    if crate::item::item_trace_enabled() {
-                        eprintln!(
-                            "[peek-child] code={} flags=0x{:08X} version={} compact={}",
-                            code.trim(),
-                            flags,
-                            version,
-                            is_compact
+                let mut limit = None;
+                let mut forced_compact = None;
+                if alpha {
+                    if let Some((_, _, _, code, flags, version, is_compact, _, _, _)) = &peek_res {
+                        if crate::item::item_trace_enabled() {
+                            eprintln!(
+                                "[peek-child] code={} flags=0x{:08X} version={} compact={}",
+                                code.trim(),
+                                flags,
+                                version,
+                                is_compact
+                            );
+                        }
+                        let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(
+                            *version,
+                            code,
+                            *flags,
+                            Some(idx),
                         );
-                    }
-                    let target_width = crate::domain::forensic::v105::axioms::get_v105_target_width(
-                        *version,
-                        code,
-                        *flags,
-                        Some(idx),
-                    );
-                    if target_width > 0 {
-                        limit = Some(target_width as u64);
-                    }
-                    if *is_compact {
-                        forced_compact = Some(true);
+                        if target_width > 0 {
+                            limit = Some(target_width as u64);
+                        }
+                        if *is_compact {
+                            forced_compact = Some(true);
+                        }
                     }
                 }
-            }
 
-            let (item, mut consumed) =
-                crate::domain::item::serialization::parse_item_at_with_limit(
-                    bytes,
-                    pos,
-                    section_base_abs,
-                    huff,
-                    idx,
-                    alpha,
-                    limit,
-                    forced_compact,
-                    code_hint,
-                )?;
-            if let Some(l) = limit {
-                consumed = consumed.max(l);
-            }
-            Ok((item, consumed))
-        },
-    )?;
+                let (item, mut consumed) =
+                    crate::domain::item::serialization::parse_item_at_with_limit(
+                        bytes,
+                        pos,
+                        section_base_abs,
+                        huff,
+                        idx,
+                        alpha,
+                        limit,
+                        forced_compact,
+                        code_hint,
+                    )?;
+                if let Some(l) = limit {
+                    consumed = consumed.max(l);
+                }
+                Ok((item, consumed))
+            },
+        )
+    }?;
     let mut nested_items = nested_items;
     if axiom.is_alpha() && is_runeword && nested_items.len() < 3 {
         let scan_limit = if trimmed_code.contains(' ') || is_authority_host || is_runeword {

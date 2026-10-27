@@ -8,6 +8,7 @@ mod retail_entry;
 mod property_read;
 pub(crate) mod property_list;
 mod retail_list;
+pub(crate) use retail_list::read_retail_property_list;
 mod property_list_read;
 pub(crate) mod property_entry;
 pub mod parser;
