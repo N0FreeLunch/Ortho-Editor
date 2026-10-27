@@ -1,5 +1,5 @@
-use bitstream_io::{BitWrite, BitWriter, LittleEndian};
-use std::io;
+use bitstream_io::{BitRead, BitWrite, BitWriter, LittleEndian};
+use std::io::{self, Cursor};
 
 pub struct BitEmitter {
     writer: BitWriter<Vec<u8>, LittleEndian>,
@@ -77,5 +77,49 @@ impl BitEmitter {
     pub fn into_bytes(mut self) -> Vec<u8> {
         let _ = self.byte_align();
         self.writer.into_writer()
+    }
+}
+
+/// Retains an available raw span with the existing legacy cursor semantics.
+/// Incomplete reads return an empty or partial span. The original u32 seek
+/// conversion is preserved; callers decide whether completeness is required.
+pub(crate) fn read_legacy_source_bits(bytes: &[u8], start_bit: u64, bit_count: u64) -> Vec<bool> {
+    if bit_count == 0 {
+        return Vec::new();
+    }
+
+    let mut reader = bitstream_io::BitReader::endian(Cursor::new(bytes), LittleEndian);
+    let mut bits = Vec::with_capacity(bit_count as usize);
+
+    if reader.skip(start_bit as u32).is_ok() {
+        for _ in 0..bit_count {
+            match reader.read_bit() {
+                Ok(bit) => bits.push(bit),
+                Err(_) => break,
+            }
+        }
+    }
+
+    bits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_legacy_source_bits;
+    use d2r_macros::hypothesis_test;
+
+    #[hypothesis_test]
+    fn legacy_source_bits_preserve_partial_and_wrapped_seek() {
+        let bytes = [0b1010_1101, 0b0000_0011];
+        let seven_bits = vec![true, false, true, false, true, true, true];
+        assert_eq!(read_legacy_source_bits(&bytes, 3, 7), seven_bits);
+        assert_eq!(read_legacy_source_bits(&bytes, 14, 5), vec![false, false]);
+        assert!(read_legacy_source_bits(&bytes, 16, 1).is_empty());
+        assert!(read_legacy_source_bits(&bytes, 17, 1).is_empty());
+        assert!(read_legacy_source_bits(&bytes, u64::MAX, 0).is_empty());
+        assert_eq!(
+            read_legacy_source_bits(&bytes, (1_u64 << 32) + 3, 7),
+            seven_bits
+        );
     }
 }
