@@ -31,6 +31,7 @@ Domain names match the private overlay's map, so you can look them up by name th
 | **Item parsing / Decrypt** | `src/item.rs`, `src/domain/stats/` | `d2item_inspect`, `d2stat_fidelity_radar`, `d2stat_probe_oracle`, `d2stat_tiling_prober`, `d2save_equipped_invariant` |
 | **Inventory / Grid** | `src/inventory.rs` | `d2save_inventory_check` |
 | **Status (Attrs/Skills)** | `src/save.rs` | `d2save_status_inspect` |
+| **Save / Item Mutation API** | `src/domain/contracts/`, `src/save.rs`, `src/bin/ortho.rs` | `tests/item_mutation_contract_test.rs`, `ortho --dry-run --json` |
 | **Option Logic / Display** | `src/engine/validation.rs`, `src/engine/formatter.rs` | `tests/item_validation_test.rs`, `tests/option_rendering_test.rs` |
 | **Quest / Waypoint (v105)** | `src/save.rs` | `d2save_progression_audit` |
 | **Save Verification** | - | `d2save_verify`, `d2save_equipped_invariant` |
