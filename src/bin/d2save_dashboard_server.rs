@@ -109,6 +109,16 @@ fn handle(mut stream: TcpStream, observe: bool) -> std::io::Result<()> {
             frontend_root().join("index.html"),
             "text/html; charset=utf-8",
         ),
+        ("GET", "/prototype") | ("GET", "/character-sheet-prototype.html") => serve_file(
+            &mut stream,
+            frontend_root().join("character-sheet-prototype.html"),
+            "text/html; charset=utf-8",
+        ),
+        ("GET", "/editor") | ("GET", "/editor.html") => serve_file(
+            &mut stream,
+            frontend_root().join("editor.html"),
+            "text/html; charset=utf-8",
+        ),
         ("GET", "/item-model.mjs") => serve_file(
             &mut stream,
             frontend_root().join("item-model.mjs"),
