@@ -238,6 +238,13 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     }
 }
 
+/// Formats the projected properties of a socketed child item (gem, rune, or jewel)
+/// within the context of its parent item.
+pub fn format_socketed_child(child: &Item, parent: &Item, language: &str, char_level: u8) -> Vec<String> {
+    let props = crate::engine::socket_effects::resolve_socketed_child_properties(child, parent);
+    format_properties_list(&props, char_level, language)
+}
+
 pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip_indices = std::collections::HashSet::new();

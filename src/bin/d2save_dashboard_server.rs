@@ -458,7 +458,21 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
         .socketed_items
         .iter()
         .enumerate()
-        .map(|(child_index, child)| item_json(child_index, child, level, 0))
+        .map(|(child_index, child)| {
+            let mut child_val = item_json(child_index, child, level, 0);
+            let projected_props =
+                d2r_core::engine::socket_effects::resolve_socketed_child_properties(child, item);
+            if !projected_props.is_empty() {
+                child_val["formatted_lines_ko"] = json!(
+                    d2r_core::engine::formatter::format_properties_list(&projected_props, level, "ko")
+                );
+                child_val["formatted_lines_en"] = json!(
+                    d2r_core::engine::formatter::format_properties_list(&projected_props, level, "en")
+                );
+                child_val["projected_properties"] = json!(properties(&projected_props));
+            }
+            child_val
+        })
         .collect::<Vec<_>>();
     let mut opaque_bits = item.body.v105_7mgw_payload.as_ref().map_or(0, Vec::len);
     let mut opaque_reasons = Vec::new();

@@ -1,7 +1,7 @@
 //! Transient socket totals for tooltips; never stored or serialized as item fields.
 //! Poison duration is an item projection, not a character or skill damage aggregate.
 
-use crate::data::gems::GEMS;
+use crate::data::gems::{determine_gem_slot, get_gem_stats, GEMS};
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::item_specs::ItemStatRange;
 use crate::data::stat_costs::STAT_COSTS;
@@ -40,12 +40,50 @@ impl SocketContextError {
     }
 }
 
-fn virtual_property(id: u32, value: i32) -> ItemProperty {
+/// Creates a virtual property with an explicit param, stat id, and value.
+pub fn virtual_property_with_param(id: u32, param: u32, value: i32) -> ItemProperty {
     let name = STAT_COSTS
         .iter()
         .find(|s| s.id == id)
         .map_or("", |s| s.name);
-    ItemProperty::new(id, name.into(), 0, value, value, ItemBitRange::default())
+    ItemProperty::new(id, name.into(), param, value, value, ItemBitRange::default())
+}
+
+fn virtual_property(id: u32, value: i32) -> ItemProperty {
+    virtual_property_with_param(id, 0, value)
+}
+
+/// Resolves the active properties of a socketed child item (gem, rune, or jewel)
+/// conditioned on its parent item context.
+pub fn resolve_socketed_child_properties(child: &Item, parent: &Item) -> Vec<ItemProperty> {
+    let jewel_props: Vec<_> = child
+        .properties
+        .iter()
+        .filter(|p| p.stat_id != 511 && p.stat_id != 317)
+        .cloned()
+        .collect();
+
+    if !jewel_props.is_empty() && (!child.header.is_compact || child.code.trim() == "jew") {
+        return jewel_props;
+    }
+
+    let is_weapon = ITEM_TEMPLATES
+        .iter()
+        .find(|t| t.code == parent.code.trim())
+        .map_or(false, |t| t.is_weapon);
+    let types = get_all_item_types(&parent.code);
+    let is_shield = types.contains(&"shld");
+
+    let slot = determine_gem_slot(is_weapon, is_shield);
+
+    if let Some(ranges) = get_gem_stats(child.code.trim(), slot) {
+        return ranges
+            .iter()
+            .map(|r| virtual_property_with_param(r.stat_id, r.param, r.min))
+            .collect();
+    }
+
+    jewel_props
 }
 
 fn saved_scalar(p: &ItemProperty) -> bool {

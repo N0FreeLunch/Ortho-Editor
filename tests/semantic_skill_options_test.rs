@@ -7,6 +7,9 @@ use d2r_core::domain::stats::semantics::{
     skill_tab_clean_title, PropertySemantics,
 };
 use d2r_core::domain::stats::ItemProperty;
+use d2r_core::engine::formatter::format_socketed_child;
+use d2r_core::engine::socket_effects::resolve_socketed_child_properties;
+use d2r_core::item::Item;
 
 #[test]
 fn test_all_8_classes_class_skills_semantics() {
@@ -389,4 +392,105 @@ fn test_item_quality_localization_and_superior_low_prefixes() {
     low_item.low_high_graphic_bits = Some(3);
     assert_eq!(resolve_item_name(&low_item, "en"), "Low Quality Short Sword");
     assert_eq!(resolve_item_name(&low_item, "ko"), "로우 퀄리티 숏소드");
+}
+
+#[test]
+fn test_socketed_gems_and_runes_slot_projection() {
+    // 1. Chipped Ruby (`gcr`) in Weapon (Short Sword `ssd `)
+    let mut weapon = Item::empty_for_tests();
+    weapon.code = "ssd ".to_string();
+
+    let mut chip_ruby = Item::empty_for_tests();
+    chip_ruby.code = "gcr ".to_string();
+    chip_ruby.header.is_compact = true;
+
+    let props_weapon = resolve_socketed_child_properties(&chip_ruby, &weapon);
+    assert_eq!(props_weapon.len(), 2);
+    assert_eq!(props_weapon[0].stat_id, 48); // firemindam
+    assert_eq!(props_weapon[0].value, 3);
+    assert_eq!(props_weapon[1].stat_id, 49); // firemaxdam
+    assert_eq!(props_weapon[1].value, 4);
+
+    let lines_w_en = format_socketed_child(&chip_ruby, &weapon, "en", 99);
+    assert_eq!(lines_w_en, vec!["Adds 3-4 fire damage"]);
+    let lines_w_ko = format_socketed_child(&chip_ruby, &weapon, "ko", 99);
+    assert_eq!(lines_w_ko, vec!["3 - 4 파이어 데미지 추가"]);
+
+    // 2. Chipped Ruby (`gcr`) in Helm (Cap `cap `)
+    let mut helm = Item::empty_for_tests();
+    helm.code = "cap ".to_string();
+
+    let props_helm = resolve_socketed_child_properties(&chip_ruby, &helm);
+    assert_eq!(props_helm.len(), 1);
+    assert_eq!(props_helm[0].stat_id, 7); // maxhp
+    assert_eq!(props_helm[0].value, 10);
+
+    let lines_h_en = format_socketed_child(&chip_ruby, &helm, "en", 99);
+    assert_eq!(lines_h_en.len(), 1);
+    assert!(lines_h_en[0].contains("10") && lines_h_en[0].contains("Life"));
+
+    // 3. Chipped Ruby (`gcr`) in Shield (Buckler `buc `)
+    let mut shield = Item::empty_for_tests();
+    shield.code = "buc ".to_string();
+
+    let props_shield = resolve_socketed_child_properties(&chip_ruby, &shield);
+    assert_eq!(props_shield.len(), 1);
+    assert_eq!(props_shield[0].stat_id, 39); // fireresist
+    assert_eq!(props_shield[0].value, 12);
+
+    let lines_s_en = format_socketed_child(&chip_ruby, &shield, "en", 99);
+    assert_eq!(lines_s_en.len(), 1);
+    assert!(lines_s_en[0].contains("12%") && lines_s_en[0].contains("Fire Resist"));
+
+    // 4. El Rune (`r01`) in Weapon vs Armor (Quilted Armor `qui `)
+    let mut el_rune = Item::empty_for_tests();
+    el_rune.code = "r01 ".to_string();
+    el_rune.header.is_compact = true;
+
+    let props_el_w = resolve_socketed_child_properties(&el_rune, &weapon);
+    assert_eq!(props_el_w.len(), 2);
+    assert_eq!(props_el_w[0].stat_id, 89); // item_lightradius
+    assert_eq!(props_el_w[0].value, 1);
+    assert_eq!(props_el_w[1].stat_id, 19); // item_tohit
+    assert_eq!(props_el_w[1].value, 50);
+
+    let lines_el_w_en = format_socketed_child(&el_rune, &weapon, "en", 99);
+    assert!(lines_el_w_en.iter().any(|l| l.contains("50") && l.contains("Attack Rating")));
+    assert!(lines_el_w_en.iter().any(|l| l.contains("1") && l.contains("Light Radius")));
+
+    let mut armor = Item::empty_for_tests();
+    armor.code = "qui ".to_string();
+
+    let props_el_a = resolve_socketed_child_properties(&el_rune, &armor);
+    assert_eq!(props_el_a.len(), 2);
+    assert_eq!(props_el_a[0].stat_id, 89); // item_lightradius
+    assert_eq!(props_el_a[0].value, 1);
+    assert_eq!(props_el_a[1].stat_id, 31); // item_defense
+    assert_eq!(props_el_a[1].value, 15);
+
+    let lines_el_a_en = format_socketed_child(&el_rune, &armor, "en", 99);
+    assert!(lines_el_a_en.iter().any(|l| l.contains("15") && l.contains("Defense")));
+    assert!(lines_el_a_en.iter().any(|l| l.contains("1") && l.contains("Light Radius")));
+
+    // 5. Jewel (`jew`) preserving rolled properties
+    let mut jewel = Item::empty_for_tests();
+    jewel.code = "jew ".to_string();
+    jewel.header.is_compact = false;
+    jewel.properties.push(ItemProperty::new(
+        25, // damagepercent (Enhanced Damage)
+        "damagepercent".to_string(),
+        0,
+        20,
+        20,
+        ItemBitRange::default(),
+    ));
+
+    let props_jew = resolve_socketed_child_properties(&jewel, &weapon);
+    assert_eq!(props_jew.len(), 1);
+    assert_eq!(props_jew[0].stat_id, 25);
+    assert_eq!(props_jew[0].value, 20);
+
+    let lines_jew = format_socketed_child(&jewel, &weapon, "en", 99);
+    assert_eq!(lines_jew.len(), 1);
+    assert!(lines_jew[0].contains("+20%") && lines_jew[0].contains("Enhanced Damage"));
 }
