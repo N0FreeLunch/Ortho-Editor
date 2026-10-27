@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use d2r_core::data::item_specs::get_base_item_spec;
 use d2r_core::domain::item::image::ItemImageKey;
 #[path = "dashboard/image_service.rs"]
@@ -516,6 +518,12 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
         "formatted_base_en": en.base_attributes,
         "set_bonuses_ko": format_set_bonuses(&ko.set_bonuses),
         "set_bonuses_en": format_set_bonuses(&en.set_bonuses),
+        "piece_set_bonuses_ko": format_set_bonuses(&ko.piece_set_bonuses),
+        "piece_set_bonuses_en": format_set_bonuses(&en.piece_set_bonuses),
+        "set_name_ko": ko.set_name,
+        "set_name_en": en.set_name,
+        "set_pieces_ko": ko.set_pieces,
+        "set_pieces_en": en.set_pieces,
         "warnings_ko": ko.warnings,
         "warnings_en": en.warnings,
         "detailed_warnings_ko": ko.detailed_warnings,

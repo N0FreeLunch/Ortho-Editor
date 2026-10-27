@@ -7,9 +7,9 @@ use d2r_core::domain::stats::semantics::{
     skill_tab_clean_title, PropertySemantics,
 };
 use d2r_core::domain::stats::ItemProperty;
-use d2r_core::engine::formatter::format_socketed_child;
+use d2r_core::engine::formatter::{format_item, format_socketed_child};
 use d2r_core::engine::socket_effects::resolve_socketed_child_properties;
-use d2r_core::item::Item;
+use d2r_core::item::{Item, ItemQuality};
 
 #[test]
 fn test_all_8_classes_class_skills_semantics() {
@@ -493,4 +493,66 @@ fn test_socketed_gems_and_runes_slot_projection() {
     let lines_jew = format_socketed_child(&jewel, &weapon, "en", 99);
     assert_eq!(lines_jew.len(), 1);
     assert!(lines_jew[0].contains("+20%") && lines_jew[0].contains("Enhanced Damage"));
+}
+
+#[test]
+fn test_set_item_piece_bonuses_and_group_semantics() {
+    // Civerb's Cudgel (`gsc `): id 2, set_id "Civerb's Vestments"
+    let mut cudgel = Item::empty_for_tests();
+    cudgel.code = "gsc ".to_string();
+    cudgel.quality = Some(ItemQuality::Set);
+    cudgel.unique_id = Some(2);
+    cudgel.is_identified = true;
+
+    // Piece set bonus: e.g. +100 to Attack Rating (stat 19) at 2 pieces
+    cudgel.set_attributes.push(vec![ItemProperty::new(
+        19,
+        "item_tohit".to_string(),
+        0,
+        100,
+        100,
+        ItemBitRange::default(),
+    )]);
+
+    // 1. Single piece equipped (active_set_count = 1)
+    let f1_en = format_item(&cudgel, "en", 1, 99);
+    let f1_ko = format_item(&cudgel, "ko", 1, 99);
+
+    assert_eq!(f1_en.set_name, Some("Civerb's Vestments".to_string()));
+    assert_eq!(f1_ko.set_name, Some("시버브 베스트먼트".to_string()));
+
+    assert_eq!(f1_en.set_pieces.len(), 3);
+    assert!(f1_en.set_pieces.contains(&"Civerb's Cudgel".to_string()));
+    assert!(f1_en.set_pieces.contains(&"Civerb's Icon".to_string()));
+    assert!(f1_en.set_pieces.contains(&"Civerb's Ward".to_string()));
+
+    assert_eq!(f1_ko.set_pieces.len(), 3);
+    assert!(f1_ko.set_pieces.contains(&"시버브의 커질".to_string()));
+    assert!(f1_ko.set_pieces.contains(&"시버브의 아이콘".to_string()));
+    assert!(f1_ko.set_pieces.contains(&"시버브의 워드".to_string()));
+
+    // Piece bonus: 1 bonus requiring 2 items, inactive
+    assert_eq!(f1_en.piece_set_bonuses.len(), 1);
+    assert_eq!(f1_en.piece_set_bonuses[0].required_count, 2);
+    assert!(!f1_en.piece_set_bonuses[0].active);
+    assert!(f1_en.piece_set_bonuses[0].lines[0].contains("100") && f1_en.piece_set_bonuses[0].lines[0].contains("Attack Rating"));
+
+    // Group bonuses: partial (2) and full (3), both inactive
+    assert_eq!(f1_en.set_bonuses.len(), 2);
+    assert_eq!(f1_en.set_bonuses[0].required_count, 2);
+    assert!(!f1_en.set_bonuses[0].active);
+    assert_eq!(f1_en.set_bonuses[1].required_count, 3);
+    assert!(!f1_en.set_bonuses[1].active);
+
+    // 2. Two pieces equipped (active_set_count = 2)
+    let f2_en = format_item(&cudgel, "en", 2, 99);
+    assert!(f2_en.piece_set_bonuses[0].active);
+    assert!(f2_en.set_bonuses[0].active); // partial active
+    assert!(!f2_en.set_bonuses[1].active); // full inactive
+
+    // 3. Full set equipped (active_set_count = 3)
+    let f3_en = format_item(&cudgel, "en", 3, 99);
+    assert!(f3_en.piece_set_bonuses[0].active);
+    assert!(f3_en.set_bonuses[0].active); // partial active
+    assert!(f3_en.set_bonuses[1].active); // full active
 }

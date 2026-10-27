@@ -4,7 +4,6 @@ use crate::data::localization::LOCALIZATIONS;
 // use crate::data::monsters::MONSTER_TYPES;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
 use crate::data::set_items::SET_ITEMS;
-use crate::data::sets::SET_BONUSES;
 use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
@@ -27,7 +26,10 @@ pub struct FormattedItem {
     pub quality_name: String,
     pub base_attributes: Vec<String>,
     pub properties: Vec<String>,
+    pub piece_set_bonuses: Vec<FormattedSetBonus>,
     pub set_bonuses: Vec<FormattedSetBonus>,
+    pub set_name: Option<String>,
+    pub set_pieces: Vec<String>,
     pub warnings: Vec<String>,
     pub detailed_warnings: Vec<crate::engine::validation::ValidationWarning>,
 }
@@ -126,10 +128,59 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
     };
 
     let mut set_bonuses = Vec::new();
+    let mut piece_set_bonuses = Vec::new();
+    let mut set_name = None;
+    let mut set_pieces = Vec::new();
+
     if item.quality == Some(ItemQuality::Set) && item.is_identified {
         if let Some(id) = item.unique_id {
             if let Some(set_item) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
-                if let Some(group) = SET_BONUSES.iter().find(|g| g.index == set_item.set_id) {
+                // Localized Set Name
+                set_name = Some(get_loc(set_item.set_id, language).to_string());
+
+                // Set pieces list
+                set_pieces = crate::data::sets::get_set_items(set_item.set_id)
+                    .map(|s| get_loc(s.index, language).to_string())
+                    .collect();
+
+                // 1. Piece-specific Set Attributes (item.set_attributes - Green)
+                let flags = item
+                    .body
+                    .d2r_v3_auxiliary
+                    .as_ref()
+                    .and_then(|a| a.set_property_flags);
+
+                if let Some(flags) = flags {
+                    let mut packed = 0;
+                    for (ordinal, present) in flags.into_iter().enumerate() {
+                        if present {
+                            if packed < item.set_attributes.len() {
+                                let list = &item.set_attributes[packed];
+                                let lines = format_properties_list(list, char_level, language);
+                                let required_count = (ordinal + 2) as u8;
+                                piece_set_bonuses.push(FormattedSetBonus {
+                                    active: active_set_count >= required_count as usize,
+                                    required_count,
+                                    lines,
+                                });
+                            }
+                            packed += 1;
+                        }
+                    }
+                } else {
+                    for (idx, list) in item.set_attributes.iter().enumerate() {
+                        let lines = format_properties_list(list, char_level, language);
+                        let required_count = (idx + 2) as u8;
+                        piece_set_bonuses.push(FormattedSetBonus {
+                            active: active_set_count >= required_count as usize,
+                            required_count,
+                            lines,
+                        });
+                    }
+                }
+
+                // 2. Set Group Bonuses (Gold)
+                if let Some(group) = crate::data::sets::get_set_group(set_item.set_id) {
                     let mut counts: Vec<u8> =
                         group.partial.iter().map(|p| p.required_count).collect();
                     counts.sort();
@@ -140,7 +191,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
                         for bonus in group.partial.iter().filter(|p| p.required_count == count) {
                             let prop = ItemProperty::new(
                                 bonus.stat.stat_id,
-                                String::new(), // Not used by formatter?
+                                String::new(),
                                 bonus.stat.param,
                                 bonus.stat.min,
                                 bonus.stat.min,
@@ -156,10 +207,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
                     }
 
                     if !group.full.is_empty() {
-                        let total_pieces = SET_ITEMS
-                            .iter()
-                            .filter(|s| s.set_id == set_item.set_id)
-                            .count();
+                        let total_pieces = crate::data::sets::get_set_total_pieces(set_item.set_id);
                         let mut lines = Vec::new();
                         for stat in group.full {
                             let prop = ItemProperty::new(
@@ -232,7 +280,10 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         quality_name: quality_display_name(item.quality, language),
         base_attributes,
         properties,
+        piece_set_bonuses,
         set_bonuses,
+        set_name,
+        set_pieces,
         warnings,
         detailed_warnings,
     }
