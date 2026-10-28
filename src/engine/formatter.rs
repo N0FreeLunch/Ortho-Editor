@@ -697,9 +697,9 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
 
     let loc_str = get_loc(key_str, language).trim();
     
-    // Slice 1: DescStr2 handling (e.g. Based on Character Level)
-    let phrase2 = if let Some(d2) = cost.descstr2 {
-        Some(get_loc(d2, language))
+    // Slice 1: DescStr2 handling (e.g. Based on Character Level with per-level rate)
+    let mut phrase2 = if let Some(d2) = cost.descstr2 {
+        Some(get_loc(d2, language).to_string())
     } else {
         None
     };
@@ -710,7 +710,28 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
         if op != 0 {
             match op {
                 2 | 4 | 5 => {
-                    display_value = (prop.value * char_level as i32) >> cost.op_param.unwrap_or(0);
+                    let shift = cost.op_param.unwrap_or(0);
+                    display_value = (prop.value * char_level as i32) >> shift;
+
+                    // Append precise decimal rate per level, e.g. (+1.5 per Character Level) or (+1.5 캐릭터 레벨에 비례해서)
+                    if shift > 0 {
+                        let factor = prop.value as f64 / (1 << shift) as f64;
+                        let factor_str = if factor.fract() == 0.0 {
+                            format!("{:+}", factor as i64)
+                        } else {
+                            // Format up to 3 decimal places without trailing zeros
+                            let s = format!("{:+.*}", 3, factor);
+                            s.trim_end_matches('0').trim_end_matches('.').to_string()
+                        };
+
+                        if let Some(ref orig_phrase) = phrase2 {
+                            if language == "ko" {
+                                phrase2 = Some(format!("({} {})", factor_str, orig_phrase.trim_matches(|c| c == '(' || c == ')')));
+                            } else {
+                                phrase2 = Some(format!("({} {})", factor_str, orig_phrase.trim_matches(|c| c == '(' || c == ')')));
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1519,19 +1540,17 @@ mod tests {
     #[test]
     fn test_per_level_text() {
         let prop = make_prop(216, 0, 12);
-        // 12 * 80 / 8 = 120
+        // 12 * 80 / 8 = 120, rate = +1.5 per level
         let formatted = format_property(&prop, 80, "en");
-        assert_eq!(formatted, "+120 to Life (Based on Character Level)");
+        assert_eq!(formatted, "+120 to Life (+1.5 Based on Character Level)");
     }
 
     #[test]
     fn test_per_level_ko_text() {
         let prop = make_prop(216, 0, 12);
-        // 12 * 80 / 8 = 120
+        // 12 * 80 / 8 = 120, rate = +1.5 per level
         let formatted = format_property(&prop, 80, "ko");
-        // `ModStr1u in ko is "생명력" (Wait, I should check this)`
-        // `Let's assume it's "+120 생명력 (캐릭터 레벨에 비례해서)"`
-        assert_eq!(formatted, "+120 라이프 (캐릭터 레벨에 비례해서)");
+        assert_eq!(formatted, "+120 라이프 (+1.5 캐릭터 레벨에 비례해서)");
     }
 
     #[test]

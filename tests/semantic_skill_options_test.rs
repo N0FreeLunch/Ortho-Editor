@@ -684,4 +684,54 @@ fn test_dual_mode_stat_fusion_and_poison_formula() {
     assert_eq!(vg_discrete_en.len(), 3);
 }
 
+#[test]
+fn test_per_level_scaling_and_charged_proc_skill_semantics() {
+    use d2r_core::domain::stats::entity::ItemProperty;
+    use d2r_core::engine::formatter::format_property;
+
+    let make_prop_with_param = |stat_id: u32, name: &str, param: u32, val: i32| {
+        ItemProperty::new(stat_id, name.to_string(), param, val, val, ItemBitRange::default())
+    };
+
+    // 1. Per-Level Stat Scaling with Factor (Stat 216 item_hp_perlevel, raw=12, char_level=80)
+    // 12 * 80 / 8 = 120, rate = +1.5 per level
+    let hp_per_lvl = make_prop_with_param(216, "item_hp_perlevel", 0, 12);
+
+    assert_eq!(
+        format_property(&hp_per_lvl, 80, "en"),
+        "+120 to Life (+1.5 Based on Character Level)"
+    );
+    assert_eq!(
+        format_property(&hp_per_lvl, 80, "ko"),
+        "+120 라이프 (+1.5 캐릭터 레벨에 비례해서)"
+    );
+
+    // 2. Chance to Cast on Attack (Stat 195: descfunc 15)
+    // Left Hand Swing (skill 5), Level 3, 25% chance
+    let proc_prop = make_prop_with_param(195, "item_skillonattack", (5 << 6) | 3, 25);
+
+    assert_eq!(
+        format_property(&proc_prop, 99, "en"),
+        "25% Chance to cast level 3 Left Hand Swing on attack"
+    );
+    assert_eq!(
+        format_property(&proc_prop, 99, "ko"),
+        "25% 기회로 레벨 3 왼손 휘두르기  시전 (공격시)"
+    );
+
+    // 3. Charged Skill (Stat 204: descfunc 24)
+    // Fire Arrow (skill 7), Level 2, 5/20 charges
+    let charge_prop = make_prop_with_param(204, "item_charged_skill", (7 << 6) | 2, (20 << 8) | 5);
+
+    assert_eq!(
+        format_property(&charge_prop, 99, "en"),
+        "Level 2 Fire Arrow (5/20 Charges)"
+    );
+    assert_eq!(
+        format_property(&charge_prop, 99, "ko"),
+        "레벨 2 파이어 애로우  (5/20 회)"
+    );
+}
+
+
 
