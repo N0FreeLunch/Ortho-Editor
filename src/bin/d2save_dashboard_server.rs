@@ -514,6 +514,8 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
         "properties": properties(&item.properties),
         "formatted_lines_ko": ko.properties,
         "formatted_lines_en": en.properties,
+        "formatted_lines_discrete_ko": ko.discrete_properties,
+        "formatted_lines_discrete_en": en.discrete_properties,
         "formatted_base_ko": ko.base_attributes,
         "formatted_base_en": en.base_attributes,
         "set_bonuses_ko": format_set_bonuses(&ko.set_bonuses),

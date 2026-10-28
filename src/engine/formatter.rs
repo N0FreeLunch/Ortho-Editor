@@ -33,6 +33,7 @@ pub struct FormattedItem {
     pub quality_name: String,
     pub base_attributes: Vec<String>,
     pub properties: Vec<String>,
+    pub discrete_properties: Vec<String>,
     pub piece_set_bonuses: Vec<FormattedSetBonus>,
     pub set_bonuses: Vec<FormattedSetBonus>,
     pub set_name: Option<String>,
@@ -42,6 +43,16 @@ pub struct FormattedItem {
 }
 
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
+    format_item_with_mode(item, language, active_set_count, char_level, StatDisplayMode::Fused)
+}
+
+pub fn format_item_with_mode(
+    item: &Item,
+    language: &str,
+    active_set_count: usize,
+    char_level: u8,
+    mode: StatDisplayMode,
+) -> FormattedItem {
     let mut base_attributes = Vec::new();
     let mut defense_advisory = None;
     let mut durability_advisory = None;
@@ -124,12 +135,21 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         Ok(projected) => (projected, None),
         Err(reason) => (None, Some(reason)),
     };
-    let properties = if let Some(projected) = projected {
-        format_properties_list(&projected, char_level, language)
+    let properties = if let Some(projected) = projected.as_ref() {
+        format_properties_list_with_mode(projected, char_level, language, mode)
     } else {
-        let mut lines = format_properties_list(&item.properties, char_level, language);
+        let mut lines = format_properties_list_with_mode(&item.properties, char_level, language, mode);
         if item.is_runeword {
-            lines.extend(format_properties_list(&item.runeword_attributes, char_level, language));
+            lines.extend(format_properties_list_with_mode(&item.runeword_attributes, char_level, language, mode));
+        }
+        lines
+    };
+    let discrete_properties = if let Some(projected) = projected.as_ref() {
+        format_properties_list_with_mode(projected, char_level, language, StatDisplayMode::Discrete)
+    } else {
+        let mut lines = format_properties_list_with_mode(&item.properties, char_level, language, StatDisplayMode::Discrete);
+        if item.is_runeword {
+            lines.extend(format_properties_list_with_mode(&item.runeword_attributes, char_level, language, StatDisplayMode::Discrete));
         }
         lines
     };
@@ -163,7 +183,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
                         if present {
                             if packed < item.set_attributes.len() {
                                 let list = &item.set_attributes[packed];
-                                let lines = format_properties_list(list, char_level, language);
+                                let lines = format_properties_list_with_mode(list, char_level, language, mode);
                                 let required_count = (ordinal + 2) as u8;
                                 piece_set_bonuses.push(FormattedSetBonus {
                                     active: active_set_count >= required_count as usize,
@@ -287,6 +307,7 @@ pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_le
         quality_name: quality_display_name(item.quality, language),
         base_attributes,
         properties,
+        discrete_properties,
         piece_set_bonuses,
         set_bonuses,
         set_name,
