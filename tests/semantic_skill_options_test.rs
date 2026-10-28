@@ -556,3 +556,66 @@ fn test_set_item_piece_bonuses_and_group_semantics() {
     assert!(f3_en.set_bonuses[0].active); // partial active
     assert!(f3_en.set_bonuses[1].active); // full active
 }
+
+#[test]
+fn test_runeword_base_qualification_and_sequence_validation() {
+    use d2r_core::engine::validation::{check_runeword_legitimacy_detailed, WarningConfidenceTier};
+    use d2r_core::item::{Item, ItemQuality};
+
+    // Helper to build a socketed rune item
+    fn rune_item(code: &str) -> Item {
+        let mut r = Item::empty_for_tests();
+        r.code = format!("{:<4}", code);
+        r
+    }
+
+    // 1. Valid Enigma (Jah + Ith + Ber in Archon Plate)
+    // Runeword id 32 = Enigma (r31, r06, r30), item_types: ["tors"]
+    let mut enigma = Item::empty_for_tests();
+    enigma.is_runeword = true;
+    enigma.runeword_id = Some(32);
+    enigma.code = "utp ".to_string(); // Archon Plate (code: "utp", item_type: "tors")
+    enigma.quality = Some(ItemQuality::Normal);
+    enigma.sockets = Some(3);
+    enigma.socketed_items = vec![rune_item("r31"), rune_item("r06"), rune_item("r30")];
+
+    let warnings = check_runeword_legitimacy_detailed(&enigma);
+    assert!(warnings.is_empty(), "Valid Enigma should have no warnings: {:?}", warnings);
+
+    // 2. Base Quality Violation: Magic quality cannot form a runeword
+    let mut magic_enigma = enigma.clone();
+    magic_enigma.quality = Some(ItemQuality::Magic);
+    let warnings = check_runeword_legitimacy_detailed(&magic_enigma);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].category, "runeword_base_quality");
+    assert_eq!(warnings[0].tier, WarningConfidenceTier::SettledContract);
+    assert!(warnings[0].message.contains("cannot be made in an item of quality 'Magic'"));
+
+    // 3. Socket Count Mismatch: 4 sockets instead of 3
+    let mut four_sock = enigma.clone();
+    four_sock.sockets = Some(4);
+    let warnings = check_runeword_legitimacy_detailed(&four_sock);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].category, "runeword_socket_count");
+    assert_eq!(warnings[0].tier, WarningConfidenceTier::SettledContract);
+    assert!(warnings[0].message.contains("requires 3 sockets, but item has 4"));
+
+    // 4. Ineligible Item Type: Hand Axe (axe/weap) cannot form Enigma (tors)
+    let mut axe_enigma = enigma.clone();
+    axe_enigma.code = "hax ".to_string();
+    let warnings = check_runeword_legitimacy_detailed(&axe_enigma);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].category, "runeword_item_type");
+    assert_eq!(warnings[0].tier, WarningConfidenceTier::SettledContract);
+    assert!(warnings[0].message.contains("not eligible for item type 'hax'"));
+
+    // 5. Rune Sequence Violation: Jah + Ber + Ith (r31, r30, r06)
+    let mut wrong_order = enigma.clone();
+    wrong_order.socketed_items = vec![rune_item("r31"), rune_item("r30"), rune_item("r06")];
+    let warnings = check_runeword_legitimacy_detailed(&wrong_order);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].category, "runeword_rune_sequence");
+    assert_eq!(warnings[0].tier, WarningConfidenceTier::SettledContract);
+    assert!(warnings[0].message.contains("incorrect rune sequence: expected 'r06' at socket position 2, found 'r30'"));
+}
+

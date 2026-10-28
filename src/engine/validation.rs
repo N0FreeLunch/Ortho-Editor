@@ -360,7 +360,12 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
         res.detailed_warnings.extend(staffmod_warnings);
 
         res.warnings.extend(check_affix_group_legitimacy(item));
-        res.warnings.extend(check_runeword_legitimacy(item));
+
+        let rw_warnings = check_runeword_legitimacy_detailed(item);
+        for w in &rw_warnings {
+            res.warnings.push(w.message.clone());
+        }
+        res.detailed_warnings.extend(rw_warnings);
         
         let base_stat_warnings = check_base_stat_legitimacy_detailed(item);
         for w in &base_stat_warnings {
@@ -730,6 +735,13 @@ pub fn check_base_stat_legitimacy(item: &Item) -> Vec<String> {
         .collect()
 }
 pub fn check_runeword_legitimacy(item: &Item) -> Vec<String> {
+    check_runeword_legitimacy_detailed(item)
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
+}
+
+pub fn check_runeword_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
 
     if !item.is_runeword {
@@ -742,47 +754,87 @@ pub fn check_runeword_legitimacy(item: &Item) -> Vec<String> {
     };
 
     let rw_name = runeword_display_name(rw);
+
+    // 1. Base Item Quality: Runewords can ONLY be made in Normal or Superior items (Low/Normal/High)
+    if let Some(quality) = item.quality {
+        match quality {
+            ItemQuality::Normal | ItemQuality::Low | ItemQuality::High => {}
+            _ => {
+                warnings.push(ValidationWarning::new(
+                    format!(
+                        "Runeword '{}' cannot be made in an item of quality '{:?}'",
+                        rw_name, quality
+                    ),
+                    WarningConfidenceTier::SettledContract,
+                    "runeword_base_quality",
+                ));
+            }
+        }
+    }
+
     let expected_item_types = runeword_expected_item_types(rw);
 
-    // 1. Type Eligibility
+    // 2. Type Eligibility
     let item_types = get_all_item_types(&item.code);
     let is_eligible = expected_item_types
         .iter()
         .any(|&item_type| item_types.contains(&item_type));
     if !is_eligible {
-        warnings.push(format!(
-            "Runeword '{}' is not eligible for item type '{}'",
-            rw_name,
-            item.code.trim()
+        warnings.push(ValidationWarning::new(
+            format!(
+                "Runeword '{}' is not eligible for item type '{}'",
+                rw_name,
+                item.code.trim()
+            ),
+            WarningConfidenceTier::SettledContract,
+            "runeword_item_type",
         ));
     }
 
     let expected_runes = runeword_expected_runes(rw);
 
-    // 2. Socket Count
+    // 3. Socket Count
     if let Some(sockets) = item.sockets {
         if !expected_runes.is_empty() && sockets as usize != expected_runes.len() {
-            warnings.push(format!(
-                "Runeword '{}' requires {} sockets, but item has {}",
-                rw_name,
-                expected_runes.len(),
-                sockets
+            warnings.push(ValidationWarning::new(
+                format!(
+                    "Runeword '{}' requires {} sockets, but item has {}",
+                    rw_name,
+                    expected_runes.len(),
+                    sockets
+                ),
+                WarningConfidenceTier::SettledContract,
+                "runeword_socket_count",
             ));
         }
     }
 
-    // 3. Rune Sequence
+    // 4. Rune Sequence
     if !expected_runes.is_empty() && item.socketed_items.len() == expected_runes.len() {
         for (i, socketed) in item.socketed_items.iter().enumerate() {
             if socketed.code.trim() != expected_runes[i] {
-                warnings.push(format!("Runeword '{}' has incorrect rune sequence", rw_name));
+                warnings.push(ValidationWarning::new(
+                    format!(
+                        "Runeword '{}' has incorrect rune sequence: expected '{}' at socket position {}, found '{}'",
+                        rw_name,
+                        expected_runes[i],
+                        i + 1,
+                        socketed.code.trim()
+                    ),
+                    WarningConfidenceTier::SettledContract,
+                    "runeword_rune_sequence",
+                ));
                 break;
             }
         }
     } else if !expected_runes.is_empty() && !item.socketed_items.is_empty() {
-        warnings.push(format!(
-            "Runeword '{}' has incorrect number of socketed items",
-            rw_name
+        warnings.push(ValidationWarning::new(
+            format!(
+                "Runeword '{}' has incorrect number of socketed items",
+                rw_name
+            ),
+            WarningConfidenceTier::SettledContract,
+            "runeword_socketed_items",
         ));
     }
 
