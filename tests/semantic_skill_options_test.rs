@@ -7,7 +7,9 @@ use d2r_core::domain::stats::semantics::{
     skill_tab_clean_title, PropertySemantics,
 };
 use d2r_core::domain::stats::ItemProperty;
-use d2r_core::engine::formatter::{format_item, format_socketed_child};
+use d2r_core::engine::formatter::{
+    format_item, format_properties_list_with_mode, format_socketed_child, StatDisplayMode,
+};
 use d2r_core::engine::socket_effects::resolve_socketed_child_properties;
 use d2r_core::item::{Item, ItemQuality};
 
@@ -618,4 +620,68 @@ fn test_runeword_base_qualification_and_sequence_validation() {
     assert_eq!(warnings[0].tier, WarningConfidenceTier::SettledContract);
     assert!(warnings[0].message.contains("incorrect rune sequence: expected 'r06' at socket position 2, found 'r30'"));
 }
+
+#[test]
+fn test_dual_mode_stat_fusion_and_poison_formula() {
+    let make_prop = |stat_id: u32, name: &str, val: i32| {
+        ItemProperty::new(stat_id, name.to_string(), 0, val, val, ItemBitRange::default())
+    };
+
+    // 1. Test All Resistances Fusion (stats 39, 41, 43, 45)
+    let res_props = vec![
+        make_prop(39, "fireresist", 15),
+        make_prop(41, "lightresist", 15),
+        make_prop(43, "coldresist", 15),
+        make_prop(45, "poisonresist", 15),
+    ];
+
+    let fused_res_en = format_properties_list_with_mode(&res_props, 1, "en", StatDisplayMode::Fused);
+    let fused_res_ko = format_properties_list_with_mode(&res_props, 1, "ko", StatDisplayMode::Fused);
+    assert_eq!(fused_res_en, vec!["All Resistances +15"]);
+    assert_eq!(fused_res_ko, vec!["모든 저항력 +15"]);
+
+    let discrete_res_en = format_properties_list_with_mode(&res_props, 1, "en", StatDisplayMode::Discrete);
+    assert_eq!(discrete_res_en.len(), 4);
+    assert!(discrete_res_en.iter().any(|s| s.contains("Fire Resist +15%")));
+    assert!(discrete_res_en.iter().any(|s| s.contains("Lightning Resist +15%")));
+    assert!(discrete_res_en.iter().any(|s| s.contains("Cold Resist +15%")));
+    assert!(discrete_res_en.iter().any(|s| s.contains("Poison Resist +15%")));
+
+    // 2. Test All Attributes Fusion (stats 0, 1, 2, 3)
+    let attr_props = vec![
+        make_prop(0, "strength", 5),
+        make_prop(1, "energy", 5),
+        make_prop(2, "dexterity", 5),
+        make_prop(3, "vitality", 5),
+    ];
+
+    let fused_attr_en = format_properties_list_with_mode(&attr_props, 1, "en", StatDisplayMode::Fused);
+    let fused_attr_ko = format_properties_list_with_mode(&attr_props, 1, "ko", StatDisplayMode::Fused);
+    assert_eq!(fused_attr_en, vec!["+5 to all Attributes"]);
+    assert_eq!(fused_attr_ko, vec!["+5 모든 능력치"]);
+
+    let discrete_attr_en = format_properties_list_with_mode(&attr_props, 1, "en", StatDisplayMode::Discrete);
+    assert_eq!(discrete_attr_en.len(), 4);
+    assert!(discrete_attr_en.iter().any(|s| s.contains("+5 to Strength")));
+    assert!(discrete_attr_en.iter().any(|s| s.contains("+5 to Energy")));
+    assert!(discrete_attr_en.iter().any(|s| s.contains("+5 to Dexterity")));
+    assert!(discrete_attr_en.iter().any(|s| s.contains("+5 to Vitality")));
+
+    // 3. Test Poison Damage In-Game Verification Formula
+    // Case A: Venom Grip (min=153, max=153, frames=100) -> 60 total over 4 seconds
+    let venom_grip_props = vec![
+        make_prop(57, "poisonmindam", 153),
+        make_prop(58, "poisonmaxdam", 153),
+        make_prop(59, "poisonlength", 100),
+    ];
+    let vg_fused_en = format_properties_list_with_mode(&venom_grip_props, 1, "en", StatDisplayMode::Fused);
+    let vg_fused_ko = format_properties_list_with_mode(&venom_grip_props, 1, "ko", StatDisplayMode::Fused);
+    assert_eq!(vg_fused_en, vec!["+59 poison damage over 4 seconds"]); // 153 * 100 / 256 = 59
+    assert_eq!(vg_fused_ko, vec!["+59 포이즌 데미지 (4 초 이상)"]);
+
+    // Case B: Discrete Mode maintains each raw component without collapsing
+    let vg_discrete_en = format_properties_list_with_mode(&venom_grip_props, 1, "en", StatDisplayMode::Discrete);
+    assert_eq!(vg_discrete_en.len(), 3);
+}
+
 

@@ -14,6 +14,13 @@ use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
 use crate::data::char_stats::CHAR_STATS;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatDisplayMode {
+    #[default]
+    Fused,
+    Discrete,
+}
+
 pub struct FormattedSetBonus {
     pub active: bool,
     pub required_count: u8,
@@ -297,8 +304,22 @@ pub fn format_socketed_child(child: &Item, parent: &Item, language: &str, char_l
 }
 
 pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: &str) -> Vec<String> {
+    format_properties_list_with_mode(props, char_level, language, StatDisplayMode::Fused)
+}
+
+pub fn format_properties_list_with_mode(
+    props: &[ItemProperty],
+    char_level: u8,
+    language: &str,
+    mode: StatDisplayMode,
+) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip_indices = std::collections::HashSet::new();
+
+    // If Fused mode is active, check and apply composite stat rules (e.g. res-all, all-stats, res-all-max)
+    if mode == StatDisplayMode::Fused {
+        apply_composite_rules(props, language, &mut out, &mut skip_indices);
+    }
 
     let mut i = 0;
     while i < props.len() {
@@ -324,7 +345,8 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         // Matching damage channels are one displayed modifier; retain every stored field.
-        if matches!(p.stat_id, 21 | 22)
+        if mode == StatDisplayMode::Fused
+            && matches!(p.stat_id, 21 | 22)
             && let Some(indices) = damage_companion_indices(props, i)
         {
             skip_indices.extend(indices);
@@ -334,7 +356,7 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         // 1. Enhanced Damage pairing (Stat 17 & 18)
-        if p.stat_id == 17 || p.stat_id == 18 {
+        if mode == StatDisplayMode::Fused && (p.stat_id == 17 || p.stat_id == 18) {
             let other_stat_id = if p.stat_id == 17 { 18 } else { 17 };
             if let Some((other_idx, other_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == other_stat_id && !skip_indices.contains(idx)) {
                 if p.value == other_p.value {
@@ -353,7 +375,7 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         // 2. Fire Damage pairing (Stat 48 & 49)
-        if p.stat_id == 48 {
+        if mode == StatDisplayMode::Fused && p.stat_id == 48 {
             if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 49 && !skip_indices.contains(idx)) {
                 skip_indices.insert(max_idx);
                 let min = p.value;
@@ -376,7 +398,7 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         // 3. Lightning Damage pairing (Stat 50 & 51)
-        if p.stat_id == 50 {
+        if mode == StatDisplayMode::Fused && p.stat_id == 50 {
             if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 51 && !skip_indices.contains(idx)) {
                 skip_indices.insert(max_idx);
                 let min = p.value;
@@ -399,7 +421,7 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         // 4. Magic Damage pairing (Stat 52 & 53)
-        if p.stat_id == 52 {
+        if mode == StatDisplayMode::Fused && p.stat_id == 52 {
             if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 53 && !skip_indices.contains(idx)) {
                 skip_indices.insert(max_idx);
                 let min = p.value;
@@ -422,7 +444,7 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
         }
 
         // 5. Cold Damage pairing (Stat 54 & 55 & 56)
-        if p.stat_id == 54 {
+        if mode == StatDisplayMode::Fused && p.stat_id == 54 {
             if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 55 && !skip_indices.contains(idx)) {
                 skip_indices.insert(max_idx);
                 let len_p = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 56 && !skip_indices.contains(idx));
@@ -460,8 +482,9 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
             }
         }
 
-        // Combine only a complete qualified poison rate/duration group.
-        if p.stat_id == 57
+        // Combine only a complete qualified poison rate/duration group when in Fused mode.
+        if mode == StatDisplayMode::Fused
+            && p.stat_id == 57
             && let Some(line) = format_poison_triplet(&props[i..], language)
         {
             out.push(line);
@@ -469,8 +492,10 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
             continue;
         }
 
-        // 6. Skip companion max stats if already consumed or orphan coldlength
-        if p.stat_id == 49 || p.stat_id == 51 || p.stat_id == 53 || p.stat_id == 55 || p.stat_id == 56 {
+        // 6. Skip companion max stats if already consumed or orphan coldlength in Fused mode
+        if mode == StatDisplayMode::Fused
+            && (p.stat_id == 49 || p.stat_id == 51 || p.stat_id == 53 || p.stat_id == 55 || p.stat_id == 56)
+        {
             i += 1;
             continue;
         }
@@ -482,6 +507,75 @@ pub fn format_properties_list(props: &[ItemProperty], char_level: u8, language: 
 
     out
 }
+
+fn apply_composite_rules(
+    props: &[ItemProperty],
+    language: &str,
+    out: &mut Vec<String>,
+    skip_indices: &mut std::collections::HashSet<usize>,
+) {
+    let rules = crate::data::properties::get_composite_rules();
+    for rule in rules {
+        // Check if all stat_ids in the rule are present with the same value and non-opaque
+        let mut matched_indices = Vec::with_capacity(rule.stat_ids.len());
+        let mut common_val: Option<i32> = None;
+        let mut all_match = true;
+
+        for &target_stat_id in rule.stat_ids {
+            let found = props.iter().enumerate().find(|(idx, p)| {
+                !skip_indices.contains(idx)
+                    && p.stat_id == target_stat_id
+                    && !p.is_opaque
+                    && p.opaque_bits.is_none()
+            });
+
+            if let Some((idx, p)) = found {
+                if let Some(val) = common_val {
+                    if p.value != val {
+                        all_match = false;
+                        break;
+                    }
+                } else {
+                    common_val = Some(p.value);
+                }
+                matched_indices.push(idx);
+            } else {
+                all_match = false;
+                break;
+            }
+        }
+
+        if all_match && matched_indices.len() == rule.stat_ids.len() {
+            if let Some(val) = common_val {
+                for &idx in &matched_indices {
+                    skip_indices.insert(idx);
+                }
+
+                let template = get_loc(rule.loc_key, language);
+                let formatted = if template.contains('%') {
+                    format_template(template, &[val.to_string()])
+                } else if rule.code == "all-stats" {
+                    if language == "ko" {
+                        format!("+{} 모든 능력치", val)
+                    } else {
+                        format!("+{} to all Attributes", val)
+                    }
+                } else if rule.code == "res-all-max" {
+                    if language == "ko" {
+                        format!("모든 최대 저항력 +{}%", val)
+                    } else {
+                        format!("+{}% to All Maximum Resistances", val)
+                    }
+                } else {
+                    format!("{} +{}", template, val)
+                };
+
+                out.push(formatted);
+            }
+        }
+    }
+}
+
 
 fn damage_companion_indices(props: &[ItemProperty], primary: usize) -> Option<Vec<usize>> {
     use crate::domain::stats::entity::StatMaturityTier;
