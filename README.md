@@ -47,15 +47,17 @@ A comprehensive suite for managing items and storage.
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│  Cuirass [xrs] · Runeword · Sockets 3/3                                │
-│  Grid: (5, 0) · Size: 2×3                                              │
+│  Cuirass [xrs] · Runeword (Authority) · Sockets 3/3                    │
+│  Grid: (2, 0) · Size: 2×3 · Defense 202 · Durability 50/50             │
 ├────────────────────────────────────────────────────────────────────────┤
 │  [Formatted Properties]                                                │
-│  +2 to Class Skills                                                    │
+│  +60% Enhanced Damage                                                  │
+│  +2 to Warlock Skills                                                  │
+│  10% Chance to cast level 15 Miasma Chain on striking                  │
+│  2% Chance to cast level 10 Psychic Ward when struck                   │
+│  Requirements -15%                                                     │
 │  +20% Faster Hit Recovery                                              │
 │  Fire Resist +30%                                                      │
-│  Requirements -15%                                                     │
-│  +38% Enhanced Defense                                                 │
 │                                                                        │
 │  [Socketed Children]                                                   │
 │  ├─ Socket 0: Hel Rune                                                 │
@@ -63,11 +65,13 @@ A comprehensive suite for managing items and storage.
 │  └─ Socket 2: Ral Rune                                                 │
 ├────────────────────────────────────────────────────────────────────────┤
 │  [Bitstream & Property Forensics]                                      │
-│   ID   Stat Name              Param    Raw   Val   Bit Range           │
-│   99   item_fastergethitrate      0     20    20   traceable           │
-│   39   fireresist                 0     30    30   traceable           │
-│   91   item_req_percent           0    -15   -15   traceable           │
-│   16   item_armor_percent         0     38    38   traceable           │
+│    ID   Stat Name                 Param   Raw   Val                    │
+│    17   item_maxdamage_percent        0    60    60                    │
+│    18   item_mindamage_percent        0    60    60                    │
+│    83   item_addclassskills           7     2     2                    │
+│   198   item_skillonhit           25551    10    10                    │
+│   201   item_skillongethit        24778     2     2                    │
+│   Source bits 7744..8304 · properties complete · 0-diff round-trip     │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
