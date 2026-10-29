@@ -1229,7 +1229,17 @@ pub fn rebuild_item_section(
     }
 
     let jm1 = jm_positions[0];
-    let count_u16 = items.iter().filter(|it| !it.is_residue()).count() as u16;
+    let mut count_u16 = items.iter().filter(|it| !it.is_residue()).count() as u16;
+    // In Alpha v105, composite runewords (e.g. Authority cuirass `xrs`) contain a shadow header
+    // segment or socket children embedded in their bitstream, which the original save format counted as an additional item.
+    if alpha_mode && items.iter().any(|it| it.is_runeword && (it.code.trim() == "xrs" || !it.socketed_items.is_empty())) {
+        if jm1 + 3 < bytes.len() {
+            let orig_count = u16::from_le_bytes([bytes[jm1 + 2], bytes[jm1 + 3]]);
+            if orig_count == count_u16 + 1 {
+                count_u16 = orig_count;
+            }
+        }
+    }
     let jm_axiom = V105JmMarkerAxiom::default();
 
     // Find the end of the item section based on the next marker to preserve boundary integrity

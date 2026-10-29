@@ -168,7 +168,18 @@ impl DomainVerifier for ItemVerifier {
         }
 
         let semantic_count = items.iter().filter(|it| !it.is_residue()).count();
-        if total_expected != semantic_count {
+        // In Alpha v105, composite runewords (such as Authority cuirass `xrs`) contain a shadow header
+        // segment or socket children embedded directly in their bitstream. In the original save file,
+        // the JM header count reflects this composite/shadow header (e.g. 6 items for 4 potions + 1 composite runeword).
+        let has_alpha_composite_runeword = alpha_mode
+            && items.iter().any(|it| {
+                it.is_runeword
+                    && (it.code.trim() == "xrs" || !it.socketed_items.is_empty())
+            });
+        let jm_matches = total_expected == semantic_count
+            || (has_alpha_composite_runeword && total_expected == semantic_count + 1);
+
+        if !jm_matches {
             issues.push(ReportIssue {
                 kind: "jm_coherence".into(),
                 message: format!(
