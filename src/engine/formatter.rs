@@ -1015,6 +1015,10 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
     let f = |base_fallback: String| -> String {
         if loc_str.contains('%') {
             format_with_phrase2(format_template(loc_str, &[display_value.to_string()]))
+        } else if descfunc == 19 && (key_str == "ModStre9s" || key_str == "ModStre9v") {
+            // descfunc 19 with ModStre9s ("Indestructible" / "(파괴안됨)") or ModStre9v ("Replenishes quantity" / "(자동수량회복)")
+            // outputs the fixed phrase without numeric value prefix.
+            format_with_phrase2(loc_str.to_string())
         } else {
             format_with_phrase2(base_fallback)
         }
@@ -1052,7 +1056,25 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
         5 => f(format!("{} {}%", loc_str, display_value)),
         6 => f(format!("{}% {}", signed_value, loc_str)),
         7 => f(format!("{}% {}", display_value, loc_str)),
-        11 => f(format!("{} {}", display_value, loc_str)),
+        11 => {
+            // descfunc 11 is used for durability replenishment (e.g. rep-dur, stat 252).
+            // In D2 engine, value represents the rate: seconds = 100 / value.
+            // If value < 100, format using ModStre9u ("Repairs %d durability in %d seconds" / "내구력 %d 회복 (매 %d 초당)")
+            // with durability amount = 1 and calculated seconds.
+            // If value >= 100, format using ModStre9t ("Repairs %d durability per second" / "내구력 %d 회복 (매 초당)")
+            // with durability rate per second = value / 100.
+            if display_value > 0 && display_value < 100 {
+                let seconds = 100 / display_value;
+                let template = get_loc("ModStre9u", language);
+                format_template(template, &["1".to_string(), seconds.to_string()])
+            } else if display_value >= 100 {
+                let rate = display_value / 100;
+                let template = get_loc("ModStre9t", language);
+                format_template(template, &[rate.to_string()])
+            } else {
+                f(format!("{} {}", display_value, loc_str))
+            }
+        }
         12 => f(format!("{} {}", loc_str, signed_value)),
         13 => {
             let class_id = prop.param as usize;

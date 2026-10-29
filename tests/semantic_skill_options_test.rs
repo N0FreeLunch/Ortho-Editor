@@ -8,7 +8,7 @@ use d2r_core::domain::stats::semantics::{
 };
 use d2r_core::domain::stats::ItemProperty;
 use d2r_core::engine::formatter::{
-    format_item, format_properties_list_with_mode, format_socketed_child, StatDisplayMode,
+    format_item, format_properties_list_with_mode, format_property, format_socketed_child, StatDisplayMode,
 };
 use d2r_core::engine::socket_effects::resolve_socketed_child_properties;
 use d2r_core::item::{Item, ItemQuality};
@@ -962,6 +962,66 @@ fn test_requirements_calculation_with_reduction_and_ethereal() {
     // Required level should scale to socketed Ber rune's req_lvl (63)
     assert!(fmt_ber_en.base_attributes.contains(&"Required Level: 63".to_string()));
 }
+
+#[test]
+fn test_replenish_durability_and_quantity_fidelity() {
+    // 1. Sandstorm Trek with rep-dur (stat 252, value = 5 -> 100 / 5 = 20 seconds)
+    let prop_dur_5 = ItemProperty::new(
+        252,
+        "item_replenish_durability".to_string(),
+        0,
+        5,
+        5,
+        ItemBitRange::default(),
+    );
+    let s_en_5 = format_property(&prop_dur_5, 99, "en");
+    assert_eq!(s_en_5, "Repairs 1 durability in 20 seconds");
+    let s_ko_5 = format_property(&prop_dur_5, 99, "ko");
+    assert_eq!(s_ko_5, "내구력 1 회복 (매 20 초당)");
+
+    // 2. Item with rep-dur value = 3 -> 100 / 3 = 33 seconds
+    let prop_dur_3 = ItemProperty::new(
+        252,
+        "item_replenish_durability".to_string(),
+        0,
+        3,
+        3,
+        ItemBitRange::default(),
+    );
+    let s_en_3 = format_property(&prop_dur_3, 99, "en");
+    assert_eq!(s_en_3, "Repairs 1 durability in 33 seconds");
+    let s_ko_3 = format_property(&prop_dur_3, 99, "ko");
+    assert_eq!(s_ko_3, "내구력 1 회복 (매 33 초당)");
+
+    // 3. Item with rep-dur value = 100 -> 100 / 100 = 1 per second
+    let prop_dur_100 = ItemProperty::new(
+        252,
+        "item_replenish_durability".to_string(),
+        0,
+        100,
+        100,
+        ItemBitRange::default(),
+    );
+    let s_en_100 = format_property(&prop_dur_100, 99, "en");
+    assert_eq!(s_en_100, "Repairs 1 durability per second");
+    let s_ko_100 = format_property(&prop_dur_100, 99, "ko");
+    assert_eq!(s_ko_100, "내구력 1 회복 (매 초당)");
+
+    // 4. Titan's Revenge with rep-quant (stat 253, value = 3)
+    let prop_quant = ItemProperty::new(
+        253,
+        "item_replenish_quantity".to_string(),
+        0,
+        3,
+        3,
+        ItemBitRange::default(),
+    );
+    let s_quant_en = format_property(&prop_quant, 99, "en");
+    assert_eq!(s_quant_en, "Replenishes quantity");
+    let s_quant_ko = format_property(&prop_quant, 99, "ko");
+    assert_eq!(s_quant_ko, "(자동수량회복)");
+}
+
 
 
 
