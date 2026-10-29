@@ -252,15 +252,8 @@ impl AttributeSection {
     }
 }
 
-pub fn char_stat_save_add(stat_id: u32, is_alpha: bool) -> i32 {
-    if is_alpha {
-        0
-    } else {
-        match stat_id {
-            0 | 1 | 2 | 3 => 32, // Strength, Energy, Dexterity, Vitality usually have +32 in stat_costs
-            _ => stat_cost(stat_id).map(|c| c.save_add).unwrap_or(0),
-        }
-    }
+pub fn char_stat_save_add(_stat_id: u32, _is_alpha: bool) -> i32 {
+    0
 }
 
 pub fn char_stat_save_bits(stat_id: u32, is_alpha: bool) -> u32 {

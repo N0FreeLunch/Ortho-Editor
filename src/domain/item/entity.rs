@@ -1189,10 +1189,84 @@ impl Item {
         huffman: &crate::domain::item::serialization::HuffmanTree,
         alpha_mode: bool,
     ) -> io::Result<Vec<bool>> {
+        if !self.bits.is_empty() && self.socketed_items.is_empty() {
+            return Ok(self.bits.iter().map(|rb| rb.bit).collect());
+        }
+        if !alpha_mode && self.body.d2r_v3_auxiliary.is_some() {
+            return self.to_bits_d2r_v3(huffman);
+        }
         use crate::domain::item::serialization::BitEmitter;
         let mut emitter = BitEmitter::new();
         self.to_emitter(idx, &mut emitter, huffman, alpha_mode)?;
         Ok(emitter.into_bits())
+    }
+
+    pub fn to_bits_d2r_v3(
+        &self,
+        huffman: &crate::domain::item::serialization::HuffmanTree,
+    ) -> io::Result<Vec<bool>> {
+        if !self.bits.is_empty() && self.socketed_items.is_empty() {
+            return Ok(self.bits.iter().map(|rb| rb.bit).collect());
+        }
+
+        let template = crate::data::repository::legacy_item_template(self.code.trim());
+        let deferred_stored_host = self.header.is_runeword
+            || !self.socketed_items.is_empty()
+            || self
+                .body
+                .d2r_v3_auxiliary
+                .as_ref()
+                .is_some_and(|auxiliary| auxiliary.filled_sockets != 0);
+
+        let mut emitted = if self.is_compact {
+            self.to_bits_d2r_v3_compact(huffman)?
+        } else if self.header.is_socketed
+            && template.is_some_and(|template| template.is_weapon || template.is_armor)
+            && deferred_stored_host
+        {
+            self.to_bits_d2r_v3_socket_host(huffman)?
+        } else if template.is_some_and(|template| template.is_weapon) {
+            if deferred_stored_host {
+                self.to_bits_d2r_v3_weapon(huffman)?
+            } else {
+                self.to_bits_d2r_v3_stored_weapon(huffman)?
+            }
+        } else if template.is_some_and(|template| template.is_armor) {
+            if self.header.is_socketed {
+                self.to_bits_d2r_v3_empty_socket_armor(huffman)?
+            } else {
+                if let Ok(bits) = self.to_bits_d2r_v3_armor(huffman) {
+                    bits
+                } else {
+                    self.to_bits_d2r_v3_stored_armor(huffman)?
+                }
+            }
+        } else if matches!(self.code.trim(), "cm1" | "cm2" | "cm3" | "jew") {
+            self.to_bits_d2r_v3_accessory(huffman)?
+        } else if matches!(
+            self.code.trim(),
+            "key" | "tbk" | "ibk" | "box" | "vip" | "ice"
+        ) {
+            self.to_bits_d2r_v3_stored_misc(huffman)?
+        } else if matches!(self.code.trim(), "rin" | "amu") {
+            if deferred_stored_host {
+                self.to_bits_d2r_v3_jewelry(huffman)?
+            } else {
+                self.to_bits_d2r_v3_stored_jewelry(huffman)?
+            }
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("No explicit V3 inverse for item code {}", self.code),
+            ));
+        };
+
+        // Top-level D2R v3 items must always align to a byte boundary
+        while emitted.len() % 8 != 0 {
+            emitted.push(false);
+        }
+
+        Ok(emitted)
     }
 
     pub fn to_bits_with_phase_trace(
@@ -2530,6 +2604,13 @@ impl Item {
         let mut emitter = BitEmitter::new();
         for (i, item) in items.iter().enumerate() {
             emitter.extend_bits(item.gap_bits.iter().cloned())?;
+            let is_v3 = item.body.d2r_v3_auxiliary.is_some() || (!alpha_mode && item.is_compact);
+            if is_v3 {
+                let item_bits = item.to_bits_d2r_v3(huffman)?;
+                emitter.extend_bits(item_bits)?;
+                continue;
+            }
+
             if alpha_mode {
                 let item_bits = item.to_bits(i, huffman, alpha_mode)?;
                 emitter.extend_bits(item_bits)?;

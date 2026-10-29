@@ -379,6 +379,11 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
 
     let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
     // Synchronize header CHAR_LEVEL_OFFSET (byte 27)
+    let items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
+        stream.items
+    } else {
+        Item::read_player_items(bytes, huffman, version == 105)?
+    };
     let mut working = rebuild_status_and_player_items(
         bytes,
         Some(&attrs),
@@ -386,7 +391,7 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
         None,
         None,
         None,
-        &Item::read_player_items(bytes, huffman, version == 105)?,
+        &items,
         huffman,
     )?;
     working[CHAR_LEVEL_OFFSET] = new_level;
@@ -468,6 +473,13 @@ pub fn try_apply_character_mutation(
     }
 
     // Rebuild sections
+    let player_items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
+        stream.items
+    } else {
+        Item::read_player_items(bytes, huffman, is_alpha)
+            .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?
+    };
+
     let mut working = rebuild_status_and_player_items(
         bytes,
         Some(&attrs),
@@ -475,8 +487,7 @@ pub fn try_apply_character_mutation(
         None,
         None,
         None,
-        &Item::read_player_items(bytes, huffman, is_alpha)
-            .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?,
+        &player_items,
         huffman,
     ).map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to rebuild save: {}", e)))?;
 
@@ -582,6 +593,167 @@ pub fn apply_waypoint_mutation(
 ) -> io::Result<Vec<u8>> {
     try_apply_waypoint_mutation(bytes, contract)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))
+}
+
+/// Result of attempting to apply a skill mutation.
+/// Either the modified save bytes or a structured domain SkillContractError.
+pub fn try_apply_skill_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::SkillMutationContract,
+    huffman: &HuffmanTree,
+) -> Result<Vec<u8>, crate::domain::contracts::SkillContractError> {
+    let map = map_core_sections(bytes).map_err(|e| {
+        crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to map sections: {}", e))
+    })?;
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version == 105;
+    let char_class = if CHAR_CLASS_OFFSET < bytes.len() {
+        bytes[CHAR_CLASS_OFFSET]
+    } else {
+        0
+    };
+    let base_skill_id = crate::domain::contracts::class_base_skill_id(char_class).unwrap_or(0);
+
+    let mut attrs = AttributeSection::parse(bytes, map.gf_pos, map.if_pos).map_err(|e| {
+        crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to parse attributes: {}", e))
+    })?;
+
+    let mut skills_section = crate::domain::character::skills::parse_skill_section(
+        bytes,
+        map.if_pos,
+        map.jm_positions.first().copied(),
+    )
+    .map_err(|e| {
+        crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to parse skills: {}", e))
+    })?;
+
+    if contract.respec {
+        // Sum all allocated hard points across 30 class skills
+        let total_spent: u32 = skills_section
+            .iter_skills(base_skill_id)
+            .map(|sl| sl.level as u32)
+            .sum();
+
+        // Zero out 30 skills in SkillSection
+        for idx in 0..SKILL_SECTION_LEN {
+            skills_section.0[idx] = 0;
+        }
+
+        // Refund points to stat 5 (newskills)
+        let current_unspent = attrs.actual_value(5, is_alpha).unwrap_or(0).max(0) as u32;
+        let save_add = char_stat_save_add(5, is_alpha);
+        attrs.set_value(5, (current_unspent + total_spent) as i32, save_add);
+    }
+
+    // Apply explicit skill level assignments
+    for &(skill_id, level) in &contract.skills {
+        skills_section.set_level(base_skill_id, skill_id, level);
+    }
+
+    // Apply explicit skill points
+    if let Some(pts) = contract.skill_points {
+        let save_add = char_stat_save_add(5, is_alpha);
+        attrs.set_value(5, pts as i32, save_add);
+    }
+
+    let items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
+        stream.items
+    } else {
+        Item::read_player_items(bytes, huffman, is_alpha).map_err(|e| {
+            crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to read player items: {}", e))
+        })?
+    };
+
+    let mut rebuilt = rebuild_status_and_player_items(
+        bytes,
+        Some(&attrs),
+        Some(&skills_section),
+        None,
+        None,
+        None,
+        &items,
+        huffman,
+    ).map_err(|e| {
+        crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to rebuild save: {}", e))
+    })?;
+
+    finalize_save_bytes(&mut rebuilt, false).map_err(|e| {
+        crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to finalize checksum: {}", e))
+    })?;
+
+    Ok(rebuilt)
+}
+
+/// Result of attempting to apply a batch item operation.
+/// Either the modified save bytes or a structured domain ItemContractError.
+pub fn try_apply_batch_item_mutation(
+    bytes: &[u8],
+    contract: &crate::domain::contracts::BatchItemContract,
+    huffman: &HuffmanTree,
+) -> Result<Vec<u8>, crate::domain::contracts::ItemContractError> {
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let is_alpha = version == 105;
+
+    let mut items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
+        stream.items
+    } else {
+        Item::read_player_items(bytes, huffman, is_alpha)
+            .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?
+    };
+
+    for item in &mut items {
+        let mut editor = crate::domain::item::editor::ItemEditor::new(item);
+
+        // Repair All
+        if contract.repair_all {
+            if let (Some(cur), Some(max)) = (editor.item().current_durability, editor.item().max_durability) {
+                if cur < max {
+                    editor.set_durability(max, max);
+                }
+            }
+        }
+
+        // Identify All
+        if contract.identify_all && !editor.item().header.is_identified {
+            editor.set_identified(true);
+        }
+
+        // Socket All
+        if let Some(target_sockets) = contract.socket_all {
+            if editor.item().sockets.unwrap_or(0) == 0 {
+                let types = crate::engine::validation::get_all_item_types(&editor.item().code);
+                let ilvl = editor.item().header.level.unwrap_or(99);
+                let mut max_sock = 0;
+                for type_code in types {
+                    if let Some(rule) = crate::data::legitimacy::SOCKET_RULES.iter().find(|r| r.item_type == type_code) {
+                        max_sock = if ilvl >= 41 { rule.max_sock_high } else if ilvl >= 26 { rule.max_sock_mid } else { rule.max_sock_low };
+                        break;
+                    }
+                }
+                if max_sock > 0 {
+                    let count = target_sockets.min(max_sock);
+                    editor.set_sockets(count);
+                }
+            }
+        }
+    }
+
+    let mut rebuilt = rebuild_status_and_player_items(
+        bytes,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &items,
+        huffman,
+    ).map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to rebuild save: {}", e)))?;
+
+    finalize_save_bytes(&mut rebuilt, false).map_err(|e| {
+        crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to finalize checksum: {}", e))
+    })?;
+
+    Ok(rebuilt)
 }
 
 /// Result of attempting to apply an item mutation.

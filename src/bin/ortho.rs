@@ -7,13 +7,12 @@ use std::process::exit;
 
 use serde::Serialize;
 use d2r_core::domain::contracts::{
-    CharacterMutationContract, CharacterWireDto, ItemBoundaryValidator, ItemStatOpWireDto,
-    ItemWireDto, NumericOp, ValidationErrorResponse, WaypointMutationContract, WaypointWireDto,
+    BatchItemWireDto, CharacterWireDto, ItemStatOpWireDto, ItemWireDto, NumericOp,
+    SaveMutationDto, SaveMutationPipeline, SaveMutationValidator, SkillOpWireDto, SkillWireDto,
+    WaypointWireDto,
 };
-use d2r_core::item::{HuffmanTree, Item};
-use d2r_core::save::{
-    try_apply_character_mutation, try_apply_item_mutation, try_apply_waypoint_mutation, Save,
-};
+use d2r_core::item::HuffmanTree;
+use d2r_core::save::Save;
 
 #[derive(Debug, Serialize)]
 struct MutationCliReport {
@@ -30,7 +29,10 @@ struct MutationCliReport {
     stat_points: Option<u32>,
     gold_stash: Option<u32>,
     waypoints_unlocked: Option<bool>,
+    skills_mutated: Option<bool>,
+    respec_applied: Option<bool>,
     item_mutated: Option<bool>,
+    batch_operations: Option<Vec<String>>,
     new_checksum: Option<String>,
     error: Option<String>,
 }
@@ -40,6 +42,9 @@ fn print_usage() {
         r#"Ortho Editor CLI - Save and Item Mutation Engine
 
 Usage: ortho <save_file> [OPTIONS]
+
+Payload Option:
+    --payload <path|json>  Load entire SaveMutationDto from JSON file or literal JSON string
 
 Character Options:
     --name <string>        Set character name (2-15 chars)
@@ -57,7 +62,17 @@ Waypoint Options:
     --difficulty <0-2>     Select difficulty (0: Normal, 1: Nightmare, 2: Hell)
     --activate-wp <name>   Activate a specific waypoint by name
 
-Item Options:
+Skill & Respec Options:
+    --skill <id:op>        Set/shift skill level (e.g. 54:=20, 64:+1, 36:=0)
+    --skill-points <op>    Set/shift unspent skill points (stat 5)
+    --respec               Reset all 30 class skills to 0 and refund all spent points
+
+Batch Item Options:
+    --repair-all           Fully repair current durability on all items
+    --identify-all         Identify all unidentified items
+    --socket-all <count>   Add sockets to eligible unsocketed items (up to base/ilvl limit)
+
+Single Item Options:
     --item-index <uint>    Target item by 0-based index
     --item-code <string>   Target item by 3-letter code (e.g. amu, rin, mau)
     --item-slot <string>   Target item by slot (e.g. head, neck, torso)
@@ -95,13 +110,22 @@ fn main() {
 
     let mut input_file: Option<PathBuf> = None;
     let mut out_file: Option<PathBuf> = None;
+    let mut payload_arg: Option<String> = None;
     let mut dry_run = false;
     let mut json_mode = false;
     let mut force_overwrite = false;
 
     let mut wire_dto = CharacterWireDto::default();
+    let mut mutate_character = false;
+
     let mut wp_dto = WaypointWireDto::default();
     let mut mutate_waypoints = false;
+
+    let mut skill_dto = SkillWireDto::default();
+    let mut mutate_skills = false;
+
+    let mut batch_dto = BatchItemWireDto::default();
+    let mut mutate_batch = false;
 
     let mut item_dto = ItemWireDto::default();
     let mut mutate_item = false;
@@ -112,6 +136,13 @@ fn main() {
             "--dry-run" => dry_run = true,
             "--json" => json_mode = true,
             "--force-overwrite" => force_overwrite = true,
+            "--payload" => {
+                i += 1;
+                if i < args.len() {
+                    payload_arg = Some(args[i].clone());
+                }
+            }
+            // Waypoints
             "--unlock-all-wps" => {
                 wp_dto.unlock_all = true;
                 mutate_waypoints = true;
@@ -130,6 +161,50 @@ fn main() {
                     mutate_waypoints = true;
                 }
             }
+            // Skills & Respec
+            "--skill" => {
+                i += 1;
+                if i < args.len() {
+                    match args[i].parse::<SkillOpWireDto>() {
+                        Ok(op_dto) => {
+                            skill_dto.skills.push(op_dto);
+                            mutate_skills = true;
+                        }
+                        Err(err) => {
+                            eprintln!("Invalid --skill parameter: {}", err);
+                            exit(1);
+                        }
+                    }
+                }
+            }
+            "--skill-points" => {
+                i += 1;
+                if i < args.len() {
+                    skill_dto.skill_points = args[i].parse::<NumericOp<u8>>().ok();
+                    mutate_skills = true;
+                }
+            }
+            "--respec" => {
+                skill_dto.respec = Some(true);
+                mutate_skills = true;
+            }
+            // Batch Item Operations
+            "--repair-all" => {
+                batch_dto.repair_all = Some(true);
+                mutate_batch = true;
+            }
+            "--identify-all" => {
+                batch_dto.identify_all = Some(true);
+                mutate_batch = true;
+            }
+            "--socket-all" => {
+                i += 1;
+                if i < args.len() {
+                    batch_dto.socket_all = args[i].parse::<u8>().ok();
+                    mutate_batch = true;
+                }
+            }
+            // Single Item Operations
             "--item-index" => {
                 i += 1;
                 if i < args.len() {
@@ -267,54 +342,63 @@ fn main() {
                 i += 1;
                 if i < args.len() {
                     wire_dto.name = Some(args[i].clone());
+                    mutate_character = true;
                 }
             }
             "--level" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.level = args[i].parse::<NumericOp<u8>>().ok();
+                    mutate_character = true;
                 }
             }
             "--strength" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.strength = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             "--dexterity" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.dexterity = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             "--vitality" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.vitality = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             "--energy" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.energy = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             "--stat-points" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.stat_points = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             "--gold-stash" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.gold_stash = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             "--gold-char" => {
                 i += 1;
                 if i < args.len() {
                     wire_dto.gold_character = args[i].parse::<NumericOp<u32>>().ok();
+                    mutate_character = true;
                 }
             }
             arg if !arg.starts_with("--") && input_file.is_none() => {
@@ -356,36 +440,41 @@ fn main() {
         exit(1);
     }
 
-    // 1. Convert Wire DTOs to domain contracts ("Parse, don't validate")
-    let char_contract = match CharacterMutationContract::try_from(wire_dto) {
-        Ok(c) => c,
-        Err(err) => {
-            if json_mode {
-                let err_resp = ValidationErrorResponse::from(err);
-                println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
-            } else {
-                eprintln!("Boundary validation error: {}", err);
-            }
+    // 1. Build root SaveMutationDto from payload and/or CLI flags
+    let mut root_dto = if let Some(ref payload) = payload_arg {
+        let content = if Path::new(payload).is_file() {
+            fs::read_to_string(payload).unwrap_or_else(|e| {
+                eprintln!("Failed to read payload file '{}': {}", payload, e);
+                exit(1);
+            })
+        } else {
+            payload.clone()
+        };
+
+        serde_json::from_str::<SaveMutationDto>(&content).unwrap_or_else(|e| {
+            eprintln!("Failed to parse payload as SaveMutationDto JSON: {}", e);
             exit(1);
-        }
+        })
+    } else {
+        SaveMutationDto::default()
     };
 
-    let wp_contract = if mutate_waypoints {
-        match WaypointMutationContract::try_from(wp_dto.clone()) {
-            Ok(c) => Some(c),
-            Err(err) => {
-                if json_mode {
-                    let err_resp = ValidationErrorResponse::from(err);
-                    println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
-                } else {
-                    eprintln!("Waypoint validation error: {}", err);
-                }
-                exit(1);
-            }
-        }
-    } else {
-        None
-    };
+    // Merge CLI flags into root_dto (flags augment/override payload)
+    if mutate_character {
+        root_dto.character = Some(wire_dto);
+    }
+    if mutate_waypoints {
+        root_dto.waypoints = Some(wp_dto.clone());
+    }
+    if mutate_skills {
+        root_dto.skills = Some(skill_dto);
+    }
+    if mutate_batch {
+        root_dto.batch_items = Some(batch_dto);
+    }
+    if mutate_item {
+        root_dto.items.push(item_dto);
+    }
 
     // 2. Read source save file
     let save_bytes = match fs::read(&input_path) {
@@ -396,101 +485,45 @@ fn main() {
         }
     };
 
-    let version = u32::from_le_bytes(save_bytes[4..8].try_into().unwrap_or([0; 4]));
-    let is_alpha = version == 105;
     let huffman = HuffmanTree::new();
 
-    // 3. Convert item wire DTO to domain contract against source item state
-    let item_contract = if mutate_item {
-        let stream = d2r_core::domain::item::stream::PlayerItemStream::read(&save_bytes, &huffman).ok();
-        let fallback_items = Item::read_player_items(&save_bytes, &huffman, is_alpha).ok();
-
-        let target_item = if let Some(ref s) = stream {
-            s.items.iter().enumerate().find_map(|(idx, item)| {
-                let slot = s.placement(item).equipment_slot;
-                if item_dto.target.matches(idx, item, slot) {
-                    Some(item)
-                } else {
-                    None
-                }
-            })
-        } else if let Some(ref items) = fallback_items {
-            items.iter().enumerate().find_map(|(idx, item)| {
-                if item_dto.target.matches(idx, item, None) {
-                    Some(item)
-                } else {
-                    None
-                }
-            })
-        } else {
-            None
-        };
-
-        match ItemBoundaryValidator::validate(&item_dto, target_item) {
-            Ok(c) => Some(c),
-            Err(err) => {
-                if json_mode {
-                    let err_resp = ValidationErrorResponse::from(err);
-                    println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
-                } else {
-                    eprintln!("Item validation error: {}", err);
-                }
-                exit(1);
-            }
-        }
-    } else {
-        None
-    };
-
-    // 4. Apply mutation contracts sequentially
-    let after_char_bytes = match try_apply_character_mutation(&save_bytes, &char_contract, &huffman) {
-        Ok(b) => b,
-        Err(err) => {
+    // 3. Validate root SaveMutationDto across all domains simultaneously
+    let validated_contract = match SaveMutationValidator::validate(&root_dto, &save_bytes, &huffman) {
+        Ok(c) => c,
+        Err(err_resp) => {
             if json_mode {
-                let err_resp = ValidationErrorResponse::from(err);
                 println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
             } else {
-                eprintln!("Failed to apply character mutation: {}", err);
+                eprintln!("Validation error (HTTP 422): {}", err_resp.message);
+                for (field, violations) in &err_resp.errors {
+                    for v in violations {
+                        eprintln!("  - [{}]: {} ({})", field, v.message, v.hint);
+                    }
+                }
             }
             exit(1);
         }
     };
 
-    let after_wp_bytes = if let Some(ref wpc) = wp_contract {
-        match try_apply_waypoint_mutation(&after_char_bytes, wpc) {
-            Ok(b) => b,
-            Err(err) => {
-                if json_mode {
-                    let err_resp = ValidationErrorResponse::from(err);
-                    println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
-                } else {
-                    eprintln!("Failed to apply waypoint mutation: {}", err);
+    // 4. Apply mutations atomically via SaveMutationPipeline
+    let mutated_bytes = match SaveMutationPipeline::execute(&save_bytes, &validated_contract, &huffman) {
+        Ok(b) => b,
+        Err(err_resp) => {
+            if json_mode {
+                println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
+            } else {
+                eprintln!("Pipeline execution error: {}", err_resp.message);
+                for (field, violations) in &err_resp.errors {
+                    for v in violations {
+                        eprintln!("  - [{}]: {}", field, v.message);
+                    }
                 }
-                exit(1);
             }
+            exit(1);
         }
-    } else {
-        after_char_bytes
     };
 
-    let mutated_bytes = if let Some(ref itc) = item_contract {
-        match try_apply_item_mutation(&after_wp_bytes, itc, &huffman) {
-            Ok(b) => b,
-            Err(err) => {
-                if json_mode {
-                    let err_resp = ValidationErrorResponse::from(err);
-                    println!("{}", serde_json::to_string_pretty(&err_resp).unwrap());
-                } else {
-                    eprintln!("Failed to apply item mutation: {}", err);
-                }
-                exit(1);
-            }
-        }
-    } else {
-        after_wp_bytes
-    };
-
-    // 4. Parse modified save for reporting and verification
+    // 5. Parse modified save for reporting and verification
     let modified_save = match Save::from_bytes(&mutated_bytes) {
         Ok(s) => s,
         Err(err) => {
@@ -499,7 +532,7 @@ fn main() {
         }
     };
 
-    // 5. Write to output if not in dry-run mode
+    // 6. Write to output if not in dry-run mode
     if !dry_run {
         if let Err(err) = fs::write(&target_out_path, &mutated_bytes) {
             eprintln!("Failed to write mutated save to '{}': {}", target_out_path.display(), err);
@@ -507,7 +540,7 @@ fn main() {
         }
     }
 
-    // 6. Output report
+    // 7. Output report
     if json_mode {
         let map = d2r_core::save::map_core_sections(&mutated_bytes).ok();
         let attrs = map.and_then(|m| d2r_core::domain::stats::AttributeSection::parse(&mutated_bytes, m.gf_pos, m.if_pos).ok());
@@ -534,8 +567,17 @@ fn main() {
             energy: final_enr,
             stat_points: final_pts,
             gold_stash: final_gold_stash,
-            waypoints_unlocked: if mutate_waypoints { Some(wp_dto.unlock_all) } else { None },
-            item_mutated: if mutate_item { Some(true) } else { None },
+            waypoints_unlocked: if mutate_waypoints || root_dto.waypoints.is_some() { Some(true) } else { None },
+            skills_mutated: if mutate_skills || root_dto.skills.is_some() { Some(true) } else { None },
+            respec_applied: root_dto.skills.as_ref().map(|s| s.respec.unwrap_or(false)),
+            item_mutated: if mutate_item || !root_dto.items.is_empty() { Some(true) } else { None },
+            batch_operations: root_dto.batch_items.as_ref().map(|b| {
+                let mut ops = Vec::new();
+                if b.repair_all.unwrap_or(false) { ops.push("repair_all".to_string()); }
+                if b.identify_all.unwrap_or(false) { ops.push("identify_all".to_string()); }
+                if let Some(sock) = b.socket_all { ops.push(format!("socket_all({})", sock)); }
+                ops
+            }),
             new_checksum: Some(format!("{:#010X}", modified_save.header.checksum)),
             error: None,
         };

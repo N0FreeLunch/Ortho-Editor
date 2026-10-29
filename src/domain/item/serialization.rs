@@ -4159,17 +4159,20 @@ impl Item {
                 "stash quantity",
             )?;
         }
-        let padding = auxiliary
-            .alignment_padding
-            .as_ref()
-            .ok_or_else(|| invalid("Missing independently captured alignment field"))?;
         let required_padding = ((8 - emitter.written_bits() % 8) % 8) as usize;
-        if padding.len() != required_padding {
-            return Err(invalid(
-                "D2R v3 alignment field does not match the rebuilt grammar",
-            ));
+        if let Some(padding) = auxiliary.alignment_padding.as_ref() {
+            if padding.len() == required_padding {
+                emitter.extend_bits(padding.iter().copied())?;
+            } else {
+                for _ in 0..required_padding {
+                    emitter.write_bit(false)?;
+                }
+            }
+        } else {
+            for _ in 0..required_padding {
+                emitter.write_bit(false)?;
+            }
         }
-        emitter.extend_bits(padding.iter().copied())?;
         let mut bits = emitter.into_bits();
         if socket_host_layout {
             for child in &self.socketed_items {

@@ -13,6 +13,16 @@ impl<'a> ItemEditor<'a> {
         Self { item }
     }
 
+    /// Access reference to the underlying Item.
+    pub fn item(&self) -> &Item {
+        self.item
+    }
+
+    /// Access mutable reference to the underlying Item.
+    pub fn item_mut(&mut self) -> &mut Item {
+        self.item
+    }
+
     fn ensure_extended(&mut self) {
         self.item.header.is_compact = false;
         self.item.is_compact = false;
@@ -155,8 +165,31 @@ impl<'a> ItemEditor<'a> {
             opaque_bits: None,
             maturity: crate::domain::stats::StatMaturityTier::Verified,
         };
-        self.item.properties.push(prop.clone());
-        self.item.stats.properties.push(prop);
+        let term = crate::domain::stats::ItemProperty {
+            stat_id: 511,
+            raw_value: 0,
+            param: 0,
+            name: "item_terminator".to_string(),
+            value: 0,
+            range: crate::domain::item::ItemBitRange::default(),
+            is_opaque: false,
+            opaque_bits: None,
+            maturity: crate::domain::stats::StatMaturityTier::Verified,
+        };
+
+        if let Some(pos) = self.item.properties.iter().position(|p| p.stat_id == 511) {
+            self.item.properties.insert(pos, prop.clone());
+        } else {
+            self.item.properties.push(prop.clone());
+            self.item.properties.push(term.clone());
+        }
+
+        if let Some(pos) = self.item.stats.properties.iter().position(|p| p.stat_id == 511) {
+            self.item.stats.properties.insert(pos, prop);
+        } else {
+            self.item.stats.properties.push(prop);
+            self.item.stats.properties.push(term);
+        }
         self.item.bits.clear();
         self
     }
