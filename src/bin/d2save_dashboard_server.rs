@@ -795,25 +795,39 @@ mod tests {
     }
 
     #[settled_contract_test]
-    fn inspect_amazon_authority_runeword_payload() {
-        let bytes = include_bytes!(
-            "../../tests/fixtures/savegames/original/amazon_authority_runeword.d2s"
-        );
-        let data = dashboard_payload(bytes).unwrap();
-        let mut found = None;
-        for key in &["equipment", "inventory", "belt", "stash", "cube", "unknown"] {
-            if let Some(items) = data[key].as_array() {
-                if let Some(item) = items.iter().find(|i| i["code"] == "xrs") {
-                    found = Some((key, item));
-                    break;
-                }
-            }
+    fn amazon_authority_runeword_belt_potions_and_runeword_are_cleanly_placed() {
+        let auth_bytes =
+            include_bytes!("../../tests/fixtures/savegames/original/amazon_authority_runeword.d2s");
+        let data = dashboard_payload(auth_bytes).unwrap();
+        assert_eq!(data["parser"]["item_dialect"], "d2r-v3");
+        let belt = data["belt"].as_array().expect("belt array");
+        assert_eq!(belt.len(), 4, "all 4 starter healing potions must route to belt");
+        for (expected_x, item) in belt.iter().enumerate() {
+            assert_eq!(item["code"], "hp1");
+            assert_eq!(item["x"], expected_x);
+            assert_eq!(item["y"], 0);
+            assert_eq!(item["parse_status"], "parsed");
+            assert_eq!(item["opaque_info"]["bit_count"], 0);
         }
-        let (location, xrs) = found.expect("xrs should be somewhere");
-        eprintln!("xrs found in: {}, parse_status: {}, opaque_info: {:?}", location, xrs["parse_status"], xrs["opaque_info"]);
-        assert_eq!(xrs["parse_status"], "parsed");
-        assert_eq!(xrs["opaque_info"]["is_opaque"], false);
-        assert_eq!(xrs["opaque_info"]["bit_count"], 0);
+
+        let inv = data["inventory"].as_array().expect("inventory array");
+        assert_eq!(inv.len(), 2, "inventory should contain base Cuirass and Authority runeword Cuirass");
+        let base_xrs = &inv[0];
+        assert_eq!(base_xrs["code"], "xrs");
+        assert_eq!(base_xrs["quality"], "Normal");
+        assert_eq!(base_xrs["x"], 0);
+        assert_eq!(base_xrs["y"], 0);
+        assert_eq!(base_xrs["parse_status"], "parsed");
+        assert_eq!(base_xrs["opaque_info"]["bit_count"], 0);
+
+        let auth_xrs = &inv[1];
+        assert_eq!(auth_xrs["code"], "xrs");
+        assert_eq!(auth_xrs["quality"], "Runeword");
+        assert_eq!(auth_xrs["x"], 2);
+        assert_eq!(auth_xrs["y"], 0);
+        assert_eq!(auth_xrs["parse_status"], "parsed");
+        assert_eq!(auth_xrs["opaque_info"]["bit_count"], 0);
+        assert_eq!(auth_xrs["socketed_items"].as_array().unwrap().len(), 3);
     }
 }
 
