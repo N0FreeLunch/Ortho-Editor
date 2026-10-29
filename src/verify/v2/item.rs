@@ -15,13 +15,19 @@ enum CompactStandaloneContract {
 }
 
 fn compact_standalone_contract(item: &Item) -> CompactStandaloneContract {
+    if item.header.save_is_alpha {
+        match item.code.trim() {
+            "xrs" | "c8xr" | "rhd" => return CompactStandaloneContract::ContextRequired,
+            _ => {}
+        }
+    }
     if !(item.header.save_is_alpha && item.header.is_compact) {
         return CompactStandaloneContract::WireCanonical;
     }
 
     match item.code.trim() {
         "jav" | "buc" => CompactStandaloneContract::SemanticCanonical,
-        "xrs" | "c8xr" | "rhd" | "hp1" | "mp1" | "tsc" | "isc" => {
+        "hp1" | "mp1" | "tsc" | "isc" => {
             CompactStandaloneContract::ContextRequired
         }
         _ => CompactStandaloneContract::WireCanonical,

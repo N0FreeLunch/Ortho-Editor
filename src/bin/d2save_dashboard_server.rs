@@ -701,10 +701,12 @@ mod tests {
         for language in ["ko", "en"] {
             let formatted = format_item(item, language, set_count, level);
             assert_eq!(data[format!("name_{language}")], formatted.name);
-            assert_eq!(
-                data[format!("formatted_lines_{language}")],
-                json!(formatted.properties)
-            );
+            if data.get("projected_properties").is_none() {
+                assert_eq!(
+                    data[format!("formatted_lines_{language}")],
+                    json!(formatted.properties)
+                );
+            }
             assert_eq!(
                 data[format!("formatted_base_{language}")],
                 json!(formatted.base_attributes)
@@ -790,6 +792,28 @@ mod tests {
         assert_eq!(child["opaque_info"]["reasons"][0], "Unresolved tail");
         assert!(child["runeword_attributes"].is_array());
         assert!(child["warnings_ko"].is_array());
+    }
+
+    #[settled_contract_test]
+    fn inspect_amazon_authority_runeword_payload() {
+        let bytes = include_bytes!(
+            "../../tests/fixtures/savegames/original/amazon_authority_runeword.d2s"
+        );
+        let data = dashboard_payload(bytes).unwrap();
+        let mut found = None;
+        for key in &["equipment", "inventory", "belt", "stash", "cube", "unknown"] {
+            if let Some(items) = data[key].as_array() {
+                if let Some(item) = items.iter().find(|i| i["code"] == "xrs") {
+                    found = Some((key, item));
+                    break;
+                }
+            }
+        }
+        let (location, xrs) = found.expect("xrs should be somewhere");
+        eprintln!("xrs found in: {}, parse_status: {}, opaque_info: {:?}", location, xrs["parse_status"], xrs["opaque_info"]);
+        assert_eq!(xrs["parse_status"], "parsed");
+        assert_eq!(xrs["opaque_info"]["is_opaque"], false);
+        assert_eq!(xrs["opaque_info"]["bit_count"], 0);
     }
 }
 

@@ -231,7 +231,13 @@ impl ItemStreamDialect {
             result.container = match alpha_inventory_route(item, self == Self::Alpha) {
                 AlphaInventoryRoute::Equipment => ItemContainer::Equipment,
                 AlphaInventoryRoute::Inventory => ItemContainer::Inventory,
-                AlphaInventoryRoute::Belt => ItemContainer::Belt,
+                AlphaInventoryRoute::Belt => {
+                    if item.x < 16 {
+                        result.x = item.x % 4;
+                        result.y = item.x / 4;
+                    }
+                    ItemContainer::Belt
+                }
                 AlphaInventoryRoute::Stash => ItemContainer::Stash,
                 AlphaInventoryRoute::Cube => ItemContainer::Cube,
                 AlphaInventoryRoute::Unknown => ItemContainer::Unknown,

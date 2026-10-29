@@ -2804,9 +2804,10 @@ impl Item {
                 item.total_bits = item.range.end - item.range.start;
 
                 let preserve_trusted_compact_tail = alpha_mode
-                    && code_peek
+                    && (code_peek
                         .map(|code| HEADER_COMPACT_CODES.trusted_compact_codes.contains(&code.trim()))
-                        .unwrap_or(false);
+                        .unwrap_or(false)
+                        || is_alpha_v105_authority_code(&item.code));
                 if alpha_mode {
                     if preserve_trusted_compact_tail {
                         item.body.alpha_alignment_padding.extend(residue_bits);
