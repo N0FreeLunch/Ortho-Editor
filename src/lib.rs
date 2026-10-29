@@ -158,10 +158,13 @@ mod tests {
             .map(|prop| (prop.stat_id, prop.value))
             .collect();
         let expected_props = vec![
-            (133, 13),
-            (281, 12),
-            (16, 31),
-            (385, 131),
+            (83, 2),    // +2 Class Skills
+            (201, 2),   // 2% chance of lvl 10 Psychic Hammer on get hit
+            (198, 10),  // 10% chance of lvl 15 Chain Lightning on hit
+            (99, 20),   // +20% Faster Hit Recovery (Shael)
+            (39, 30),   // +30% Fire Resist (Ral)
+            (91, -15),  // -15% Requirements (Hel)
+            (16, 38),   // +38% Enhanced Defense
         ];
 
         assert_eq!(authority.code.trim(), "xrs");

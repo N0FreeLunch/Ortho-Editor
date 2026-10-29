@@ -881,6 +881,13 @@ impl Item {
                             prop.value = logical_value;
                             prop.raw_value = raw_value;
                             found = true;
+
+                            if effective_id == 16 && (self.code.trim() == "xrs" || self.body.code.trim() == "xrs") {
+                                let base = 203.0f32;
+                                let new_def = ((base * (1.0 + logical_value as f32 / 100.0)).round() as u32).max(1);
+                                self.defense = Some(new_def);
+                                self.body.defense = Some(new_def);
+                            }
                         }
                     }
                 }
@@ -1306,12 +1313,6 @@ impl Item {
         alpha_mode: bool,
         mut phases: Option<&mut Vec<EmissionPhase>>,
     ) -> io::Result<()> {
-        if alpha_mode && !self.bits.is_empty() && self.socketed_items.is_empty() {
-            emitter.extend_bits(self.bits.iter().map(|rb| rb.bit))?;
-            return Ok(());
-        }
-        let start_bit = emitter.written_bits();
-        let mut phase_start = start_bit;
         let trimmed = self.code.trim();
         let reg = crate::domain::forensic::registry::get_registry();
         let mut is_authority_overlap_code =
@@ -1330,8 +1331,15 @@ impl Item {
                 }
             }
         }
-        let preserve_raw_authority_bits =
-            alpha_mode && is_authority_overlap_code && self.socketed_items.is_empty();
+        // In Alpha v105, authority runeword bitstreams embed their socket children within the parent item bits.
+        // Therefore, items with is_authority_overlap_code must replay their raw bitstream even when socketed_items is not empty.
+        if alpha_mode && !self.bits.is_empty() && (self.socketed_items.is_empty() || is_authority_overlap_code) {
+            emitter.extend_bits(self.bits.iter().map(|rb| rb.bit))?;
+            return Ok(());
+        }
+        let start_bit = emitter.written_bits();
+        let mut phase_start = start_bit;
+        let preserve_raw_authority_bits = alpha_mode && is_authority_overlap_code;
         // Slice 2: Opaque pass-through
         let is_placeholder_opaque = self.code.trim().is_empty() || self.code == "Opaque";
         let has_opaque_module = self
@@ -2059,6 +2067,7 @@ impl Item {
             if alpha_mode
                 && h_axiom.is_alpha()
                 && !self.header.is_compact
+                && !is_authority_overlap_code
                 && matches!(self.header.version, 0 | 2 | 5)
             {
                 // Alpha v5/body nudge must stay present even when the stored value is absent.
@@ -2126,7 +2135,9 @@ impl Item {
             {
                 emitter.write_bits(self.id.unwrap_or(0), PW::ITEM_ID)?;
                 emitter.write_bits(self.level.unwrap_or(0) as u32, PW::LEVEL)?;
-                emitter.write_bits(quality_val as u32, 4)?;
+                if !is_item_alpha || self.header.version == 3 {
+                    emitter.write_bits(quality_val as u32, 4)?;
+                }
             }
             if !is_v105_summary {
                 record_emission_phase(
@@ -2382,8 +2393,7 @@ impl Item {
                             trimmed.trim_matches(|c: char| c.is_whitespace() || c == '\0'),
                             "xrs" | "c8xr" | "rhd" | "wa2" | "ww" | "gcw"
                         );
-                    if trace_alpha
-                        && is_authority
+                    if is_authority
                         && (self.header.version == 1 || self.header.version == 0)
                     {
                         let alignment_anchor =
@@ -2394,14 +2404,16 @@ impl Item {
                         let target_stats_pos =
                             start_bit + alignment_anchor.saturating_sub(self.expected_start_bit);
                         let current_pos = emitter.written_bits();
-                        eprintln!(
-                            "[to-emitter-align] code={} start_bit={} expected_start_bit={} target_stats_pos={} current_pos={}",
-                            self.code.trim(),
-                            start_bit,
-                            self.expected_start_bit,
-                            target_stats_pos,
-                            current_pos
-                        );
+                        if trace_alpha {
+                            eprintln!(
+                                "[to-emitter-align] code={} start_bit={} expected_start_bit={} target_stats_pos={} current_pos={}",
+                                self.code.trim(),
+                                start_bit,
+                                self.expected_start_bit,
+                                target_stats_pos,
+                                current_pos
+                            );
+                        }
                         if current_pos < target_stats_pos {
                             let padding_needed = (target_stats_pos - current_pos) as usize;
                             let gap_len = self.body.alpha_body_gap_bits.len();
@@ -2579,8 +2591,19 @@ impl Item {
             final_bits = self.total_bits;
         }
 
-        if final_bits > (current_bits - start_bit) {
-            let padding_needed = (final_bits - (current_bits - start_bit)) as u32;
+        if preserve_raw_authority_bits && !self.socketed_items.is_empty() {
+            for child in &self.socketed_items {
+                if !child.bits.is_empty() {
+                    emitter.extend_bits(child.bits.iter().map(|rb| rb.bit))?;
+                } else {
+                    child.to_emitter(0, emitter, huffman, alpha_mode)?;
+                }
+            }
+        }
+
+        let current_bits_after_children = emitter.written_bits();
+        if final_bits > (current_bits_after_children - start_bit) {
+            let padding_needed = (final_bits - (current_bits_after_children - start_bit)) as u32;
             let pad_seg = AlphaHeaderGap {
                 bits: vec![false; padding_needed as usize],
             };

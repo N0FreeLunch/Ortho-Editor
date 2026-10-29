@@ -238,10 +238,10 @@ mod roundtrip_tests {
             .expect("items should parse");
         let authority = items
             .iter_mut()
-            .find(|item| item.code.trim() == "wa2")
-            .expect("Authority item (wa2) not found");
+            .find(|item| item.code.trim() == "xrs")
+            .expect("Authority item (xrs) not found");
 
-        let target_stat_id = 297;
+        let target_stat_id = 16;
         use d2r_core::domain::vo::ItemStatValue;
         let new_val = ItemStatValue::new(100).unwrap();
 
@@ -267,8 +267,8 @@ mod roundtrip_tests {
             .expect("should parse back rebuilt items");
         let modified_item = rebuilt_items
             .iter()
-            .find(|item| item.code.trim() == "wa2")
-            .expect("Authority item 'wa2' not found after rebuild");
+            .find(|item| item.code.trim() == "xrs")
+            .expect("Authority item 'xrs' not found after rebuild");
 
         let mut all_stats = modified_item.properties.clone();
         for list in &modified_item.set_attributes {
