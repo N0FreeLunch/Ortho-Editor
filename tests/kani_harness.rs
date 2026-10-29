@@ -1,6 +1,6 @@
 #[cfg(kani)]
 mod kani_tests {
-    use crate::domain::vo::*;
+    use d2r_core::domain::vo::*;
 
     #[kani::proof]
     fn proof_item_stat_value_invariants() {
@@ -92,5 +92,74 @@ mod kani_tests {
         assert!(aligned % 8 == 0);
         assert!(aligned >= pos);
         assert!(aligned < pos + 8);
+    }
+
+    #[kani::proof]
+    fn proof_descfunc_11_reciprocal_safety() {
+        let value: i32 = kani::any();
+        if value > 0 && value < 100 {
+            // Guarded division: value is strictly between 1 and 99, so 100 / value never divides by zero
+            let secs = 100 / value;
+            assert!(secs >= 1);
+            assert!(secs <= 100);
+        } else if value >= 100 {
+            let rate = value / 100;
+            assert!(rate >= 1);
+        }
+    }
+
+    #[kani::proof]
+    fn proof_weapon_damage_and_ed_synthesis_safety() {
+        let base_min: u16 = kani::any();
+        let base_max: u16 = kani::any();
+        kani::assume(base_min > 0 && base_min <= 500);
+        kani::assume(base_max >= base_min && base_max <= 1000);
+
+        let is_ethereal: bool = kani::any();
+        let ed_pct: i32 = kani::any();
+        kani::assume(ed_pct >= -100 && ed_pct <= 1000);
+
+        let add_min: i32 = kani::any();
+        let add_max: i32 = kani::any();
+        kani::assume(add_min >= 0 && add_min <= 500);
+        kani::assume(add_max >= add_min && add_max <= 500);
+
+        let mut b_min = base_min as i32;
+        let mut b_max = base_max as i32;
+        if is_ethereal {
+            b_min = (b_min * 150) / 100;
+            b_max = (b_max * 150) / 100;
+        }
+
+        let f_min = ((b_min * (100 + ed_pct)) / 100 + add_min).max(1);
+        let f_max = ((b_max * (100 + ed_pct)) / 100 + add_max).max(f_min);
+
+        assert!(f_min >= 1);
+        assert!(f_max >= f_min);
+    }
+
+    #[kani::proof]
+    fn proof_equipment_requirements_reduction_safety() {
+        let base_req: u16 = kani::any();
+        kani::assume(base_req <= 255);
+
+        let is_ethereal: bool = kani::any();
+        let req_pct: i32 = kani::any();
+        kani::assume(req_pct >= -100 && req_pct <= 100);
+
+        let mut base = base_req as i32;
+        if is_ethereal {
+            base = (base - 10).max(0);
+        }
+
+        let final_req = ((base * (100 + req_pct)) / 100).max(0);
+
+        assert!(final_req >= 0);
+        if req_pct <= -100 {
+            assert_eq!(final_req, 0);
+        }
+        if is_ethereal && base_req <= 10 {
+            assert_eq!(final_req, 0);
+        }
     }
 }

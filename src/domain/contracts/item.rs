@@ -165,6 +165,30 @@ pub struct ItemWireDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_identified: Option<bool>,
 
+    /// Enhanced damage modifier (%) (stat 17).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enhanced_damage: Option<NumericOp<i32>>,
+
+    /// Flat minimum damage bonus (stat 21).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_damage: Option<NumericOp<i32>>,
+
+    /// Flat maximum damage bonus (stat 22).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_damage: Option<NumericOp<i32>>,
+
+    /// Replenish durability rate (stat 252).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replenish_durability: Option<NumericOp<i32>>,
+
+    /// Replenish quantity rate (stat 253).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replenish_quantity: Option<NumericOp<i32>>,
+
+    /// Indestructible status (stat 152).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_indestructible: Option<bool>,
+
     /// Property and stat modifications.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stats: Vec<ItemStatOpWireDto>,
@@ -217,7 +241,7 @@ impl From<ItemContractError> for ValidationErrorResponse {
 }
 
 /// Infallible domain contract for item mutations with validated values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ItemMutationContract {
     pub target: ItemTarget,
     pub defense: Option<u32>,
@@ -227,6 +251,12 @@ pub struct ItemMutationContract {
     pub sockets: Option<u8>,
     pub is_ethereal: Option<bool>,
     pub is_identified: Option<bool>,
+    pub is_indestructible: Option<bool>,
+    pub enhanced_damage: Option<i32>,
+    pub min_damage: Option<i32>,
+    pub max_damage: Option<i32>,
+    pub replenish_durability: Option<i32>,
+    pub replenish_quantity: Option<i32>,
     pub stats: Vec<(u32, i32)>,
 }
 
@@ -248,6 +278,18 @@ impl ItemBoundaryValidator {
 
     pub const MIN_STAT_VALUE: i32 = -32_768;
     pub const MAX_STAT_VALUE: i32 = 32_767;
+
+    pub const MIN_ENHANCED_DAMAGE: i32 = -100;
+    pub const MAX_ENHANCED_DAMAGE: i32 = 1000;
+
+    pub const MIN_DAMAGE_BONUS: i32 = 0;
+    pub const MAX_DAMAGE_BONUS: i32 = 500;
+
+    pub const MIN_REPLENISH_DURABILITY: i32 = 1;
+    pub const MAX_REPLENISH_DURABILITY: i32 = 100;
+
+    pub const MIN_REPLENISH_QUANTITY: i32 = 1;
+    pub const MAX_REPLENISH_QUANTITY: i32 = 100;
 
     /// Validates an inbound wire DTO against domain boundaries and current item state.
     pub fn validate(
@@ -316,17 +358,45 @@ impl ItemBoundaryValidator {
             None
         };
 
-        // 5. Sockets Validation
+        // 5. Dynamic Sockets Validation based on Item Type and ilvl
+        let effective_max_sockets = if let Some(item) = current_item {
+            let types = crate::engine::validation::get_all_item_types(&item.code);
+            let ilvl = item.header.level.unwrap_or(99);
+            let mut max_sock = None;
+            for type_code in types {
+                if let Some(rule) = crate::data::legitimacy::SOCKET_RULES.iter().find(|r| r.item_type == type_code) {
+                    let m = if ilvl >= 41 {
+                        rule.max_sock_high
+                    } else if ilvl >= 26 {
+                        rule.max_sock_mid
+                    } else {
+                        rule.max_sock_low
+                    };
+                    max_sock = Some(m);
+                    break;
+                }
+            }
+            max_sock.unwrap_or(Self::MAX_SOCKETS)
+        } else {
+            Self::MAX_SOCKETS
+        };
+
         let evaluated_sockets = if let Some(sockets) = dto.sockets {
-            if sockets > Self::MAX_SOCKETS {
+            if sockets > effective_max_sockets {
+                let item_code = current_item.map(|i| i.code.trim()).unwrap_or("item");
+                let hint = if effective_max_sockets == 0 {
+                    format!("Item '{}' cannot have sockets.", item_code)
+                } else {
+                    format!("Item sockets must be an integer between {} and {}.", Self::MIN_SOCKETS, effective_max_sockets)
+                };
                 errors.entry("item.sockets".to_string()).or_default().push(
                     FieldViolation::new(
                         "invalid_range",
-                        format!("Socket count {} exceeds maximum allowable of {}.", sockets, Self::MAX_SOCKETS),
-                        format!("Item sockets must be an integer between {} and {}.", Self::MIN_SOCKETS, Self::MAX_SOCKETS),
+                        format!("Socket count {} exceeds maximum allowable of {} for item '{}'.", sockets, effective_max_sockets, item_code),
+                        hint,
                     )
                     .with_rejected_value(sockets)
-                    .with_constraint(Self::MIN_SOCKETS as u64, Self::MAX_SOCKETS as u64),
+                    .with_constraint(Self::MIN_SOCKETS as u64, effective_max_sockets as u64),
                 );
                 None
             } else {
@@ -336,17 +406,213 @@ impl ItemBoundaryValidator {
             None
         };
 
-        // 6. Stats Validation
+        // 6. Ethereal Invariant Validation
+        if dto.is_ethereal == Some(true) {
+            if let Some(item) = current_item {
+                let non_ethereal_types = ["ring", "amul", "char", "csch", "mcha", "scha", "rune", "scro", "poti"];
+                let types = crate::engine::validation::get_all_item_types(&item.code);
+                if types.iter().any(|t| non_ethereal_types.contains(t)) {
+                    errors.entry("item.is_ethereal".to_string()).or_default().push(
+                        FieldViolation::new(
+                            "invalid_attribute",
+                            format!("Item '{}' cannot have ethereal property.", item.code.trim()),
+                            "Jewelry, charms, runes, scrolls, and potions cannot possess ethereal status.",
+                        )
+                        .with_rejected_value(true),
+                    );
+                }
+            }
+        }
+
+        // 7. Stackable Quantity vs Durability Invariant
+        if dto.quantity.is_some() {
+            if let Some(item) = current_item {
+                let base_spec = crate::data::item_specs::get_base_item_spec(&item.code);
+                if item.quantity.is_none() && base_spec.map_or(false, |s| s.durability > 0) {
+                    errors.entry("item.quantity".to_string()).or_default().push(
+                        FieldViolation::new(
+                            "not_stackable",
+                            format!("Item '{}' is not a stackable or throwing item.", item.code.trim()),
+                            "Quantity can only be modified on stackable items (throwing weapons, potions, keys, arrows/bolts).",
+                        ),
+                    );
+                }
+            }
+        }
+
+        if dto.durability.is_some() {
+            if let Some(item) = current_item {
+                if item.current_durability.is_none() && item.quantity.is_some() {
+                    errors.entry("item.durability".to_string()).or_default().push(
+                        FieldViolation::new(
+                            "no_durability",
+                            format!("Stackable item '{}' does not use durability.", item.code.trim()),
+                            "Throwing weapons and consumables track stack quantity rather than durability.",
+                        ),
+                    );
+                }
+            }
+        }
+
+        // 8. Indestructible Invariant Validation
+        let is_indestructible_active = dto.is_indestructible.unwrap_or_else(|| {
+            current_item.map_or(false, |it| {
+                it.stats.properties.iter().any(|p| p.stat_id == 152 && p.raw_value > 0)
+                    || it.properties.iter().any(|p| p.stat_id == 152 && p.value > 0)
+            })
+        });
+
+        if is_indestructible_active {
+            if evaluated_durability == Some(0) {
+                errors.entry("item.durability".to_string()).or_default().push(
+                    FieldViolation::new(
+                        "invalid_state",
+                        "Indestructible items cannot have 0 durability.",
+                        "Indestructible items never lose durability; durability must equal maximum durability.",
+                    )
+                    .with_rejected_value(0),
+                );
+            } else if let Some(cur) = evaluated_durability {
+                if cur < effective_max_durability {
+                    errors.entry("item.durability".to_string()).or_default().push(
+                        FieldViolation::new(
+                            "invalid_state",
+                            format!("Indestructible item durability ({}) cannot be less than max durability ({}).", cur, effective_max_durability),
+                            "Indestructible items maintain full durability at all times.",
+                        )
+                        .with_rejected_value(cur)
+                        .with_constraint(effective_max_durability as u64, effective_max_durability as u64),
+                    );
+                }
+            }
+        }
+
+        // 9. Stats & High-Level Damage / Replenishment Evaluation
         let mut evaluated_stats = Vec::new();
+
+        let mut upsert_stat = |stat_id: u32, value: i32| {
+            if let Some(pos) = evaluated_stats.iter().position(|(id, _)| *id == stat_id) {
+                evaluated_stats[pos].1 = value;
+            } else {
+                evaluated_stats.push((stat_id, value));
+            }
+        };
+
+        let get_current_stat = |stat_id: u32| -> i32 {
+            current_item
+                .and_then(|i| {
+                    i.stats
+                        .properties
+                        .iter()
+                        .find(|p| p.stat_id == stat_id)
+                        .map(|p| p.raw_value)
+                        .or_else(|| {
+                            i.properties
+                                .iter()
+                                .find(|p| p.stat_id == stat_id)
+                                .map(|p| p.value)
+                        })
+                })
+                .unwrap_or(0)
+        };
+
+        // Enhanced damage (stat 17)
+        let evaluated_ed = if let Some(ref op) = dto.enhanced_damage {
+            let current = get_current_stat(17);
+            match Self::evaluate_i32_op("item.enhanced_damage", *op, current, Self::MIN_ENHANCED_DAMAGE, Self::MAX_ENHANCED_DAMAGE) {
+                Ok(val) => {
+                    upsert_stat(17, val);
+                    Some(val)
+                }
+                Err(v) => {
+                    errors.entry("item.enhanced_damage".to_string()).or_default().push(v);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Flat minimum damage bonus (stat 21)
+        let evaluated_min_dmg = if let Some(ref op) = dto.min_damage {
+            let current = get_current_stat(21);
+            match Self::evaluate_i32_op("item.min_damage", *op, current, Self::MIN_DAMAGE_BONUS, Self::MAX_DAMAGE_BONUS) {
+                Ok(val) => {
+                    upsert_stat(21, val);
+                    Some(val)
+                }
+                Err(v) => {
+                    errors.entry("item.min_damage".to_string()).or_default().push(v);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Flat maximum damage bonus (stat 22)
+        let evaluated_max_dmg = if let Some(ref op) = dto.max_damage {
+            let current = get_current_stat(22);
+            match Self::evaluate_i32_op("item.max_damage", *op, current, Self::MIN_DAMAGE_BONUS, Self::MAX_DAMAGE_BONUS) {
+                Ok(val) => {
+                    upsert_stat(22, val);
+                    Some(val)
+                }
+                Err(v) => {
+                    errors.entry("item.max_damage".to_string()).or_default().push(v);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Replenish durability rate (stat 252)
+        let evaluated_rep_dur = if let Some(ref op) = dto.replenish_durability {
+            let current = get_current_stat(252);
+            match Self::evaluate_i32_op("item.replenish_durability", *op, current, Self::MIN_REPLENISH_DURABILITY, Self::MAX_REPLENISH_DURABILITY) {
+                Ok(val) => {
+                    upsert_stat(252, val);
+                    Some(val)
+                }
+                Err(v) => {
+                    errors.entry("item.replenish_durability".to_string()).or_default().push(v);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Replenish quantity rate (stat 253)
+        let evaluated_rep_quant = if let Some(ref op) = dto.replenish_quantity {
+            let current = get_current_stat(253);
+            match Self::evaluate_i32_op("item.replenish_quantity", *op, current, Self::MIN_REPLENISH_QUANTITY, Self::MAX_REPLENISH_QUANTITY) {
+                Ok(val) => {
+                    upsert_stat(253, val);
+                    Some(val)
+                }
+                Err(v) => {
+                    errors.entry("item.replenish_quantity".to_string()).or_default().push(v);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Indestructible flag (stat 152)
+        if let Some(indestructible) = dto.is_indestructible {
+            upsert_stat(152, if indestructible { 1 } else { 0 });
+        }
+
+        // Raw custom stat operations
         for (idx, stat_op) in dto.stats.iter().enumerate() {
             let field_name = format!("item.stats[{}].value", idx);
-            let current = current_item
-                .and_then(|i| i.stats.properties.iter().find(|p| p.stat_id == stat_op.stat_id))
-                .map(|p| p.raw_value)
-                .unwrap_or(0);
+            let current = get_current_stat(stat_op.stat_id);
 
             match Self::evaluate_i32_op(&field_name, stat_op.op, current, Self::MIN_STAT_VALUE, Self::MAX_STAT_VALUE) {
-                Ok(val) => evaluated_stats.push((stat_op.stat_id, val)),
+                Ok(val) => upsert_stat(stat_op.stat_id, val),
                 Err(violation) => {
                     errors.entry(field_name).or_default().push(violation);
                 }
@@ -366,6 +632,12 @@ impl ItemBoundaryValidator {
             sockets: evaluated_sockets,
             is_ethereal: dto.is_ethereal,
             is_identified: dto.is_identified,
+            is_indestructible: dto.is_indestructible,
+            enhanced_damage: evaluated_ed,
+            min_damage: evaluated_min_dmg,
+            max_damage: evaluated_max_dmg,
+            replenish_durability: evaluated_rep_dur,
+            replenish_quantity: evaluated_rep_quant,
             stats: evaluated_stats,
         })
     }

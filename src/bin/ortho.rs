@@ -68,6 +68,12 @@ Item Options:
     --item-sockets <0-6>   Set item socket count
     --item-ethereal <bool> Set ethereal status (true/false)
     --item-identified <b>  Set identified status (true/false)
+    --item-ed <op>         Set or shift enhanced damage % (e.g. 150, +30)
+    --item-min-damage <op> Set or shift flat min damage (e.g. 15, +5)
+    --item-max-damage <op> Set or shift flat max damage (e.g. 30, +10)
+    --item-rep-dur <op>    Set or shift replenish durability rate (e.g. 3)
+    --item-rep-quant <op>  Set or shift replenish quantity rate (e.g. 1)
+    --item-indestructible  Set indestructible flag (true/false)
     --item-stat <id:op>    Set/shift stat property (e.g. 9:+20, 127:=2, 31:-5)
 
 General Options:
@@ -191,6 +197,48 @@ fn main() {
                 i += 1;
                 if i < args.len() {
                     item_dto.is_identified = args[i].parse::<bool>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-ed" | "--item-enhanced-damage" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.enhanced_damage = args[i].parse::<NumericOp<i32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-min-damage" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.min_damage = args[i].parse::<NumericOp<i32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-max-damage" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.max_damage = args[i].parse::<NumericOp<i32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-rep-dur" | "--item-replenish-durability" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.replenish_durability = args[i].parse::<NumericOp<i32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-rep-quant" | "--item-replenish-quantity" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.replenish_quantity = args[i].parse::<NumericOp<i32>>().ok();
+                    mutate_item = true;
+                }
+            }
+            "--item-indestructible" => {
+                i += 1;
+                if i < args.len() {
+                    item_dto.is_indestructible = args[i].parse::<bool>().ok();
                     mutate_item = true;
                 }
             }
