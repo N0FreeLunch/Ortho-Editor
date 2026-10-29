@@ -166,6 +166,73 @@ pub fn format_item_with_mode(
         }
     }
 
+    // 5. Weapon Damage (One-Hand and Two-Hand)
+    let is_weapon = ITEM_TEMPLATES
+        .iter()
+        .find(|t| t.code == item.code.trim())
+        .map_or(false, |t| t.is_weapon);
+
+    if is_weapon {
+        if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
+            let ed_pct: i32 = item
+                .properties
+                .iter()
+                .filter(|p| p.stat_id == 17)
+                .map(|p| p.value)
+                .sum();
+
+            let add_min: i32 = item
+                .properties
+                .iter()
+                .filter(|p| p.stat_id == 21)
+                .map(|p| p.value)
+                .sum();
+            let add_max: i32 = item
+                .properties
+                .iter()
+                .filter(|p| p.stat_id == 22)
+                .map(|p| p.value)
+                .sum();
+
+            // One-Hand Damage
+            if spec.min_dmg > 0 && spec.max_dmg > 0 {
+                let mut b_min = spec.min_dmg as i32;
+                let mut b_max = spec.max_dmg as i32;
+                if item.is_ethereal {
+                    b_min = (b_min * 150) / 100;
+                    b_max = (b_max * 150) / 100;
+                }
+                let f_min = ((b_min * (100 + ed_pct)) / 100 + add_min).max(1);
+                let f_max = ((b_max * (100 + ed_pct)) / 100 + add_max).max(f_min);
+
+                let label = get_loc("ItemStats1l", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[f_min.to_string(), f_max.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {} - {}", label.trim(), f_min, f_max));
+                }
+            }
+
+            // Two-Hand Damage
+            if spec.min_dmg2h > 0 && spec.max_dmg2h > 0 {
+                let mut b_min = spec.min_dmg2h as i32;
+                let mut b_max = spec.max_dmg2h as i32;
+                if item.is_ethereal {
+                    b_min = (b_min * 150) / 100;
+                    b_max = (b_max * 150) / 100;
+                }
+                let f_min = ((b_min * (100 + ed_pct)) / 100 + add_min).max(1);
+                let f_max = ((b_max * (100 + ed_pct)) / 100 + add_max).max(f_min);
+
+                let label = get_loc("ItemStats1m", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[f_min.to_string(), f_max.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {} - {}", label.trim(), f_min, f_max));
+                }
+            }
+        }
+    }
 
     if let Some(display) = displayed_durability(item, active_set_count) {
         let (current, maximum) = match display {
@@ -194,6 +261,78 @@ pub fn format_item_with_mode(
             base_attributes.push(format!("{label}: {base}"));
         }
     }
+
+    // 6. Requirements: Strength, Dexterity, Level
+    if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
+        let mut base_str = spec.req_str as i32;
+        let mut base_dex = spec.req_dex as i32;
+
+        if item.is_ethereal {
+            base_str = (base_str - 10).max(0);
+            base_dex = (base_dex - 10).max(0);
+        }
+
+        let req_pct: i32 = item
+            .properties
+            .iter()
+            .filter(|p| p.stat_id == 91)
+            .map(|p| p.value)
+            .sum();
+
+        if spec.req_str > 0 {
+            let final_str = ((base_str * (100 + req_pct)) / 100).max(0);
+            let label = get_loc("ItemStats1e", language);
+            if label.contains('%') {
+                base_attributes.push(format_template(label, &[final_str.to_string()]));
+            } else {
+                base_attributes.push(format!("{} {}", label.trim(), final_str));
+            }
+        }
+
+        if spec.req_dex > 0 {
+            let final_dex = ((base_dex * (100 + req_pct)) / 100).max(0);
+            let label = get_loc("ItemStats1f", language);
+            if label.contains('%') {
+                base_attributes.push(format_template(label, &[final_dex.to_string()]));
+            } else {
+                base_attributes.push(format!("{} {}", label.trim(), final_dex));
+            }
+        }
+
+        // Required Level
+        let mut req_lvl = spec.req_lvl;
+        if item.quality == Some(ItemQuality::Unique) && item.is_identified {
+            if let Some(id) = item.unique_id {
+                if let Some(u) = UNIQUE_ITEMS.iter().find(|u| u.id == id as u32) {
+                    req_lvl = req_lvl.max(u.level_req as u8);
+                }
+            }
+        }
+        if item.quality == Some(ItemQuality::Set) && item.is_identified {
+            if let Some(id) = item.unique_id {
+                if let Some(s) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
+                    if let Some(lvl) = s.level_req {
+                        req_lvl = req_lvl.max(lvl as u8);
+                    }
+                }
+            }
+        }
+        for socketed in &item.socketed_items {
+            if let Some(s_spec) = crate::data::item_specs::get_base_item_spec(&socketed.code) {
+                req_lvl = req_lvl.max(s_spec.req_lvl);
+            }
+        }
+
+        if req_lvl > 1 {
+            let label = get_loc("ItemStats1p", language);
+            if label.contains('%') {
+                base_attributes.push(format_template(label, &[req_lvl.to_string()]));
+            } else {
+                base_attributes.push(format!("{} {}", label.trim(), req_lvl));
+            }
+        }
+    }
+
 
     if let Some(qty) = item.quantity() {
         let capacity = qualified_quantity_capacity(item, qty, active_set_count);

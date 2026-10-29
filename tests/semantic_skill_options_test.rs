@@ -856,6 +856,114 @@ fn test_shield_block_and_smite_damage() {
     assert!(fmt_boosted_ko.base_attributes.contains(&"공격저지 성공율: 62%".to_string()));
 }
 
+#[test]
+fn test_weapon_damage_and_enhanced_damage_synthesis() {
+    // 1. Short Sword (ssd): min_dmg = 2, max_dmg = 7
+    let mut sword = Item::empty_for_tests();
+    sword.code = "ssd ".to_string();
+    sword.is_identified = true;
+
+    let fmt_en = format_item(&sword, "en", 0, 99);
+    assert!(fmt_en.base_attributes.contains(&"One-Hand Damage: 2 to 7".to_string()));
+    let fmt_ko = format_item(&sword, "ko", 0, 99);
+    assert!(fmt_ko.base_attributes.contains(&"한손 데미지: 2 - 7".to_string()));
+
+    // 2. Short Sword with +100% Enhanced Damage (stat 17)
+    sword.properties.push(ItemProperty::new(
+        17,
+        "item_maxdamage_percent".to_string(),
+        0,
+        100,
+        100,
+        ItemBitRange::default(),
+    ));
+    let fmt_ed_en = format_item(&sword, "en", 0, 99);
+    assert!(fmt_ed_en.base_attributes.contains(&"One-Hand Damage: 4 to 14".to_string()));
+
+    // 3. Short Sword with flat +5 min and +10 max damage (stats 21 & 22)
+    sword.properties.push(ItemProperty::new(
+        21,
+        "mindamage".to_string(),
+        0,
+        5,
+        5,
+        ItemBitRange::default(),
+    ));
+    sword.properties.push(ItemProperty::new(
+        22,
+        "maxdamage".to_string(),
+        0,
+        10,
+        10,
+        ItemBitRange::default(),
+    ));
+    let fmt_flat_en = format_item(&sword, "en", 0, 99);
+    // (2 * 200 / 100) + 5 = 9, (7 * 200 / 100) + 10 = 24
+    assert!(fmt_flat_en.base_attributes.contains(&"One-Hand Damage: 9 to 24".to_string()));
+
+    // 4. Colossus Blade (7gd): min_dmg = 25, max_dmg = 65, min_dmg2h = 58, max_dmg2h = 115
+    let mut cb = Item::empty_for_tests();
+    cb.code = "7gd ".to_string();
+    cb.is_identified = true;
+
+    let fmt_cb_en = format_item(&cb, "en", 0, 99);
+    assert!(fmt_cb_en.base_attributes.contains(&"One-Hand Damage: 25 to 65".to_string()));
+    assert!(fmt_cb_en.base_attributes.contains(&"Two-Hand Damage: 58 to 115".to_string()));
+    let fmt_cb_ko = format_item(&cb, "ko", 0, 99);
+    assert!(fmt_cb_ko.base_attributes.contains(&"한손 데미지: 25 - 65".to_string()));
+    assert!(fmt_cb_ko.base_attributes.contains(&"양손 데미지: 58 - 115".to_string()));
+
+    // 5. Ethereal Colossus Blade (50% bonus to base damage)
+    cb.is_ethereal = true;
+    let fmt_eth_en = format_item(&cb, "en", 0, 99);
+    // 25 * 1.5 = 37, 65 * 1.5 = 97
+    // 58 * 1.5 = 87, 115 * 1.5 = 172
+    assert!(fmt_eth_en.base_attributes.contains(&"One-Hand Damage: 37 to 97".to_string()));
+    assert!(fmt_eth_en.base_attributes.contains(&"Two-Hand Damage: 87 to 172".to_string()));
+}
+
+#[test]
+fn test_requirements_calculation_with_reduction_and_ethereal() {
+    // 1. Mage Plate (xtp): req_str = 55, req_lvl = 25
+    let mut mp = Item::empty_for_tests();
+    mp.code = "xtp ".to_string();
+    mp.is_identified = true;
+
+    let fmt_en = format_item(&mp, "en", 0, 99);
+    assert!(fmt_en.base_attributes.contains(&"Required Strength: 55".to_string()));
+    assert!(fmt_en.base_attributes.contains(&"Required Level: 25".to_string()));
+    let fmt_ko = format_item(&mp, "ko", 0, 99);
+    assert!(fmt_ko.base_attributes.contains(&"착용 가능한 힘: 55".to_string()));
+    assert!(fmt_ko.base_attributes.contains(&"착용 가능한 레벨: 25".to_string()));
+
+    // 2. Ethereal Mage Plate (-10 str requirement)
+    mp.is_ethereal = true;
+    let fmt_eth_en = format_item(&mp, "en", 0, 99);
+    assert!(fmt_eth_en.base_attributes.contains(&"Required Strength: 45".to_string()));
+
+    // 3. Ethereal Mage Plate with -20% requirements (stat 91: item_req_percent = -20)
+    mp.properties.push(ItemProperty::new(
+        91,
+        "item_req_percent".to_string(),
+        0,
+        -20,
+        -20,
+        ItemBitRange::default(),
+    ));
+    let fmt_eth_red_en = format_item(&mp, "en", 0, 99);
+    // (45 * 80) / 100 = 36
+    assert!(fmt_eth_red_en.base_attributes.contains(&"Required Strength: 36".to_string()));
+
+    // 4. Socketed with Ber Rune (r30: req_lvl = 63)
+    let mut r30 = Item::empty_for_tests();
+    r30.code = "r30 ".to_string();
+    mp.socketed_items.push(r30);
+    let fmt_ber_en = format_item(&mp, "en", 0, 99);
+    // Required level should scale to socketed Ber rune's req_lvl (63)
+    assert!(fmt_ber_en.base_attributes.contains(&"Required Level: 63".to_string()));
+}
+
+
 
 
 
