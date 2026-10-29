@@ -733,5 +733,129 @@ fn test_per_level_scaling_and_charged_proc_skill_semantics() {
     );
 }
 
+#[test]
+fn test_unidentified_item_suppression_and_label() {
+    let mut item = Item::empty_for_tests();
+    item.code = "rin ".to_string();
+    item.quality = Some(ItemQuality::Unique);
+    item.unique_id = Some(1); // Nagelring
+    item.is_identified = false;
+    item.properties.push(ItemProperty::new(
+        80, // item_magicbonus (MF)
+        "item_magicbonus".to_string(),
+        0,
+        30,
+        30,
+        ItemBitRange::default(),
+    ));
+
+    // In English
+    let fmt_en = format_item(&item, "en", 0, 99);
+    assert_eq!(fmt_en.name, "Ring");
+    assert!(fmt_en.base_attributes.contains(&"Unidentified".to_string()));
+    assert!(fmt_en.properties.is_empty(), "Properties must be hidden when unidentified");
+    assert!(fmt_en.discrete_properties.is_empty(), "Discrete properties must be hidden when unidentified");
+
+    // In Korean
+    let fmt_ko = format_item(&item, "ko", 0, 99);
+    assert_eq!(fmt_ko.name, "링");
+    assert!(fmt_ko.base_attributes.contains(&"미확인".to_string()));
+    assert!(fmt_ko.properties.is_empty());
+}
+
+#[test]
+fn test_standalone_gem_three_slot_tooltips() {
+    let mut gem = Item::empty_for_tests();
+    gem.code = "gcr ".to_string(); // Chipped Ruby
+    gem.is_identified = true;
+
+    // English
+    let fmt_en = format_item(&gem, "en", 0, 99);
+    assert!(fmt_en.base_attributes.contains(&"Can be Inserted into Socketed Items".to_string()));
+    assert_eq!(fmt_en.properties.len(), 3);
+    assert_eq!(fmt_en.properties[0], "Weapons: Adds 3-4 fire damage");
+    assert_eq!(fmt_en.properties[1], "Armor: +10 to Life");
+    assert_eq!(fmt_en.properties[2], "Shields: Fire Resist +12%");
+
+    // Korean
+    let fmt_ko = format_item(&gem, "ko", 0, 99);
+    assert!(fmt_ko.base_attributes.contains(&"소켓 아이템용".to_string()));
+    assert_eq!(fmt_ko.properties.len(), 3);
+    assert_eq!(fmt_ko.properties[0], "무기: 3 - 4 파이어 데미지 추가");
+    assert_eq!(fmt_ko.properties[1], "아머: +10 라이프");
+    assert_eq!(fmt_ko.properties[2], "방패: +12 파이어 저항력");
+}
+
+#[test]
+fn test_potion_recovery_tooltips() {
+    // 1. Minor Healing Potion (hp1)
+    let mut hp1 = Item::empty_for_tests();
+    hp1.code = "hp1 ".to_string();
+    hp1.is_identified = true;
+    let fmt_hp1_en = format_item(&hp1, "en", 0, 99);
+    assert!(fmt_hp1_en.base_attributes.contains(&"Points: 30".to_string()));
+    let fmt_hp1_ko = format_item(&hp1, "ko", 0, 99);
+    assert!(fmt_hp1_ko.base_attributes.contains(&"회복량: 30".to_string()));
+
+    // 2. Greater Mana Potion (mp4)
+    let mut mp4 = Item::empty_for_tests();
+    mp4.code = "mp4 ".to_string();
+    mp4.is_identified = true;
+    let fmt_mp4_en = format_item(&mp4, "en", 0, 99);
+    assert!(fmt_mp4_en.base_attributes.contains(&"Points: 120".to_string()));
+    let fmt_mp4_ko = format_item(&mp4, "ko", 0, 99);
+    assert!(fmt_mp4_ko.base_attributes.contains(&"회복량: 120".to_string()));
+
+    // 3. Rejuvenation Potion (rvs)
+    let mut rvs = Item::empty_for_tests();
+    rvs.code = "rvs ".to_string();
+    rvs.is_identified = true;
+    let fmt_rvs_en = format_item(&rvs, "en", 0, 99);
+    assert!(fmt_rvs_en.base_attributes.contains(&"Heals 35% Life and Mana".to_string()));
+    let fmt_rvs_ko = format_item(&rvs, "ko", 0, 99);
+    assert!(fmt_rvs_ko.base_attributes.contains(&"라이프와 마나 35% 회복".to_string()));
+
+    // 4. Full Rejuvenation Potion (rvl)
+    let mut rvl = Item::empty_for_tests();
+    rvl.code = "rvl ".to_string();
+    rvl.is_identified = true;
+    let fmt_rvl_en = format_item(&rvl, "en", 0, 99);
+    assert!(fmt_rvl_en.base_attributes.contains(&"Heals 100% Life and Mana".to_string()));
+    let fmt_rvl_ko = format_item(&rvl, "ko", 0, 99);
+    assert!(fmt_rvl_ko.base_attributes.contains(&"라이프와 마나 100% 회복".to_string()));
+}
+
+#[test]
+fn test_shield_block_and_smite_damage() {
+    // 1. Monarch (uit)
+    let mut monarch = Item::empty_for_tests();
+    monarch.code = "uit ".to_string();
+    monarch.is_identified = true;
+
+    let fmt_en = format_item(&monarch, "en", 0, 99);
+    assert!(fmt_en.base_attributes.contains(&"Chance to Block: 42%".to_string()));
+    assert!(fmt_en.base_attributes.contains(&"Smite Damage: 12 to 34".to_string()));
+
+    let fmt_ko = format_item(&monarch, "ko", 0, 99);
+    assert!(fmt_ko.base_attributes.contains(&"공격저지 성공율: 42%".to_string()));
+    assert!(fmt_ko.base_attributes.contains(&"타격 데미지: 12 - 34".to_string()));
+
+    // 2. Monarch with toblock bonus (+20% block, e.g. from prefix/stat)
+    monarch.properties.push(ItemProperty::new(
+        20,
+        "toblock".to_string(),
+        0,
+        20,
+        20,
+        ItemBitRange::default(),
+    ));
+
+    let fmt_boosted_en = format_item(&monarch, "en", 0, 99);
+    assert!(fmt_boosted_en.base_attributes.contains(&"Chance to Block: 62%".to_string()));
+    let fmt_boosted_ko = format_item(&monarch, "ko", 0, 99);
+    assert!(fmt_boosted_ko.base_attributes.contains(&"공격저지 성공율: 62%".to_string()));
+}
+
+
 
 

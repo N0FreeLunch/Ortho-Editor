@@ -42,6 +42,26 @@ pub struct FormattedItem {
     pub detailed_warnings: Vec<crate::engine::validation::ValidationWarning>,
 }
 
+fn stat_ranges_to_properties(ranges: &[crate::data::item_specs::ItemStatRange]) -> Vec<ItemProperty> {
+    ranges
+        .iter()
+        .map(|r| {
+            let name = crate::data::stat_costs::STAT_COSTS
+                .iter()
+                .find(|s| s.id == r.stat_id)
+                .map_or("", |s| s.name);
+            ItemProperty::new(
+                r.stat_id,
+                name.into(),
+                r.param,
+                r.min,
+                r.max,
+                ItemBitRange::default(),
+            )
+        })
+        .collect()
+}
+
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
     format_item_with_mode(item, language, active_set_count, char_level, StatDisplayMode::Fused)
 }
@@ -57,6 +77,11 @@ pub fn format_item_with_mode(
     let mut defense_advisory = None;
     let mut durability_advisory = None;
     let mut quantity_advisory = false;
+
+    // 1. Unidentified label
+    if !item.is_identified {
+        base_attributes.push(get_loc("ItemStats1b", language).to_string());
+    }
 
     if let Some(display) = displayed_defense(item, active_set_count, char_level) {
         match display {
@@ -75,6 +100,72 @@ pub fn format_item_with_mode(
             }
         }
     }
+
+    // 2. Shield Chance to Block
+    if let Some(base_block) = crate::data::shields::get_shield_base_block(&item.code) {
+        let bonus_block: i32 = item
+            .properties
+            .iter()
+            .filter(|p| p.stat_id == 20)
+            .map(|p| p.value)
+            .sum();
+        let total_block = (base_block as i32 + bonus_block).max(0);
+        let label = get_loc("ItemStats1r", language);
+        if label.contains('%') {
+            base_attributes.push(format_template(label, &[total_block.to_string()]));
+        } else {
+            base_attributes.push(format!("{} {}%", label.trim(), total_block));
+        }
+    }
+
+    // 3. Shield Smite Damage
+    if crate::data::shields::get_shield_base_block(&item.code).is_some() {
+        if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
+            if spec.min_dmg > 0 && spec.max_dmg > 0 {
+                let label = get_loc("ItemStats1o", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[spec.min_dmg.to_string(), spec.max_dmg.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {} - {}", label.trim(), spec.min_dmg, spec.max_dmg));
+                }
+            }
+        }
+    }
+
+    // 4. Potion Recovery
+    if let Some(recovery) = crate::data::potions::get_potion_recovery(&item.code) {
+        match recovery {
+            crate::data::potions::PotionRecovery::Life(pts) | crate::data::potions::PotionRecovery::Mana(pts) => {
+                let label = get_loc("ItemStats1q", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[pts.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {}", label.trim(), pts));
+                }
+            }
+            crate::data::potions::PotionRecovery::Rejuvenation(35) => {
+                let label = get_loc("ItemStatsrejuv1", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &["35".to_string()]));
+                } else {
+                    base_attributes.push(label.to_string());
+                }
+            }
+            crate::data::potions::PotionRecovery::Rejuvenation(100) => {
+                let label = get_loc("ItemStatsrejuv2", language);
+                base_attributes.push(label.to_string());
+            }
+            crate::data::potions::PotionRecovery::Rejuvenation(pct) => {
+                let label = get_loc("ItemStatsrejuv1", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[pct.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {}%", label.trim(), pct));
+                }
+            }
+        }
+    }
+
 
     if let Some(display) = displayed_durability(item, active_set_count) {
         let (current, maximum) = match display {
@@ -135,24 +226,58 @@ pub fn format_item_with_mode(
         Ok(projected) => (projected, None),
         Err(reason) => (None, Some(reason)),
     };
-    let properties = if let Some(projected) = projected.as_ref() {
-        format_properties_list_with_mode(projected, char_level, language, mode)
-    } else {
-        let mut lines = format_properties_list_with_mode(&item.properties, char_level, language, mode);
-        if item.is_runeword {
-            lines.extend(format_properties_list_with_mode(&item.runeword_attributes, char_level, language, mode));
+    let (properties, discrete_properties) = if !item.is_identified {
+        (Vec::new(), Vec::new())
+    } else if let Some(gem) = crate::data::gems::get_gem_spec(&item.code) {
+        let insert_hint = get_loc("ExInsertSockets", language).to_string();
+        if !base_attributes.contains(&insert_hint) {
+            base_attributes.push(insert_hint);
         }
-        lines
-    };
-    let discrete_properties = if let Some(projected) = projected.as_ref() {
-        format_properties_list_with_mode(projected, char_level, language, StatDisplayMode::Discrete)
-    } else {
-        let mut lines = format_properties_list_with_mode(&item.properties, char_level, language, StatDisplayMode::Discrete);
-        if item.is_runeword {
-            lines.extend(format_properties_list_with_mode(&item.runeword_attributes, char_level, language, StatDisplayMode::Discrete));
+
+        let mut gem_lines = Vec::new();
+
+        // 1. Weapons
+        let w_props = stat_ranges_to_properties(gem.weapon_stats);
+        let w_formatted = format_properties_list_with_mode(&w_props, char_level, language, mode);
+        let w_prefix = get_loc("StrGemX3", language).trim();
+        for line in w_formatted {
+            gem_lines.push(format!("{w_prefix} {line}"));
         }
-        lines
+
+        // 2. Armor / Helms
+        let a_props = stat_ranges_to_properties(gem.helm_stats);
+        let a_formatted = format_properties_list_with_mode(&a_props, char_level, language, mode);
+        let a_prefix = get_loc("StrGemX4", language).trim();
+        for line in a_formatted {
+            gem_lines.push(format!("{a_prefix} {line}"));
+        }
+
+        // 3. Shields
+        let s_props = stat_ranges_to_properties(gem.shield_stats);
+        let s_formatted = format_properties_list_with_mode(&s_props, char_level, language, mode);
+        let s_prefix = get_loc("StrGemX2", language).trim();
+        for line in s_formatted {
+            gem_lines.push(format!("{s_prefix} {line}"));
+        }
+
+        (gem_lines.clone(), gem_lines)
+    } else if let Some(projected) = projected.as_ref() {
+        (
+            format_properties_list_with_mode(projected, char_level, language, mode),
+            format_properties_list_with_mode(projected, char_level, language, StatDisplayMode::Discrete),
+        )
+    } else {
+        let mut fused_lines = format_properties_list_with_mode(&item.properties, char_level, language, mode);
+        if item.is_runeword {
+            fused_lines.extend(format_properties_list_with_mode(&item.runeword_attributes, char_level, language, mode));
+        }
+        let mut discrete_lines = format_properties_list_with_mode(&item.properties, char_level, language, StatDisplayMode::Discrete);
+        if item.is_runeword {
+            discrete_lines.extend(format_properties_list_with_mode(&item.runeword_attributes, char_level, language, StatDisplayMode::Discrete));
+        }
+        (fused_lines, discrete_lines)
     };
+
 
     let mut set_bonuses = Vec::new();
     let mut piece_set_bonuses = Vec::new();
