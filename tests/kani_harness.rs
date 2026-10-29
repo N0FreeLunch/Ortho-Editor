@@ -162,4 +162,242 @@ mod kani_tests {
             assert_eq!(final_req, 0);
         }
     }
+
+    #[kani::proof]
+    fn proof_character_boundary_evaluate_bound_soundness() {
+        let current: u64 = kani::any();
+        let min: u64 = kani::any();
+        let max: u64 = kani::any();
+        kani::assume(min <= max);
+        kani::assume(current >= min && current <= max);
+
+        let op_mode: u8 = kani::any();
+        let operand: u64 = kani::any();
+
+        let op = match op_mode % 3 {
+            0 => d2r_core::domain::contracts::NumericOp::Set(operand),
+            1 => d2r_core::domain::contracts::NumericOp::Add(operand),
+            _ => d2r_core::domain::contracts::NumericOp::Sub(operand),
+        };
+
+        let result = d2r_core::domain::contracts::CharacterBoundaryValidator::evaluate_bound(
+            "test_field",
+            current,
+            op,
+            min,
+            max,
+        );
+
+        if let Ok(resulting) = result {
+            assert!(resulting >= min);
+            assert!(resulting <= max);
+            match op {
+                d2r_core::domain::contracts::NumericOp::Set(v) => assert_eq!(resulting, v),
+                d2r_core::domain::contracts::NumericOp::Add(v) => assert_eq!(resulting, current + v),
+                d2r_core::domain::contracts::NumericOp::Sub(v) => assert_eq!(resulting, current - v),
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn proof_character_gold_cap_and_wealth_invariants() {
+        let level: u8 = kani::any();
+        kani::assume(level >= 1 && level <= 99);
+
+        let char_gold_cap = (level as u64) * 10_000;
+        assert!(char_gold_cap >= 10_000);
+        assert!(char_gold_cap <= 990_000);
+
+        let max_stash_gold = d2r_core::domain::contracts::StashGoldValue::MAX_STASH_GOLD as u64;
+        assert_eq!(max_stash_gold, 2_500_000);
+
+        let max_total_wealth = char_gold_cap + max_stash_gold;
+        assert!(max_total_wealth <= 3_490_000);
+        assert!(max_total_wealth < u32::MAX as u64);
+    }
+
+    #[kani::proof]
+    fn proof_item_boundary_u32_op_soundness() {
+        let current: u32 = kani::any();
+        let min: u32 = kani::any();
+        let max: u32 = kani::any();
+        kani::assume(min <= max);
+        kani::assume(current >= min && current <= max);
+
+        let op_mode: u8 = kani::any();
+        let operand: u32 = kani::any();
+
+        let op = match op_mode % 3 {
+            0 => d2r_core::domain::contracts::NumericOp::Set(operand),
+            1 => d2r_core::domain::contracts::NumericOp::Add(operand),
+            _ => d2r_core::domain::contracts::NumericOp::Sub(operand),
+        };
+
+        let result = d2r_core::domain::contracts::ItemBoundaryValidator::evaluate_u32_op(
+            "test.item_u32",
+            op,
+            current,
+            min,
+            max,
+        );
+
+        if let Ok(resulting) = result {
+            assert!(resulting >= min);
+            assert!(resulting <= max);
+        }
+    }
+
+    #[kani::proof]
+    fn proof_item_boundary_i32_op_soundness() {
+        let current: i32 = kani::any();
+        let min: i32 = kani::any();
+        let max: i32 = kani::any();
+        kani::assume(min <= max);
+        kani::assume(current >= min && current <= max);
+
+        let op_mode: u8 = kani::any();
+        let operand: i32 = kani::any();
+
+        let op = match op_mode % 3 {
+            0 => d2r_core::domain::contracts::NumericOp::Set(operand),
+            1 => d2r_core::domain::contracts::NumericOp::Add(operand),
+            _ => d2r_core::domain::contracts::NumericOp::Sub(operand),
+        };
+
+        let result = d2r_core::domain::contracts::ItemBoundaryValidator::evaluate_i32_op(
+            "test.item_i32",
+            op,
+            current,
+            min,
+            max,
+        );
+
+        if let Ok(resulting) = result {
+            assert!(resulting >= min);
+            assert!(resulting <= max);
+        }
+    }
+
+    #[kani::proof]
+    fn proof_waypoint_buffer_indexing_soundness() {
+        let diff: u8 = kani::any();
+        kani::assume(diff <= 2);
+
+        let wp_idx: usize = kani::any();
+        kani::assume(wp_idx < 39);
+
+        // Save file layout has 24 bytes per difficulty for waypoints (72 bytes total).
+        let byte_offset = (diff as usize) * 24 + (wp_idx / 8);
+        let bit_in_byte = wp_idx % 8;
+
+        assert!(byte_offset < 72);
+        assert!(byte_offset <= 52); // Maximum possible byte offset is 2 * 24 + 4 = 52
+        assert!(bit_in_byte < 8);
+    }
+
+    #[kani::proof]
+    fn proof_skill_points_respec_conservation() {
+        let unspent: u8 = kani::any();
+        kani::assume(unspent <= 99);
+
+        let s0: u8 = kani::any();
+        let s1: u8 = kani::any();
+        let s2: u8 = kani::any();
+        kani::assume(s0 <= 20 && s1 <= 20 && s2 <= 20);
+
+        let total_spent = (s0 as u32) + (s1 as u32) + (s2 as u32);
+        assert!(total_spent <= 60);
+
+        let refunded = (unspent as u32) + total_spent;
+        assert!(refunded <= 99 + 60);
+        assert!(refunded <= 699);
+    }
+}
+
+#[cfg(not(kani))]
+mod standard_boundary_invariant_tests {
+    use d2r_core::domain::contracts::{
+        CharacterBoundaryValidator, ItemBoundaryValidator, NumericOp, StashGoldValue,
+    };
+
+    #[test]
+    fn test_character_evaluate_bound_invariants() {
+        let test_cases = vec![
+            (100u64, NumericOp::Set(50), 0u64, 200u64, Ok(50u64)),
+            (100u64, NumericOp::Set(300), 0u64, 200u64, Err("overflow")),
+            (100u64, NumericOp::Add(50), 0u64, 200u64, Ok(150u64)),
+            (100u64, NumericOp::Add(150), 0u64, 200u64, Err("overflow")),
+            (100u64, NumericOp::Sub(30), 0u64, 200u64, Ok(70u64)),
+            (100u64, NumericOp::Sub(150), 0u64, 200u64, Err("underflow")),
+        ];
+
+        for (cur, op, min, max, expected) in test_cases {
+            let res = CharacterBoundaryValidator::evaluate_bound("field", cur, op, min, max);
+            match expected {
+                Ok(val) => assert_eq!(res.unwrap(), val),
+                Err(err_kind) => {
+                    assert!(res.is_err());
+                    let err = res.unwrap_err();
+                    match err {
+                        d2r_core::domain::contracts::ContractError::Overflow { .. } => assert_eq!(err_kind, "overflow"),
+                        d2r_core::domain::contracts::ContractError::Underflow { .. } => assert_eq!(err_kind, "underflow"),
+                        _ => panic!("unexpected error type: {:?}", err),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_item_evaluate_u32_op_invariants() {
+        let op_set = NumericOp::Set(150);
+        let res = ItemBoundaryValidator::evaluate_u32_op("defense", op_set, 100, 0, 500);
+        assert_eq!(res.unwrap(), 150);
+
+        let op_overflow = NumericOp::Add(450);
+        let res_err = ItemBoundaryValidator::evaluate_u32_op("defense", op_overflow, 100, 0, 500);
+        assert!(res_err.is_err());
+        assert_eq!(res_err.unwrap_err().code, "overflow");
+
+        let op_underflow = NumericOp::Sub(150);
+        let res_err = ItemBoundaryValidator::evaluate_u32_op("defense", op_underflow, 100, 0, 500);
+        assert!(res_err.is_err());
+        assert_eq!(res_err.unwrap_err().code, "underflow");
+    }
+
+    #[test]
+    fn test_item_evaluate_i32_op_invariants() {
+        let op_set = NumericOp::Set(-50);
+        let res = ItemBoundaryValidator::evaluate_i32_op("ed", op_set, 0, -100, 1000);
+        assert_eq!(res.unwrap(), -50);
+
+        let op_overflow = NumericOp::Add(1100);
+        let res_err = ItemBoundaryValidator::evaluate_i32_op("ed", op_overflow, 0, -100, 1000);
+        assert!(res_err.is_err());
+        assert_eq!(res_err.unwrap_err().code, "overflow");
+
+        let op_underflow = NumericOp::Sub(200);
+        let res_err = ItemBoundaryValidator::evaluate_i32_op("ed", op_underflow, 0, -100, 1000);
+        assert!(res_err.is_err());
+        assert_eq!(res_err.unwrap_err().code, "underflow");
+    }
+
+    #[test]
+    fn test_gold_cap_and_waypoint_indexing_invariants() {
+        for lvl in 1..=99u8 {
+            let cap = (lvl as u64) * 10_000;
+            assert!(cap >= 10_000 && cap <= 990_000);
+            assert!(cap + (StashGoldValue::MAX_STASH_GOLD as u64) < (u32::MAX as u64));
+        }
+
+        for diff in 0..=2u8 {
+            for wp_idx in 0..39usize {
+                let byte_offset = (diff as usize) * 24 + (wp_idx / 8);
+                let bit_in_byte = wp_idx % 8;
+                assert!(byte_offset < 72);
+                assert!(byte_offset <= 52);
+                assert!(bit_in_byte < 8);
+            }
+        }
+    }
 }

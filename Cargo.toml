@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license-file = "LICENSE"
 
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
+
 # [[example]]
 # name = "item_xray"
 # path = "tmp/item_xray.rs"

@@ -643,7 +643,7 @@ impl ItemBoundaryValidator {
         })
     }
 
-    fn evaluate_u32_op(
+    pub fn evaluate_u32_op(
         field: &str,
         op: NumericOp<u32>,
         current: u32,
@@ -695,7 +695,7 @@ impl ItemBoundaryValidator {
         }
     }
 
-    fn evaluate_i32_op(
+    pub fn evaluate_i32_op(
         field: &str,
         op: NumericOp<i32>,
         current: i32,
