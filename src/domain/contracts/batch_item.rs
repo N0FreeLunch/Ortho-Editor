@@ -4,9 +4,10 @@
 //! bulk item identification, and mass socket unlocking.
 
 use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
 
 /// Inbound wire DTO representing batch item mutation requests.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 pub struct BatchItemWireDto {
     /// Restore all damaged items in inventory, body, and stash to maximum durability.
     #[serde(skip_serializing_if = "Option::is_none")]

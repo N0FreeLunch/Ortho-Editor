@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CharacterWireDto",
+  "description": "Wire DTO for character profile and attribute mutations.\nSupports both absolute assignment and relative delta operations.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Character name (2 to 15 alphanumeric characters).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 2,
+      "maxLength": 15
+    },
+    "level": {
+      "description": "Character level operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "experience": {
+      "description": "Character experience points.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "strength": {
+      "description": "Base strength operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dexterity": {
+      "description": "Base dexterity operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "vitality": {
+      "description": "Base vitality operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "energy": {
+      "description": "Base energy operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stat_points": {
+      "description": "Unspent stat points operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gold_character": {
+      "description": "Gold in character inventory operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gold_stash": {
+      "description": "Gold in private stash operation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "NumericOp": {
+      "description": "Mutation operator supporting absolute assignment and relative delta operations.",
+      "oneOf": [
+        {
+          "description": "Absolute assignment: sets the field directly to the given value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Set"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative addition: increments current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative subtraction: decrements current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Sub"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ]
+    },
+    "NumericOp2": {
+      "description": "Mutation operator supporting absolute assignment and relative delta operations.",
+      "oneOf": [
+        {
+          "description": "Absolute assignment: sets the field directly to the given value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Set"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative addition: increments current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative subtraction: decrements current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Sub"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ]
+    }
+  }
+}

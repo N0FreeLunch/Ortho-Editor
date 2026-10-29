@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BatchItemWireDto",
+  "description": "Inbound wire DTO representing batch item mutation requests.",
+  "type": "object",
+  "properties": {
+    "repair_all": {
+      "description": "Restore all damaged items in inventory, body, and stash to maximum durability.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "identify_all": {
+      "description": "Identify all unidentified items across all character inventory containers.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "socket_all": {
+      "description": "Add sockets to all unsocketed eligible items up to their base max (or capped at count).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255
+    }
+  }
+}

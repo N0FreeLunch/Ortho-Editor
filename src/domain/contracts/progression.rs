@@ -3,9 +3,10 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use validator::Validate;
+use schemars::JsonSchema;
 
 /// Game difficulty level (0 = Normal, 1 = Nightmare, 2 = Hell).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum DifficultyLevel {
     Normal = 0,
     Nightmare = 1,
@@ -85,7 +86,7 @@ impl From<ProgressionContractError> for super::validation::ValidationErrorRespon
 }
 
 /// External Wire DTO for waypoint mutations.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Validate, JsonSchema)]
 pub struct WaypointWireDto {
     /// Target difficulty (0 = Normal, 1 = Nightmare, 2 = Hell). If None, applies to all unlocked/all difficulties.
     pub difficulty: Option<u8>,

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaypointWireDto",
+  "description": "External Wire DTO for waypoint mutations.",
+  "type": "object",
+  "properties": {
+    "difficulty": {
+      "description": "Target difficulty (0 = Normal, 1 = Nightmare, 2 = Hell). If None, applies to all unlocked/all difficulties.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "unlock_all": {
+      "description": "If true, unlocks all waypoints in the target difficulty (or all difficulties if difficulty is None).",
+      "type": "boolean"
+    },
+    "activate_waypoints": {
+      "description": "Explicit list of waypoint names to activate.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "unlock_all"
+  ]
+}

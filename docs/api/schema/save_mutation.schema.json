@@ -1,0 +1,670 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SaveMutationDto",
+  "description": "Root wire DTO representing an integrated save mutation request.",
+  "type": "object",
+  "properties": {
+    "character": {
+      "description": "Character attributes, level, and stats.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CharacterWireDto"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "waypoints": {
+      "description": "Waypoint activation across difficulties.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WaypointWireDto"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "skills": {
+      "description": "Character skills and respec.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SkillWireDto"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "items": {
+      "description": "Granular single-item mutations.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ItemWireDto"
+      }
+    },
+    "batch_items": {
+      "description": "Mass/bulk item operations (repair all, identify all, socket all).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BatchItemWireDto"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "CharacterWireDto": {
+      "description": "Wire DTO for character profile and attribute mutations.\nSupports both absolute assignment and relative delta operations.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Character name (2 to 15 alphanumeric characters).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 2,
+          "maxLength": 15
+        },
+        "level": {
+          "description": "Character level operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "experience": {
+          "description": "Character experience points.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strength": {
+          "description": "Base strength operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dexterity": {
+          "description": "Base dexterity operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vitality": {
+          "description": "Base vitality operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "energy": {
+          "description": "Base energy operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stat_points": {
+          "description": "Unspent stat points operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gold_character": {
+          "description": "Gold in character inventory operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gold_stash": {
+          "description": "Gold in private stash operation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "NumericOp": {
+      "description": "Mutation operator supporting absolute assignment and relative delta operations.",
+      "oneOf": [
+        {
+          "description": "Absolute assignment: sets the field directly to the given value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Set"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative addition: increments current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative subtraction: decrements current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Sub"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ]
+    },
+    "NumericOp2": {
+      "description": "Mutation operator supporting absolute assignment and relative delta operations.",
+      "oneOf": [
+        {
+          "description": "Absolute assignment: sets the field directly to the given value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Set"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative addition: increments current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative subtraction: decrements current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Sub"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ]
+    },
+    "WaypointWireDto": {
+      "description": "External Wire DTO for waypoint mutations.",
+      "type": "object",
+      "properties": {
+        "difficulty": {
+          "description": "Target difficulty (0 = Normal, 1 = Nightmare, 2 = Hell). If None, applies to all unlocked/all difficulties.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "unlock_all": {
+          "description": "If true, unlocks all waypoints in the target difficulty (or all difficulties if difficulty is None).",
+          "type": "boolean"
+        },
+        "activate_waypoints": {
+          "description": "Explicit list of waypoint names to activate.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "unlock_all"
+      ]
+    },
+    "SkillWireDto": {
+      "description": "Inbound wire DTO representing skill mutation requests.",
+      "type": "object",
+      "properties": {
+        "skills": {
+          "description": "Specific skill level modifications.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SkillOpWireDto"
+          }
+        },
+        "skill_points": {
+          "description": "Unspent skill points modifier (stat 5).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "respec": {
+          "description": "Complete skill respec flag: resets all allocated skills to 0 and refunds spent points to unspent pool.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "SkillOpWireDto": {
+      "description": "Operation on an individual skill.",
+      "type": "object",
+      "properties": {
+        "skill_id": {
+          "description": "Skill ID (e.g. 54 for Teleport) or skill name/code.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "op": {
+          "description": "Mutation operation (Set, Add, or Sub).",
+          "$ref": "#/$defs/NumericOp"
+        }
+      },
+      "required": [
+        "skill_id",
+        "op"
+      ]
+    },
+    "ItemWireDto": {
+      "description": "Inbound wire DTO representing an item mutation request.",
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "Target criteria to locate the item.",
+          "$ref": "#/$defs/ItemTarget",
+          "default": {}
+        },
+        "defense": {
+          "description": "Defense modifier.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "durability": {
+          "description": "Current durability modifier.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_durability": {
+          "description": "Maximum durability modifier.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quantity": {
+          "description": "Stack quantity modifier.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sockets": {
+          "description": "Total socket count (0..=6).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "is_ethereal": {
+          "description": "Ethereal status.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "is_identified": {
+          "description": "Identified status.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enhanced_damage": {
+          "description": "Enhanced damage modifier (%) (stat 17).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_damage": {
+          "description": "Flat minimum damage bonus (stat 21).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_damage": {
+          "description": "Flat maximum damage bonus (stat 22).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replenish_durability": {
+          "description": "Replenish durability rate (stat 252).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replenish_quantity": {
+          "description": "Replenish quantity rate (stat 253).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericOp3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_indestructible": {
+          "description": "Indestructible status (stat 152).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "stats": {
+          "description": "Property and stat modifications.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemStatOpWireDto"
+          }
+        }
+      }
+    },
+    "ItemTarget": {
+      "description": "Target specification to find an item within a character's inventory or body slots.",
+      "type": "object",
+      "properties": {
+        "index": {
+          "description": "0-based index in the character's item list.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "code": {
+          "description": "3-letter item code (e.g. \"amu\", \"rin\", \"mau\"). Case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slot": {
+          "description": "Semantic equipment slot name (e.g. \"head\", \"neck\", \"torso\", \"left_arm\", \"right_arm\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "NumericOp3": {
+      "description": "Mutation operator supporting absolute assignment and relative delta operations.",
+      "oneOf": [
+        {
+          "description": "Absolute assignment: sets the field directly to the given value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Set"
+            },
+            "value": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative addition: increments current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "value": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative subtraction: decrements current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Sub"
+            },
+            "value": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ]
+    },
+    "ItemStatOpWireDto": {
+      "description": "Stat operation DTO for modifying an individual item property.",
+      "type": "object",
+      "properties": {
+        "stat_id": {
+          "description": "Numerical stat ID (e.g. 9 for max mana, 127 for all skills).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "op": {
+          "description": "Mutation operation (Set, Add, or Sub).",
+          "$ref": "#/$defs/NumericOp3"
+        }
+      },
+      "required": [
+        "stat_id",
+        "op"
+      ]
+    },
+    "BatchItemWireDto": {
+      "description": "Inbound wire DTO representing batch item mutation requests.",
+      "type": "object",
+      "properties": {
+        "repair_all": {
+          "description": "Restore all damaged items in inventory, body, and stash to maximum durability.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "identify_all": {
+          "description": "Identify all unidentified items across all character inventory containers.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "socket_all": {
+          "description": "Add sockets to all unsocketed eligible items up to their base max (or capped at count).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        }
+      }
+    }
+  }
+}

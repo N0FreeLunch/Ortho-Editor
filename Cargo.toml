@@ -35,10 +35,15 @@ regex = "1.10"
 pulldown-cmark = "0.12"
 colored = "2.1"
 validator = { version = "0.18", features = ["derive"] }
+schemars = { version = "1.2.3", features = ["derive"] }
 
 [[bin]]
 name = "ortho"
 path = "src/bin/ortho.rs"
+
+[[bin]]
+name = "gen_api_docs"
+path = "src/bin/gen_api_docs.rs"
 
 [[bin]]
 name = "semantic-bit-diff"

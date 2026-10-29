@@ -3,9 +3,10 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
 
 /// Numeric or value constraints applicable to the field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConstraintRange {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<u64>,
@@ -23,7 +24,7 @@ impl ConstraintRange {
 }
 
 /// Detailed violation for an individual field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FieldViolation {
     /// Machine-readable violation code (e.g. "overflow", "underflow", "length", "invalid_range").
     pub code: &'static str,
@@ -66,7 +67,7 @@ impl FieldViolation {
 }
 
 /// Standardized 422 Unprocessable Entity response payload.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ValidationErrorResponse {
     /// High level status indicator.
     pub status: &'static str,

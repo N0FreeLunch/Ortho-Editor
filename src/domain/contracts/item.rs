@@ -7,13 +7,14 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use schemars::JsonSchema;
 
 use super::character::NumericOp;
 use super::validation::{FieldViolation, ValidationErrorResponse};
 use crate::domain::item::Item;
 
 /// Target specification to find an item within a character's inventory or body slots.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 pub struct ItemTarget {
     /// 0-based index in the character's item list.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,7 +89,7 @@ impl ItemTarget {
 }
 
 /// Stat operation DTO for modifying an individual item property.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ItemStatOpWireDto {
     /// Numerical stat ID (e.g. 9 for max mana, 127 for all skills).
     pub stat_id: u32,
@@ -131,7 +132,7 @@ impl FromStr for ItemStatOpWireDto {
 }
 
 /// Inbound wire DTO representing an item mutation request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 pub struct ItemWireDto {
     /// Target criteria to locate the item.
     #[serde(default)]

@@ -4,9 +4,10 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use validator::Validate;
+use schemars::JsonSchema;
 
 /// Mutation operator supporting absolute assignment and relative delta operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", content = "value")]
 pub enum NumericOp<T> {
     /// Absolute assignment: sets the field directly to the given value.
@@ -180,7 +181,7 @@ impl From<ContractError> for super::validation::ValidationErrorResponse {
 }
 
 /// Strongly typed Value Object representing a verified character level (1..=99).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct LevelValue(u8);
 
 impl LevelValue {
@@ -199,7 +200,7 @@ impl LevelValue {
 }
 
 /// Strongly typed Value Object representing a verified stat attribute or unspent point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct StatPointValue(u32);
 
 impl StatPointValue {
@@ -219,7 +220,7 @@ impl StatPointValue {
 }
 
 /// Strongly typed Value Object representing private stash gold (0..=2,500,000).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct StashGoldValue(u32);
 
 impl StashGoldValue {
@@ -242,7 +243,7 @@ impl StashGoldValue {
 
 /// Wire DTO for character profile and attribute mutations.
 /// Supports both absolute assignment and relative delta operations.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Validate, JsonSchema)]
 pub struct CharacterWireDto {
     /// Character name (2 to 15 alphanumeric characters).
     #[validate(length(min = 2, max = 15, message = "Character name must be 2 to 15 characters"))]

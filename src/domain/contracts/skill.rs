@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use schemars::JsonSchema;
 
 use super::character::NumericOp;
 use super::validation::{FieldViolation, ValidationErrorResponse};
@@ -41,7 +42,7 @@ pub fn class_base_skill_id(class_id: u8) -> Option<u32> {
 }
 
 /// Operation on an individual skill.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SkillOpWireDto {
     /// Skill ID (e.g. 54 for Teleport) or skill name/code.
     pub skill_id: u32,
@@ -86,7 +87,7 @@ impl FromStr for SkillOpWireDto {
 }
 
 /// Inbound wire DTO representing skill mutation requests.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 pub struct SkillWireDto {
     /// Specific skill level modifications.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

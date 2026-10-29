@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkillWireDto",
+  "description": "Inbound wire DTO representing skill mutation requests.",
+  "type": "object",
+  "properties": {
+    "skills": {
+      "description": "Specific skill level modifications.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SkillOpWireDto"
+      }
+    },
+    "skill_points": {
+      "description": "Unspent skill points modifier (stat 5).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NumericOp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "respec": {
+      "description": "Complete skill respec flag: resets all allocated skills to 0 and refunds spent points to unspent pool.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "$defs": {
+    "SkillOpWireDto": {
+      "description": "Operation on an individual skill.",
+      "type": "object",
+      "properties": {
+        "skill_id": {
+          "description": "Skill ID (e.g. 54 for Teleport) or skill name/code.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "op": {
+          "description": "Mutation operation (Set, Add, or Sub).",
+          "$ref": "#/$defs/NumericOp"
+        }
+      },
+      "required": [
+        "skill_id",
+        "op"
+      ]
+    },
+    "NumericOp": {
+      "description": "Mutation operator supporting absolute assignment and relative delta operations.",
+      "oneOf": [
+        {
+          "description": "Absolute assignment: sets the field directly to the given value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Set"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative addition: increments current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Add"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Relative subtraction: decrements current value by delta.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "Sub"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ]
+    }
+  }
+}

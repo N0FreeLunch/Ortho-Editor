@@ -21,6 +21,7 @@ use super::skill::{
     SkillBoundaryValidator, SkillContractError, SkillMutationContract, SkillWireDto,
 };
 use super::validation::{FieldViolation, ValidationErrorResponse};
+use schemars::JsonSchema;
 use crate::domain::character::skills::parse_skill_section;
 use crate::domain::item::Item;
 use crate::domain::stats::AttributeSection;
@@ -28,7 +29,7 @@ use crate::item::HuffmanTree;
 use crate::save::{map_core_sections, CHAR_CLASS_OFFSET};
 
 /// Root wire DTO representing an integrated save mutation request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 pub struct SaveMutationDto {
     /// Character attributes, level, and stats.
     #[serde(skip_serializing_if = "Option::is_none")]

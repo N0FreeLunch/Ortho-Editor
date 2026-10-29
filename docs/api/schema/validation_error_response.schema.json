@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ValidationErrorResponse",
+  "description": "Standardized 422 Unprocessable Entity response payload.",
+  "type": "object",
+  "properties": {
+    "status": {
+      "description": "High level status indicator.",
+      "type": "string"
+    },
+    "code": {
+      "description": "HTTP/IPC semantic status code (422 = Unprocessable Entity).",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "message": {
+      "description": "Summary message.",
+      "type": "string"
+    },
+    "errors": {
+      "description": "Map of field names to list of violations.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/FieldViolation"
+        }
+      }
+    }
+  },
+  "required": [
+    "status",
+    "code",
+    "message",
+    "errors"
+  ],
+  "$defs": {
+    "FieldViolation": {
+      "description": "Detailed violation for an individual field.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Machine-readable violation code (e.g. \"overflow\", \"underflow\", \"length\", \"invalid_range\").",
+          "type": "string"
+        },
+        "message": {
+          "description": "Developer-readable description of the error.",
+          "type": "string"
+        },
+        "hint": {
+          "description": "Concrete, actionable guide for the user on how to resolve the error.",
+          "type": "string"
+        },
+        "rejected_value": {
+          "description": "The specific value or delta that caused the rejection."
+        },
+        "constraint": {
+          "description": "Boundary constraints for the field.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "hint"
+      ]
+    },
+    "ConstraintRange": {
+      "description": "Numeric or value constraints applicable to the field.",
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
