@@ -86,6 +86,7 @@ fn run() -> Result<(), ProducerFailure> {
         let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("dump");
         format!("{}.json", stem)
     });
+    validate_output_path(&output_path)?;
 
     let bytes = fs::read(&input_path).map_err(|error| ProducerFailure::execution("read", error))?;
     let save =
@@ -305,6 +306,33 @@ fn run() -> Result<(), ProducerFailure> {
     }
     fs::write(&output_path, out_str).map_err(|error| ProducerFailure::execution("write", error))?;
     println!("Successfully dumped save game JSON to {}", output_path);
+    Ok(())
+}
+
+fn validate_output_path(output_path: &str) -> Result<(), ProducerFailure> {
+    let path = Path::new(output_path);
+    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+        let ext_lower = ext.to_ascii_lowercase();
+        if ext_lower == "d2s" || ext_lower == "d2i" || ext_lower == "bin" || ext_lower == "bak" {
+            return Err(ProducerFailure::execution(
+                "output_guard",
+                format!(
+                    "Refusing to write JSON dump to protected binary file extension '.{}': {}",
+                    ext, output_path
+                ),
+            ));
+        }
+    }
+    let norm = output_path.replace('\\', "/");
+    if norm.contains("tests/fixtures/") {
+        return Err(ProducerFailure::execution(
+            "output_guard",
+            format!(
+                "Refusing to write JSON dump into test fixture directory: {}",
+                output_path
+            ),
+        ));
+    }
     Ok(())
 }
 
@@ -895,8 +923,8 @@ mod mercenary_export_tests {
         assert_eq!(empty.evidence.declared_count, Some(0));
         assert!(empty.items.is_empty() && empty.evidence.diagnostics.is_empty());
 
-        let (alpha_bytes, alpha_map, alpha_stream) = load("original/amazon_authority_runeword.d2s");
-        assert_eq!(alpha_stream.dialect, ItemStreamDialect::Alpha);
+        let (alpha_bytes, alpha_map, mut alpha_stream) = load("gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s");
+        alpha_stream.dialect = ItemStreamDialect::Alpha;
         let alpha = parse_mercenary_equipped_items(&alpha_bytes, &alpha_map, &h, &alpha_stream);
         assert!(alpha.items.is_empty());
         assert_eq!(alpha.evidence.dialect, ItemStreamDialect::Alpha);
@@ -914,5 +942,17 @@ mod mercenary_export_tests {
             .0,
             "Weapon1"
         );
+    }
+
+    #[test]
+    fn validate_output_path_rejects_binary_extensions_and_fixtures() {
+        assert!(validate_output_path("output.d2s").is_err());
+        assert!(validate_output_path("output.D2S").is_err());
+        assert!(validate_output_path("test.d2i").is_err());
+        assert!(validate_output_path("test.bin").is_err());
+        assert!(validate_output_path("tests/fixtures/savegames/original/dump.json").is_err());
+        assert!(validate_output_path("..\\tests\\fixtures\\dump.json").is_err());
+        assert!(validate_output_path("valid_output.json").is_ok());
+        assert!(validate_output_path("dump_123.txt").is_ok());
     }
 }
