@@ -148,6 +148,30 @@ impl<'a> From<&'a mut ArgSpec> for ArgSpec {
     }
 }
 
+fn collect_option_values(
+    spec: &ArgSpec,
+    spelling: &str,
+    args: &mut impl Iterator<Item = OsString>,
+    values: &mut HashMap<String, Vec<String>>,
+) -> Result<(), ArgError> {
+    let mut collected = Vec::new();
+    for _ in 0..spec.value_count {
+        if let Some(value) = args.next() {
+            collected.push(value.to_string_lossy().to_string());
+        } else {
+            return Err(ArgError::Error(format!(
+                "Option {} requires {} value(s)",
+                spelling, spec.value_count
+            )));
+        }
+    }
+    values
+        .entry(spec.name.clone())
+        .or_insert_with(Vec::new)
+        .extend(collected);
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct ArgParser {
     program_name: String,
@@ -230,21 +254,12 @@ impl ArgParser {
                             flags.insert(spec.name.clone(), true);
                         }
                         ArgType::Option => {
-                            let mut collected = Vec::new();
-                            for _ in 0..spec.value_count {
-                                if let Some(val) = it.next() {
-                                    collected.push(val.to_string_lossy().to_string());
-                                } else {
-                                    return Err(ArgError::Error(format!(
-                                        "Option --{} requires {} value(s)",
-                                        long_name, spec.value_count
-                                    )));
-                                }
-                            }
-                            values
-                                .entry(spec.name.clone())
-                                .or_insert_with(Vec::new)
-                                .extend(collected);
+                            collect_option_values(
+                                spec,
+                                &format!("--{}", long_name),
+                                &mut it,
+                                &mut values,
+                            )?;
                         }
                         ArgType::Positional | ArgType::RepeatedPositional => unreachable!(),
                     }
@@ -276,21 +291,12 @@ impl ArgParser {
                             flags.insert(spec.name.clone(), true);
                         }
                         ArgType::Option => {
-                            let mut collected = Vec::new();
-                            for _ in 0..spec.value_count {
-                                if let Some(val) = it.next() {
-                                    collected.push(val.to_string_lossy().to_string());
-                                } else {
-                                    return Err(ArgError::Error(format!(
-                                        "Option -{} requires {} value(s)",
-                                        short_name, spec.value_count
-                                    )));
-                                }
-                            }
-                            values
-                                .entry(spec.name.clone())
-                                .or_insert_with(Vec::new)
-                                .extend(collected);
+                            collect_option_values(
+                                spec,
+                                &format!("-{}", short_name),
+                                &mut it,
+                                &mut values,
+                            )?;
                         }
                         ArgType::Positional | ArgType::RepeatedPositional => unreachable!(),
                     }
@@ -583,6 +589,97 @@ mod tests {
         assert_eq!(parsed.get("name").unwrap(), "Alice");
         assert_eq!(parsed.get("level").unwrap(), "2");
         assert!(parsed.is_set("verbose"));
+    }
+
+    fn contract_parser() -> ArgParser {
+        let mut parser = ArgParser::new("probe").disable_dotenv();
+        let mut pair = ArgSpec::option("pair", Some('p'), Some("pair"), "pair");
+        pair.value_count(2);
+        parser.add_spec(pair);
+        parser
+    }
+
+    fn contract_args(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn option_values_and_repetitions_preserve_order() {
+        for values in [&["--pair", "A", "B"][..], &["-p", "A", "B"][..]] {
+            let parsed = contract_parser().parse(contract_args(values)).unwrap();
+            assert_eq!(parsed.get_vec("pair").unwrap(), &["A", "B"]);
+        }
+        let parsed = contract_parser()
+            .parse(contract_args(&["--pair", "A", "B", "-p", "C", "D"]))
+            .unwrap();
+        assert_eq!(parsed.get_vec("pair").unwrap(), &["A", "B", "C", "D"]);
+        let parsed = contract_parser()
+            .parse(contract_args(&["--pair", "--json", "-p"]))
+            .unwrap();
+        assert_eq!(parsed.get_vec("pair").unwrap(), &["--json", "-p"]);
+        assert!(!parsed.is_json());
+    }
+
+    #[test]
+    fn missing_option_values_preserve_spelling_and_count() {
+        for (values, expected) in [
+            (&["--pair"][..], "Option --pair requires 2 value(s)"),
+            (&["--pair", "A"][..], "Option --pair requires 2 value(s)"),
+            (&["-p"][..], "Option -p requires 2 value(s)"),
+            (&["-p", "A"][..], "Option -p requires 2 value(s)"),
+        ] {
+            assert_eq!(
+                contract_parser().parse(contract_args(values)).unwrap_err(),
+                ArgError::Error(expected.into())
+            );
+        }
+    }
+
+    #[test]
+    fn builtins_and_explicit_options_keep_precedence() {
+        let mut explicit = ArgParser::new("probe").disable_dotenv();
+        explicit.add_spec(ArgSpec::option(
+            "custom",
+            Some('o'),
+            Some("output"),
+            "custom",
+        ));
+        let parsed = explicit
+            .parse(contract_args(&["--output", "A", "-o", "B", "--json"]))
+            .unwrap();
+        assert_eq!(parsed.get_vec("custom").unwrap(), &["A", "B"]);
+        assert!(parsed.get_vec("output").is_none());
+        assert!(parsed.is_json());
+        let builtin = ArgParser::new("probe").disable_dotenv();
+        let parsed = builtin
+            .parse(contract_args(&["--output", "A", "-o", "B", "-te"]))
+            .unwrap();
+        assert_eq!(parsed.get_vec("output").unwrap(), &["A", "B"]);
+        assert!(parsed.is_set("token-efficient"));
+    }
+
+    #[test]
+    fn zero_count_and_unknown_options_keep_behavior() {
+        let mut zero = ArgParser::new("probe").disable_dotenv();
+        let mut opt = ArgSpec::option("empty", Some('e'), Some("empty"), "empty");
+        opt.value_count(0);
+        zero.add_spec(opt);
+        assert_eq!(
+            zero.parse(contract_args(&["-e", "--empty"]))
+                .unwrap()
+                .get_vec("empty"),
+            Some(&vec![])
+        );
+        assert_eq!(
+            contract_parser()
+                .parse(contract_args(&["--unknown"]))
+                .unwrap_err(),
+            ArgError::Error("Unknown option --unknown".into())
+        );
+        assert_eq!(
+            contract_parser().parse(contract_args(&["-z"])).unwrap_err(),
+            ArgError::Error("Unknown option -z".into())
+        );
     }
 
     #[test]
