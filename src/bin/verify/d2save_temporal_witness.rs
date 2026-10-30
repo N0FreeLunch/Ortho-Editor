@@ -205,7 +205,11 @@ fn main() {
             process::exit(1);
         }
     };
-    let mut out = OutputManager::new("d2save_temporal_witness", &parsed);
+    let mut out =
+        OutputManager::try_new("d2save_temporal_witness", &parsed).unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
     let directory = Path::new(parsed.get("directory").unwrap());
     let mut paths = Vec::new();
     if let Err(error) = collect_saves(directory, &mut paths) {

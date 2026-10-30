@@ -65,7 +65,10 @@ fn main() {
         }
     };
 
-    let mut out = OutputManager::new("d2save_item_diff", &parsed);
+    let mut out = OutputManager::try_new("d2save_item_diff", &parsed).unwrap_or_else(|error| {
+        eprintln!("Failed to initialize output destination: {error}");
+        std::process::exit(1);
+    });
 
     let path_a = parsed.get("file_a").unwrap();
     let path_b = parsed.get("file_b").unwrap();

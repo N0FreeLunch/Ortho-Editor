@@ -76,7 +76,11 @@ fn main() -> io::Result<()> {
     let list_anchors = parsed.is_set("list-anchors");
     let auto_map = parsed.is_set("auto-map");
     let heatmap = parsed.is_set("heatmap");
-    let mut om = d2r_core::verify::OutputManager::new("d2item_oracle_mapper", &parsed);
+    let mut om = d2r_core::verify::OutputManager::try_new("d2item_oracle_mapper", &parsed)
+        .unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
     let show_json = om.is_json();
     let heatmap_width: u32 = parsed
         .get("width")

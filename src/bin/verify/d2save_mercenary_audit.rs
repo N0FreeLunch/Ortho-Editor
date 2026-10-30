@@ -66,7 +66,11 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("{}", parser.usage());
     }
 
-    let mut om = OutputManager::new("d2save_mercenary_audit", &parsed);
+    let mut om =
+        OutputManager::try_new("d2save_mercenary_audit", &parsed).unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
     let is_json = om.is_json();
     let verbose = parsed.is_set("verbose");
 

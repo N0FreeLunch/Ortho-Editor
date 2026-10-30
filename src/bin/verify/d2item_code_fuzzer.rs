@@ -55,7 +55,10 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut om = OutputManager::new("d2item_code_fuzzer", &parsed);
+    let mut om = OutputManager::try_new("d2item_code_fuzzer", &parsed).unwrap_or_else(|error| {
+        eprintln!("Failed to initialize output destination: {error}");
+        std::process::exit(1);
+    });
 
     let path = parsed.get("save_file").unwrap();
     let scan_range: u64 = parsed.get("range").unwrap().parse()?;

@@ -104,7 +104,11 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut om = OutputManager::new("d2item_property_fuzzer", &parsed);
+    let mut om =
+        OutputManager::try_new("d2item_property_fuzzer", &parsed).unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
 
     let file_path = parsed.get("fixture").unwrap();
     let target_idx: usize = parsed

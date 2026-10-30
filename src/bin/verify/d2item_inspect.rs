@@ -352,9 +352,9 @@ fn emit_selected_item_json(
     parsed: &d2r_core::verify::args::ParsedArgs,
     report: &serde_json::Value,
     summary: &str,
-) {
+) -> std::io::Result<()> {
     if parsed.get("output").is_some() || parsed.is_set("token-efficient") {
-        let mut output = OutputManager::new("d2item_inspect", parsed);
+        let mut output = OutputManager::try_new("d2item_inspect", parsed)?;
         output.json(&report.to_string());
         if parsed.is_set("token-efficient") {
             output.summary(summary);
@@ -362,6 +362,7 @@ fn emit_selected_item_json(
     } else {
         println!("{}", report);
     }
+    Ok(())
 }
 
 fn compare_first_difference_offset(left: &[bool], right: &[bool], base_bit: u64) -> Option<u64> {
@@ -4084,7 +4085,11 @@ fn main() {
                             section_item_index,
                             item.code.trim()
                         ),
-                    );
+                    )
+                    .unwrap_or_else(|error| {
+                        eprintln!("Failed to initialize output destination: {error}");
+                        std::process::exit(1);
+                    });
                 } else {
                     println!(
                         "Section item {} '{}' bits {}-{}",
@@ -4379,7 +4384,11 @@ fn main() {
                         item.code.trim(),
                         item.range.end.saturating_sub(item.range.start)
                     ),
-                );
+                )
+                .unwrap_or_else(|error| {
+                    eprintln!("Failed to initialize output destination: {error}");
+                    std::process::exit(1);
+                });
             } else {
                 println!(
                     "Section item {}: '{}' range {}-{}",
@@ -4569,7 +4578,8 @@ mod tests {
             "errors": []
         });
 
-        emit_selected_item_json(&parsed, &report, "selected item inspected");
+        emit_selected_item_json(&parsed, &report, "selected item inspected")
+            .expect("selected-item output should initialize");
 
         let artifact = fs::read_to_string(&output_path)
             .expect("explicit output path should receive selected-item JSON");

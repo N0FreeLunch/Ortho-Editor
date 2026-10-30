@@ -57,7 +57,10 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut out = OutputManager::new("sba", &parsed);
+    let mut out = OutputManager::try_new("sba", &parsed).unwrap_or_else(|error| {
+        eprintln!("Failed to initialize output destination: {error}");
+        std::process::exit(1);
+    });
     let fixture_path = parsed.get("fixture").cloned().unwrap();
     let baseline_path = parsed.get("baseline").cloned().unwrap();
     let is_generate = parsed.is_set("generate");

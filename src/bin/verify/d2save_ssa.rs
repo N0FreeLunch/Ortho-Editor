@@ -54,7 +54,10 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut om = OutputManager::new("d2save_ssa", &parsed);
+    let mut om = OutputManager::try_new("d2save_ssa", &parsed).unwrap_or_else(|error| {
+        eprintln!("Failed to initialize output destination: {error}");
+        std::process::exit(1);
+    });
     let file1_path = parsed.get("file1").unwrap();
     let file2_path = parsed.get("file2").unwrap();
 

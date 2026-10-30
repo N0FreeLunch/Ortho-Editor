@@ -56,7 +56,10 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut om = OutputManager::new("d2save_dsa", &parsed);
+    let mut om = OutputManager::try_new("d2save_dsa", &parsed).unwrap_or_else(|error| {
+        eprintln!("Failed to initialize output destination: {error}");
+        std::process::exit(1);
+    });
     let path_a = parsed.get("file_a").unwrap();
     let path_b = parsed.get("file_b").unwrap();
     let allowed_bits_str = parsed.get("allowed-bits").map(|s| s.as_str()).unwrap_or("");

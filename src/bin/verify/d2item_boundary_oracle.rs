@@ -115,7 +115,11 @@ fn main() {
         }
     };
 
-    let mut out = OutputManager::new("d2item_boundary_oracle", &parsed);
+    let mut out =
+        OutputManager::try_new("d2item_boundary_oracle", &parsed).unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
 
     let fixture_str = parsed
         .get("fixture")

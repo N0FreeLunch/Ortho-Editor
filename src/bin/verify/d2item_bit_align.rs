@@ -37,7 +37,11 @@ fn main() {
     let target_idx = parsed
         .get("item_index")
         .and_then(|s| s.parse::<usize>().ok());
-    let mut om = d2r_core::verify::OutputManager::new("d2item_bit_align", &parsed);
+    let mut om = d2r_core::verify::OutputManager::try_new("d2item_bit_align", &parsed)
+        .unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
 
     let bytes = fs::read(path).expect("failed to read save file");
 

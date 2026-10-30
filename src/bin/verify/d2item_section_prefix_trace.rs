@@ -300,7 +300,11 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut out = OutputManager::new("d2item_section_prefix_trace", &parsed);
+    let mut out =
+        OutputManager::try_new("d2item_section_prefix_trace", &parsed).unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
     let path = parsed.get("save_file").unwrap();
     let bytes = fs::read(path).with_context(|| format!("Failed to read file: {}", path))?;
     if bytes.len() < 8 {

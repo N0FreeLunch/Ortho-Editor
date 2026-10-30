@@ -50,7 +50,11 @@ fn main() {
     let visual_out = parsed.get("visual").cloned();
     let target_idx = parsed.get("target").and_then(|s| s.parse::<usize>().ok());
     let fail_fast = parsed.is_set("fail-fast");
-    let mut om = d2r_core::verify::OutputManager::new("d2item_serialization_audit", &parsed);
+    let mut om = d2r_core::verify::OutputManager::try_new("d2item_serialization_audit", &parsed)
+        .unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
 
     let bytes = match fs::read(path) {
         Ok(b) => b,

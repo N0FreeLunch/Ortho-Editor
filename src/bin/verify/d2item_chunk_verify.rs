@@ -94,7 +94,10 @@ fn main() -> io::Result<()> {
         }
     };
 
-    let mut out = OutputManager::new("d2item_chunk_verify", &parsed);
+    let mut out = OutputManager::try_new("d2item_chunk_verify", &parsed).unwrap_or_else(|error| {
+        eprintln!("Failed to initialize output destination: {error}");
+        std::process::exit(1);
+    });
     let path = parsed.get("save_file").unwrap();
     let mut range_start = 0;
     let mut range_end = 10;
