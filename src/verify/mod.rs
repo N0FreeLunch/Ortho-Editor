@@ -292,11 +292,20 @@ impl OutputManager {
         })
     }
 
+    fn write_detail(&mut self, text: &str, newline: bool) -> std::io::Result<()> {
+        if let Some(writer) = &mut self.writer {
+            if newline {
+                writeln!(writer, "{}", text)?;
+            } else {
+                write!(writer, "{}", text)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn println(&mut self, text: &str) {
         if !self.is_json {
-            if let Some(w) = &mut self.writer {
-                let _ = writeln!(w, "{}", text);
-            }
+            let _ = self.write_detail(text, true);
         }
 
         if self.is_json {
@@ -308,9 +317,7 @@ impl OutputManager {
 
     pub fn print(&mut self, text: &str) {
         if !self.is_json {
-            if let Some(w) = &mut self.writer {
-                let _ = write!(w, "{}", text);
-            }
+            let _ = self.write_detail(text, false);
         }
 
         if self.is_json {
@@ -321,9 +328,7 @@ impl OutputManager {
     }
 
     pub fn json(&mut self, text: &str) {
-        if let Some(w) = &mut self.writer {
-            let _ = writeln!(w, "{}", text);
-        }
+        let _ = self.write_detail(text, true);
         if !self.is_token_efficient {
             println!("{}", text);
         }
@@ -339,10 +344,63 @@ impl OutputManager {
                 text.to_string()
             };
             println!("{}", formatted);
-            if let Some(w) = &mut self.writer {
-                let _ = writeln!(w, "{}", text);
-            }
+            let _ = self.write_detail(text, true);
         }
+    }
+
+    pub fn try_println(&mut self, text: &str) -> std::io::Result<()> {
+        if !self.is_json {
+            self.write_detail(text, true)?;
+        }
+        if self.is_json {
+            eprintln!("{}", text);
+        } else if !self.is_token_efficient {
+            println!("{}", text);
+        }
+        Ok(())
+    }
+
+    pub fn try_print(&mut self, text: &str) -> std::io::Result<()> {
+        if !self.is_json {
+            self.write_detail(text, false)?;
+        }
+        if self.is_json {
+            eprint!("{}", text);
+        } else if !self.is_token_efficient {
+            print!("{}", text);
+        }
+        Ok(())
+    }
+
+    pub fn try_json(&mut self, text: &str) -> std::io::Result<()> {
+        self.write_detail(text, true)?;
+        if !self.is_token_efficient {
+            println!("{}", text);
+        }
+        Ok(())
+    }
+
+    pub fn try_summary(&mut self, text: &str) -> std::io::Result<()> {
+        if self.is_json {
+            eprintln!("{}", text);
+        } else {
+            let formatted = if self.is_token_efficient {
+                format!("[TOKEN-EFFICIENT] {}", text)
+            } else {
+                text.to_string()
+            };
+            self.write_detail(text, true)?;
+            self.try_finish()?;
+            println!("{}", formatted);
+        }
+        Ok(())
+    }
+
+    pub fn try_finish(&mut self) -> std::io::Result<()> {
+        if let Some(writer) = &mut self.writer {
+            writer.flush()?;
+        }
+        Ok(())
     }
 
     pub fn is_json(&self) -> bool {
@@ -351,5 +409,146 @@ impl OutputManager {
 
     pub fn is_token_efficient(&self) -> bool {
         self.is_token_efficient
+    }
+}
+
+#[cfg(test)]
+mod output_error_tests {
+    use super::OutputManager;
+    use std::io::{self, Write};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct ProbeWriter {
+        writes: Arc<AtomicUsize>,
+        flushes: Arc<AtomicUsize>,
+        fail_write: bool,
+        fail_flush: bool,
+    }
+
+    impl Write for ProbeWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            if self.fail_write {
+                Err(io::Error::other("write failed"))
+            } else {
+                Ok(bytes.len())
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes.fetch_add(1, Ordering::SeqCst);
+            if self.fail_flush {
+                Err(io::Error::other("flush failed"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn manager(
+        json: bool,
+        fail_write: bool,
+        fail_flush: bool,
+    ) -> (OutputManager, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let writes = Arc::new(AtomicUsize::new(0));
+        let flushes = Arc::new(AtomicUsize::new(0));
+        let writer = ProbeWriter {
+            writes: writes.clone(),
+            flushes: flushes.clone(),
+            fail_write,
+            fail_flush,
+        };
+        (
+            OutputManager {
+                writer: Some(Box::new(writer)),
+                is_token_efficient: true,
+                is_json: json,
+            },
+            writes,
+            flushes,
+        )
+    }
+
+    #[test]
+    fn checked_writes_return_file_errors() {
+        for operation in 0..4 {
+            let (mut output, writes, _) = manager(operation == 2, true, false);
+            let result = match operation {
+                0 => output.try_print("text"),
+                1 => output.try_println("text"),
+                2 => output.try_json("{}"),
+                _ => output.try_summary("text"),
+            };
+            assert_eq!(result.unwrap_err().to_string(), "write failed");
+            assert!(writes.load(Ordering::SeqCst) > 0);
+        }
+    }
+
+    #[test]
+    fn checked_finish_returns_flush_error() {
+        let (mut output, writes, flushes) = manager(true, false, true);
+        output.try_json("{}").expect("write succeeds");
+        assert_eq!(output.try_finish().unwrap_err().to_string(), "flush failed");
+        assert!(writes.load(Ordering::SeqCst) > 0);
+        assert_eq!(flushes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn checked_text_summary_returns_flush_error() {
+        let (mut output, _, flushes) = manager(false, false, true);
+        assert_eq!(
+            output.try_summary("summary").unwrap_err().to_string(),
+            "flush failed"
+        );
+        assert_eq!(flushes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn checked_finish_without_writer_succeeds() {
+        let mut output = OutputManager {
+            writer: None,
+            is_token_efficient: false,
+            is_json: false,
+        };
+        output.try_finish().expect("no file to flush");
+    }
+
+    #[test]
+    fn checked_writes_deliver_complete_text() {
+        struct Capture(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let bytes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut output = OutputManager {
+            writer: Some(Box::new(Capture(bytes.clone()))),
+            is_token_efficient: true,
+            is_json: false,
+        };
+        output.try_print("a").unwrap();
+        output.try_println("b").unwrap();
+        output.try_json("{}").unwrap();
+        output.try_summary("summary").unwrap();
+        output.try_finish().unwrap();
+        assert_eq!(&*bytes.lock().unwrap(), b"ab\n{}\nsummary\n");
+    }
+
+    #[test]
+    fn legacy_methods_continue_after_file_errors() {
+        let (mut output, writes, _) = manager(false, true, false);
+        output.print("first");
+        output.println("second");
+        output.json("{}");
+        output.summary("summary");
+        assert!(writes.load(Ordering::SeqCst) >= 4);
     }
 }
