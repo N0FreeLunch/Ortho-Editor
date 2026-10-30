@@ -151,7 +151,7 @@ fn main() -> io::Result<()> {
     if list_anchors || auto_map {
         if show_json {
             let report = Report::new(path, scan_results.clone());
-            om.println(&serde_json::to_string_pretty(&report).unwrap());
+            om.json(&serde_json::to_string_pretty(&report).unwrap());
         } else {
             om.println("| Anchor Bit | Code | Flags      | Ver | Mode | Loc | Width | Score |");
             om.println("|------------|------|------------|-----|------|-----|-------|-------|");
