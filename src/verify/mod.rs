@@ -229,6 +229,18 @@ pub struct OutputManager {
 
 impl OutputManager {
     pub fn new(tool_name: &str, args: &args::ParsedArgs) -> Self {
+        Self::create(tool_name, args, false).unwrap_or_else(|_| Self {
+            writer: None,
+            is_token_efficient: args.is_set("token-efficient"),
+            is_json: args.is_json(),
+        })
+    }
+
+    pub fn try_new(tool_name: &str, args: &args::ParsedArgs) -> std::io::Result<Self> {
+        Self::create(tool_name, args, true)
+    }
+
+    fn create(tool_name: &str, args: &args::ParsedArgs, strict: bool) -> std::io::Result<Self> {
         let is_json = args.is_json();
         let is_token_efficient = args.is_set("token-efficient");
         let output_path = args.get("output");
@@ -236,8 +248,10 @@ impl OutputManager {
         let mut writer = None;
 
         if let Some(path) = output_path {
-            if let Ok(f) = File::create(path) {
-                writer = Some(Box::new(f) as Box<dyn Write>);
+            match File::create(path) {
+                Ok(f) => writer = Some(Box::new(f) as Box<dyn Write>),
+                Err(error) if strict => return Err(error),
+                Err(_) => {}
             }
         } else if is_token_efficient {
             let timestamp = SystemTime::now()
@@ -254,20 +268,28 @@ impl OutputManager {
                     base.join("agent_artifacts")
                 });
 
-            let _ = fs::create_dir_all(&root);
+            if let Err(error) = fs::create_dir_all(&root)
+                && strict
+            {
+                return Err(error);
+            }
 
             let path = root.join(format!("{}_{}.txt", tool_name, timestamp));
-            if let Ok(f) = File::create(&path) {
-                eprintln!("[TOKEN-EFFICIENT] Detail saved to: {}", path.display());
-                writer = Some(Box::new(f) as Box<dyn Write>);
+            match File::create(&path) {
+                Ok(f) => {
+                    eprintln!("[TOKEN-EFFICIENT] Detail saved to: {}", path.display());
+                    writer = Some(Box::new(f) as Box<dyn Write>);
+                }
+                Err(error) if strict => return Err(error),
+                Err(_) => {}
             }
         }
 
-        Self {
+        Ok(Self {
             writer,
             is_token_efficient,
             is_json,
-        }
+        })
     }
 
     pub fn println(&mut self, text: &str) {

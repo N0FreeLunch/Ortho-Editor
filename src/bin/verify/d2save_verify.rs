@@ -61,7 +61,8 @@ fn main() -> anyhow::Result<()> {
     let files = final_parsed.get_vec("files").cloned().unwrap_or_default();
     let fix_mode = final_parsed.is_set("fix");
 
-    let mut om = d2r_core::verify::OutputManager::new("d2save_verify", &final_parsed);
+    let mut om = d2r_core::verify::OutputManager::try_new("d2save_verify", &final_parsed)
+        .context("Failed to initialize output destination")?;
     let is_json = om.is_json();
     let diff_baseline_path = final_parsed.get("diff-baseline");
     let target_section = final_parsed.get("section");
