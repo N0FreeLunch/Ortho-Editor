@@ -553,6 +553,8 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
             "raw_y": item.y,
             "is_identified": item.is_identified,
             "unique_id": item.unique_id,
+            "item_level": item.level,
+            "required_level": item.required_level(),
             "image_key": ItemImageKey::from(item),
             "has_multiple_graphics": item.has_multiple_graphics,
             "multi_graphics_bits": item.multi_graphics_bits,

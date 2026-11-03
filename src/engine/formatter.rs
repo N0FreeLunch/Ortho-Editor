@@ -319,28 +319,7 @@ pub fn format_item_with_mode(
         }
 
         // Required Level
-        let mut req_lvl = spec.req_lvl;
-        if item.quality == Some(ItemQuality::Unique) && item.is_identified {
-            if let Some(id) = item.unique_id {
-                if let Some(u) = UNIQUE_ITEMS.iter().find(|u| u.id == id as u32) {
-                    req_lvl = req_lvl.max(u.level_req as u8);
-                }
-            }
-        }
-        if item.quality == Some(ItemQuality::Set) && item.is_identified {
-            if let Some(id) = item.unique_id {
-                if let Some(s) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
-                    if let Some(lvl) = s.level_req {
-                        req_lvl = req_lvl.max(lvl as u8);
-                    }
-                }
-            }
-        }
-        for socketed in &item.socketed_items {
-            if let Some(s_spec) = crate::data::item_specs::get_base_item_spec(&socketed.code) {
-                req_lvl = req_lvl.max(s_spec.req_lvl);
-            }
-        }
+        let req_lvl = item.required_level();
 
         if req_lvl > 1 {
             let label = get_loc("ItemStats1p", language);
@@ -3175,5 +3154,92 @@ mod boot_damage_display_tests {
         let qui = make_boot("qui ");
         let en_qui = format_item(&qui, "en", 0, 10);
         assert!(!en_qui.base_attributes.iter().any(|s| s.contains("Kick Damage")));
+    }
+}
+
+#[cfg(test)]
+mod item_level_and_dynamic_req_level_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    fn make_test_item(code: &str, quality: ItemQuality) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.quality = Some(quality);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    #[settled_contract_test]
+    fn item_level_accessor_reflects_header_level() {
+        let mut item = make_test_item("lbt ", ItemQuality::Normal);
+        assert_eq!(item.item_level(), None);
+
+        item.header.level = Some(85);
+        assert_eq!(item.item_level(), Some(85));
+    }
+
+    #[settled_contract_test]
+    fn base_item_requirement_is_respected() {
+        // Archon Plate (utp) has base req_lvl 63
+        let archon = make_test_item("utp ", ItemQuality::Normal);
+        assert_eq!(archon.required_level(), 63);
+
+        let en = format_item(&archon, "en", 0, 10);
+        let ko = format_item(&archon, "ko", 0, 10);
+        assert!(en.base_attributes.contains(&"Required Level: 63".to_string()));
+        assert!(ko.base_attributes.contains(&"착용 가능한 레벨: 63".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn unique_and_set_level_requirements_are_respected() {
+        // Harlequin Crest (Shako, unique id 248, req_lvl 62)
+        let mut shako = make_test_item("uap ", ItemQuality::Unique);
+        shako.unique_id = Some(248);
+        assert_eq!(shako.required_level(), 62);
+
+        let en = format_item(&shako, "en", 0, 10);
+        assert!(en.base_attributes.contains(&"Required Level: 62".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn affixes_elevate_required_level_on_low_base() {
+        // Leather boots (lbt) has base req_lvl 0
+        let mut boots = make_test_item("lbt ", ItemQuality::Rare);
+        assert_eq!(boots.required_level(), 0);
+
+        // Add prefix Holy (id: 6, level_req: 27)
+        boots.rare_affixes[0] = Some(6);
+        assert_eq!(boots.required_level(), 27);
+
+        let en = format_item(&boots, "en", 0, 10);
+        let ko = format_item(&boots, "ko", 0, 10);
+        assert!(en.base_attributes.contains(&"Required Level: 27".to_string()));
+        assert!(ko.base_attributes.contains(&"착용 가능한 레벨: 27".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn crafted_item_calculates_penalty_rule() {
+        // Crafted item with base req_lvl 0, 1 affix with level_req 27
+        // Formula: max(0, 27) + 10 + 3 * 1 = 40
+        let mut craft = make_test_item("lbt ", ItemQuality::Crafted);
+        craft.rare_affixes[0] = Some(6); // Holy, level_req 27
+        assert_eq!(craft.required_level(), 40);
+
+        let en = format_item(&craft, "en", 0, 10);
+        assert!(en.base_attributes.contains(&"Required Level: 40".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn socketed_higher_requirement_elevates_parent_item() {
+        // Leather boots (req_lvl 0) socketed with Zod Rune (r33, req_lvl 69)
+        let mut boots = make_test_item("lbt ", ItemQuality::Normal);
+        let zod = make_test_item("r33 ", ItemQuality::Normal);
+        boots.socketed_items.push(zod);
+
+        assert_eq!(boots.required_level(), 69);
+        let en = format_item(&boots, "en", 0, 10);
+        assert!(en.base_attributes.contains(&"Required Level: 69".to_string()));
     }
 }
