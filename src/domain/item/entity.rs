@@ -1178,6 +1178,83 @@ impl Item {
         result
     }
 
+    /// Returns the internal item level (ilvl / hidden level) if available.
+    pub fn item_level(&self) -> Option<u8> {
+        self.header.level
+    }
+
+    /// Dynamically calculates the required character level to equip this item,
+    /// taking into account base item requirements, quality (Unique, Set),
+    /// magic/rare/crafted affixes, runewords, and all socketed items (gems, runes, jewels).
+    pub fn required_level(&self) -> u8 {
+        let mut req_lvl = crate::data::item_specs::get_base_item_spec(self.code.trim())
+            .map_or(0, |spec| spec.req_lvl);
+
+        // 1. Unique item level requirement
+        if self.quality == Some(ItemQuality::Unique) && self.is_identified {
+            if let Some(id) = self.unique_id {
+                if let Some(u) = crate::data::unique_items::UNIQUE_ITEMS.iter().find(|u| u.id == id as u32) {
+                    req_lvl = req_lvl.max(u.level_req as u8);
+                }
+            }
+        }
+
+        // 2. Set item level requirement
+        if self.quality == Some(ItemQuality::Set) && self.is_identified {
+            if let Some(id) = self.unique_id {
+                if let Some(s) = crate::data::set_items::SET_ITEMS.iter().find(|s| s.id == id as u32) {
+                    if let Some(lvl) = s.level_req {
+                        req_lvl = req_lvl.max(lvl as u8);
+                    }
+                }
+            }
+        }
+
+        // 3. Affixes level requirements (Magic, Rare, Crafted, Superior)
+        let mut max_affix_req: u8 = 0;
+        let mut affix_count: usize = 0;
+
+        for prefix in self.prefixes() {
+            max_affix_req = max_affix_req.max(prefix.level_req as u8);
+            affix_count += 1;
+        }
+        for suffix in self.suffixes() {
+            max_affix_req = max_affix_req.max(suffix.level_req as u8);
+            affix_count += 1;
+        }
+
+        if self.quality == Some(ItemQuality::Crafted) {
+            // Crafted item level requirement rule:
+            // max(base_req_lvl, max_affix_req) + 10 + 3 * affix_count, capped at 98.
+            let penalty = 10u8.saturating_add((3 * affix_count as u8).min(88));
+            let candidate = req_lvl.max(max_affix_req).saturating_add(penalty);
+            req_lvl = req_lvl.max(candidate.min(98));
+        } else {
+            req_lvl = req_lvl.max(max_affix_req);
+        }
+
+        // 4. Runeword level requirement
+        if (self.is_runeword || self.runeword_id.is_some()) && self.is_identified {
+            if let Some(rw_id) = self.runeword_id {
+                if let Some(rw) = crate::data::runewords::RUNEWORDS.iter().find(|rw| rw.id == rw_id as u32) {
+                    for rune_code in rw.runes {
+                        if let Some(r_spec) = crate::data::item_specs::get_base_item_spec(rune_code) {
+                            req_lvl = req_lvl.max(r_spec.req_lvl);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Socketed items (Gems, Runes, Jewels)
+        for socketed in &self.socketed_items {
+            let socketed_lvl = socketed.required_level();
+            req_lvl = req_lvl.max(socketed_lvl);
+        }
+
+        req_lvl
+    }
+
     pub fn to_bytes(
         &self,
         idx: usize,
