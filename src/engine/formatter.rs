@@ -132,7 +132,26 @@ pub fn format_item_with_mode(
         }
     }
 
-    // 4. Potion Recovery
+    // 4. Boot Kick Damage
+    let is_boot = ITEM_TEMPLATES
+        .iter()
+        .find(|t| t.code == item.code.trim())
+        .map_or(false, |t| t.item_type == Some("boot"));
+
+    if is_boot {
+        if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
+            if spec.min_dmg > 0 && spec.max_dmg > 0 {
+                let label = get_loc("ModStre10k", language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[spec.min_dmg.to_string(), spec.max_dmg.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {} - {}", label.trim(), spec.min_dmg, spec.max_dmg));
+                }
+            }
+        }
+    }
+
+    // 5. Potion Recovery
     if let Some(recovery) = crate::data::potions::get_potion_recovery(&item.code) {
         match recovery {
             crate::data::potions::PotionRecovery::Life(pts) | crate::data::potions::PotionRecovery::Mana(pts) => {
@@ -166,7 +185,7 @@ pub fn format_item_with_mode(
         }
     }
 
-    // 5. Weapon Damage (One-Hand and Two-Hand)
+    // 6. Weapon Damage (One-Hand and Two-Hand)
     let is_weapon = ITEM_TEMPLATES
         .iter()
         .find(|t| t.code == item.code.trim())
@@ -977,7 +996,7 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
                     let shift = cost.op_param.unwrap_or(0);
                     display_value = (prop.value * char_level as i32) >> shift;
 
-                    // Append precise decimal rate per level, e.g. (+1.5 per Character Level) or (+1.5 캐릭터 레벨에 비례해서)
+                    // Append precise decimal rate per level, e.g. (+1.5 per Character Level) or (+1.5 `캐릭터 레벨에 비례해서`)
                     if shift > 0 {
                         let factor = prop.value as f64 / (1 << shift) as f64;
                         let factor_str = if factor.fract() == 0.0 {
@@ -1016,7 +1035,7 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
         if loc_str.contains('%') {
             format_with_phrase2(format_template(loc_str, &[display_value.to_string()]))
         } else if descfunc == 19 && (key_str == "ModStre9s" || key_str == "ModStre9v") {
-            // descfunc 19 with ModStre9s ("Indestructible" / "(파괴안됨)") or ModStre9v ("Replenishes quantity" / "(자동수량회복)")
+            // descfunc 19 with ModStre9s ("Indestructible" / `파괴안됨`) or ModStre9v ("Replenishes quantity" / `자동수량회복`)
             // outputs the fixed phrase without numeric value prefix.
             format_with_phrase2(loc_str.to_string())
         } else {
@@ -1059,9 +1078,9 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
         11 => {
             // descfunc 11 is used for durability replenishment (e.g. rep-dur, stat 252).
             // In D2 engine, value represents the rate: seconds = 100 / value.
-            // If value < 100, format using ModStre9u ("Repairs %d durability in %d seconds" / "내구력 %d 회복 (매 %d 초당)")
+            // If value < 100, format using ModStre9u ("Repairs %d durability in %d seconds" / `내구력 회복`)
             // with durability amount = 1 and calculated seconds.
-            // If value >= 100, format using ModStre9t ("Repairs %d durability per second" / "내구력 %d 회복 (매 초당)")
+            // If value >= 100, format using ModStre9t ("Repairs %d durability per second" / `내구력 회복`)
             // with durability rate per second = value / 100.
             if display_value > 0 && display_value < 100 {
                 let seconds = 100 / display_value;
@@ -3109,5 +3128,52 @@ mod base_item_name_source_tests {
             }
             assert_eq!(item, before);
         }
+    }
+}
+
+#[cfg(test)]
+mod boot_damage_display_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    fn make_boot(code: &str) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    #[settled_contract_test]
+    fn boot_kick_damage_renders_correctly_in_en_and_ko() {
+        // Leather Boots (lbt): min_dmg 3, max_dmg 8
+        let lbt = make_boot("lbt ");
+        let en_lbt = format_item(&lbt, "en", 0, 10);
+        let ko_lbt = format_item(&lbt, "ko", 0, 10);
+        assert!(en_lbt.base_attributes.contains(&"Kick Damage: 3 to 8".to_string()));
+        assert!(ko_lbt.base_attributes.contains(&"킥 데미지: 3 - 8".to_string()));
+
+        // Heavy Boots (hbt): min_dmg 10, max_dmg 20
+        let hbt = make_boot("hbt ");
+        let en_hbt = format_item(&hbt, "en", 0, 10);
+        let ko_hbt = format_item(&hbt, "ko", 0, 10);
+        assert!(en_hbt.base_attributes.contains(&"Kick Damage: 10 to 20".to_string()));
+        assert!(ko_hbt.base_attributes.contains(&"킥 데미지: 10 - 20".to_string()));
+
+        // Myrmidon Greaves (uhb): min_dmg 83, max_dmg 149
+        let uhb = make_boot("uhb ");
+        let en_uhb = format_item(&uhb, "en", 0, 10);
+        let ko_uhb = format_item(&uhb, "ko", 0, 10);
+        assert!(en_uhb.base_attributes.contains(&"Kick Damage: 83 to 149".to_string()));
+        assert!(ko_uhb.base_attributes.contains(&"킥 데미지: 83 - 149".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn non_boot_armor_does_not_render_kick_damage() {
+        // Quilted Armor (qui) should not have kick damage
+        let qui = make_boot("qui ");
+        let en_qui = format_item(&qui, "en", 0, 10);
+        assert!(!en_qui.base_attributes.iter().any(|s| s.contains("Kick Damage")));
     }
 }

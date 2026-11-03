@@ -579,16 +579,28 @@ fn format_set_bonuses(bonuses: &[FormattedSetBonus]) -> Value {
 }
 
 fn base_damage(code: &str) -> Value {
-    let Some(spec) = get_base_item_spec(code.trim()) else {
+    let trimmed = code.trim();
+    let Some(spec) = get_base_item_spec(trimmed) else {
         return Value::Null;
     };
-    let one_hand = (spec.max_dmg > 0).then(|| json!({"min": spec.min_dmg, "max": spec.max_dmg}));
-    let two_hand =
-        (spec.max_dmg2h > 0).then(|| json!({"min": spec.min_dmg2h, "max": spec.max_dmg2h}));
-    if one_hand.is_none() && two_hand.is_none() {
+    let template = d2r_core::data::item_codes::ITEM_TEMPLATES
+        .iter()
+        .find(|t| t.code == trimmed);
+
+    let is_weapon = template.map_or(false, |t| t.is_weapon);
+    let is_boot = template.map_or(false, |t| t.item_type == Some("boot"));
+
+    let one_hand =
+        (is_weapon && spec.max_dmg > 0).then(|| json!({"min": spec.min_dmg, "max": spec.max_dmg}));
+    let two_hand = (is_weapon && spec.max_dmg2h > 0)
+        .then(|| json!({"min": spec.min_dmg2h, "max": spec.max_dmg2h}));
+    let kick =
+        (is_boot && spec.max_dmg > 0).then(|| json!({"min": spec.min_dmg, "max": spec.max_dmg}));
+
+    if one_hand.is_none() && two_hand.is_none() && kick.is_none() {
         Value::Null
     } else {
-        json!({"one_hand": one_hand, "two_hand": two_hand})
+        json!({"one_hand": one_hand, "two_hand": two_hand, "kick": kick})
     }
 }
 
