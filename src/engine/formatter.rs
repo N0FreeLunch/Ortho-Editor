@@ -250,6 +250,30 @@ pub fn format_item_with_mode(
                     base_attributes.push(format!("{} {} - {}", label.trim(), f_min, f_max));
                 }
             }
+
+            // Attack Speed
+            if let Some(base_wsm) = crate::data::weapons::get_weapon_base_speed(&item.code) {
+                let ias: i32 = item
+                    .properties
+                    .iter()
+                    .filter(|p| p.stat_id == 93)
+                    .map(|p| p.value)
+                    .sum();
+                let effective_speed = (base_wsm as i32) - ias;
+                let speed_key = if effective_speed <= -20 {
+                    "WeaponAttackVeryFast"
+                } else if effective_speed <= -10 {
+                    "WeaponAttackFast"
+                } else if effective_speed <= 0 {
+                    "WeaponAttackNormal"
+                } else if effective_speed <= 15 {
+                    "WeaponAttackSlow"
+                } else {
+                    "WeaponAttackVerySlow"
+                };
+                let speed_desc = get_loc(speed_key, language);
+                base_attributes.push(format!("{} [{}]", speed_desc.trim(), base_wsm));
+            }
         }
     }
 
@@ -3243,3 +3267,69 @@ mod item_level_and_dynamic_req_level_tests {
         assert!(en.base_attributes.contains(&"Required Level: 69".to_string()));
     }
 }
+
+#[cfg(test)]
+mod weapon_attack_speed_display_tests {
+    use super::*;
+    use d2r_macros::settled_contract_test;
+
+    fn make_weapon(code: &str) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    #[settled_contract_test]
+    fn weapon_base_attack_speed_renders_in_en_and_ko() {
+        // Phase Blade (7cr): base WSM -30 -> Very Fast Attack Speed
+        let pb = make_weapon("7cr ");
+        let en_pb = format_item(&pb, "en", 0, 10);
+        let ko_pb = format_item(&pb, "ko", 0, 10);
+        assert!(en_pb.base_attributes.contains(&"Very Fast Attack Speed [-30]".to_string()));
+        assert!(ko_pb.base_attributes.contains(&"매우 빠른 공격속도 [-30]".to_string()));
+
+        // Berserker Axe (7wa): base WSM 0 -> Normal Attack Speed
+        let ba = make_weapon("7wa ");
+        let en_ba = format_item(&ba, "en", 0, 10);
+        let ko_ba = format_item(&ba, "ko", 0, 10);
+        assert!(en_ba.base_attributes.contains(&"Normal Attack Speed [0]".to_string()));
+        assert!(ko_ba.base_attributes.contains(&"보통 공격속도 [0]".to_string()));
+
+        // Colossus Blade (7gd): base WSM 5 -> Slow Attack Speed
+        let cb = make_weapon("7gd ");
+        let en_cb = format_item(&cb, "en", 0, 10);
+        let ko_cb = format_item(&cb, "ko", 0, 10);
+        assert!(en_cb.base_attributes.contains(&"Slow Attack Speed [5]".to_string()));
+        assert!(ko_cb.base_attributes.contains(&"느린 공격속도 [5]".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn weapon_with_ias_shifts_effective_attack_speed() {
+        // Berserker Axe (7wa, base WSM 0) + 40% IAS (stat_id 93) -> effective -40 -> Very Fast Attack Speed [0]
+        let mut ba = make_weapon("7wa ");
+        ba.properties.push(ItemProperty::new(
+            93,
+            "item_fasterattackrate".into(),
+            0,
+            40,
+            40,
+            ItemBitRange::default(),
+        ));
+        let en_ba = format_item(&ba, "en", 0, 10);
+        let ko_ba = format_item(&ba, "ko", 0, 10);
+        assert!(en_ba.base_attributes.contains(&"Very Fast Attack Speed [0]".to_string()));
+        assert!(ko_ba.base_attributes.contains(&"매우 빠른 공격속도 [0]".to_string()));
+    }
+
+    #[settled_contract_test]
+    fn non_weapon_item_does_not_render_attack_speed() {
+        // Leather Boots (lbt) should not have attack speed
+        let lbt = make_weapon("lbt ");
+        let en_lbt = format_item(&lbt, "en", 0, 10);
+        assert!(!en_lbt.base_attributes.iter().any(|s| s.contains("Attack Speed")));
+    }
+}
+

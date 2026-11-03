@@ -534,6 +534,7 @@ fn item_json(index: usize, item: &Item, level: u8, active_set_count: usize) -> V
         "runeword_attributes": properties(&item.runeword_attributes),
         "socketed_items": socketed_items,
         "base_damage": base_damage(&item.code),
+        "attack_speed": attack_speed(item),
         "defense": item.defense,
         "max_durability": item.max_durability,
         "current_durability": item.current_durability,
@@ -604,6 +605,37 @@ fn base_damage(code: &str) -> Value {
     } else {
         json!({"one_hand": one_hand, "two_hand": two_hand, "kick": kick})
     }
+}
+
+fn attack_speed(item: &Item) -> Value {
+    let Some(base_wsm) = d2r_core::data::weapons::get_weapon_base_speed(&item.code) else {
+        return Value::Null;
+    };
+    let ias: i32 = item
+        .properties
+        .iter()
+        .filter(|p| p.stat_id == 93)
+        .map(|p| p.value)
+        .sum();
+    let effective = (base_wsm as i32) - ias;
+    let (desc_en, desc_ko) = if effective <= -20 {
+        ("Very Fast Attack Speed", "매우 빠른 공격속도")
+    } else if effective <= -10 {
+        ("Fast Attack Speed", "빠른 공격속도")
+    } else if effective <= 0 {
+        ("Normal Attack Speed", "보통 공격속도")
+    } else if effective <= 15 {
+        ("Slow Attack Speed", "느린 공격속도")
+    } else {
+        ("Very Slow Attack Speed", "매우 느린 공격속도")
+    };
+    json!({
+        "base_wsm": base_wsm,
+        "ias": ias,
+        "effective_speed": effective,
+        "description_en": desc_en,
+        "description_ko": desc_ko,
+    })
 }
 
 fn properties(items: &[ItemProperty]) -> Vec<Value> {
