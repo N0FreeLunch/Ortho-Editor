@@ -208,35 +208,38 @@ fn main() -> Result<()> {
         )
         .with_results(results)
         .with_forensic_context();
-        om.json(&serde_json::to_string_pretty(&report)?);
+        om.try_json(&serde_json::to_string_pretty(&report)?)?;
+        om.try_finish()?;
     } else {
-        om.println("SSA - Semantic Save-Game Auditor");
-        om.println(&format!("File A: {}", file1_path));
-        om.println(&format!("File B: {}", file2_path));
-        om.println("");
+        om.try_println("SSA - Semantic Save-Game Auditor")?;
+        om.try_println(&format!("File A: {}", file1_path))?;
+        om.try_println(&format!("File B: {}", file2_path))?;
+        om.try_println("")?;
 
         if results.is_empty() {
-            om.summary("No semantic differences found.");
+            om.try_finish()?;
+            om.try_summary("No semantic differences found.")?;
         } else {
-            om.println(
+            om.try_println(
                 "+------------+----------------------+----------------------+----------------------+"
-            );
-            om.println(
+            )?;
+            om.try_println(
                 "| Section    | Field                | Value A              | Value B              |"
-            );
-            om.println(
+            )?;
+            om.try_println(
                 "+------------+----------------------+----------------------+----------------------+"
-            );
+            )?;
             for res in &results {
-                om.println(&format!(
+                om.try_println(&format!(
                     "| {:<10} | {:<20} | {:<20} | {:<20} |",
                     res.section, res.field, res.old_value, res.new_value
-                ));
+                ))?;
             }
-            om.println(
+            om.try_println(
                 "+------------+----------------------+----------------------+----------------------+"
-            );
-            om.summary(&format!("{} semantic differences found.", results.len()));
+            )?;
+            om.try_finish()?;
+            om.try_summary(&format!("{} semantic differences found.", results.len()))?;
         }
     }
 
