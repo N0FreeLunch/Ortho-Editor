@@ -7,7 +7,7 @@ use std::fs;
 use std::io::{self, Cursor};
 use std::process;
 
-fn main() {
+fn main() -> io::Result<()> {
     let mut parser = ArgParser::new("d2item_bit_align").description(
         "Analyzes bit-level similarity between actual item bits and expected re-serialized bits",
     );
@@ -49,12 +49,44 @@ fn main() {
     let is_alpha = bytes[4..8] == [0x69, 0, 0, 0];
     let items = Item::read_player_items(&bytes, &huffman, is_alpha).expect("failed to parse items");
 
+    if om.is_json() {
+        om.try_finish()?;
+    }
+    let mut emitted = false;
     if let Some(idx) = target_idx {
-        let _ = run_align_report(&items, idx, &huffman, &mut om);
+        emitted |= emit_align_report(&items, idx, &huffman, &mut om)?;
     } else {
         for i in 0..items.len() {
-            let _ = run_align_report(&items, i, &huffman, &mut om);
+            emitted |= emit_align_report(&items, i, &huffman, &mut om)?;
         }
+    }
+    if !om.is_json() && !emitted {
+        om.try_finish()?;
+    }
+    Ok(())
+}
+
+enum AlignReportError {
+    Analysis,
+    Output(io::Error),
+}
+
+impl From<io::Error> for AlignReportError {
+    fn from(_: io::Error) -> Self {
+        Self::Analysis
+    }
+}
+
+fn emit_align_report(
+    items: &[Item],
+    item_index: usize,
+    huffman: &HuffmanTree,
+    om: &mut d2r_core::verify::OutputManager,
+) -> io::Result<bool> {
+    match run_align_report(items, item_index, huffman, om) {
+        Ok(()) => Ok(true),
+        Err(AlignReportError::Analysis) => Ok(false),
+        Err(AlignReportError::Output(error)) => Err(error),
     }
 }
 
@@ -63,15 +95,14 @@ fn run_align_report(
     item_index: usize,
     huffman: &HuffmanTree,
     om: &mut d2r_core::verify::OutputManager,
-) -> io::Result<()> {
+) -> Result<(), AlignReportError> {
     let item = &items[item_index];
     let actual: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
 
     if actual.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "No bits recorded for the item.",
-        ));
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidData, "No bits recorded for the item.").into(),
+        );
     }
 
     // Strategy A: Re-serialize and re-parse to get "Expected Bits"
@@ -87,12 +118,13 @@ fn run_align_report(
     let aligner = BitAligner::new(2, -1, -3, -1);
     let result = aligner.align(&actual, &expected);
 
-    om.summary(&format!(
+    om.try_summary(&format!(
         "Item {} [{}]: Similarity {}%",
         item_index,
         item.code.trim(),
         result.similarity_pct()
-    ));
+    ))
+    .map_err(AlignReportError::Output)?;
     Ok(())
 }
 
@@ -138,5 +170,20 @@ struct AlignResult {
 impl AlignResult {
     fn similarity_pct(&self) -> f32 {
         (self.matches as f32 / self.a_len.max(self.b_len) as f32) * 100.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_item_bits_remain_an_ignored_analysis_error() {
+        let parsed = ArgParser::new("alignment-test").parse(Vec::new()).unwrap();
+        let mut output =
+            d2r_core::verify::OutputManager::try_new("alignment-test", &parsed).unwrap();
+        let emitted = emit_align_report(&[Item::default()], 0, &HuffmanTree::new(), &mut output)
+            .expect("analysis errors remain non-fatal");
+        assert!(!emitted);
     }
 }
