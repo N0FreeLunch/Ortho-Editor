@@ -201,7 +201,14 @@ fn main() -> anyhow::Result<()> {
             ))?;
         }
         if result.total_diff_count == 0 && result.length_diff == 0 {
-            om.try_println("  [IDENTICAL] No differences found.")?;
+            let message = "  [IDENTICAL] No differences found.";
+            if om.is_token_efficient() {
+                om.try_println(message)?;
+                om.try_finish()?;
+            } else {
+                om.try_summary(message)?;
+            }
+            return Ok(());
         }
     }
     om.try_finish()?;
