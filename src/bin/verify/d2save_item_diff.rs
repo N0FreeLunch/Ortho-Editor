@@ -38,7 +38,7 @@ fn find_first_jm(bytes: &[u8]) -> Option<usize> {
     None
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2save_item_diff").description(
         "Compares item sections of two D2R save files after aligning to the first JM marker",
     );
@@ -87,10 +87,11 @@ fn main() {
                     message: message.clone(),
                     bit_offset: None,
                 }]);
-                out.json(&serde_json::to_string_pretty(&report).unwrap());
+                out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
             } else {
                 eprintln!("{}", message);
             }
+            out.try_finish()?;
             process::exit(1);
         }
     };
@@ -108,18 +109,19 @@ fn main() {
                     message: message.clone(),
                     bit_offset: None,
                 }]);
-                out.json(&serde_json::to_string_pretty(&report).unwrap());
+                out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
             } else {
                 eprintln!("{}", message);
             }
+            out.try_finish()?;
             process::exit(1);
         }
     };
 
     let header = "=== d2save_item_diff (JM Aligned) ===";
-    out.println(header);
-    out.println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()));
-    out.println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()));
+    out.try_println(header)?;
+    out.try_println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()))?;
+    out.try_println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()))?;
 
     let jm_a_idx = find_first_jm(&bytes_a);
     let jm_b_idx = find_first_jm(&bytes_b);
@@ -136,18 +138,19 @@ fn main() {
                 message: message.clone(),
                 bit_offset: None,
             }]);
-            out.json(&serde_json::to_string_pretty(&report).unwrap());
+            out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
         } else {
             eprintln!("{}", message);
         }
+        out.try_finish()?;
         process::exit(1);
     }
 
     let a_start = jm_a_idx.unwrap();
     let b_start = jm_b_idx.unwrap();
 
-    out.println(&format!("  First JM in A: offset {}", a_start));
-    out.println(&format!("  First JM in B: offset {}", b_start));
+    out.try_println(&format!("  First JM in A: offset {}", a_start))?;
+    out.try_println(&format!("  First JM in B: offset {}", b_start))?;
 
     let items_a = &bytes_a[a_start..];
     let items_b = &bytes_b[b_start..];
@@ -200,52 +203,57 @@ fn main() {
     )
     .with_results(report_payload);
 
-    out.println("");
-    out.println("[ITEM SECTION DIFF SUMMARY]");
-    out.println(&format!("  Items A length: {} bytes", items_a.len()));
-    out.println(&format!("  Items B length: {} bytes", items_b.len()));
+    out.try_println("")?;
+    out.try_println("[ITEM SECTION DIFF SUMMARY]")?;
+    out.try_println(&format!("  Items A length: {} bytes", items_a.len()))?;
+    out.try_println(&format!("  Items B length: {} bytes", items_b.len()))?;
 
     if items_a.len() != items_b.len() {
-        out.println(&format!(
+        out.try_println(&format!(
             "  Length diff: {} bytes",
             items_b.len() as isize - items_a.len() as isize
-        ));
+        ))?;
     }
 
-    out.println(&format!("  Total differences: {} bytes", diffs.len()));
+    out.try_println(&format!("  Total differences: {} bytes", diffs.len()))?;
 
     if out.is_json() {
-        out.json(&serde_json::to_string_pretty(&report).unwrap());
+        out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
+        out.try_finish()?;
         process::exit(if identical { 0 } else { 1 });
     }
 
     if identical {
-        out.summary("  [IDENTICAL] The Item Sections (JM onwards) are 100% strictly identical.");
+        out.try_finish()?;
+        out.try_summary(
+            "  [IDENTICAL] The Item Sections (JM onwards) are 100% strictly identical.",
+        )?;
         process::exit(0);
     }
 
-    out.println("");
-    out.println("[DETAILS] (first 30 differences in Item Section)");
-    out.println(&format!(
+    out.try_println("")?;
+    out.try_println("[DETAILS] (first 30 differences in Item Section)")?;
+    out.try_println(&format!(
         "  {:>10}  {:>10}  {:>10}  {:>10}",
         "Rel Offset", "Abs A", "A (hex)", "B (hex)"
-    ));
-    out.println(&format!(
+    ))?;
+    out.try_println(&format!(
         "  {:->10}  {:->10}  {:->10}  {:->10}",
         "", "", "", ""
-    ));
+    ))?;
     for &i in diffs.iter().take(30) {
         let a_val = items_a[i];
         let b_val = items_b[i];
         let abs_a = a_start + i;
-        out.println(&format!(
+        out.try_println(&format!(
             "  {:>10}  {:>10}  0x{:02X} ({:>3})   0x{:02X} ({:>3})",
             i, abs_a, a_val, a_val, b_val, b_val
-        ));
+        ))?;
     }
     if diffs.len() > 30 {
-        out.println(&format!("  ... and {} more diffs", diffs.len() - 30));
+        out.try_println(&format!("  ... and {} more diffs", diffs.len() - 30))?;
     }
 
+    out.try_finish()?;
     process::exit(1);
 }
