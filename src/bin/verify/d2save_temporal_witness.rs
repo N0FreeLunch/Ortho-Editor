@@ -173,7 +173,7 @@ fn is_strict_subset(before: &[String], after: &[String]) -> bool {
     before.is_subset(&after) && before != after
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2save_temporal_witness").description(
         "Read-only progression partial-order and item-group witness discovery for save directories",
     );
@@ -315,12 +315,19 @@ fn main() {
     )
     .with_results(payload);
     if out.is_json() {
-        out.json(&serde_json::to_string_pretty(&report).unwrap());
+        out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
+        out.try_finish()?;
     } else {
-        out.println(&format!(
-            "Temporal witness index: {} nodes, {} forward edges",
+        let message = format!(
+            "Temporal witness index: {} nodes, {} forward edges\nUse --json --output <path> for the machine-readable report.",
             node_count, edge_count
-        ));
-        out.println("Use --json --output <path> for the machine-readable report.");
+        );
+        if out.is_token_efficient() {
+            out.try_println(&message)?;
+            out.try_finish()?;
+        } else {
+            out.try_summary(&message)?;
+        }
     }
+    Ok(())
 }
