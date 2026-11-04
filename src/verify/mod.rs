@@ -221,10 +221,16 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+enum DeferredOutput {
+    StdoutLine(String),
+    Stderr(String),
+}
+
 pub struct OutputManager {
     writer: Option<Box<dyn Write>>,
     is_token_efficient: bool,
     is_json: bool,
+    deferred: Vec<DeferredOutput>,
 }
 
 impl OutputManager {
@@ -233,6 +239,7 @@ impl OutputManager {
             writer: None,
             is_token_efficient: args.is_set("token-efficient"),
             is_json: args.is_json(),
+            deferred: Vec::new(),
         })
     }
 
@@ -289,6 +296,7 @@ impl OutputManager {
             writer,
             is_token_efficient,
             is_json,
+            deferred: Vec::new(),
         })
     }
 
@@ -353,7 +361,12 @@ impl OutputManager {
             self.write_detail(text, true)?;
         }
         if self.is_json {
-            eprintln!("{}", text);
+            if self.deferred.is_empty() {
+                eprintln!("{}", text);
+            } else {
+                self.deferred
+                    .push(DeferredOutput::Stderr(format!("{text}\n")));
+            }
         } else if !self.is_token_efficient {
             println!("{}", text);
         }
@@ -365,7 +378,11 @@ impl OutputManager {
             self.write_detail(text, false)?;
         }
         if self.is_json {
-            eprint!("{}", text);
+            if self.deferred.is_empty() {
+                eprint!("{}", text);
+            } else {
+                self.deferred.push(DeferredOutput::Stderr(text.to_string()));
+            }
         } else if !self.is_token_efficient {
             print!("{}", text);
         }
@@ -375,14 +392,25 @@ impl OutputManager {
     pub fn try_json(&mut self, text: &str) -> std::io::Result<()> {
         self.write_detail(text, true)?;
         if !self.is_token_efficient {
-            println!("{}", text);
+            if self.is_json && self.writer.is_some() {
+                // Release reports only after the destination is flushed successfully.
+                self.deferred
+                    .push(DeferredOutput::StdoutLine(text.to_string()));
+            } else {
+                println!("{}", text);
+            }
         }
         Ok(())
     }
 
     pub fn try_summary(&mut self, text: &str) -> std::io::Result<()> {
         if self.is_json {
-            eprintln!("{}", text);
+            if self.deferred.is_empty() {
+                eprintln!("{}", text);
+            } else {
+                self.deferred
+                    .push(DeferredOutput::Stderr(format!("{text}\n")));
+            }
         } else {
             let formatted = if self.is_token_efficient {
                 format!("[TOKEN-EFFICIENT] {}", text)
@@ -399,6 +427,12 @@ impl OutputManager {
     pub fn try_finish(&mut self) -> std::io::Result<()> {
         if let Some(writer) = &mut self.writer {
             writer.flush()?;
+        }
+        for event in self.deferred.drain(..) {
+            match event {
+                DeferredOutput::StdoutLine(text) => println!("{}", text),
+                DeferredOutput::Stderr(text) => eprint!("{}", text),
+            }
         }
         Ok(())
     }
@@ -420,6 +454,75 @@ mod output_error_tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn output_delivery_child() {
+        let Ok(mode) = std::env::var("D2R_TEST_OUTPUT_CHILD") else {
+            return;
+        };
+        let (mut output, _, _) = manager(true, mode == "write", mode == "flush");
+        output.is_token_efficient = mode == "token";
+        if mode == "no_writer" {
+            output.writer = None;
+        }
+        if let Err(error) = output.try_json("REPORT_ONE") {
+            eprintln!("OUTPUT_ERROR:{error}");
+            return;
+        }
+        output.try_json("REPORT_TWO").unwrap();
+        output.try_print("DIAGNOSTIC_PART").unwrap();
+        output.try_println("_LINE").unwrap();
+        output.try_summary("DIAGNOSTIC_AFTER_REPORT").unwrap();
+        if mode == "no_writer" || mode == "early" {
+            return;
+        }
+        if let Err(error) = output.try_finish() {
+            eprintln!("OUTPUT_ERROR:{error}");
+            return;
+        }
+        output.try_finish().unwrap();
+    }
+
+    #[test]
+    fn checked_json_delivery_is_visible_only_after_successful_finish() {
+        use std::process::Command;
+
+        for mode in ["success", "flush", "write", "no_writer", "token", "early"] {
+            let run = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "verify::output_error_tests::output_delivery_child",
+                    "--nocapture",
+                ])
+                .env("D2R_TEST_OUTPUT_CHILD", mode)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "child failed in {mode}: {run:?}");
+            let stdout = String::from_utf8(run.stdout).unwrap();
+            let stderr = String::from_utf8(run.stderr).unwrap();
+            let expected = usize::from(matches!(mode, "success" | "no_writer"));
+            assert_eq!(stdout.matches("REPORT_ONE").count(), expected, "{mode}");
+            assert_eq!(stdout.matches("REPORT_TWO").count(), expected, "{mode}");
+            if expected == 1 {
+                assert!(
+                    stdout.find("REPORT_ONE") < stdout.find("REPORT_TWO"),
+                    "{mode}"
+                );
+            }
+            if mode == "success" || mode == "no_writer" || mode == "token" {
+                assert!(
+                    stderr.contains("DIAGNOSTIC_PART_LINE\nDIAGNOSTIC_AFTER_REPORT\n"),
+                    "{mode}"
+                );
+            } else {
+                assert!(!stderr.contains("DIAGNOSTIC_AFTER_REPORT"), "{mode}");
+                assert!(!stderr.contains("DIAGNOSTIC_PART"), "{mode}");
+            }
+            if mode == "write" || mode == "flush" {
+                assert!(stderr.contains("OUTPUT_ERROR:"), "{mode}");
+            }
+        }
+    }
 
     struct ProbeWriter {
         writes: Arc<AtomicUsize>,
@@ -466,6 +569,7 @@ mod output_error_tests {
                 writer: Some(Box::new(writer)),
                 is_token_efficient: true,
                 is_json: json,
+                deferred: Vec::new(),
             },
             writes,
             flushes,
@@ -512,6 +616,7 @@ mod output_error_tests {
             writer: None,
             is_token_efficient: false,
             is_json: false,
+            deferred: Vec::new(),
         };
         output.try_finish().expect("no file to flush");
     }
@@ -533,6 +638,7 @@ mod output_error_tests {
             writer: Some(Box::new(Capture(bytes.clone()))),
             is_token_efficient: true,
             is_json: false,
+            deferred: Vec::new(),
         };
         output.try_print("a").unwrap();
         output.try_println("b").unwrap();
