@@ -74,6 +74,7 @@ fn main() -> anyhow::Result<()> {
         let start_bit: u64 = bits_args[0].parse().unwrap_or(0);
         let count: u64 = bits_args[1].parse().unwrap_or(0);
         dump_bits(&mut om, &files[0], start_bit, count)?;
+        om.try_finish()?;
         return Ok(());
     }
 
@@ -84,6 +85,7 @@ fn main() -> anyhow::Result<()> {
         for file in &files {
             dump_residue_map(&mut om, file)?;
         }
+        om.try_finish()?;
         return Ok(());
     }
 
@@ -107,12 +109,12 @@ fn main() -> anyhow::Result<()> {
                         message: format!("Cannot read file: {}", e),
                         bit_offset: None,
                     }]);
-                    om.json(&serde_json::to_string(&report)?);
+                    om.try_json(&serde_json::to_string(&report)?)?;
                 } else {
-                    om.println(&format!(
+                    om.try_println(&format!(
                         "=== {} ===\n  [ERROR] Cannot read file: {}",
                         path, e
-                    ));
+                    ))?;
                 }
                 all_ok = false;
                 continue;
@@ -162,29 +164,29 @@ fn main() -> anyhow::Result<()> {
             let mut bytes_to_fix = bytes.clone();
             d2r_core::engine::checksum::Checksum::fix(&mut bytes_to_fix);
             fs::write(path, &bytes_to_fix).context(format!("Failed to write fixed {}", path))?;
-            om.summary(&format!("  [FIXED] Checksum updated for {}", path));
+            om.try_summary(&format!("  [FIXED] Checksum updated for {}", path))?;
         }
 
         if is_json {
             let report_json = report.with_forensic_context();
-            om.json(&serde_json::to_string(&report_json)?);
+            om.try_json(&serde_json::to_string(&report_json)?)?;
         } else {
-            om.println(&format!("=== {} ===", path));
-            om.println(&format!("  status: {:?}", report.status));
+            om.try_println(&format!("=== {} ===", path))?;
+            om.try_println(&format!("  status: {:?}", report.status))?;
             if let Some(results) = report.scan_results.as_ref() {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  version=0x{:04X} alpha={} size={} checksum={}",
                     results.header_version,
                     results.alpha_mode,
                     results.file_size_actual,
                     results.checksum_stored
-                ));
+                ))?;
 
-                om.println(&format!(
+                om.try_println(&format!(
                     "  Fidelity Score: {:.1}% ({:?})",
                     results.fidelity_score * 100.0,
                     results.forensic_audit.combined_confidence
-                ));
+                ))?;
 
                 if let Ok(prog_res) = d2r_core::domain::progression::Progression::from_bytes(
                     &bytes,
@@ -198,11 +200,11 @@ fn main() -> anyhow::Result<()> {
                         2 => "Hell",
                         _ => "Unknown",
                     };
-                    om.println(&format!("  Difficulty: {}", diff_str));
+                    om.try_println(&format!("  Difficulty: {}", diff_str))?;
                 }
 
                 if results.fidelity_score < 1.0 || results.alpha_mode {
-                    om.println("  [FORENSIC RATIONALE]");
+                    om.try_println("  [FORENSIC RATIONALE]")?;
                     let mut unique_findings = std::collections::HashSet::new();
                     for finding in &results.forensic_audit.findings {
                         // For Alpha, show everything. For others, show only speculative/fragile.
@@ -215,14 +217,14 @@ fn main() -> anyhow::Result<()> {
                                 finding.confidence, finding.intentionality, finding.rationale
                             );
                             if unique_findings.insert(line.clone()) {
-                                om.println(&line);
+                                om.try_println(&line)?;
                             }
                         }
                     }
                 }
             }
             for issue in &report.issues {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  [{}] {}{}",
                     issue.kind,
                     issue.message,
@@ -230,10 +232,10 @@ fn main() -> anyhow::Result<()> {
                         .bit_offset
                         .map(|b| format!(" (bit {})", b))
                         .unwrap_or_default()
-                ));
+                ))?;
             }
             for issue in &report.forensic_issues {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  [FORENSIC] [{}] {}{}",
                     issue.kind,
                     issue.message,
@@ -241,31 +243,25 @@ fn main() -> anyhow::Result<()> {
                         .bit_offset
                         .map(|b| format!(" (bit {})", b))
                         .unwrap_or_default()
-                ));
+                ))?;
                 if let Some(dna) = &issue.dna_class {
-                    om.println(&format!("    DNA Class: {}", dna));
+                    om.try_println(&format!("    DNA Class: {}", dna))?;
                 }
                 if let Some(pres) = &issue.prescription {
-                    om.println(&format!("    Prescription: {}", pres));
+                    om.try_println(&format!("    Prescription: {}", pres))?;
                 }
             }
             for action in &report.suggested_actions {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  [ACTION] ({:.2}) {}: {}",
                     action.confidence, action.kind, action.command
-                ));
+                ))?;
             }
-            om.println("");
+            om.try_println("")?;
         }
         if failed {
             all_ok = false;
         }
-    }
-
-    if all_ok {
-        om.summary("Verification complete: OK");
-    } else {
-        om.summary("Verification complete: FAILED");
     }
 
     if let Some(baseline_path) = diff_baseline_path {
@@ -282,29 +278,34 @@ fn main() -> anyhow::Result<()> {
             let delta =
                 d2r_core::verify::delta::FidelityDelta::compare(&baseline_report, &current_report);
 
-            om.summary("\n=== FIDELITY DELTA ===");
-            om.summary(&format!("  Status: {:?}", delta.status));
-            om.summary(&format!(
+            om.try_summary("\n=== FIDELITY DELTA ===")?;
+            om.try_summary(&format!("  Status: {:?}", delta.status))?;
+            om.try_summary(&format!(
                 "  Score Change: {:.2}% -> {:.2}%",
                 delta.prev_score * 100.0,
                 delta.curr_score * 100.0
-            ));
-            om.summary(&format!(
+            ))?;
+            om.try_summary(&format!(
                 "  Issues: Fixed={}, New={}",
                 delta.fixed_issues.len(),
                 delta.new_issues.len()
-            ));
+            ))?;
 
             if delta.status == d2r_core::verify::delta::DeltaStatus::Regressed {
-                om.summary("  [REGRESSION DETECTED] Exiting with non-zero status.");
+                om.try_summary("  [REGRESSION DETECTED] Exiting with non-zero status.")?;
+                om.try_finish()?;
                 process::exit(1);
             }
         }
     }
 
     if all_ok {
+        om.try_finish()?;
+        om.try_summary("Verification complete: OK")?;
         process::exit(0);
     } else {
+        om.try_summary("Verification complete: FAILED")?;
+        om.try_finish()?;
         process::exit(1);
     }
 }
@@ -316,10 +317,10 @@ fn dump_bits(
     count: u64,
 ) -> anyhow::Result<()> {
     let bytes = fs::read(path)?;
-    om.summary(&format!(
+    om.try_summary(&format!(
         "Dumping {} bits starting at {}:",
         count, start_bit
-    ));
+    ))?;
     let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
     reader.skip(start_bit as u32)?;
     let mut line = String::new();
@@ -330,14 +331,14 @@ fn dump_bits(
             line.push(' ');
         }
         if (i + 1) % 64 == 0 {
-            om.println(&line);
+            om.try_println(&line)?;
             line.clear();
         }
     }
     if !line.is_empty() {
-        om.println(&line);
+        om.try_println(&line)?;
     }
-    om.println("");
+    om.try_println("")?;
     Ok(())
 }
 
@@ -388,11 +389,11 @@ fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> any
             report.scan_results = Some(results);
         }
 
-        om.json(&serde_json::to_string(&report)?);
+        om.try_json(&serde_json::to_string(&report)?)?;
         return Ok(());
     }
 
-    om.summary(&format!("Residue Gap Map for {}:", path));
+    om.try_summary(&format!("Residue Gap Map for {}:", path))?;
 
     for (i, item) in items.iter().enumerate() {
         let start = item.range.start;
@@ -407,18 +408,18 @@ fn dump_residue_map(om: &mut d2r_core::verify::OutputManager, path: &str) -> any
                     bits.push(' ');
                 }
             }
-            om.println(&format!(
+            om.try_println(&format!(
                 "[{:>3}] [GAP: {:>5} bits] [0x{:08X} - 0x{:08X}] bits: {}",
                 i, len, start, end, bits
-            ));
+            ))?;
         } else {
-            om.println(&format!(
+            om.try_println(&format!(
                 "[{:>3}] [CLAIMED: {:>4}] [0x{:08X} - 0x{:08X}]",
                 i,
                 item.code.trim(),
                 start,
                 end
-            ));
+            ))?;
         }
     }
 
