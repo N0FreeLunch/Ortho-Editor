@@ -53,7 +53,7 @@ fn classify_offset(offset: usize, jm0: Option<usize>) -> &'static str {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2save_structural_diff").description(
         "Compares two D2R save files with Alpha v105 subsystem awareness and checksum masking",
     );
@@ -164,69 +164,78 @@ fn main() {
         )
         .with_results(payload);
 
-        out.json(&serde_json::to_string_pretty(&report).unwrap());
+        out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
     } else {
-        out.println("=== d2save_structural_diff ===");
-        out.println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()));
-        out.println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()));
-        out.println("");
+        out.try_println("=== d2save_structural_diff ===")?;
+        out.try_println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()))?;
+        out.try_println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()))?;
+        out.try_println("")?;
 
         if section_counts.is_empty() && length_delta == 0 {
-            out.println("  [IDENTICAL] No differences found.");
+            let message = "  [IDENTICAL] No differences found.";
+            if out.is_token_efficient() {
+                out.try_println(message)?;
+                out.try_finish()?;
+            } else {
+                out.try_summary(message)?;
+            }
+            return Ok(());
         } else {
-            out.println("[SECTION SUMMARY]");
+            out.try_println("[SECTION SUMMARY]")?;
             let mut keys: Vec<_> = section_counts.keys().collect();
             keys.sort();
             for label in keys {
                 let count = section_counts[label];
                 let mask_note = if label == "Checksum" { " (MASKED)" } else { "" };
-                out.println(&format!("  {:<15}: {:>4} bytes{}", label, count, mask_note));
+                out.try_println(&format!("  {:<15}: {:>4} bytes{}", label, count, mask_note))?;
             }
             if length_delta != 0 {
-                out.println(&format!(
+                out.try_println(&format!(
                     "  {:<15}: {:>4} bytes",
                     "Length Delta", length_delta
-                ));
+                ))?;
             }
-            out.println("");
+            out.try_println("")?;
 
             if show_details || show_all {
-                out.println("[DETAILED DIFFS]");
-                out.println(&format!(
+                out.try_println("[DETAILED DIFFS]")?;
+                out.try_println(&format!(
                     "  {:>8}  {:<12}  {:>8}  {:>8}",
                     "Offset", "Section", "A", "B"
-                ));
-                out.println(&format!(
+                ))?;
+                out.try_println(&format!(
                     "  {:->8}  {:->12}  {:->8}  {:->8}",
                     "", "", "", ""
-                ));
+                ))?;
 
                 for d in &details {
                     if !show_all && d.is_masked {
                         continue;
                     }
-                    out.println(&format!(
+                    out.try_println(&format!(
                         "  {:>8}  {:<12}  {:>8}  {:>8}",
                         d.offset, d.label, d.a_hex, d.b_hex
-                    ));
+                    ))?;
                 }
 
                 if !show_all && details.len() > unmasked_count {
-                    out.println(&format!(
+                    out.try_println(&format!(
                         "  ... ({} masked bytes hidden, use --all to see)",
                         details.len() - unmasked_count
-                    ));
+                    ))?;
                 }
             } else if unmasked_count == 0 && !details.is_empty() {
-                out.println(
+                out.try_println(
                     "  [INFO] Only masked sections (Checksum) differ. Use --all to see details.",
-                );
+                )?;
             } else if unmasked_count > 0 {
-                out.println(&format!(
+                out.try_println(&format!(
                     "  [INFO] {} unmasked differences found. Use --details to see offset list.",
                     unmasked_count
-                ));
+                ))?;
             }
         }
     }
+    out.try_finish()?;
+    Ok(())
 }
