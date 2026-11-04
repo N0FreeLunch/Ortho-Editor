@@ -36,7 +36,7 @@ fn find_first_jm(bytes: &[u8]) -> Option<usize> {
     None
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let mut parser = ArgParser::new("d2save_diff")
         .description("Compares two D2R save files and highlights byte-level differences in header and item sections");
 
@@ -154,37 +154,37 @@ fn main() {
 
     if om.is_json() {
         let json = serde_json::to_string_pretty(&report).unwrap();
-        om.json(&json);
+        om.try_json(&json)?;
     } else {
-        om.println("=== d2save_diff ===");
-        om.println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()));
-        om.println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()));
-        om.println(&format!("  First JM in A: {:?}", jm_a));
-        om.println(&format!("  First JM in B: {:?}", jm_b));
+        om.try_println("=== d2save_diff ===")?;
+        om.try_println(&format!("  A: {} ({} bytes)", path_a, bytes_a.len()))?;
+        om.try_println(&format!("  B: {} ({} bytes)", path_b, bytes_b.len()))?;
+        om.try_println(&format!("  First JM in A: {:?}", jm_a))?;
+        om.try_println(&format!("  First JM in B: {:?}", jm_b))?;
 
-        om.println("");
-        om.println("[DIFF SUMMARY]");
-        om.println(&format!(
+        om.try_println("")?;
+        om.try_println("[DIFF SUMMARY]")?;
+        om.try_println(&format!(
             "  Header diffs  (0..{header_end}): {} bytes",
             result.header_diff_count
-        ));
-        om.println(&format!(
+        ))?;
+        om.try_println(&format!(
             "  Item diffs    ({header_end}..{}): {} bytes",
             common_len, result.item_diff_count
-        ));
+        ))?;
         if result.length_diff != 0 {
-            om.println(&format!("  Length diff: {} bytes", result.length_diff));
+            om.try_println(&format!("  Length diff: {} bytes", result.length_diff))?;
         }
 
-        om.println("");
-        om.println("[DETAILS] (first 30 diffs)");
-        om.println(&format!(
+        om.try_println("")?;
+        om.try_println("[DETAILS] (first 30 diffs)")?;
+        om.try_println(&format!(
             "  {:>8}  {:>10}  {:>10}",
             "Offset", "A (hex)", "B (hex)"
-        ));
-        om.println(&format!("  {:->8}  {:->10}  {:->10}", "", "", ""));
+        ))?;
+        om.try_println(&format!("  {:->8}  {:->10}  {:->10}", "", "", ""))?;
         for detail in result.details.iter().take(30) {
-            om.println(&format!(
+            om.try_println(&format!(
                 "  {:>8}  0x{:02X} ({:>3})   0x{:02X} ({:>3})   [{}]",
                 detail.offset,
                 detail.val_a,
@@ -192,16 +192,18 @@ fn main() {
                 detail.val_b,
                 detail.val_b,
                 detail.region
-            ));
+            ))?;
         }
         if result.total_diff_count > 30 {
-            om.println(&format!(
+            om.try_println(&format!(
                 "  ... and {} more diffs",
                 result.total_diff_count - 30
-            ));
+            ))?;
         }
         if result.total_diff_count == 0 && result.length_diff == 0 {
-            om.println("  [IDENTICAL] No differences found.");
+            om.try_println("  [IDENTICAL] No differences found.")?;
         }
     }
+    om.try_finish()?;
+    Ok(())
 }
