@@ -127,7 +127,8 @@ fn main() -> Result<()> {
                 bit_offset: None,
             }])
             .with_forensic_context();
-            om.json(&serde_json::to_string_pretty(&report)?);
+            om.try_json(&serde_json::to_string_pretty(&report)?)?;
+            om.try_finish()?;
             process::exit(1);
         } else {
             return Err(anyhow!("{}", msg));
@@ -182,33 +183,36 @@ fn main() -> Result<()> {
             }]);
         }
 
-        om.json(&serde_json::to_string_pretty(&report)?);
+        om.try_json(&serde_json::to_string_pretty(&report)?)?;
+        om.try_finish()?;
     } else {
-        om.println("=== Domain Symmetry Auditor (DSA) ===");
-        om.println(&format!("  A: {}", path_a));
-        om.println(&format!("  B: {}", path_b));
-        om.println(&format!("  Allowed bits: {:?}", allowed_bits));
+        om.try_println("=== Domain Symmetry Auditor (DSA) ===")?;
+        om.try_println(&format!("  A: {}", path_a))?;
+        om.try_println(&format!("  B: {}", path_b))?;
+        om.try_println(&format!("  Allowed bits: {:?}", allowed_bits))?;
 
         if violations.is_empty() {
-            om.summary("Bitwise symmetry verified.");
+            om.try_finish()?;
+            om.try_summary("Bitwise symmetry verified.")?;
         } else {
-            om.println(&format!(
+            om.try_println(&format!(
                 "\n[FAILURE] {} unauthorized bit violations found:",
                 violations.len()
-            ));
+            ))?;
             for v in violations.iter().take(20) {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  Bit {:>6} (Byte {:>5}, Bit {}): A={} B={}",
                     v.abs_bit, v.byte_offset, v.bit_in_byte, v.val_a, v.val_b
-                ));
+                ))?;
             }
             if violations.len() > 20 {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  ... and {} more violations",
                     violations.len() - 20
-                ));
+                ))?;
             }
-            om.summary(&format!("{} violations found.", violations.len()));
+            om.try_summary(&format!("{} violations found.", violations.len()))?;
+            om.try_finish()?;
             process::exit(1);
         }
     }
