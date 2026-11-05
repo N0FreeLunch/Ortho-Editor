@@ -355,10 +355,11 @@ fn emit_selected_item_json(
 ) -> std::io::Result<()> {
     if parsed.get("output").is_some() || parsed.is_set("token-efficient") {
         let mut output = OutputManager::try_new("d2item_inspect", parsed)?;
-        output.json(&report.to_string());
+        output.try_json(&report.to_string())?;
         if parsed.is_set("token-efficient") {
-            output.summary(summary);
+            output.try_defer_json_summary(summary)?;
         }
+        output.try_finish()?;
     } else {
         println!("{}", report);
     }
@@ -4087,7 +4088,9 @@ fn main() {
                         ),
                     )
                     .unwrap_or_else(|error| {
-                        eprintln!("Failed to initialize output destination: {error}");
+                        eprintln!(
+                            "Failed to initialize output destination or deliver output: {error}"
+                        );
                         std::process::exit(1);
                     });
                 } else {
@@ -4386,7 +4389,7 @@ fn main() {
                     ),
                 )
                 .unwrap_or_else(|error| {
-                    eprintln!("Failed to initialize output destination: {error}");
+                    eprintln!("Failed to initialize output destination or deliver output: {error}");
                     std::process::exit(1);
                 });
             } else {
