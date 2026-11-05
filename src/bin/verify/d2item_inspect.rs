@@ -352,11 +352,14 @@ fn emit_legacy_json_report(
     parsed: &d2r_core::verify::args::ParsedArgs,
     report: &serde_json::Value,
 ) {
-    let text = report.to_string();
+    emit_legacy_json_text(parsed, &report.to_string());
+}
+
+fn emit_legacy_json_text(parsed: &d2r_core::verify::args::ParsedArgs, text: &str) {
     let deliver = || -> std::io::Result<()> {
         if parsed.get("output").is_some() || parsed.is_set("token-efficient") {
             let mut output = OutputManager::try_new("d2item_inspect", parsed)?;
-            output.try_json(&text)?;
+            output.try_json(text)?;
             output.try_finish()?;
             if parsed.is_set("token-efficient") {
                 println!("{}", text);
@@ -2987,9 +2990,9 @@ fn main() {
         }
 
         if is_json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&manifest).unwrap_or_default()
+            emit_legacy_json_text(
+                &parsed,
+                &serde_json::to_string_pretty(&manifest).unwrap_or_default(),
             );
         } else if dump_manifest_opt.is_none() {
             println!(
@@ -3026,14 +3029,14 @@ fn main() {
             || marker_ordinal_raw.is_none())
     {
         if is_json {
-            println!(
-                "{}",
-                json!({
+            emit_legacy_json_report(
+                &parsed,
+                &json!({
                     "errors": [{
                         "kind": "selector_pair_required",
                         "message": "--marker-section and --marker-ordinal must be supplied as a complete numeric pair"
                     }]
-                })
+                }),
             );
         } else {
             eprintln!(
@@ -3266,7 +3269,7 @@ fn main() {
     }
 
     if section_segment_witnesses && is_json && Path::new(path).is_dir() {
-        println!("{}", section_segment_witness_directory_report(path));
+        emit_legacy_json_report(&parsed, &section_segment_witness_directory_report(path));
         return;
     }
 
@@ -3274,9 +3277,9 @@ fn main() {
         Ok(b) => b,
         Err(e) => {
             if is_json {
-                println!(
-                    "{}",
-                    json!({"errors": [format!("Failed to read file: {}", e)]})
+                emit_legacy_json_report(
+                    &parsed,
+                    &json!({"errors": [format!("Failed to read file: {}", e)]}),
                 );
             } else {
                 eprintln!("Failed to read file: {}", e);
@@ -3306,15 +3309,15 @@ fn main() {
         let Some(section_index) = section_index.filter(|&index| index < valid_sections.len())
         else {
             if is_json {
-                println!(
-                    "{}",
-                    json!({
+                emit_legacy_json_report(
+                    &parsed,
+                    &json!({
                         "errors": [{
                             "kind": "unknown_marker_section",
                             "marker_section": marker_section,
                             "available_section_count": valid_sections.len()
                         }]
-                    })
+                    }),
                 );
             } else {
                 eprintln!(
@@ -3409,9 +3412,9 @@ fn main() {
                 })
                 .collect::<Vec<_>>();
 
-            println!(
-                "{}",
-                json!({
+            emit_legacy_json_report(
+                &parsed,
+                &json!({
                     "selector": {
                         "marker_section": marker_section,
                         "marker_ordinal": marker_ordinal
@@ -3430,7 +3433,7 @@ fn main() {
                         "segments": segments
                     },
                     "errors": []
-                })
+                }),
             );
         } else if is_json {
             let mut report = json!({
@@ -3535,15 +3538,15 @@ fn main() {
                         })
                         .collect::<Vec<_>>();
                     if is_json {
-                        println!(
-                            "{}",
-                            json!({
+                        emit_legacy_json_report(
+                            &parsed,
+                            &json!({
                                 "item": item_to_json(&item, None),
                                 "range": {"start": item.range.start, "end": trace_end},
                                 "parser_consumed_bits": bit_end,
                                 "coordinate": coordinate,
                                 "segments": segments
-                            })
+                            }),
                         );
                     } else {
                         println!(
@@ -3921,14 +3924,14 @@ fn main() {
                     .collect::<Vec<_>>();
 
                 if is_json {
-                    println!(
-                        "{}",
-                        json!({
+                    emit_legacy_json_report(
+                        &parsed,
+                        &json!({
                             "coordinate_bit": absolute,
                             "top_level_item_count": items.len(),
                             "carrier_count": carriers.len(),
                             "carriers": carriers
-                        })
+                        }),
                     );
                 } else if carriers.is_empty() {
                     println!(
@@ -3950,15 +3953,15 @@ fn main() {
         if let Some(section_item_index) = section_item {
             if section_item_index >= items.len() {
                 if is_json {
-                    println!(
-                        "{}",
-                        json!({
+                    emit_legacy_json_report(
+                        &parsed,
+                        &json!({
                             "errors": [format!(
                                 "Requested section item {} but only {} top-level items were parsed",
                                 section_item_index,
                                 items.len()
                             )]
-                        })
+                        }),
                     );
                 } else {
                     eprintln!(

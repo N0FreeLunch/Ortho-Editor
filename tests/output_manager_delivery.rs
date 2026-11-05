@@ -76,6 +76,110 @@ fn legacy_inspector_json_reports_reach_explicit_destination() {
 }
 
 #[test]
+fn legacy_inspector_variant_and_error_reports_reach_destination() {
+    struct OwnedDir(PathBuf);
+    impl Drop for OwnedDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let core = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = core.join("tests/fixtures/savegames/original/amazon_initial.d2s");
+    let before = fs::read(&fixture).expect("fixture");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let work = OwnedDir(
+        core.join("tmp")
+            .join(format!("inspector-variant-{}-{nonce}", std::process::id())),
+    );
+    fs::create_dir(&work.0).expect("create unique test directory");
+    let directory = work.0.join("fixtures");
+    fs::create_dir(&directory).expect("create fixture directory");
+    fs::copy(&fixture, directory.join("input.d2s")).expect("copy fixture");
+    for name in [
+        "marker-reparse",
+        "bit-trace",
+        "coordinate",
+        "witness-dir",
+        "corpus",
+        "invalid-index",
+        "invalid-marker",
+        "invalid-pair",
+        "missing",
+    ] {
+        for efficient in [false, true] {
+            let dest = work.0.join(format!("{name}-{efficient}.json"));
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_d2item_inspect"));
+            cmd.args(["--dialect", "legacy", "--json", "--output"])
+                .arg(&dest);
+            if efficient {
+                cmd.arg("--token-efficient");
+            }
+            match name {
+                "marker-reparse" => {
+                    cmd.args([
+                        "--marker-section",
+                        "1",
+                        "--marker-ordinal",
+                        "0",
+                        "--marker-reparse-limit-bits",
+                        "74",
+                    ]);
+                }
+                "bit-trace" => {
+                    cmd.args(["--bit-offset", "7256", "--trace-segments"]);
+                }
+                "coordinate" => {
+                    cmd.args(["--coordinate-bit", "7256"]);
+                }
+                "witness-dir" => {
+                    cmd.arg("--section-segment-witnesses");
+                }
+                "corpus" => {
+                    cmd.arg("--corpus-dir").arg(&directory);
+                }
+                "invalid-index" => {
+                    cmd.args(["--section-item", "999"]);
+                }
+                "invalid-marker" => {
+                    cmd.args(["--marker-section", "999", "--marker-ordinal", "0"]);
+                }
+                "invalid-pair" => {
+                    cmd.args(["--marker-section", "1"]);
+                }
+                _ => {}
+            }
+            if name == "witness-dir" {
+                cmd.arg(&directory);
+            } else if name == "missing" {
+                cmd.arg(work.0.join("missing.d2s"));
+            } else if name != "corpus" {
+                cmd.arg(&fixture);
+            }
+            let output = cmd.output().expect("run inspector");
+            assert!(
+                output.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let file =
+                fs::read(&dest).unwrap_or_else(|error| panic!("{name}: missing report: {error}"));
+            assert_eq!(file, output.stdout, "{name}, token={efficient}");
+            let value: serde_json::Value = serde_json::from_slice(&file).expect("JSON report");
+            if ["invalid-index", "invalid-marker", "invalid-pair", "missing"].contains(&name) {
+                assert!(
+                    !value["errors"].as_array().expect("error list").is_empty(),
+                    "{name}"
+                );
+            }
+        }
+    }
+    assert_eq!(fs::read(&fixture).expect("fixture after"), before);
+}
+
+#[test]
 fn serialization_visual_directory_destination_is_an_error() {
     let fixture = fixture();
     let before = fs::read(&fixture).expect("fixture");
