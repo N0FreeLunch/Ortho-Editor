@@ -348,6 +348,30 @@ fn item_to_json(item: &Item, provenance: Option<serde_json::Value>) -> serde_jso
     serde_json::Value::Object(map)
 }
 
+fn emit_legacy_json_report(
+    parsed: &d2r_core::verify::args::ParsedArgs,
+    report: &serde_json::Value,
+) {
+    let text = report.to_string();
+    let deliver = || -> std::io::Result<()> {
+        if parsed.get("output").is_some() || parsed.is_set("token-efficient") {
+            let mut output = OutputManager::try_new("d2item_inspect", parsed)?;
+            output.try_json(&text)?;
+            output.try_finish()?;
+            if parsed.is_set("token-efficient") {
+                println!("{}", text);
+            }
+        } else {
+            println!("{}", text);
+        }
+        Ok(())
+    };
+    if let Err(error) = deliver() {
+        eprintln!("Failed to initialize output destination or deliver output: {error}");
+        std::process::exit(1);
+    }
+}
+
 fn emit_selected_item_json(
     parsed: &d2r_core::verify::args::ParsedArgs,
     report: &serde_json::Value,
@@ -3436,7 +3460,7 @@ fn main() {
                     object.insert("marker_header_preview".to_string(), preview);
                 }
             }
-            println!("{}", report);
+            emit_legacy_json_report(&parsed, &report);
         } else {
             println!("Receipt-only marker selection succeeded.");
         }
@@ -3737,9 +3761,9 @@ fn main() {
                 };
 
                 if is_json {
-                    println!(
-                        "{}",
-                        json!({ "item": item_to_json(&item, provenance), "errors": [], "range": {"start": offset, "end": bit_end} })
+                    emit_legacy_json_report(
+                        &parsed,
+                        &json!({ "item": item_to_json(&item, provenance), "errors": [], "range": {"start": offset, "end": bit_end} }),
                     );
                 } else {
                     println!(
@@ -3858,7 +3882,7 @@ fn main() {
                 eprintln!("--section-segment-witnesses requires --json");
                 return;
             }
-            println!("{}", section_segment_witness_report(&items, path));
+            emit_legacy_json_report(&parsed, &section_segment_witness_report(&items, path));
             return;
         }
 
@@ -4064,17 +4088,19 @@ fn main() {
                         comparison_item.range.end as i64 - comparison_item.range.start as i64;
                     let span_delta_bits = base_span_bits - comparison_span_bits;
                     let end_delta_bits = item.range.end as i64 - comparison_item.range.end as i64;
-                    println!(
-                        "{}",
-                        json!({
-                            "base": report,
-                            "comparison": comparison_report,
-                            "start_delta_bits": start_delta_bits,
-                            "span_delta_bits": span_delta_bits,
-                            "end_delta_bits": end_delta_bits,
-                            "delta_identity_holds": end_delta_bits == start_delta_bits + span_delta_bits
-                        })
-                    );
+                    let comparison = json!({
+                        "base": report,
+                        "comparison": comparison_report,
+                        "start_delta_bits": start_delta_bits,
+                        "span_delta_bits": span_delta_bits,
+                        "end_delta_bits": end_delta_bits,
+                        "delta_identity_holds": end_delta_bits == start_delta_bits + span_delta_bits
+                    });
+                    if is_json {
+                        emit_legacy_json_report(&parsed, &comparison);
+                    } else {
+                        println!("{}", comparison);
+                    }
                     return;
                 }
                 if is_json {
@@ -4406,7 +4432,7 @@ fn main() {
 
         if is_json {
             let item_objs: Vec<_> = items.iter().map(|it| item_to_json(it, None)).collect();
-            println!("{}", json!({"items": item_objs, "errors": []}));
+            emit_legacy_json_report(&parsed, &json!({"items": item_objs, "errors": []}));
             return;
         }
 

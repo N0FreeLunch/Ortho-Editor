@@ -22,6 +22,60 @@ fn assert_failure(output: std::process::Output) {
 }
 
 #[test]
+fn legacy_inspector_json_reports_reach_explicit_destination() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/savegames/original/amazon_initial.d2s");
+    let before = fs::read(&fixture).expect("fixture");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    for name in ["all", "comparison", "marker", "offset", "witness"] {
+        for efficient in [false, true] {
+            let dest = std::env::temp_dir().join(format!(
+                "inspector-route-{}-{nonce}-{name}-{efficient}.json",
+                std::process::id()
+            ));
+            assert!(!dest.exists());
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_d2item_inspect"));
+            cmd.args(["--dialect", "legacy", "--json", "--output"])
+                .arg(&dest);
+            if efficient {
+                cmd.arg("--token-efficient");
+            }
+            match name {
+                "comparison" => {
+                    cmd.args(["--section-item", "0", "--section-context", "--compare-file"])
+                        .arg(&fixture);
+                }
+                "marker" => {
+                    cmd.args(["--marker-section", "1", "--marker-ordinal", "0"]);
+                }
+                "offset" => {
+                    cmd.args(["--bit-offset", "7256"]);
+                }
+                "witness" => {
+                    cmd.arg("--section-segment-witnesses");
+                }
+                _ => {}
+            }
+            let result = cmd.arg(&fixture).output().expect("run inspector");
+            assert!(
+                result.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let file =
+                fs::read(&dest).unwrap_or_else(|error| panic!("{name}: missing report: {error}"));
+            assert_eq!(file, result.stdout, "{name}, token={efficient}");
+            let _: serde_json::Value = serde_json::from_slice(&file).expect("JSON report");
+            fs::remove_file(&dest).expect("remove owned test output");
+        }
+    }
+    assert_eq!(fs::read(&fixture).expect("fixture after"), before);
+}
+
+#[test]
 fn serialization_visual_directory_destination_is_an_error() {
     let fixture = fixture();
     let before = fs::read(&fixture).expect("fixture");
