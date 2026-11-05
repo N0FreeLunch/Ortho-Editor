@@ -22,6 +22,173 @@ fn assert_failure(output: std::process::Output) {
 }
 
 #[test]
+fn legacy_inspector_option_errors_reach_destination() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/savegames/original/amazon_initial.d2s");
+    let before = fs::read(&fixture).expect("fixture");
+    let f = fixture.to_str().expect("fixture path");
+    let cases = vec![
+        (
+            "selector-conflict",
+            vec![
+                "--marker-section",
+                "1",
+                "--marker-ordinal",
+                "0",
+                "--section-item",
+                "0",
+            ],
+            0,
+        ),
+        ("preview-requires", vec!["--marker-header-preview"], 0),
+        ("bad-reparse", vec!["--reparse-limit-bits", "x"], 0),
+        (
+            "bad-marker-reparse",
+            vec!["--marker-reparse-limit-bits", "x"],
+            0,
+        ),
+        (
+            "candidate-requires",
+            vec!["--candidate-evidence-records", "unused.json"],
+            0,
+        ),
+        (
+            "candidate-conflict",
+            vec![
+                "--candidate-evidence-records",
+                "unused.json",
+                "--section-context",
+                "--section-item",
+                "0",
+                "--compare-file",
+                f,
+            ],
+            0,
+        ),
+        ("compact-requires", vec!["--compact-transition-probe"], 1),
+        (
+            "compact-conflict",
+            vec![
+                "--compact-transition-probe",
+                "--section-context",
+                "--section-item",
+                "0",
+                "--compare-file",
+                f,
+            ],
+            1,
+        ),
+        ("replay-requires", vec!["--recorded-parser-replay"], 1),
+        (
+            "replay-conflict",
+            vec![
+                "--recorded-parser-replay",
+                "--section-context",
+                "--section-item",
+                "0",
+                "--compare-file",
+                f,
+            ],
+            1,
+        ),
+        ("body-requires", vec!["--recorded-body-probe"], 1),
+        (
+            "body-conflict",
+            vec![
+                "--recorded-body-probe",
+                "--section-context",
+                "--section-item",
+                "0",
+                "--compare-file",
+                f,
+            ],
+            1,
+        ),
+        ("dual-requires", vec!["--dual-limit-body-probe"], 1),
+        (
+            "dual-conflict",
+            vec![
+                "--dual-limit-body-probe",
+                "--section-context",
+                "--section-item",
+                "0",
+                "--compare-file",
+                f,
+            ],
+            1,
+        ),
+        (
+            "marker-limit-requires",
+            vec!["--marker-reparse-limit-bits", "74"],
+            0,
+        ),
+        (
+            "marker-limit-conflict",
+            vec![
+                "--marker-section",
+                "1",
+                "--marker-ordinal",
+                "0",
+                "--marker-reparse-limit-bits",
+                "74",
+                "--reparse-limit-bits",
+                "74",
+            ],
+            0,
+        ),
+        (
+            "preview-conflict",
+            vec![
+                "--marker-section",
+                "1",
+                "--marker-ordinal",
+                "0",
+                "--marker-header-preview",
+                "--marker-reparse-limit-bits",
+                "74",
+            ],
+            0,
+        ),
+        ("reparse-requires", vec!["--reparse-limit-bits", "74"], 0),
+    ];
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    for (name, flags, expected) in cases {
+        for efficient in [false, true] {
+            let dest = std::env::temp_dir().join(format!(
+                "inspector-option-{}-{nonce}-{name}-{efficient}.json",
+                std::process::id()
+            ));
+            assert!(!dest.exists());
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_d2item_inspect"));
+            cmd.args(["--dialect", "legacy", "--json", "--output"])
+                .arg(&dest);
+            if efficient {
+                cmd.arg("--token-efficient");
+            }
+            let result = cmd
+                .args(flags.iter())
+                .arg(&fixture)
+                .output()
+                .expect("run inspector");
+            assert_eq!(result.status.code(), Some(expected), "{name}");
+            let file =
+                fs::read(&dest).unwrap_or_else(|error| panic!("{name}: missing report: {error}"));
+            assert_eq!(file, result.stdout, "{name}, token={efficient}");
+            let value: serde_json::Value = serde_json::from_slice(&file).expect("JSON error");
+            assert!(
+                !value["errors"].as_array().expect("error list").is_empty(),
+                "{name}"
+            );
+            fs::remove_file(&dest).expect("remove owned test output");
+        }
+    }
+    assert_eq!(fs::read(&fixture).expect("fixture after"), before);
+}
+
+#[test]
 fn legacy_inspector_json_reports_reach_explicit_destination() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/savegames/original/amazon_initial.d2s");

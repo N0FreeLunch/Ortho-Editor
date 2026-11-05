@@ -3047,15 +3047,15 @@ fn main() {
     }
     if marker_selector_requested && (section_item.is_some() || bit_offset.is_some()) {
         if is_json {
-            println!(
-                "{}",
-                json!({
+            emit_legacy_json_report(
+                &parsed,
+                &json!({
                     "errors": [{
                         "kind": "selector_mutually_exclusive",
                         "options": ["--marker-section", "--marker-ordinal"],
                         "conflicts_with": if section_item.is_some() { "--section-item" } else { "--bit-offset" }
                     }]
-                })
+                }),
             );
         } else {
             eprintln!(
@@ -3072,7 +3072,7 @@ fn main() {
     if marker_header_preview && !(is_json && marker_section.is_some() && marker_ordinal.is_some()) {
         let message = "--marker-header-preview requires --json and a complete marker selector pair";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3095,9 +3095,9 @@ fn main() {
             Ok(limit) => Some(limit),
             Err(_) => {
                 if is_json {
-                    println!(
-                        "{}",
-                        json!({"errors": ["--reparse-limit-bits must be an unsigned integer"]})
+                    emit_legacy_json_report(
+                        &parsed,
+                        &json!({"errors": ["--reparse-limit-bits must be an unsigned integer"]}),
                     );
                 } else {
                     eprintln!("error: --reparse-limit-bits must be an unsigned integer");
@@ -3112,9 +3112,9 @@ fn main() {
             Ok(limit) => Some(limit),
             Err(_) => {
                 if is_json {
-                    println!(
-                        "{}",
-                        json!({"errors": ["--marker-reparse-limit-bits must be an unsigned integer"]})
+                    emit_legacy_json_report(
+                        &parsed,
+                        &json!({"errors": ["--marker-reparse-limit-bits must be an unsigned integer"]}),
                     );
                 } else {
                     eprintln!("error: --marker-reparse-limit-bits must be an unsigned integer");
@@ -3130,7 +3130,7 @@ fn main() {
         let message =
             "--candidate-evidence-records requires --json, --section-context, and --section-item";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3139,7 +3139,7 @@ fn main() {
     if candidate_evidence_records.is_some() && compare_path.is_some() {
         let message = "--candidate-evidence-records cannot be combined with --compare-file";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3149,7 +3149,7 @@ fn main() {
         let message =
             "--compact-transition-probe requires --json, --section-context, and --section-item";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3158,7 +3158,7 @@ fn main() {
     if compact_transition_probe && compare_path.is_some() {
         let message = "--compact-transition-probe cannot be combined with --compare-file";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3168,7 +3168,7 @@ fn main() {
         let message =
             "--recorded-parser-replay requires --json, --section-context, and --section-item";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3177,7 +3177,7 @@ fn main() {
     if recorded_parser_replay && compare_path.is_some() {
         let message = "--recorded-parser-replay cannot be combined with --compare-file";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3187,7 +3187,7 @@ fn main() {
         let message =
             "--recorded-body-probe requires --json, --section-context, and --section-item";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3196,7 +3196,7 @@ fn main() {
     if recorded_body_probe && compare_path.is_some() {
         let message = "--recorded-body-probe cannot be combined with --compare-file";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3206,7 +3206,7 @@ fn main() {
         let message =
             "--dual-limit-body-probe requires --json, --section-context, and --section-item";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3215,7 +3215,7 @@ fn main() {
     if dual_limit_body_probe && compare_path.is_some() {
         let message = "--dual-limit-body-probe cannot be combined with --compare-file";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3227,7 +3227,7 @@ fn main() {
         let message =
             "--marker-reparse-limit-bits requires --json and a complete marker selector pair";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3238,7 +3238,7 @@ fn main() {
     {
         let message = "--marker-reparse-limit-bits cannot be combined with --reparse-limit-bits, --section-item, or --bit-offset";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3252,7 +3252,7 @@ fn main() {
     {
         let message = "--marker-header-preview cannot be combined with --marker-reparse-limit-bits, --reparse-limit-bits, --section-item, or --bit-offset";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
@@ -3261,7 +3261,7 @@ fn main() {
     if reparse_limit_bits.is_some() && !(is_json && trace_segments && section_item.is_some()) {
         let message = "--reparse-limit-bits requires --json, --trace-segments, and --section-item";
         if is_json {
-            println!("{}", json!({"errors": [message]}));
+            emit_legacy_json_report(&parsed, &json!({"errors": [message]}));
         } else {
             eprintln!("error: {}", message);
         }
