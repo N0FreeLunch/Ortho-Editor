@@ -71,7 +71,7 @@ pub struct BoundaryReport {
     pub visual_dump: Option<String>,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = ArgParser::new("d2item_boundary_oracle");
     parser.add_spec(ArgSpec::option(
         "fixture",
@@ -153,13 +153,14 @@ fn main() {
                     message: format!("Failed to read fixture: {}", e),
                     bit_offset: None,
                 }]);
-                out.json(&serde_json::to_string_pretty(&report).unwrap());
+                out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
             } else {
-                out.println(&format!(
+                out.try_println(&format!(
                     "Error: Failed to read fixture '{}': {}",
                     fixture_str, e
-                ));
+                ))?;
             }
+            out.try_finish()?;
             std::process::exit(1);
         }
     };
@@ -334,31 +335,33 @@ fn main() {
             ReportStatus::Ok,
         )
         .with_results(report);
-        out.json(&serde_json::to_string_pretty(&final_report).unwrap());
+        out.try_json(&serde_json::to_string_pretty(&final_report).unwrap())?;
     } else {
-        out.println(&format!(
+        out.try_println(&format!(
             "Boundary Oracle Report for domain: {}",
             report.domain
-        ));
-        out.println(&format!("  Item Index: {}", item_index));
-        out.println(&format!("  Left Anchor (bit):  {}", left_bit));
-        out.println(&format!(
+        ))?;
+        out.try_println(&format!("  Item Index: {}", item_index))?;
+        out.try_println(&format!("  Left Anchor (bit):  {}", left_bit))?;
+        out.try_println(&format!(
             "  Target Span Start:  {}",
             report.target_span.start_bit
-        ));
-        out.println(&format!("  Right Anchor (bit): {}", right_bit));
-        out.println(&format!("  Verdict: {:?}", report.verdict));
-        out.println(&format!("  Hint: {}", report.hint));
+        ))?;
+        out.try_println(&format!("  Right Anchor (bit): {}", right_bit))?;
+        out.try_println(&format!("  Verdict: {:?}", report.verdict))?;
+        out.try_println(&format!("  Hint: {}", report.hint))?;
 
         if let Some(dump) = &report.visual_dump {
             if dump.starts_with("artifact:") {
-                out.println(&format!("  Visual Dump: (saved to {})", &dump[9..]));
+                out.try_println(&format!("  Visual Dump: (saved to {})", &dump[9..]))?;
             } else {
-                out.println("  Visual Dump:");
-                out.println(&format!("    {}", dump));
+                out.try_println("  Visual Dump:")?;
+                out.try_println(&format!("    {}", dump))?;
             }
         }
 
-        out.println("\n  (Use --json for machine-readable bitstream isolation boundaries)");
+        out.try_println("\n  (Use --json for machine-readable bitstream isolation boundaries)")?;
     }
+    out.try_finish()?;
+    Ok(())
 }
