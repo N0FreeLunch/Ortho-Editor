@@ -2,6 +2,7 @@ use bitstream_io::{BitReader, LittleEndian};
 use d2r_core::data::bit_cursor::BitCursor;
 use d2r_core::item::{HuffmanTree, Item};
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
+use d2r_core::verify::{Report, ReportMetadata, ReportStatus};
 use std::env;
 use std::fs;
 use std::io::{self, Cursor};
@@ -50,7 +51,20 @@ fn main() -> io::Result<()> {
     let items = Item::read_player_items(&bytes, &huffman, is_alpha).expect("failed to parse items");
 
     if om.is_json() {
+        let payload = alignment_payload(&items, target_idx, &huffman);
+        let status = payload.status();
+        let report = Report::new(
+            ReportMetadata::new("d2item_bit_align", path, env!("CARGO_PKG_VERSION")),
+            status,
+        )
+        .with_results(payload);
+        let json = serde_json::to_string_pretty(&report).map_err(io::Error::other)?;
+        om.try_json(&json)?;
         om.try_finish()?;
+        for item in &report.scan_results.as_ref().unwrap().items {
+            om.try_summary(&item.summary())?;
+        }
+        return Ok(());
     }
     let mut emitted = false;
     if let Some(idx) = target_idx {
@@ -60,21 +74,65 @@ fn main() -> io::Result<()> {
             emitted |= emit_align_report(&items, i, &huffman, &mut om)?;
         }
     }
-    if !om.is_json() && !emitted {
+    if !emitted {
         om.try_finish()?;
     }
     Ok(())
 }
 
-enum AlignReportError {
-    Analysis,
-    Output(io::Error),
+#[derive(serde::Serialize)]
+struct AlignmentRecord {
+    item_index: usize,
+    code: String,
+    similarity_pct: f32,
 }
 
-impl From<io::Error> for AlignReportError {
-    fn from(_: io::Error) -> Self {
-        Self::Analysis
+impl AlignmentRecord {
+    fn summary(&self) -> String {
+        format!(
+            "Item {} [{}]: Similarity {}%",
+            self.item_index, self.code, self.similarity_pct
+        )
     }
+}
+
+#[derive(serde::Serialize)]
+struct AlignmentPayload {
+    items: Vec<AlignmentRecord>,
+    skipped_indices: Vec<usize>,
+}
+
+impl AlignmentPayload {
+    fn status(&self) -> ReportStatus {
+        if self.skipped_indices.is_empty() {
+            ReportStatus::Ok
+        } else {
+            ReportStatus::Warn
+        }
+    }
+}
+
+fn alignment_payload(
+    items: &[Item],
+    target_idx: Option<usize>,
+    huffman: &HuffmanTree,
+) -> AlignmentPayload {
+    let mut payload = AlignmentPayload {
+        items: Vec::new(),
+        skipped_indices: Vec::new(),
+    };
+    let mut add = |index| match run_align_report(items, index, huffman) {
+        Ok(record) => payload.items.push(record),
+        Err(_) => payload.skipped_indices.push(index),
+    };
+    if let Some(index) = target_idx {
+        add(index);
+    } else {
+        for index in 0..items.len() {
+            add(index);
+        }
+    }
+    payload
 }
 
 fn emit_align_report(
@@ -83,10 +141,12 @@ fn emit_align_report(
     huffman: &HuffmanTree,
     om: &mut d2r_core::verify::OutputManager,
 ) -> io::Result<bool> {
-    match run_align_report(items, item_index, huffman, om) {
-        Ok(()) => Ok(true),
-        Err(AlignReportError::Analysis) => Ok(false),
-        Err(AlignReportError::Output(error)) => Err(error),
+    match run_align_report(items, item_index, huffman) {
+        Ok(record) => {
+            om.try_summary(&record.summary())?;
+            Ok(true)
+        }
+        Err(_) => Ok(false),
     }
 }
 
@@ -94,15 +154,15 @@ fn run_align_report(
     items: &[Item],
     item_index: usize,
     huffman: &HuffmanTree,
-    om: &mut d2r_core::verify::OutputManager,
-) -> Result<(), AlignReportError> {
+) -> io::Result<AlignmentRecord> {
     let item = &items[item_index];
     let actual: Vec<bool> = item.bits.iter().map(|rb| rb.bit).collect();
 
     if actual.is_empty() {
-        return Err(
-            io::Error::new(io::ErrorKind::InvalidData, "No bits recorded for the item.").into(),
-        );
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "No bits recorded for the item.",
+        ));
     }
 
     // Strategy A: Re-serialize and re-parse to get "Expected Bits"
@@ -118,14 +178,11 @@ fn run_align_report(
     let aligner = BitAligner::new(2, -1, -3, -1);
     let result = aligner.align(&actual, &expected);
 
-    om.try_summary(&format!(
-        "Item {} [{}]: Similarity {}%",
+    Ok(AlignmentRecord {
         item_index,
-        item.code.trim(),
-        result.similarity_pct()
-    ))
-    .map_err(AlignReportError::Output)?;
-    Ok(())
+        code: item.code.trim().to_string(),
+        similarity_pct: result.similarity_pct(),
+    })
 }
 
 struct BitAligner {
@@ -185,5 +242,25 @@ mod tests {
         let emitted = emit_align_report(&[Item::default()], 0, &HuffmanTree::new(), &mut output)
             .expect("analysis errors remain non-fatal");
         assert!(!emitted);
+    }
+
+    #[test]
+    fn json_reports_skipped_analysis_as_warning() {
+        let payload = alignment_payload(&[Item::default()], Some(0), &HuffmanTree::new());
+        assert!(payload.items.is_empty());
+        assert_eq!(payload.skipped_indices, vec![0]);
+        assert_eq!(payload.status(), ReportStatus::Warn);
+        let report = Report::new(
+            ReportMetadata::new("d2item_bit_align", "fixture", "test"),
+            payload.status(),
+        )
+        .with_results(payload);
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["status"], "warn");
+        assert_eq!(
+            json["scan_results"]["skipped_indices"],
+            serde_json::json!([0])
+        );
+        assert_eq!(json["scan_results"]["items"], serde_json::json!([]));
     }
 }
