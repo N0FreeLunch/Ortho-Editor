@@ -425,6 +425,24 @@ impl OutputManager {
         }
     }
 
+    /// Writes a text summary and defers its display until destination flush succeeds.
+    pub fn try_defer_text_summary(&mut self, text: &str) -> std::io::Result<()> {
+        if self.is_json {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "text summary requested in JSON mode",
+            ));
+        }
+        self.write_detail(text, true)?;
+        let formatted = if self.is_token_efficient {
+            format!("[TOKEN-EFFICIENT] {}", text)
+        } else {
+            text.to_string()
+        };
+        self.defer_stdout_line(&formatted);
+        Ok(())
+    }
+
     pub fn try_summary(&mut self, text: &str) -> std::io::Result<()> {
         if self.is_json {
             if self.deferred.is_empty() {
@@ -716,6 +734,32 @@ mod output_error_tests {
         output.defer_stdout_line("visual generated");
         output.try_summary("visual generated").unwrap();
         assert!(output.deferred.is_empty());
+    }
+
+    #[test]
+    fn deferred_text_summaries_wait_for_successful_flush() {
+        let (mut output, _, _) = manager(false, false, true);
+        output.try_defer_text_summary("first").unwrap();
+        output.try_defer_text_summary("second").unwrap();
+        assert!(
+            matches!(output.deferred.as_slice(), [DeferredOutput::StdoutLine(first), DeferredOutput::StdoutLine(second)] if first == "[TOKEN-EFFICIENT] first" && second == "[TOKEN-EFFICIENT] second")
+        );
+        assert_eq!(output.try_finish().unwrap_err().to_string(), "flush failed");
+        assert_eq!(output.deferred.len(), 2);
+        let (mut output, _, _) = manager(false, true, false);
+        assert_eq!(
+            output
+                .try_defer_text_summary("first")
+                .unwrap_err()
+                .to_string(),
+            "write failed"
+        );
+        assert!(output.deferred.is_empty());
+        let (mut output, _, _) = manager(true, false, false);
+        assert_eq!(
+            output.try_defer_text_summary("bad").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
     #[test]

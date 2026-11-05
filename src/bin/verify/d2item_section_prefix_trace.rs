@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use d2r_core::domain::forensic::registry::get_registry;
 use d2r_core::domain::item::scanner::scan_item_markers;
@@ -598,11 +598,12 @@ fn main() -> Result<()> {
     .with_results(payload);
 
     if parsed.is_json() {
-        out.json(&serde_json::to_string_pretty(&report)?);
+        out.try_json(&serde_json::to_string_pretty(&report)?)?;
     } else {
-        print_text_report(&report, parsed.is_set("verbose"), &mut out);
+        print_text_report(&report, parsed.is_set("verbose"), &mut out)?;
     }
 
+    out.try_finish()?;
     Ok(())
 }
 
@@ -1062,7 +1063,11 @@ fn item_span(item: &ItemTrace) -> ItemSpan {
     }
 }
 
-fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mut OutputManager) {
+fn print_text_report(
+    report: &Report<PrefixTraceReport>,
+    verbose: bool,
+    out: &mut OutputManager,
+) -> std::io::Result<()> {
     let payload = report
         .scan_results
         .as_ref()
@@ -1073,61 +1078,61 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
         ReportStatus::Fail => "fail",
     };
 
-    out.summary(&format!("Prefix trace: {}", payload.file));
-    out.summary(&format!(
+    out.try_defer_text_summary(&format!("Prefix trace: {}", payload.file))?;
+    out.try_defer_text_summary(&format!(
         "Version: {} | Alpha mode: {} | JM sections: {} | Items: {}",
         payload.version, payload.alpha_mode, payload.total_jm_sections, payload.total_items
-    ));
-    out.summary(&format!(
+    ))?;
+    out.try_defer_text_summary(&format!(
         "Verdict: {} | Status: {} | Local matches: {}/{} | Divergent sections: {}",
         payload.verdict,
         status,
         payload.local_match_count,
         payload.total_items,
         payload.sections_with_divergence
-    ));
+    ))?;
 
     if let Some(sim) = &payload.insertion_simulation {
-        out.summary(&format!(
+        out.try_defer_text_summary(&format!(
             "Insertion simulation: {} -> {}",
             sim.base_file, sim.target_file
-        ));
-        out.summary(&format!(
+        ))?;
+        out.try_defer_text_summary(&format!(
             "  Section: {} | Status: {} | Repair authorized: {}",
             sim.section_index, sim.simulation_status, sim.repair_authorized
-        ));
-        out.summary(&format!(
+        ))?;
+        out.try_defer_text_summary(&format!(
             "  Base payload: {} bits | Target payload: {} bits | Delta: {} bits",
             sim.base_payload_bits, sim.target_payload_bits, sim.projected_delta_bits
-        ));
-        out.summary(&format!(
+        ))?;
+        out.try_defer_text_summary(&format!(
             "  Base next JM bit: {} | Projected next JM bit: {}",
             sim.base_next_jm_bit_offset, sim.projected_next_jm_bit_offset
-        ));
+        ))?;
     }
 
     if let Some(multi_sim) = &payload.multi_insertion_simulation {
-        out.summary(&format!(
+        out.try_defer_text_summary(&format!(
             "Multi insertion simulation: {} (targets: {})",
             multi_sim.base_file,
             multi_sim.targets.len()
-        ));
-        out.summary(&format!(
+        ))?;
+        out.try_defer_text_summary(&format!(
             "  Aggregate status: {} | Repair authorized: {}",
             multi_sim.aggregate_status, multi_sim.repair_authorized
-        ));
+        ))?;
         for sim in &multi_sim.targets {
-            out.summary(&format!(
+            out.try_defer_text_summary(&format!(
                 "  Target: {} | Delta: {} bits | Projected next JM bit: {}",
                 sim.target_file, sim.projected_delta_bits, sim.projected_next_jm_bit_offset
-            ));
+            ))?;
         }
     }
 
     for section in &payload.sections {
         if let Some(divergence) = &section.first_divergence {
             let code = divergence.item_code.as_deref().unwrap_or("<unknown>");
-            out.summary(&format!(
+            out.try_defer_text_summary(&format!(
                 "Section {} @ JM byte {}: prefix diverges at bit {} (byte {}), item {} {}",
                 section.section_index,
                 section.jm_offset_bit / 8,
@@ -1138,25 +1143,29 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
                     .map(|idx| idx.to_string())
                     .unwrap_or_else(|| "-".to_string()),
                 code
-            ));
-            out.summary(&format!(
+            ))?;
+            out.try_defer_text_summary(&format!(
                 "  Matching prefix: {} bits | Local item matches: {}/{}",
                 section.matching_prefix_bits, section.local_match_count, section.parsed_item_count
-            ));
+            ))?;
         } else {
-            out.summary(&format!(
+            out.try_defer_text_summary(&format!(
                 "Section {} @ JM byte {}: full prefix match through {} bits",
                 section.section_index,
                 section.jm_offset_bit / 8,
                 section.payload_original_len_bits
-            ));
+            ))?;
         }
 
         if verbose {
-            out.summary("  idx | code       | raw range           | local | prefix | children");
-            out.summary("  ----+------------+---------------------+-------+--------+---------");
+            out.try_defer_text_summary(
+                "  idx | code       | raw range           | local | prefix | children",
+            )?;
+            out.try_defer_text_summary(
+                "  ----+------------+---------------------+-------+--------+---------",
+            )?;
             for item in &section.items {
-                out.summary(&format!(
+                out.try_defer_text_summary(&format!(
                     "  {:>3} | {:<10} | {:>8}..{:>8} | {:>5} | {:>6} | {:>3}/{}{}",
                     item.item_index,
                     truncate_code(&item.code, 10),
@@ -1184,10 +1193,11 @@ fn print_text_report(report: &Report<PrefixTraceReport>, verbose: bool, out: &mu
                     } else {
                         ""
                     }
-                ));
+                ))?;
             }
         }
     }
+    Ok(())
 }
 
 fn emit_item_section_bits(
