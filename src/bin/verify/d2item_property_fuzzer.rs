@@ -145,15 +145,15 @@ fn main() -> anyhow::Result<()> {
     let target_item = &original_items[target_idx];
     let item_bit_offset = target_item.range.start as usize;
 
-    om.println("--- Alpha v105 Item Property Poke-Test Fuzzer ---");
-    om.println(&format!("Fixture: {}", file_path));
-    om.println(&format!(
+    om.try_defer_println("--- Alpha v105 Item Property Poke-Test Fuzzer ---")?;
+    om.try_defer_println(&format!("Fixture: {}", file_path))?;
+    om.try_defer_println(&format!(
         "Target Item: #{} ({} at bit {})",
         target_idx,
         target_item.code.trim(),
         item_bit_offset
-    ));
-    om.println(&format!("Fuzzing Bit Range: {}..{}", bit_start, bit_end));
+    ))?;
+    om.try_defer_println(&format!("Fuzzing Bit Range: {}..{}", bit_start, bit_end))?;
 
     let out_dir = Path::new("tmp/fuzz_outputs");
     if !out_dir.exists() {
@@ -243,10 +243,10 @@ fn main() -> anyhow::Result<()> {
             "MUTATED"
         };
 
-        om.println(&format!(
+        om.try_defer_println(&format!(
             "  Bit {:>4}: FIDELITY={:>5.1}% [{}] {}{}",
             bit_offset, fidelity, status, mismatch_info, drift_info
-        ));
+        ))?;
 
         results.push(FuzzResult {
             bit_offset,
@@ -272,7 +272,7 @@ fn main() -> anyhow::Result<()> {
     let report = Report::new(metadata, ReportStatus::Ok).with_results(results.clone());
 
     if om.is_json() {
-        om.json(&serde_json::to_string_pretty(&report).unwrap());
+        om.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
     }
 
     if let Some(json_path) = output_json {
@@ -282,10 +282,11 @@ fn main() -> anyhow::Result<()> {
             let _ = fs::create_dir_all(parent);
         }
         fs::write(&json_path, json_str).unwrap();
-        om.println(&format!("Results exported to {}", json_path.display()));
+        om.try_defer_println(&format!("Results exported to {}", json_path.display()))?;
     }
 
-    om.println("Fuzzing complete. Results in tmp/fuzz_outputs/");
+    om.try_defer_println("Fuzzing complete. Results in tmp/fuzz_outputs/")?;
+    om.try_finish()?;
 
     Ok(())
 }

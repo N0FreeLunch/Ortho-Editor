@@ -425,6 +425,18 @@ impl OutputManager {
         }
     }
 
+    /// Defers a detail line until the selected destination is flushed.
+    pub fn try_defer_println(&mut self, text: &str) -> std::io::Result<()> {
+        if self.is_json {
+            return self.try_defer_json_summary(text);
+        }
+        self.write_detail(text, true)?;
+        if !self.is_token_efficient {
+            self.defer_stdout_line(text);
+        }
+        Ok(())
+    }
+
     /// Writes a text summary and defers its display until destination flush succeeds.
     pub fn try_defer_text_summary(&mut self, text: &str) -> std::io::Result<()> {
         if self.is_json {
@@ -760,6 +772,31 @@ mod output_error_tests {
             output.try_defer_text_summary("bad").unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn deferred_detail_lines_preserve_modes_and_errors() {
+        let (mut text, _, _) = manager(false, false, true);
+        text.is_token_efficient = false;
+        text.try_defer_println("first").unwrap();
+        assert!(
+            matches!(text.deferred.as_slice(), [DeferredOutput::StdoutLine(line)] if line == "first")
+        );
+        assert!(text.try_finish().is_err());
+        assert_eq!(text.deferred.len(), 1);
+        let (mut quiet, _, _) = manager(false, false, false);
+        quiet.try_defer_println("quiet").unwrap();
+        assert!(quiet.deferred.is_empty());
+        let (mut json, _, _) = manager(true, false, false);
+        json.is_token_efficient = false;
+        json.try_defer_println("diagnostic").unwrap();
+        json.try_json("{}").unwrap();
+        assert!(
+            matches!(json.deferred.as_slice(), [DeferredOutput::Stderr(line), DeferredOutput::StdoutLine(report)] if line == "diagnostic\n" && report == "{}")
+        );
+        let (mut failing, _, _) = manager(false, true, false);
+        assert!(failing.try_defer_println("failure").is_err());
+        assert!(failing.deferred.is_empty());
     }
 
     #[test]
