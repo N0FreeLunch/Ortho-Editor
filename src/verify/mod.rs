@@ -223,6 +223,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 enum DeferredOutput {
     StdoutLine(String),
+    StdoutFragment(String),
     Stderr(String),
 }
 
@@ -425,6 +426,28 @@ impl OutputManager {
         }
     }
 
+    /// Defers a detail fragment until the selected destination is flushed.
+    pub fn try_defer_print(&mut self, text: &str) -> std::io::Result<()> {
+        if self.is_json {
+            if self.writer.is_some() {
+                self.deferred.push(DeferredOutput::Stderr(text.to_string()));
+            } else {
+                eprint!("{}", text);
+            }
+        } else {
+            self.write_detail(text, false)?;
+            if !self.is_token_efficient {
+                if self.writer.is_some() {
+                    self.deferred
+                        .push(DeferredOutput::StdoutFragment(text.to_string()));
+                } else {
+                    print!("{}", text);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Defers a detail line until the selected destination is flushed.
     pub fn try_defer_println(&mut self, text: &str) -> std::io::Result<()> {
         if self.is_json {
@@ -483,6 +506,7 @@ impl OutputManager {
         for event in self.deferred.drain(..) {
             match event {
                 DeferredOutput::StdoutLine(text) => println!("{}", text),
+                DeferredOutput::StdoutFragment(text) => print!("{}", text),
                 DeferredOutput::Stderr(text) => eprint!("{}", text),
             }
         }
@@ -797,6 +821,28 @@ mod output_error_tests {
         let (mut failing, _, _) = manager(false, true, false);
         assert!(failing.try_defer_println("failure").is_err());
         assert!(failing.deferred.is_empty());
+    }
+
+    #[test]
+    fn deferred_fragments_preserve_order_and_failures() {
+        let (mut output, _, _) = manager(false, false, true);
+        output.is_token_efficient = false;
+        output.try_defer_print("fragment").unwrap();
+        output.try_defer_println("line").unwrap();
+        assert!(
+            matches!(output.deferred.as_slice(), [DeferredOutput::StdoutFragment(a), DeferredOutput::StdoutLine(b)] if a == "fragment" && b == "line")
+        );
+        assert!(output.try_finish().is_err());
+        assert_eq!(output.deferred.len(), 2);
+        let (mut failed, _, _) = manager(false, true, false);
+        assert!(failed.try_defer_print("fragment").is_err());
+        assert!(failed.deferred.is_empty());
+        let (mut json, _, _) = manager(true, false, false);
+        json.try_defer_print("part").unwrap();
+        json.try_defer_println("end").unwrap();
+        assert!(
+            matches!(json.deferred.as_slice(), [DeferredOutput::Stderr(a), DeferredOutput::Stderr(b)] if a == "part" && b == "end\n")
+        );
     }
 
     #[test]

@@ -122,7 +122,8 @@ fn main() -> io::Result<()> {
     let map = match d2r_core::save::map_core_sections(&bytes) {
         Ok(m) => m,
         Err(e) => {
-            out.println(&format!("[ERROR] Failed to map save sections: {}", e));
+            out.try_defer_println(&format!("[ERROR] Failed to map save sections: {}", e))?;
+            out.try_finish()?;
             return Ok(());
         }
     };
@@ -197,41 +198,43 @@ fn main() -> io::Result<()> {
     });
 
     // Print Save Structure Table
-    out.println("=== Save File Structure ===");
-    out.println(&format!("Checksum: {}", checksum_status));
-    out.println("");
-    out.println(&format!(
+    out.try_defer_println("=== Save File Structure ===")?;
+    out.try_defer_println(&format!("Checksum: {}", checksum_status))?;
+    out.try_defer_println("")?;
+    out.try_defer_println(&format!(
         "{:<20} | {:<4} | {:<10} | {:<10} | {:<10} | {:<10}",
         "Section", "Mark", "Start(Hex)", "End(Hex)", "Len(Dec)", "Status"
-    ));
-    out.println("---------------------|------|------------|------------|------------|-----------");
+    ))?;
+    out.try_defer_println(
+        "---------------------|------|------------|------------|------------|-----------",
+    )?;
 
     for s in &sections {
-        out.println(&format!(
+        out.try_defer_println(&format!(
             "{:<20} | {:<4} | 0x{:08X} | 0x{:08X} | {:>10} | {}",
             s.name, s.mark, s.start, s.end, s.length, s.status
-        ));
+        ))?;
     }
-    out.println("");
+    out.try_defer_println("")?;
 
     // === Progression Sections (Header) ===
-    out.println("=== Progression Sections (Header) ===");
+    out.try_defer_println("=== Progression Sections (Header) ===")?;
 
     // Wide-range Signature Scanning
     let header_range = bytes.len().min(0x341);
     let header_slice = &bytes[..header_range];
 
-    out.println(&format!(
+    out.try_defer_println(&format!(
         "[Scanning signatures in 0x0000..0x{:04X}]",
         header_range - 1
-    ));
+    ))?;
 
     let mut patterns = Vec::new();
     // Normal Pattern: [02, FF, 02] (Odd ON)
     let mut normal_found = false;
     for (i, win) in header_slice.windows(3).enumerate() {
         if win == [0x02, 0xFF, 0x02] {
-            out.println(&format!("[PatternFound] Normal at 0x{:04X}", i));
+            out.try_defer_println(&format!("[PatternFound] Normal at 0x{:04X}", i))?;
             patterns.push(PatternMatch {
                 name: "Normal".to_string(),
                 offset: Some(i),
@@ -241,7 +244,7 @@ fn main() -> io::Result<()> {
         }
     }
     if !normal_found {
-        out.println("[PatternFound] Normal not found in header range");
+        out.try_defer_println("[PatternFound] Normal not found in header range")?;
         patterns.push(PatternMatch {
             name: "Normal".to_string(),
             offset: None,
@@ -252,7 +255,7 @@ fn main() -> io::Result<()> {
     let mut nm_found = false;
     for (i, win) in header_slice.windows(3).enumerate() {
         if win == [0xFF, 0x02, 0xFF] {
-            out.println(&format!("[PatternFound] NM at 0x{:04X}", i));
+            out.try_defer_println(&format!("[PatternFound] NM at 0x{:04X}", i))?;
             patterns.push(PatternMatch {
                 name: "NM".to_string(),
                 offset: Some(i),
@@ -262,7 +265,7 @@ fn main() -> io::Result<()> {
         }
     }
     if !nm_found {
-        out.println("[PatternFound] NM not found in header range");
+        out.try_defer_println("[PatternFound] NM not found in header range")?;
         patterns.push(PatternMatch {
             name: "NM".to_string(),
             offset: None,
@@ -273,7 +276,7 @@ fn main() -> io::Result<()> {
     let mut hell_found = false;
     for (i, win) in header_slice.windows(5).enumerate() {
         if win == [0xFF, 0xFF, 0xFF, 0xFF, 0x02] {
-            out.println(&format!("[PatternFound] Hell at 0x{:04X}", i));
+            out.try_defer_println(&format!("[PatternFound] Hell at 0x{:04X}", i))?;
             patterns.push(PatternMatch {
                 name: "Hell".to_string(),
                 offset: Some(i),
@@ -283,52 +286,55 @@ fn main() -> io::Result<()> {
         }
     }
     if !hell_found {
-        out.println("[PatternFound] Hell not found in header range");
+        out.try_defer_println("[PatternFound] Hell not found in header range")?;
         patterns.push(PatternMatch {
             name: "Hell".to_string(),
             offset: None,
             found: false,
         });
     }
-    out.println("");
+    out.try_defer_println("")?;
 
     // Raw Header Dump (0x000..0x340)
-    out.println(&format!(
+    out.try_defer_println(&format!(
         "=== Raw Header Dump (0x000..0x{:04X}) ===",
         header_range - 1
-    ));
+    ))?;
     for row in 0..((header_range + 15) / 16) {
         let row_start = row * 16;
         let row_end = (row_start + 16).min(header_range);
-        out.print(&format!("  0x{:04X} |", row_start));
+        out.try_defer_print(&format!("  0x{:04X} |", row_start))?;
         // Hex
         for b in row_start..row_end {
-            out.print(&format!(" {:02X}", bytes[b]));
+            out.try_defer_print(&format!(" {:02X}", bytes[b]))?;
         }
         for _ in row_end..(row_start + 16) {
-            out.print("   ");
+            out.try_defer_print("   ")?;
         }
-        out.print(" | ");
+        out.try_defer_print(" | ")?;
         // Binary (Compact)
         for b in row_start..row_end {
             // print bit string but slightly more compact
             let bin = format!("{:08b}", bytes[b]);
-            out.print(&format!("{} ", bin));
+            out.try_defer_print(&format!("{} ", bin))?;
         }
-        out.println("");
+        out.try_defer_println("")?;
     }
-    out.println("");
+    out.try_defer_println("")?;
 
     let mut completed_quests = Vec::new();
     let mut activated_waypoints = Vec::new();
 
     // === Character Progression (Alpha v105 Engine) ===
+    if env::var_os("D2R_ITEM_TRACE").is_some() {
+        out.try_finish()?;
+    }
     if let Ok(save) = d2r_core::save::Save::from_bytes(&bytes) {
-        out.println("=== Character Progression (Alpha v105) ===");
+        out.try_defer_println("=== Character Progression (Alpha v105) ===")?;
         let version = save.header.version;
 
         // Quests
-        out.println("Completed Quests:");
+        out.try_defer_println("Completed Quests:")?;
         let mut completed_any = false;
         if let Some(ref quests) = save.header.quests {
             let normal_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE
@@ -344,10 +350,10 @@ fn main() -> io::Result<()> {
                         2 => "Hell",
                         _ => "?",
                     };
-                    out.println(&format!(
+                    out.try_defer_println(&format!(
                         "  [{:<6}] Act {} - {}",
                         diff_str, quest.act, quest.name
-                    ));
+                    ))?;
                     completed_quests
                         .push(format!("[{}] Act {} - {}", diff_str, quest.act, quest.name));
                     completed_any = true;
@@ -355,12 +361,12 @@ fn main() -> io::Result<()> {
             }
         }
         if !completed_any {
-            out.println("  (None)");
+            out.try_defer_println("  (None)")?;
         }
-        out.println("");
+        out.try_defer_println("")?;
 
         // Waypoints
-        out.println("Activated Waypoints:");
+        out.try_defer_println("Activated Waypoints:")?;
         let mut wp_any = false;
         let wp_anchor = d2r_core::domain::progression::axiom::PROG_START_FILE
             + d2r_core::domain::progression::axiom::V105WaypointAxiom::start_offset();
@@ -410,14 +416,14 @@ fn main() -> io::Result<()> {
                     2 => "Hell",
                     _ => "?",
                 };
-                out.println(&format!("  [{:>9}]: {}", diff_str, diff_wps.join(", ")));
+                out.try_defer_println(&format!("  [{:>9}]: {}", diff_str, diff_wps.join(", ")))?;
                 wp_any = true;
             }
         }
         if !wp_any {
-            out.println("  (None)");
+            out.try_defer_println("  (None)")?;
         }
-        out.println("");
+        out.try_defer_println("")?;
     }
 
     let mut all_items = Vec::new();
@@ -436,50 +442,56 @@ fn main() -> io::Result<()> {
             bytes.len()
         };
 
-        out.println(&format!(
+        out.try_defer_println(&format!(
             "JM Section at 0x{:04X}: {} items",
             start_pos, count_val
-        ));
+        ))?;
         if count_val > 0 {
             let section_data = &bytes[start_pos + 4..end_marker];
 
             if env::var("D2R_ITEM_TRACE").is_ok() {
-                out.println(&format!(
+                out.try_defer_println(&format!(
                     "  [Diagnostic] Performing bit-level probe for JM section at 0x{:04X}...",
                     start_pos
-                ));
+                ))?;
                 let section_bits = (section_data.len() * 8) as u64;
                 for b in 0..section_bits.saturating_sub(64) {
                     if is_terminator_like(section_data, b) {
-                        out.println(&format!("  [Probe] Possible Terminator at bit {}", b));
-                        dump_bit_window(&mut out, section_data, b);
+                        out.try_defer_println(&format!(
+                            "  [Probe] Possible Terminator at bit {}",
+                            b
+                        ))?;
+                        dump_bit_window(&mut out, section_data, b)?;
                     }
                     let code = peek_code_minimal(section_data, b, &huffman);
                     if let Some(c) = code {
                         // Only dump window for plausible codes in the interesting region
                         if b >= 1000 && b <= 2000 {
-                            out.println(&format!(
+                            out.try_defer_println(&format!(
                                 "  [Probe] Plausible Header at bit {} (Code: '{}')",
                                 b, c
-                            ));
-                            dump_bit_window(&mut out, section_data, b);
+                            ))?;
+                            dump_bit_window(&mut out, section_data, b)?;
                         }
                     } else if b == 1127 {
                         // Explicitly requested bit window for bit 1127
-                        out.println("  [Probe] Target Diagnostic at bit 1127");
-                        dump_bit_window(&mut out, section_data, b);
+                        out.try_defer_println("  [Probe] Target Diagnostic at bit 1127")?;
+                        dump_bit_window(&mut out, section_data, b)?;
                     }
                 }
             }
 
             let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+            if env::var_os("D2R_ITEM_TRACE").is_some() {
+                out.try_finish()?;
+            }
             let result =
                 Item::read_section(section_data, 0, count_val, &huffman, version == 105, false);
 
             match result {
                 Ok(sect_items) => all_items.extend(sect_items),
                 Err(err) => {
-                    out.println(&format!("  [ERROR] JM @ 0x{:04X}: {}", start_pos, err));
+                    out.try_defer_println(&format!("  [ERROR] JM @ 0x{:04X}: {}", start_pos, err))?;
                 }
             }
         }
@@ -533,32 +545,39 @@ fn main() -> io::Result<()> {
             .with_results(payload)
             .with_forensic_context();
 
-        out.json(&serde_json::to_string_pretty(&report).unwrap());
+        out.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
     }
 
     if let Some(idx) = detail_index {
         if idx >= items.len() {
+            out.try_finish()?;
             eprintln!("Index {} out of bounds (total items: {})", idx, items.len());
             std::process::exit(1);
         }
-        print_detail(&mut out, idx, &items[idx]);
+        print_detail(&mut out, idx, &items[idx])?;
     } else {
-        print_summary(&mut out, &items, range_start, range_end);
+        print_summary(&mut out, &items, range_start, range_end)?;
     }
 
+    out.try_finish()?;
     Ok(())
 }
 
-fn print_summary(out: &mut OutputManager, items: &[Item], start: usize, end: usize) {
+fn print_summary(
+    out: &mut OutputManager,
+    items: &[Item],
+    start: usize,
+    end: usize,
+) -> io::Result<()> {
     let actual_end = end.min(items.len());
-    out.println(&format!("Total Items Found: {}", items.len()));
-    out.println(&format!("Scanning Range: {}..{}", start, actual_end));
-    out.println("");
-    out.println(&format!(
+    out.try_defer_println(&format!("Total Items Found: {}", items.len()))?;
+    out.try_defer_println(&format!("Scanning Range: {}..{}", start, actual_end))?;
+    out.try_defer_println("")?;
+    out.try_defer_println(&format!(
         "{:>5} | {:<5} | {:>4} | {:<10} | {:<4} | {:<8}",
         "Index", "Code", "Bits", "Quality", "RW", "Loc"
-    ));
-    out.println("------|-------|------|------------|------|---------");
+    ))?;
+    out.try_defer_println("------|-------|------|------------|------|---------")?;
 
     for i in start..actual_end {
         let item = &items[i];
@@ -572,7 +591,7 @@ fn print_summary(out: &mut OutputManager, items: &[Item], start: usize, end: usi
             _ => "Other",
         };
 
-        out.println(&format!(
+        out.try_defer_println(&format!(
             "{:>5} | {:<5} | {:>4} | {:<10} | {:<4} | G:{:<1} P:{:<1} L:{:<2} S:{:<1}",
             i,
             item.code,
@@ -583,78 +602,81 @@ fn print_summary(out: &mut OutputManager, items: &[Item], start: usize, end: usi
             item.page,
             item.location,
             item.socketed_items.len()
-        ));
+        ))?;
 
         for child in &item.socketed_items {
-            out.println(&format!(
+            out.try_defer_println(&format!(
                 "      Socketed: '{}' ({} bits)",
                 child.code,
                 child.bits.len()
-            ));
+            ))?;
         }
 
         // Basic anomaly check
         if item.is_runeword && item.bits.len() < 100 {
-            out.println(&format!(
+            out.try_defer_println(&format!(
                 "      [WARN] Runeword with suspicious short bit-length: {}",
                 item.bits.len()
-            ));
+            ))?;
         }
         if item.quality == Some(ItemQuality::Normal) && item.bits.len() > 200 {
-            out.println(&format!(
+            out.try_defer_println(&format!(
                 "      [WARN] Normal item with suspicious long bit-length: {}",
                 item.bits.len()
-            ));
+            ))?;
         }
     }
+    Ok(())
 }
 
-fn print_detail(out: &mut OutputManager, index: usize, item: &Item) {
-    out.println(&format!("=== Detail View: Item Index {} ===", index));
-    out.println(&format!("Code: '{}'", item.code));
-    out.println(&format!("Bits Length: {}", item.bits.len()));
-    out.println(&format!("Flags: 0x{:08X}", item.flags));
-    out.println(&format!("Version: {}", item.version));
-    out.println(&format!("Socketed: {}", (item.flags & (1 << 11)) != 0));
-    out.println(&format!("Quality: {:?}", item.quality));
-    out.println(&format!("Runeword: {}", item.is_runeword));
-    out.println(&format!(
+fn print_detail(out: &mut OutputManager, index: usize, item: &Item) -> io::Result<()> {
+    out.try_defer_println(&format!("=== Detail View: Item Index {} ===", index))?;
+    out.try_defer_println(&format!("Code: '{}'", item.code))?;
+    out.try_defer_println(&format!("Bits Length: {}", item.bits.len()))?;
+    out.try_defer_println(&format!("Flags: 0x{:08X}", item.flags))?;
+    out.try_defer_println(&format!("Version: {}", item.version))?;
+    out.try_defer_println(&format!("Socketed: {}", (item.flags & (1 << 11)) != 0))?;
+    out.try_defer_println(&format!("Quality: {:?}", item.quality))?;
+    out.try_defer_println(&format!("Runeword: {}", item.is_runeword))?;
+    out.try_defer_println(&format!(
         "Location: Mode={} Page={} X={} Y={} Loc={}",
         item.mode, item.page, item.x, item.y, item.location
-    ));
-    out.println(&format!(
+    ))?;
+    out.try_defer_println(&format!(
         "Properties Complete: {}",
         item.properties_complete
-    ));
-    out.println("");
-    out.println("Properties:");
+    ))?;
+    out.try_defer_println("")?;
+    out.try_defer_println("Properties:")?;
     for prop in &item.properties {
-        out.println(&format!("  ID {:>3}: Value {}", prop.stat_id, prop.value));
+        out.try_defer_println(&format!("  ID {:>3}: Value {}", prop.stat_id, prop.value))?;
     }
     if !item.runeword_attributes.is_empty() {
-        out.println("Runeword Attributes:");
+        out.try_defer_println("Runeword Attributes:")?;
         for prop in &item.runeword_attributes {
-            out.println(&format!("  ID {:>3}: Value {}", prop.stat_id, prop.value));
+            out.try_defer_println(&format!("  ID {:>3}: Value {}", prop.stat_id, prop.value))?;
         }
     }
+    Ok(())
 }
 
-fn dump_bit_window(out: &mut OutputManager, data: &[u8], pos: u64) {
+fn dump_bit_window(out: &mut OutputManager, data: &[u8], pos: u64) -> io::Result<()> {
     let half = 32;
     let start = pos.saturating_sub(half);
     let end = (pos + half).min((data.len() * 8) as u64);
 
-    out.print(&format!("  [BitWindow] @{:>4}: ", pos));
+    out.try_defer_print(&format!("  [BitWindow] @{:>4}: ", pos))?;
     for b in start..end {
         let byte_idx = (b / 8) as usize;
         let bit_idx = (b % 8) as u8;
         let bit = (data[byte_idx] >> bit_idx) & 1 != 0;
-        out.print(if bit { "1" } else { "0" });
+        out.try_defer_print(if bit { "1" } else { "0" })?;
         if b % 8 == 7 {
-            out.print(" ");
+            out.try_defer_print(" ")?;
         }
     }
-    out.println("");
+    out.try_defer_println("")?;
+    Ok(())
 }
 
 fn is_terminator_like(data: &[u8], bit_pos: u64) -> bool {
