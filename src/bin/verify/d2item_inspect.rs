@@ -3353,9 +3353,7 @@ fn main() {
                 accepted_count,
             }) => {
                 if is_json {
-                    println!(
-                        "{}",
-                        json!({
+                    emit_legacy_json_report(&parsed, &json!({
                             "errors": [{
                                 "kind": "marker_ordinal_out_of_range",
                                 "marker_section": marker_section,
@@ -3566,7 +3564,7 @@ fn main() {
                 }
                 Err(e) => {
                     if is_json {
-                        println!("{}", json!({"errors": [e.to_string()]}));
+                        emit_legacy_json_report(&parsed, &json!({"errors": [e.to_string()]}));
                     } else {
                         eprintln!("Failed to trace item at offset {}: {}", offset, e);
                     }
@@ -3864,7 +3862,7 @@ fn main() {
                     } else {
                         format!("Error at offset {}: {}{}", offset, e, prescription)
                     };
-                    println!("{}", json!({ "errors": [err_msg] }));
+                    emit_legacy_json_report(&parsed, &json!({ "errors": [err_msg] }));
                 } else {
                     if prescription.is_empty() {
                         eprintln!("Error at offset {}: {}", offset, e);
@@ -3992,7 +3990,7 @@ fn main() {
                         match candidate_evidence_report(record_path, section_item_index, item) {
                             Ok(report) => report,
                             Err(error) => {
-                                println!("{}", json!({"errors": [error]}));
+                                emit_legacy_json_report(&parsed, &json!({"errors": [error]}));
                                 return;
                             }
                         };
@@ -4023,14 +4021,14 @@ fn main() {
                     let compare_bytes = match fs::read(compare_path) {
                         Ok(bytes) => bytes,
                         Err(error) => {
-                            println!(
-                                "{}",
-                                json!({
+                            emit_legacy_json_report(
+                                &parsed,
+                                &json!({
                                     "errors": [format!(
                                         "Failed to read comparison file: {}",
                                         error
                                     )]
-                                })
+                                }),
                             );
                             return;
                         }
@@ -4045,28 +4043,28 @@ fn main() {
                         match Item::read_player_items(&compare_bytes, &huffman, compare_is_alpha) {
                             Ok(items) => items,
                             Err(error) => {
-                                println!(
-                                    "{}",
-                                    json!({
+                                emit_legacy_json_report(
+                                    &parsed,
+                                    &json!({
                                         "errors": [format!(
                                             "Failed to parse comparison file: {}",
                                             error
                                         )]
-                                    })
+                                    }),
                                 );
                                 return;
                             }
                         };
                     if section_item_index >= compare_items.len() {
-                        println!(
-                            "{}",
-                            json!({
+                        emit_legacy_json_report(
+                            &parsed,
+                            &json!({
                                 "errors": [format!(
                                     "Requested comparison section item {} but only {} top-level items were parsed",
                                     section_item_index,
                                     compare_items.len()
                                 )]
-                            })
+                            }),
                         );
                         return;
                     }
@@ -4182,9 +4180,9 @@ fn main() {
                         })
                         .collect::<Vec<_>>();
 
-                    println!(
-                        "{}",
-                        json!({
+                    emit_legacy_json_report(
+                        &parsed,
+                        &json!({
                             "section_item_index": section_item_index,
                             "code": code_hint,
                             "selected_range": {"start": range_start, "end": range_end},
@@ -4201,7 +4199,7 @@ fn main() {
                                 "parser_consumed_bits": parser_consumed_bits,
                                 "segments": segments
                             }
-                        })
+                        }),
                     );
                     return;
                 }
@@ -4324,9 +4322,9 @@ fn main() {
                             };
 
                         if is_json {
-                            println!(
-                                "{}",
-                                json!({
+                            emit_legacy_json_report(
+                                &parsed,
+                                &json!({
                                     "section_item_index": section_item_index,
                                     "code": code_hint,
                                     "range": {"start": range_start, "end": range_end},
@@ -4335,7 +4333,7 @@ fn main() {
                                     "coordinate": coordinate,
                                     "segments": segments,
                                     "header_width_comparison": header_width_comparison
-                                })
+                                }),
                             );
                         } else {
                             println!(
@@ -4542,9 +4540,9 @@ fn main() {
             .map(|(_, _, it)| item_to_json(it, None))
             .collect();
         if item_objs.len() == 1 {
-            println!("{}", json!({ "item": item_objs[0], "errors": errors }));
+            emit_legacy_json_report(&parsed, &json!({ "item": item_objs[0], "errors": errors }));
         } else {
-            println!("{}", json!({ "items": item_objs, "errors": errors }));
+            emit_legacy_json_report(&parsed, &json!({ "items": item_objs, "errors": errors }));
         }
     } else {
         println!(

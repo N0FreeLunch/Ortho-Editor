@@ -22,6 +22,123 @@ fn assert_failure(output: std::process::Output) {
 }
 
 #[test]
+fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
+    struct OwnedDir(PathBuf);
+    impl Drop for OwnedDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let core = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = core.join("tests/fixtures/savegames/original/amazon_initial.d2s");
+    let raw = core.join("tests/fixtures/items/portal_scroll.d2i");
+    let before = fs::read(&fixture).expect("fixture");
+    let raw_before = fs::read(&raw).expect("raw fixture");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let work = OwnedDir(
+        core.join("tmp")
+            .join(format!("inspector-parse-{}-{nonce}", std::process::id())),
+    );
+    fs::create_dir(&work.0).expect("create unique test directory");
+    let invalid = work.0.join("invalid.d2s");
+    fs::write(&invalid, [0u8; 16]).expect("synthetic comparison");
+    let empty = work.0.join("empty.d2s");
+    let mut bytes = before.clone();
+    assert_eq!(&bytes[903..905], b"JM");
+    bytes[905..907].copy_from_slice(&[0, 0]);
+    fs::write(&empty, bytes).expect("zero-count comparison");
+    let missing = work.0.join("missing.d2s");
+    for name in [
+        "marker-ordinal",
+        "bit-trace-error",
+        "bit-parse-error",
+        "candidate-error",
+        "compare-missing",
+        "compare-invalid",
+        "compare-empty",
+        "bounded-selected",
+        "selected-trace",
+        "raw-item",
+    ] {
+        for efficient in [false, true] {
+            let dest = work.0.join(format!("{name}-{efficient}.json"));
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_d2item_inspect"));
+            cmd.args(["--dialect", "legacy", "--json", "--output"])
+                .arg(&dest);
+            if efficient {
+                cmd.arg("--token-efficient");
+            }
+            match name {
+                "marker-ordinal" => {
+                    cmd.args(["--marker-section", "1", "--marker-ordinal", "999"]);
+                }
+                "bit-trace-error" => {
+                    cmd.args(["--bit-offset", "999999", "--trace-segments"]);
+                }
+                "bit-parse-error" => {
+                    cmd.args(["--bit-offset", "999999"]);
+                }
+                "candidate-error" => {
+                    cmd.args([
+                        "--section-item",
+                        "0",
+                        "--section-context",
+                        "--candidate-evidence-records",
+                    ])
+                    .arg(&missing);
+                }
+                "compare-missing" | "compare-invalid" | "compare-empty" => {
+                    let comparison = match name {
+                        "compare-missing" => &missing,
+                        "compare-invalid" => &invalid,
+                        _ => &empty,
+                    };
+                    cmd.args(["--section-item", "0", "--section-context", "--compare-file"])
+                        .arg(comparison);
+                }
+                "bounded-selected" => {
+                    cmd.args([
+                        "--section-item",
+                        "0",
+                        "--trace-segments",
+                        "--reparse-limit-bits",
+                        "74",
+                    ]);
+                }
+                "selected-trace" => {
+                    cmd.args(["--section-item", "0", "--trace-segments"]);
+                }
+                _ => {}
+            }
+            let output = cmd
+                .arg(if name == "raw-item" { &raw } else { &fixture })
+                .output()
+                .expect("run inspector");
+            assert!(
+                output.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let file =
+                fs::read(&dest).unwrap_or_else(|error| panic!("{name}: missing report: {error}"));
+            assert_eq!(file, output.stdout, "{name}, token={efficient}");
+            let value: serde_json::Value = serde_json::from_slice(&file).expect("JSON report");
+            if name != "bounded-selected" && name != "selected-trace" {
+                assert!(
+                    !value["errors"].as_array().expect("error list").is_empty(),
+                    "{name}"
+                );
+            }
+        }
+    }
+    assert_eq!(fs::read(&fixture).expect("fixture after"), before);
+    assert_eq!(fs::read(&raw).expect("raw fixture after"), raw_before);
+}
+
+#[test]
 fn legacy_inspector_option_errors_reach_destination() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/savegames/original/amazon_initial.d2s");
