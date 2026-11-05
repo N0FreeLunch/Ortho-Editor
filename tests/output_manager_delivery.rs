@@ -50,6 +50,10 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
     assert_eq!(&bytes[903..905], b"JM");
     bytes[905..907].copy_from_slice(&[0, 0]);
     fs::write(&empty, bytes).expect("zero-count comparison");
+    let trace_failure = work.0.join("trace-failure.d2s");
+    let mut bytes = before.clone();
+    bytes[913] ^= 0x80;
+    fs::write(&trace_failure, bytes).expect("synthetic trace failure");
     let missing = work.0.join("missing.d2s");
     for name in [
         "marker-ordinal",
@@ -61,6 +65,7 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
         "compare-empty",
         "bounded-selected",
         "selected-trace",
+        "selected-trace-failure",
         "raw-item",
     ] {
         for efficient in [false, true] {
@@ -108,13 +113,17 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
                         "74",
                     ]);
                 }
-                "selected-trace" => {
+                "selected-trace" | "selected-trace-failure" => {
                     cmd.args(["--section-item", "0", "--trace-segments"]);
                 }
                 _ => {}
             }
             let output = cmd
-                .arg(if name == "raw-item" { &raw } else { &fixture })
+                .arg(match name {
+                    "raw-item" => &raw,
+                    "selected-trace-failure" => &trace_failure,
+                    _ => &fixture,
+                })
                 .output()
                 .expect("run inspector");
             assert!(
@@ -126,6 +135,10 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
                 fs::read(&dest).unwrap_or_else(|error| panic!("{name}: missing report: {error}"));
             assert_eq!(file, output.stdout, "{name}, token={efficient}");
             let value: serde_json::Value = serde_json::from_slice(&file).expect("JSON report");
+            if name == "selected-trace-failure" {
+                assert_eq!(value["raw_len_bits"], 2);
+                assert!(value["parser_consumed_bits"].is_null());
+            }
             if name != "bounded-selected" && name != "selected-trace" {
                 assert!(
                     !value["errors"].as_array().expect("error list").is_empty(),

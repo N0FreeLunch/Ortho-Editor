@@ -4376,9 +4376,9 @@ fn main() {
                                     "availability": "bounded_parse_failed"
                                 })
                             });
-                            println!(
-                                "{}",
-                                json!({
+                            emit_legacy_json_report(
+                                &parsed,
+                                &json!({
                                     "section_item_index": section_item_index,
                                     "code": code_hint,
                                     "range": {"start": range_start, "end": range_end},
@@ -4386,7 +4386,7 @@ fn main() {
                                     "parser_consumed_bits": serde_json::Value::Null,
                                     "provenance": provenance,
                                     "errors": [error.to_string()]
-                                })
+                                }),
                             );
                         } else {
                             eprintln!(
