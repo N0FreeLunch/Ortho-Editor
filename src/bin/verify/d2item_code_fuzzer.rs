@@ -179,19 +179,20 @@ fn main() -> anyhow::Result<()> {
     if om.is_json() {
         let metadata = ReportMetadata::new("d2item_code_fuzzer", path, env!("CARGO_PKG_VERSION"));
         let report = Report::new(metadata, ReportStatus::Ok).with_results(all_results);
-        om.json(&serde_json::to_string_pretty(&report)?);
+        om.try_json(&serde_json::to_string_pretty(&report)?)?;
     } else {
         for res in all_results {
-            om.println(&format!("[JM #{}] at bit {}", res.jm_index, res.jm_bit_pos));
+            om.try_println(&format!("[JM #{}] at bit {}", res.jm_index, res.jm_bit_pos))?;
             for cand in res.candidates {
-                om.println(&format!(
+                om.try_println(&format!(
                     "  Offset {} | Shift {} | Candidate '{}' | Hex {}",
                     cand.bit_offset, cand.bit_shift, cand.code, cand.hex
-                ));
+                ))?;
             }
-            om.println(&format!("{:-<60}", ""));
+            om.try_println(&format!("{:-<60}", ""))?;
         }
     }
 
+    om.try_finish()?;
     Ok(())
 }
