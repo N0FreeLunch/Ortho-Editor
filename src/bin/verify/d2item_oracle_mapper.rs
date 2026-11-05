@@ -151,10 +151,14 @@ fn main() -> io::Result<()> {
     if list_anchors || auto_map {
         if show_json {
             let report = Report::new(path, scan_results.clone());
-            om.json(&serde_json::to_string_pretty(&report).unwrap());
+            om.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
         } else {
-            om.println("| Anchor Bit | Code | Flags      | Ver | Mode | Loc | Width | Score |");
-            om.println("|------------|------|------------|-----|------|-----|-------|-------|");
+            om.try_println(
+                "| Anchor Bit | Code | Flags      | Ver | Mode | Loc | Width | Score |",
+            )?;
+            om.try_println(
+                "|------------|------|------------|-----|------|-----|-------|-------|",
+            )?;
             for a in &scan_results {
                 let width_str = a
                     .best_width
@@ -164,7 +168,7 @@ fn main() -> io::Result<()> {
                     .score
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "-".to_string());
-                om.println(&format!(
+                om.try_println(&format!(
                     "| {:10} | {:4} | {:#010x} | {:3} | {:4} | {:3} | {:5} | {:5} |",
                     a.bit_offset,
                     a.code,
@@ -174,7 +178,7 @@ fn main() -> io::Result<()> {
                     a.location,
                     width_str,
                     score_str
-                ));
+                ))?;
             }
         }
     }
@@ -184,10 +188,10 @@ fn main() -> io::Result<()> {
             if a.code == "gp" {
                 continue;
             }
-            om.println(&format!(
+            om.try_println(&format!(
                 "\n[Heatmap] Code: {}, Start: {}, Width: {}",
                 a.code, a.bit_offset, heatmap_width
-            ));
+            ))?;
             let mut reader = BitReader::endian(Cursor::new(&bytes), LittleEndian);
             let start = a.bit_offset + 60;
             if reader.skip(start as u32).is_err() {
@@ -200,12 +204,15 @@ fn main() -> io::Result<()> {
                     let bit = reader.read_bit().unwrap_or(false);
                     line.push(if bit { '1' } else { '0' });
                 }
-                om.println(&line);
+                om.try_println(&line)?;
             }
         }
     }
 
-    om.summary("Scan complete.");
+    if show_json {
+        om.try_finish()?;
+    }
+    om.try_summary("Scan complete.")?;
     Ok(())
 }
 
