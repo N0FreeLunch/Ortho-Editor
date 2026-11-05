@@ -403,6 +403,16 @@ impl OutputManager {
         Ok(())
     }
 
+    /// Releases a stdout line after the selected destination is flushed.
+    pub fn defer_stdout_line(&mut self, text: &str) {
+        if self.writer.is_some() {
+            self.deferred
+                .push(DeferredOutput::StdoutLine(text.to_string()));
+        } else {
+            println!("{}", text);
+        }
+    }
+
     /// Defers a JSON diagnostic until the selected destination is flushed.
     /// Call `try_finish` after writing the report to release it in order.
     pub fn try_defer_json_summary(&mut self, text: &str) -> std::io::Result<()> {
@@ -460,7 +470,7 @@ impl OutputManager {
 
 #[cfg(test)]
 mod output_error_tests {
-    use super::OutputManager;
+    use super::{DeferredOutput, OutputManager};
     use std::io::{self, Write};
     use std::sync::{
         Arc,
@@ -690,6 +700,22 @@ mod output_error_tests {
             "flush failed"
         );
         assert_eq!(flushes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn deferred_stdout_stays_queued_on_delivery_failure() {
+        for (fail_write, fail_flush) in [(true, false), (false, true)] {
+            let (mut output, _, _) = manager(false, fail_write, fail_flush);
+            output.defer_stdout_line("visual generated");
+            assert!(output.try_summary("visual generated").is_err());
+            assert!(
+                matches!(output.deferred.as_slice(), [DeferredOutput::StdoutLine(line)] if line == "visual generated")
+            );
+        }
+        let (mut output, _, _) = manager(false, false, false);
+        output.defer_stdout_line("visual generated");
+        output.try_summary("visual generated").unwrap();
+        assert!(output.deferred.is_empty());
     }
 
     #[test]

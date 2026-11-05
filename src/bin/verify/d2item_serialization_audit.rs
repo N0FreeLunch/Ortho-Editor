@@ -3,7 +3,7 @@ use d2r_core::verify::symmetry::{ItemDiff, calculate_symmetry_diff};
 use std::env;
 use std::fs;
 
-fn main() {
+fn main() -> std::io::Result<()> {
     let mut parser = ArgParser::new("d2item_serialization_audit");
     parser.add_spec(ArgSpec::positional("save_file", "Path to save file"));
     parser.add_spec(ArgSpec::flag(
@@ -74,24 +74,27 @@ fn main() {
     match calculate_symmetry_diff(&bytes, None, options) {
         Ok(report) => {
             if use_json {
-                om.json(&serde_json::to_string_pretty(&report).unwrap());
+                om.try_json(&serde_json::to_string_pretty(&report).unwrap())?;
+                om.try_finish()?;
             } else if let Some(out_path) = visual_out {
                 if let Err(e) = generate_html_visual_report(&report, path, &out_path) {
                     eprintln!("Failed to write HTML report: {}", e);
                     std::process::exit(1);
                 }
-                om.summary(&format!("Visual diff report generated at {}", out_path));
+                let message = format!("Visual diff report generated at {}", out_path);
+                om.defer_stdout_line(&message);
+                om.try_summary(&message)?;
             } else {
-                om.summary(&format!("Serialization Audit for: {}", path));
+                om.try_summary(&format!("Serialization Audit for: {}", path))?;
                 if let Some(target) = target_idx {
-                    om.summary(&format!("Targeting item index: {}", target));
+                    om.try_summary(&format!("Targeting item index: {}", target))?;
                 }
-                om.summary(&format!("{:-<80}", ""));
-                om.summary(&format!(
+                om.try_summary(&format!("{:-<80}", ""))?;
+                om.try_summary(&format!(
                     "{:>5} | {:<10} | {:>8} | {:>8} | {:>5} | {:<5}",
                     "Idx", "Code", "OrigLen", "SerLen", "Match", "Fid"
-                ));
-                om.summary(&format!("{:-<90}", ""));
+                ))?;
+                om.try_summary(&format!("{:-<90}", ""))?;
 
                 for item in &report.items {
                     let idx_from_label = item
@@ -99,18 +102,18 @@ fn main() {
                         .strip_prefix("Item ")
                         .and_then(|s| s.parse::<usize>().ok());
 
-                    print_item_diff(idx_from_label, item, 0, use_visual, &mut om);
+                    print_item_diff(idx_from_label, item, 0, use_visual, &mut om)?;
                 }
-                om.summary(&format!("{:-<90}", ""));
+                om.try_summary(&format!("{:-<90}", ""))?;
 
                 if report.success {
                     if target_idx.is_some() {
-                        om.summary("MATCH: Target item matches with 100% fidelity");
+                        om.try_summary("MATCH: Target item matches with 100% fidelity")?;
                     } else {
-                        om.summary("MATCH: 100% fidelity");
+                        om.try_summary("MATCH: 100% fidelity")?;
                     }
                 } else {
-                    om.summary("FAIL: Mismatches detected.");
+                    om.try_summary("FAIL: Mismatches detected.")?;
                     std::process::exit(1);
                 }
             }
@@ -120,6 +123,7 @@ fn main() {
             std::process::exit(1);
         }
     }
+    Ok(())
 }
 
 fn generate_html_visual_report(
@@ -213,7 +217,6 @@ fn generate_html_visual_report(
     }
 
     fs::write(out_path, html)?;
-    println!("Visual diff report generated at {}", out_path);
     Ok(())
 }
 
@@ -394,12 +397,12 @@ fn print_item_diff(
     indent_level: usize,
     use_visual: bool,
     om: &mut d2r_core::verify::OutputManager,
-) {
+) -> std::io::Result<()> {
     let indent = "  ".repeat(indent_level);
     let prefix = if indent_level > 0 { "|-- " } else { "" };
     let idx_str = idx.map(|i| i.to_string()).unwrap_or_default();
 
-    om.println(&format!(
+    om.try_println(&format!(
         "{:indent$}{:<5} | {:<10} | {:>8} | {:>8} | {:>5} | {:.2} | V:{} F:0x{:08X}",
         prefix,
         idx_str,
@@ -411,40 +414,40 @@ fn print_item_diff(
         item.version,
         item.flags,
         indent = indent.len()
-    ));
+    ))?;
 
     if !item.is_match || item.fidelity_score < 1.0 {
         if let Some(m_type) = &item.mismatch_type {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [REASON] {}",
                 "",
                 m_type,
                 indent = indent.len()
-            ));
+            ))?;
         }
         if let Some(seg) = &item.segment {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [SEGMENT] {}",
                 "",
                 seg,
                 indent = indent.len()
-            ));
+            ))?;
         }
         if let Some(offset) = item.first_mismatch_offset {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [OFFSET] bit {}",
                 "",
                 offset,
                 indent = indent.len()
-            ));
+            ))?;
             if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
                 let start = (offset as usize).saturating_sub(10);
                 let end = (offset as usize + 20).min(orig.len()).min(target.len());
-                om.println(&format!(
+                om.try_println(&format!(
                     "{:indent$}      [BITS]  ...",
                     "",
                     indent = indent.len()
-                ));
+                ))?;
 
                 let seg_color = get_segment_color(item.segment.as_deref());
                 let mut o_bits = String::new();
@@ -463,18 +466,18 @@ fn print_item_diff(
                     t_bits.push_str(&format!("{}{}{}", color, t_chars[i], ANSI_RESET));
                 }
 
-                om.println(&format!(
+                om.try_println(&format!(
                     "{:indent$}      ORIG:   {}",
                     "",
                     o_bits,
                     indent = indent.len()
-                ));
-                om.println(&format!(
+                ))?;
+                om.try_println(&format!(
                     "{:indent$}      TARG:   {}",
                     "",
                     t_bits,
                     indent = indent.len()
-                ));
+                ))?;
                 let mut markers = String::new();
                 for i in start..end {
                     if i == offset as usize {
@@ -483,81 +486,82 @@ fn print_item_diff(
                         markers.push_str(" ");
                     }
                 }
-                om.println(&format!(
+                om.try_println(&format!(
                     "{:indent$}              {}",
                     "",
                     markers,
                     indent = indent.len()
-                ));
+                ))?;
             }
         }
         if let Some(gap) = item.discovered_alpha_header_gap {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [DISC GAP] {} bits",
                 "",
                 gap,
                 indent = indent.len()
-            ));
+            ))?;
         }
         if let Some(gap) = item.parsed_alpha_header_gap {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [PARS GAP] {} bits",
                 "",
                 gap,
                 indent = indent.len()
-            ));
+            ))?;
         }
         if item.alpha_alignment_padding_len > 0 {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [ALIGNMENT PAD] {} bits",
                 "",
                 item.alpha_alignment_padding_len,
                 indent = indent.len()
-            ));
+            ))?;
         }
         if item.alpha_body_gap_len > 0 {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [BODY GAP] {} bits",
                 "",
                 item.alpha_body_gap_len,
                 indent = indent.len()
-            ));
+            ))?;
         }
         if item.fidelity_score < 1.0 {
-            om.println(&format!(
+            om.try_println(&format!(
                 "{:indent$}      [FORENSIC RATIONALE]",
                 "",
                 indent = indent.len()
-            ));
+            ))?;
             for finding in &item.forensic_audit.findings {
                 if finding.confidence
                     < d2r_core::domain::item::axiom_meta::Confidence::VerifiedTruth
                 {
-                    om.println(&format!(
+                    om.try_println(&format!(
                         "{:indent$}        - [{:?}] {}",
                         "",
                         finding.confidence,
                         finding.rationale,
                         indent = indent.len()
-                    ));
+                    ))?;
                 }
             }
         }
         if use_visual {
             if let (Some(orig), Some(target)) = (&item.orig_bits, &item.target_bits) {
-                om.println(&format!(
+                om.try_println(&format!(
                     "{:indent$}      [BITSTREAM ALIGNMENT]",
                     "",
                     indent = indent.len()
-                ));
-                print_visual_diff(orig, target, indent_level, item.segment.as_deref(), om);
+                ))?;
+                print_visual_diff(orig, target, indent_level, item.segment.as_deref(), om)?;
             }
         }
     }
 
     for child in &item.children {
-        print_item_diff(None, child, indent_level + 1, use_visual, om);
+        print_item_diff(None, child, indent_level + 1, use_visual, om)?;
     }
+    Ok(())
 }
 
 fn print_visual_diff(
@@ -566,7 +570,7 @@ fn print_visual_diff(
     indent_level: usize,
     segment: Option<&str>,
     om: &mut d2r_core::verify::OutputManager,
-) {
+) -> std::io::Result<()> {
     let indent = "  ".repeat(indent_level);
     let mut i = 0;
     let mut j = 0;
@@ -665,24 +669,25 @@ fn print_visual_diff(
         .max(24);
     for k in (0..o_out.len()).step_by(chunk_size) {
         let end = (k + chunk_size).min(o_out.len());
-        om.println(&format!(
+        om.try_println(&format!(
             "{:indent$}      Orig:   {}",
             "",
             o_out[k..end].join(""),
             indent = indent.len()
-        ));
-        om.println(&format!(
+        ))?;
+        om.try_println(&format!(
             "{:indent$}      Target: {}",
             "",
             t_out[k..end].join(""),
             indent = indent.len()
-        ));
-        om.println(&format!(
+        ))?;
+        om.try_println(&format!(
             "{:indent$}      Diff:   {}",
             "",
             m_out[k..end].join(""),
             indent = indent.len()
-        ));
-        om.println("");
+        ))?;
+        om.try_println("")?;
     }
+    Ok(())
 }
