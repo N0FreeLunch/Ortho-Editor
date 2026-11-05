@@ -95,9 +95,9 @@ fn main() -> anyhow::Result<()> {
                             message: msg.clone(),
                             bit_offset: None,
                         }]);
-                    om.json(&serde_json::to_string(&report)?);
+                    om.try_json(&serde_json::to_string(&report)?)?;
                 } else {
-                    om.println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg));
+                    om.try_println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg))?;
                 }
                 all_ok = false;
                 continue;
@@ -131,9 +131,9 @@ fn main() -> anyhow::Result<()> {
                     let report = Report::new(metadata, report_status)
                         .with_results(payload)
                         .with_issues(report_issues);
-                    om.json(&serde_json::to_string(&report)?);
+                    om.try_json(&serde_json::to_string(&report)?)?;
                 } else {
-                    print_report_text(&mut om, path, &payload, &issues, verbose);
+                    print_report_text(&mut om, path, &payload, &issues, verbose)?;
                 }
                 if status == "Fail" {
                     all_ok = false;
@@ -155,15 +155,16 @@ fn main() -> anyhow::Result<()> {
                             message: msg.clone(),
                             bit_offset: None,
                         }]);
-                    om.json(&serde_json::to_string(&report)?);
+                    om.try_json(&serde_json::to_string(&report)?)?;
                 } else {
-                    om.println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg));
+                    om.try_println(&format!("=== File: {} ===\n  [ERROR] {}", path, msg))?;
                 }
                 all_ok = false;
             }
         }
     }
 
+    om.try_finish()?;
     if all_ok {
         process::exit(0);
     } else {
@@ -378,26 +379,26 @@ fn print_report_text(
     payload: &MercenaryPayload,
     issues: &[ForensicIssue],
     verbose: bool,
-) {
-    om.println(&format!("=== File: {} ===", path));
+) -> std::io::Result<()> {
+    om.try_println(&format!("=== File: {} ===", path))?;
     if let Some(merc) = &payload.mercenary {
-        om.println("Hybrid Decoded:");
-        om.println(&format!(
+        om.try_println("Hybrid Decoded:")?;
+        om.try_println(&format!(
             "  Class:    {} ({})",
             merc.class_id, merc.class_name
-        ));
-        om.println(&format!(
+        ))?;
+        om.try_println(&format!(
             "  Subtype:  {} ({})",
             merc.subtype_id, merc.subtype_name
-        ));
-        om.println(&format!("  ID:        {}", merc.hireling_id));
-        om.println(&format!(
+        ))?;
+        om.try_println(&format!("  ID:        {}", merc.hireling_id))?;
+        om.try_println(&format!(
             "  Experience: {} (0x{:08X}) -> Expected Level: {}",
             merc.experience, merc.experience, merc.expected_level
-        ));
-        om.println(&format!("  Name ID:   {}", merc.name_id));
+        ))?;
+        om.try_println(&format!("  Name ID:   {}", merc.name_id))?;
 
-        om.println(&format!(
+        om.try_println(&format!(
             "Equipment: {} items (Footer: {})",
             merc.equipment.count,
             if merc.equipment.footer_ok {
@@ -405,9 +406,9 @@ fn print_report_text(
             } else {
                 "NON-STANDARD"
             }
-        ));
+        ))?;
         for it in &merc.equipment.items {
-            om.println(&format!("  - {} in slot {}", it.code, it.slot));
+            om.try_println(&format!("  - {} in slot {}", it.code, it.slot))?;
         }
     }
 
@@ -422,11 +423,12 @@ fn print_report_text(
             .bit_offset
             .map(|o| format!(" @ bit {}", o))
             .unwrap_or_default();
-        om.println(&format!("  {} {}{}", label, issue.message, offset_str));
+        om.try_println(&format!("  {} {}{}", label, issue.message, offset_str))?;
     }
 
     if verbose {
         // Output extra debug bytes if needed
     }
-    om.println("");
+    om.try_println("")?;
+    Ok(())
 }
