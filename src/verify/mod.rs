@@ -403,6 +403,18 @@ impl OutputManager {
         Ok(())
     }
 
+    /// Defers a JSON diagnostic until the selected destination is flushed.
+    /// Call `try_finish` after writing the report to release it in order.
+    pub fn try_defer_json_summary(&mut self, text: &str) -> std::io::Result<()> {
+        if self.is_json && self.writer.is_some() {
+            self.deferred
+                .push(DeferredOutput::Stderr(format!("{text}\n")));
+            Ok(())
+        } else {
+            self.try_summary(text)
+        }
+    }
+
     pub fn try_summary(&mut self, text: &str) -> std::io::Result<()> {
         if self.is_json {
             if self.deferred.is_empty() {
@@ -519,6 +531,76 @@ mod output_error_tests {
                 assert!(!stderr.contains("DIAGNOSTIC_PART"), "{mode}");
             }
             if mode == "write" || mode == "flush" {
+                assert!(stderr.contains("OUTPUT_ERROR:"), "{mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn deferred_summary_child() {
+        let Ok(mode) = std::env::var("D2R_TEST_DEFERRED_SUMMARY") else {
+            return;
+        };
+        let (mut output, _, _) = manager(
+            true,
+            mode == "write",
+            mode == "flush" || mode == "token_flush",
+        );
+        output.is_token_efficient = mode == "token" || mode == "token_flush";
+        if mode == "no_writer" || mode == "no_writer_early" {
+            output.writer = None;
+        }
+        output
+            .try_defer_json_summary("SUMMARY_BEFORE_REPORT")
+            .unwrap();
+        if mode == "early" || mode == "no_writer_early" {
+            return;
+        }
+        if let Err(error) = output.try_json("JSON_REPORT") {
+            eprintln!("OUTPUT_ERROR:{error}");
+            return;
+        }
+        if let Err(error) = output.try_finish() {
+            eprintln!("OUTPUT_ERROR:{error}");
+        }
+    }
+
+    #[test]
+    fn deferred_summary_requires_successful_json_delivery() {
+        use std::process::Command;
+
+        for mode in [
+            "success",
+            "flush",
+            "write",
+            "token",
+            "token_flush",
+            "no_writer",
+            "early",
+            "no_writer_early",
+        ] {
+            let run = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "verify::output_error_tests::deferred_summary_child",
+                    "--nocapture",
+                ])
+                .env("D2R_TEST_DEFERRED_SUMMARY", mode)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "child failed in {mode}: {run:?}");
+            let stdout = String::from_utf8(run.stdout).unwrap();
+            let stderr = String::from_utf8(run.stderr).unwrap();
+            let summary_expected =
+                matches!(mode, "success" | "token" | "no_writer" | "no_writer_early");
+            let report_expected = matches!(mode, "success" | "no_writer");
+            assert_eq!(
+                stderr.contains("SUMMARY_BEFORE_REPORT"),
+                summary_expected,
+                "{mode}"
+            );
+            assert_eq!(stdout.contains("JSON_REPORT"), report_expected, "{mode}");
+            if matches!(mode, "write" | "flush" | "token_flush") {
                 assert!(stderr.contains("OUTPUT_ERROR:"), "{mode}");
             }
         }

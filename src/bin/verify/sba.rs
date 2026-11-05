@@ -100,16 +100,16 @@ fn main() -> Result<()> {
 
     let mut issues = Vec::new();
 
-    if is_generate {
+    let summary = if is_generate {
         let json = serde_json::to_string_pretty(&current_baseline)?;
         fs::write(&baseline_path, json)
             .with_context(|| format!("Failed to write baseline: {}", baseline_path))?;
-        out.summary(&format!(
+        format!(
             "Generated baseline for {} items to {}",
             current_baseline.items.len(),
             baseline_path
-        ));
-    } else if is_verify {
+        )
+    } else {
         let baseline_json = fs::read_to_string(&baseline_path)
             .with_context(|| format!("Failed to read baseline: {}", baseline_path))?;
         let expected_baseline: SbaBaseline = serde_json::from_str(&baseline_json)?;
@@ -121,20 +121,21 @@ fn main() -> Result<()> {
         }
 
         if issues.is_empty() {
-            out.summary(&format!(
+            format!(
                 "Verification successful: 0 segment mismatches across {} items.",
                 current_baseline.items.len()
-            ));
+            )
         } else {
-            out.summary(&format!(
+            format!(
                 "Verification failed: {} segment mismatches across {} items.",
                 issues.len(),
                 current_baseline.items.len()
-            ));
+            )
         }
-    }
+    };
 
     if is_json {
+        out.try_defer_json_summary(&summary)?;
         let status = if issues.is_empty() {
             ReportStatus::Ok
         } else {
@@ -161,7 +162,10 @@ fn main() -> Result<()> {
             .with_results(payload)
             .with_issues(issues);
 
-        out.json(&serde_json::to_string(&report)?);
+        out.try_json(&serde_json::to_string(&report)?)?;
+        out.try_finish()?;
+    } else {
+        out.try_summary(&summary)?;
     }
 
     Ok(())
