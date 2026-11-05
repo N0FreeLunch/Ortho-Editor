@@ -76,7 +76,10 @@ fn main() {
             if use_json {
                 om.json(&serde_json::to_string_pretty(&report).unwrap());
             } else if let Some(out_path) = visual_out {
-                generate_html_visual_report(&report, path, &out_path);
+                if let Err(e) = generate_html_visual_report(&report, path, &out_path) {
+                    eprintln!("Failed to write HTML report: {}", e);
+                    std::process::exit(1);
+                }
                 om.summary(&format!("Visual diff report generated at {}", out_path));
             } else {
                 om.summary(&format!("Serialization Audit for: {}", path));
@@ -123,7 +126,7 @@ fn generate_html_visual_report(
     report: &d2r_core::verify::symmetry::DiffReport,
     file_path: &str,
     out_path: &str,
-) {
+) -> std::io::Result<()> {
     let mut html = String::new();
     html.push_str(&"<!DOCTYPE html>
 <html lang=\"en\">
@@ -205,15 +208,13 @@ fn generate_html_visual_report(
 
     if let Some(parent) = std::path::Path::new(out_path).parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
-            let _ = fs::create_dir_all(parent);
+            fs::create_dir_all(parent)?;
         }
     }
 
-    if let Err(e) = fs::write(out_path, html) {
-        eprintln!("Failed to write HTML report: {}", e);
-    } else {
-        println!("Visual diff report generated at {}", out_path);
-    }
+    fs::write(out_path, html)?;
+    println!("Visual diff report generated at {}", out_path);
+    Ok(())
 }
 
 fn render_item_diff_html(

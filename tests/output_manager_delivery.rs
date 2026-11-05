@@ -22,6 +22,33 @@ fn assert_failure(output: std::process::Output) {
 }
 
 #[test]
+fn serialization_visual_directory_destination_is_an_error() {
+    let fixture = fixture();
+    let before = fs::read(&fixture).expect("fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_d2item_serialization_audit"))
+        .arg("--visual")
+        .arg(env!("CARGO_MANIFEST_DIR"))
+        .arg(&fixture)
+        .output()
+        .expect("run serialization audit");
+    assert!(!output.status.success());
+    assert!(!output.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Visual diff report generated"));
+    let blocked_parent = fixture.join("report.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_d2item_serialization_audit"))
+        .arg("--visual")
+        .arg(&blocked_parent)
+        .arg(&fixture)
+        .output()
+        .expect("run serialization audit with invalid parent");
+    assert!(!output.status.success());
+    assert!(!output.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Visual diff report generated"));
+    assert!(!blocked_parent.exists());
+    assert_eq!(fs::read(&fixture).expect("fixture after"), before);
+}
+
+#[test]
 fn explicit_missing_parent_is_an_error() {
     let fixture = fixture();
     let before = fs::read(&fixture).expect("fixture");
