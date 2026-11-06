@@ -114,11 +114,11 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let work = OwnedDir(
-        core.join("tmp")
-            .join(format!("inspector-parse-{}-{nonce}", std::process::id())),
-    );
-    fs::create_dir(&work.0).expect("create unique test directory");
+    let root = core.join("tmp");
+    fs::create_dir_all(&root).expect("temporary root");
+    let path = root.join(format!("inspector-parse-{}-{nonce}", std::process::id()));
+    fs::create_dir(&path).expect("create unique test directory");
+    let work = OwnedDir(path);
     let invalid = work.0.join("invalid.d2s");
     fs::write(&invalid, [0u8; 16]).expect("synthetic comparison");
     let empty = work.0.join("empty.d2s");
@@ -130,6 +130,13 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
     let mut bytes = before.clone();
     bytes[913] ^= 0x80;
     fs::write(&trace_failure, bytes).expect("synthetic trace failure");
+    let raw_single = work.0.join("raw-single.d2i");
+    let mut bytes = vec![0; 4];
+    bytes.extend_from_slice(&105u32.to_le_bytes());
+    bytes.extend_from_slice(b"JM");
+    bytes.extend_from_slice(&4096u16.to_le_bytes());
+    bytes.extend_from_slice(&before[907..917]);
+    fs::write(&raw_single, bytes).expect("synthetic single raw item");
     let missing = work.0.join("missing.d2s");
     for name in [
         "marker-ordinal",
@@ -143,6 +150,7 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
         "selected-trace",
         "selected-trace-failure",
         "raw-item",
+        "raw-single",
     ] {
         for efficient in [false, true] {
             let dest = work.0.join(format!("{name}-{efficient}.json"));
@@ -197,6 +205,7 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
             let output = cmd
                 .arg(match name {
                     "raw-item" => &raw,
+                    "raw-single" => &raw_single,
                     "selected-trace-failure" => &trace_failure,
                     _ => &fixture,
                 })
@@ -215,7 +224,10 @@ fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
                 assert_eq!(value["raw_len_bits"], 2);
                 assert!(value["parser_consumed_bits"].is_null());
             }
-            if name != "bounded-selected" && name != "selected-trace" {
+            if name == "raw-single" {
+                assert!(value["item"].is_object());
+                assert!(value["errors"].as_array().unwrap().is_empty());
+            } else if name != "bounded-selected" && name != "selected-trace" {
                 assert!(
                     !value["errors"].as_array().expect("error list").is_empty(),
                     "{name}"
