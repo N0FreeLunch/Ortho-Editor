@@ -312,7 +312,7 @@ impl OutputManager {
 
             match create_automatic_output(&root, tool_name, timestamp) {
                 Ok((f, path)) => {
-                    eprintln!("[TOKEN-EFFICIENT] Detail saved to: {}", path.display());
+                    eprintln!("[TOKEN-EFFICIENT] Detail output path: {}", path.display());
                     writer = Some(Box::new(f) as Box<dyn Write>);
                 }
                 Err(error) if strict => return Err(error),

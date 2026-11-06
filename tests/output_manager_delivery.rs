@@ -84,7 +84,7 @@ fn automatic_reports_preserve_existing_files_and_concurrent_outputs() {
         let stderr = String::from_utf8(result.stderr).unwrap();
         let path = stderr
             .lines()
-            .find_map(|line| line.strip_prefix("[TOKEN-EFFICIENT] Detail saved to: "))
+            .find_map(|line| line.strip_prefix("[TOKEN-EFFICIENT] Detail output path: "))
             .expect("destination notice");
         let path = PathBuf::from(path);
         assert_eq!(fs::read(&path).expect("report"), result.stdout);
