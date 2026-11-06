@@ -22,6 +22,82 @@ fn assert_failure(output: std::process::Output) {
 }
 
 #[test]
+fn automatic_reports_preserve_existing_files_and_concurrent_outputs() {
+    struct OwnedDir(PathBuf);
+    impl Drop for OwnedDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let core = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = core.join("tests/fixtures/savegames/original/amazon_initial.d2s");
+    let before = fs::read(&fixture).expect("fixture");
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let root = core.join("tmp");
+    fs::create_dir_all(&root).expect("temporary root");
+    let path = root.join(format!(
+        "output-collision-{}-{}",
+        std::process::id(),
+        now.as_nanos()
+    ));
+    fs::create_dir(&path).expect("unique directory");
+    let work = OwnedDir(path);
+    let mut sentinels = Vec::new();
+    for second in now.as_secs().saturating_sub(5)..=now.as_secs() + 120 {
+        let path = work.0.join(format!("d2item_inspect_{second}.txt"));
+        fs::write(&path, b"existing report").unwrap();
+        sentinels.push(path);
+    }
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|index| {
+            let root = work.0.clone();
+            let fixture = fixture.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                Command::new(env!("CARGO_BIN_EXE_d2item_inspect"))
+                    .args([
+                        "--dialect",
+                        "legacy",
+                        "--json",
+                        "--token-efficient",
+                        "--section-item",
+                        &index.to_string(),
+                        "--trace-segments",
+                    ])
+                    .arg(fixture)
+                    .env("AGENT_ARTIFACTS_PATH", root)
+                    .output()
+                    .unwrap()
+            })
+        })
+        .collect();
+    let mut paths = Vec::new();
+    for handle in handles {
+        let result = handle.join().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let stderr = String::from_utf8(result.stderr).unwrap();
+        let path = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("[TOKEN-EFFICIENT] Detail saved to: "))
+            .expect("destination notice");
+        let path = PathBuf::from(path);
+        assert_eq!(fs::read(&path).expect("report"), result.stdout);
+        paths.push(path);
+    }
+    assert_ne!(paths[0], paths[1]);
+    for path in sentinels {
+        assert_eq!(fs::read(path).unwrap(), b"existing report");
+    }
+    assert_eq!(fs::read(fixture).unwrap(), before);
+}
+
+#[test]
 fn legacy_inspector_parse_and_comparison_reports_reach_destination() {
     struct OwnedDir(PathBuf);
     impl Drop for OwnedDir {

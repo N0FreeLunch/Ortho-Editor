@@ -221,6 +221,34 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn create_automatic_output(
+    root: &std::path::Path,
+    tool_name: &str,
+    timestamp: u64,
+) -> std::io::Result<(File, PathBuf)> {
+    for suffix in 0..=u64::MAX {
+        let name = if suffix == 0 {
+            format!("{tool_name}_{timestamp}.txt")
+        } else {
+            format!("{tool_name}_{timestamp}_{suffix}.txt")
+        };
+        let path = root.join(name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "automatic output names exhausted",
+    ))
+}
+
 enum DeferredOutput {
     StdoutLine(String),
     StdoutFragment(String),
@@ -282,9 +310,8 @@ impl OutputManager {
                 return Err(error);
             }
 
-            let path = root.join(format!("{}_{}.txt", tool_name, timestamp));
-            match File::create(&path) {
-                Ok(f) => {
+            match create_automatic_output(&root, tool_name, timestamp) {
+                Ok((f, path)) => {
                     eprintln!("[TOKEN-EFFICIENT] Detail saved to: {}", path.display());
                     writer = Some(Box::new(f) as Box<dyn Write>);
                 }
@@ -530,6 +557,61 @@ mod output_error_tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn automatic_allocation_preserves_existing_and_concurrent_reports() {
+        struct OwnedDir(std::path::PathBuf);
+        impl Drop for OwnedDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tmp");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(format!(
+            "automatic-allocation-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let work = OwnedDir(path);
+        let (empty, empty_path) = super::create_automatic_output(&work.0, "empty", 42).unwrap();
+        drop(empty);
+        assert_eq!(empty_path.file_name().unwrap(), "empty_42.txt");
+        for name in ["verify_42.txt", "verify_42_1.txt"] {
+            std::fs::write(work.0.join(name), b"sentinel").unwrap();
+        }
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|index| {
+                let root = work.0.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let (mut file, path) =
+                        super::create_automatic_output(&root, "verify", 42).unwrap();
+                    let bytes = format!("report-{index}");
+                    file.write_all(bytes.as_bytes()).unwrap();
+                    file.flush().unwrap();
+                    (path, bytes)
+                })
+            })
+            .collect();
+        let mut paths = std::collections::HashSet::new();
+        for handle in handles {
+            let (path, expected) = handle.join().unwrap();
+            assert!(paths.insert(path.clone()));
+            assert_eq!(std::fs::read(path).unwrap(), expected.as_bytes());
+        }
+        assert_eq!(paths.len(), 8);
+        for name in ["verify_42.txt", "verify_42_1.txt"] {
+            assert_eq!(std::fs::read(work.0.join(name)).unwrap(), b"sentinel");
+        }
+        assert!(super::create_automatic_output(&work.0.join("missing"), "verify", 42).is_err());
+    }
 
     #[test]
     fn output_delivery_child() {
