@@ -1,7 +1,8 @@
 use d2r_core::verify::args::{ArgError, ArgParser, ArgSpec};
 use d2r_core::verify::{OutputManager, Report, ReportMetadata, ReportStatus};
 use std::env;
-use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::process;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -62,28 +63,38 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut om = OutputManager::try_new("d2save_diff", &parsed).unwrap_or_else(|error| {
-        eprintln!("Failed to initialize output destination: {error}");
-        std::process::exit(1);
-    });
-
     let path_a = parsed.get("file_a").unwrap();
     let path_b = parsed.get("file_b").unwrap();
 
-    let bytes_a = match fs::read(path_a) {
-        Ok(b) => b,
+    let mut input_a = match File::open(path_a) {
+        Ok(file) => file,
         Err(e) => {
             eprintln!("[ERROR] Cannot read '{}': {}", path_a, e);
             process::exit(1);
         }
     };
-    let bytes_b = match fs::read(path_b) {
-        Ok(b) => b,
+    let mut input_b = match File::open(path_b) {
+        Ok(file) => file,
         Err(e) => {
             eprintln!("[ERROR] Cannot read '{}': {}", path_b, e);
             process::exit(1);
         }
     };
+    let mut om = OutputManager::try_new_protecting("d2save_diff", &parsed, &[&input_a, &input_b])
+        .unwrap_or_else(|error| {
+            eprintln!("Failed to initialize output destination: {error}");
+            std::process::exit(1);
+        });
+    let mut bytes_a = Vec::new();
+    if let Err(e) = input_a.read_to_end(&mut bytes_a) {
+        eprintln!("[ERROR] Cannot read '{}': {}", path_a, e);
+        process::exit(1);
+    }
+    let mut bytes_b = Vec::new();
+    if let Err(e) = input_b.read_to_end(&mut bytes_b) {
+        eprintln!("[ERROR] Cannot read '{}': {}", path_b, e);
+        process::exit(1);
+    }
 
     let jm_a = find_first_jm(&bytes_a);
     let jm_b = find_first_jm(&bytes_b);

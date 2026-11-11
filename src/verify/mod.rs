@@ -221,6 +221,71 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+fn file_identity(file: &File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::other(
+            "file identity requires a regular file",
+        ));
+    }
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn file_identity(file: &File) -> std::io::Result<(u64, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other(
+            "file identity requires a regular file",
+        ));
+    }
+    let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // The handle is live for this call and Windows initializes the structure on success.
+    let success =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, info.as_mut_ptr()) };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // GetFileInformationByHandle returned success and initialized every field.
+    let info = unsafe { info.assume_init() };
+    Ok((
+        u64::from(info.dwVolumeSerialNumber),
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_identity(_file: &File) -> std::io::Result<(u64, u64)> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "file identity is unsupported on this platform",
+    ))
+}
+
+fn create_protected_output(path: &str, inputs: &[&File]) -> std::io::Result<File> {
+    let output = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    let output_identity = file_identity(&output)?;
+    for input in inputs {
+        if file_identity(input)? == output_identity {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "output destination refers to an input file",
+            ));
+        }
+    }
+    output.set_len(0)?;
+    Ok(output)
+}
+
 fn create_automatic_output(
     root: &std::path::Path,
     tool_name: &str,
@@ -264,7 +329,7 @@ pub struct OutputManager {
 
 impl OutputManager {
     pub fn new(tool_name: &str, args: &args::ParsedArgs) -> Self {
-        Self::create(tool_name, args, false).unwrap_or_else(|_| Self {
+        Self::create(tool_name, args, false, None).unwrap_or_else(|_| Self {
             writer: None,
             is_token_efficient: args.is_set("token-efficient"),
             is_json: args.is_json(),
@@ -273,10 +338,25 @@ impl OutputManager {
     }
 
     pub fn try_new(tool_name: &str, args: &args::ParsedArgs) -> std::io::Result<Self> {
-        Self::create(tool_name, args, true)
+        Self::create(tool_name, args, true, None)
     }
 
-    fn create(tool_name: &str, args: &args::ParsedArgs, strict: bool) -> std::io::Result<Self> {
+    /// Protects already-open input files from explicit output truncation.
+    /// Callers must read these same handles rather than reopening their paths.
+    pub fn try_new_protecting(
+        tool_name: &str,
+        args: &args::ParsedArgs,
+        inputs: &[&File],
+    ) -> std::io::Result<Self> {
+        Self::create(tool_name, args, true, Some(inputs))
+    }
+
+    fn create(
+        tool_name: &str,
+        args: &args::ParsedArgs,
+        strict: bool,
+        protected_inputs: Option<&[&File]>,
+    ) -> std::io::Result<Self> {
         let is_json = args.is_json();
         let is_token_efficient = args.is_set("token-efficient");
         let output_path = args.get("output");
@@ -284,7 +364,11 @@ impl OutputManager {
         let mut writer = None;
 
         if let Some(path) = output_path {
-            match File::create(path) {
+            let result = match protected_inputs {
+                Some(inputs) => create_protected_output(path, inputs),
+                None => File::create(path),
+            };
+            match result {
                 Ok(f) => writer = Some(Box::new(f) as Box<dyn Write>),
                 Err(error) if strict => return Err(error),
                 Err(_) => {}
@@ -557,6 +641,50 @@ mod output_error_tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn protected_output_uses_held_identity_before_truncation() {
+        struct OwnedDir(std::path::PathBuf);
+        impl Drop for OwnedDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tmp");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(format!("held-identity-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        let work = OwnedDir(path);
+        let original = work.0.join("input");
+        let renamed = work.0.join("renamed");
+        let output = work.0.join("unrelated");
+        std::fs::write(&original, b"original input").unwrap();
+        std::fs::write(&output, b"existing output").unwrap();
+        let input = std::fs::File::open(&original).unwrap();
+        std::fs::rename(&original, &renamed).unwrap();
+        std::fs::write(&original, b"replacement input").unwrap();
+        let error =
+            super::create_protected_output(renamed.to_str().unwrap(), &[&input]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read(&renamed).unwrap(), b"original input");
+        assert_eq!(std::fs::read(&original).unwrap(), b"replacement input");
+        let mut writer =
+            super::create_protected_output(output.to_str().unwrap(), &[&input]).unwrap();
+        writer.write_all(b"new report").unwrap();
+        writer.flush().unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"new report");
+        #[cfg(unix)]
+        let non_regular = std::fs::File::open(&work.0).unwrap();
+        #[cfg(windows)]
+        let non_regular = std::fs::File::open("NUL").unwrap();
+        assert!(super::create_protected_output(output.to_str().unwrap(), &[&non_regular]).is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"new report");
+    }
 
     #[test]
     fn automatic_allocation_preserves_existing_and_concurrent_reports() {

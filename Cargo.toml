@@ -40,6 +40,9 @@ colored = "2.1"
 validator = { version = "0.18", features = ["derive"] }
 schemars = { version = "1.2.3", features = ["derive"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [[bin]]
 name = "ortho"
 path = "src/bin/ortho.rs"

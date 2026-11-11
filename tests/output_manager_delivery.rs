@@ -22,6 +22,110 @@ fn assert_failure(output: std::process::Output) {
 }
 
 #[test]
+fn save_diff_rejects_output_aliases_without_modifying_inputs() {
+    struct OwnedDir(PathBuf);
+    impl Drop for OwnedDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let core = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = core.join("tests/fixtures/savegames/original/amazon_initial.d2s");
+    let original = fs::read(&fixture).expect("fixture");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = core.join("tmp");
+    fs::create_dir_all(&root).expect("temporary root");
+    let path = root.join(format!("save-diff-alias-{}-{nonce}", std::process::id()));
+    fs::create_dir(&path).expect("unique test directory");
+    let work = OwnedDir(path);
+    for case in ["first", "second", "relative", "hardlink", "symlink"] {
+        for efficient in [false, true] {
+            let dir = work.0.join(format!("{case}-{efficient}"));
+            fs::create_dir(&dir).unwrap();
+            let first = dir.join("first.d2s");
+            let second = dir.join("second.d2s");
+            fs::write(&first, &original).unwrap();
+            fs::write(&second, &original).unwrap();
+            let dest = match case {
+                "second" => second.clone(),
+                "relative" => dir.join(".").join("first.d2s"),
+                "hardlink" => {
+                    let link = dir.join("hardlink.d2s");
+                    fs::hard_link(&first, &link).unwrap();
+                    link
+                }
+                "symlink" => {
+                    let link = dir.join("symlink.d2s");
+                    #[cfg(windows)]
+                    let result = std::os::windows::fs::symlink_file(&first, &link);
+                    #[cfg(unix)]
+                    let result = std::os::unix::fs::symlink(&first, &link);
+                    #[cfg(not(any(windows, unix)))]
+                    let result: std::io::Result<()> = Err(std::io::ErrorKind::Unsupported.into());
+                    match result {
+                        Ok(()) => link,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::PermissionDenied
+                                    | std::io::ErrorKind::Unsupported
+                            ) =>
+                        {
+                            continue;
+                        }
+                        Err(error) => panic!("cannot create test symlink: {error}"),
+                    }
+                }
+                _ => first.clone(),
+            };
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_d2save_diff"));
+            cmd.args(["--json", "--output"]).arg(&dest);
+            if efficient {
+                cmd.arg("--token-efficient");
+            }
+            let output = cmd.arg(&first).arg(&second).output().unwrap();
+            assert_eq!(
+                fs::read(&first).unwrap(),
+                original,
+                "{case}: first input changed"
+            );
+            assert_eq!(
+                fs::read(&second).unwrap(),
+                original,
+                "{case}: second input changed"
+            );
+            assert!(!output.status.success(), "{case}: expected failure");
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("output destination refers to an input file"),
+                "{case}: missing identity diagnostic"
+            );
+            assert!(
+                output.stdout.is_empty(),
+                "{case}: unexpected success output"
+            );
+        }
+    }
+    let unrelated = work.0.join("unrelated-existing.json");
+    fs::write(&unrelated, b"preserve on missing input").unwrap();
+    let missing = work.0.join("missing-input.d2s");
+    let output = Command::new(env!("CARGO_BIN_EXE_d2save_diff"))
+        .args(["--output"])
+        .arg(&unrelated)
+        .arg(&missing)
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Cannot read"));
+    assert_eq!(fs::read(unrelated).unwrap(), b"preserve on missing input");
+    assert_eq!(fs::read(fixture).unwrap(), original);
+}
+
+#[test]
 fn automatic_reports_preserve_existing_files_and_concurrent_outputs() {
     struct OwnedDir(PathBuf);
     impl Drop for OwnedDir {
@@ -682,7 +786,11 @@ fn all_remaining_consumers_report_output_initialization_failure() {
             env!("CARGO_BIN_EXE_d2save_mercenary_audit"),
             "single",
         ),
-        ("d2save_diff", env!("CARGO_BIN_EXE_d2save_diff"), "double"),
+        (
+            "d2save_diff",
+            env!("CARGO_BIN_EXE_d2save_diff"),
+            "double-fixture",
+        ),
         ("d2save_dsa", env!("CARGO_BIN_EXE_d2save_dsa"), "double"),
         (
             "d2save_item_diff",
@@ -724,6 +832,9 @@ fn all_remaining_consumers_report_output_initialization_failure() {
             }
             "double" => {
                 cmd.arg(&missing).arg(&missing);
+            }
+            "double-fixture" => {
+                cmd.arg(&fixture).arg(&fixture);
             }
             "boundary" => {
                 cmd.arg("--fixture").arg(&missing);
