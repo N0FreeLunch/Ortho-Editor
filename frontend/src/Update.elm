@@ -82,6 +82,8 @@ type Msg
     | SelectShopCategory String
     | ChangeShopPage Int
     | ClickSpawnShopItem String
+    | DismissToast
+    | TriggerToastUndo
 
 
 type OutMsg
@@ -428,6 +430,12 @@ update msg model =
                 )
             )
 
+        DismissToast ->
+            ( { model | ui = UiState.clearToast model.ui }, NoOut )
+
+        TriggerToastUndo ->
+            ( { model | ui = UiState.clearToast model.ui }, EmitIntent Protocol.Undo )
+
 
 characterFieldFromKey : String -> Maybe CharacterField
 characterFieldFromKey key =
@@ -506,10 +514,18 @@ applyEnvelope envelope model =
         nextBanner =
             case envelope.rejection of
                 Just rej ->
-                    Just (rej.code ++ ": " ++ rej.message)
+                    Just (rej.rawCode ++ ": " ++ rej.message)
 
                 Nothing ->
                     model.ui.statusBanner
+
+        uiWithToast =
+            case envelope.rejection of
+                Just rej ->
+                    UiState.setToast rej model.ui
+
+                Nothing ->
+                    model.ui
 
         nextSession =
             case envelope.session of
@@ -551,5 +567,5 @@ applyEnvelope envelope model =
         | session = nextSession
         , lastRejection = envelope.rejection
         , lastDecodeError = Nothing
-        , ui = UiState.setStatusBanner nextBanner model.ui
+        , ui = UiState.setStatusBanner nextBanner uiWithToast
     }

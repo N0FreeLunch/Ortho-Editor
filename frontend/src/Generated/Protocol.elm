@@ -1013,17 +1013,189 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "shop_catalog" (Json.Decode.list (shopCatalogItemViewDecoder))))
 
 
+type RejectionCode
+    = RejectionInventoryFull
+    | RejectionSlotOccupied
+    | RejectionInvalidPlacement
+    | RejectionStatOutOfRange
+    | RejectionSkillPrerequisiteNotMet
+    | RejectionOpaqueBitstreamViolation
+    | RejectionMercPersistenceNotSupported
+    | RejectionNothingToUndo
+    | RejectionNothingToRedo
+    | RejectionShopSpawnFailed
+    | RejectionUnknown
+
+
+rejectionCodeDecoder : Json.Decode.Decoder RejectionCode
+rejectionCodeDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionInventoryFull" ->
+                            Json.Decode.succeed RejectionInventoryFull
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionSlotOccupied" ->
+                            Json.Decode.succeed RejectionSlotOccupied
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionInvalidPlacement" ->
+                            Json.Decode.succeed RejectionInvalidPlacement
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionStatOutOfRange" ->
+                            Json.Decode.succeed RejectionStatOutOfRange
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionSkillPrerequisiteNotMet" ->
+                            Json.Decode.succeed RejectionSkillPrerequisiteNotMet
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionOpaqueBitstreamViolation" ->
+                            Json.Decode.succeed RejectionOpaqueBitstreamViolation
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionMercPersistenceNotSupported" ->
+                            Json.Decode.succeed RejectionMercPersistenceNotSupported
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionNothingToUndo" ->
+                            Json.Decode.succeed RejectionNothingToUndo
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionNothingToRedo" ->
+                            Json.Decode.succeed RejectionNothingToRedo
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionShopSpawnFailed" ->
+                            Json.Decode.succeed RejectionShopSpawnFailed
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "RejectionUnknown" ->
+                            Json.Decode.succeed RejectionUnknown
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
+type SuggestedRecovery
+    = SuggestUndo
+    | SuggestClearSlot
+    | SuggestAdjustValue
+    | SuggestNone
+
+
+suggestedRecoveryDecoder : Json.Decode.Decoder SuggestedRecovery
+suggestedRecoveryDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SuggestUndo" ->
+                            Json.Decode.succeed SuggestUndo
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SuggestClearSlot" ->
+                            Json.Decode.succeed SuggestClearSlot
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SuggestAdjustValue" ->
+                            Json.Decode.succeed SuggestAdjustValue
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SuggestNone" ->
+                            Json.Decode.succeed SuggestNone
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
 type alias ActionRejection =
-    { code : String
+    { code : RejectionCode
+    , rawCode : String
     , message : String
+    , targetId : Maybe (String)
+    , suggestedAction : Maybe (SuggestedRecovery)
     }
 
 
 actionRejectionDecoder : Json.Decode.Decoder ActionRejection
 actionRejectionDecoder =
     Json.Decode.succeed ActionRejection
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "code" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "code" (rejectionCodeDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "raw_code" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "message" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "target_id" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "suggested_action" (Json.Decode.nullable (suggestedRecoveryDecoder))))
 
 
 type alias SessionEnvelope =

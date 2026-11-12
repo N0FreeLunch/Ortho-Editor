@@ -5,12 +5,14 @@ module State.UiState exposing
     , PaintMode(..)
     , StashTab(..)
     , ThemeMode(..)
+    , Toast
     , UiState
     , ViewTab(..)
     , beginFocusInput
     , beginMarquee
     , clearFocusInput
     , clearMarquee
+    , clearToast
     , containerLabel
     , extendMarquee
     , init
@@ -28,6 +30,7 @@ module State.UiState exposing
     , setSkillTreeTab
     , setStashTab
     , setStatusBanner
+    , setToast
     , setView
     , toggleCombatLab
     , togglePaintMode
@@ -36,7 +39,7 @@ module State.UiState exposing
     , updateMarquee
     )
 
-import Generated.Protocol exposing (ContainerKind(..), DifficultyMode(..), ItemQualityKind(..))
+import Generated.Protocol exposing (ActionRejection, ContainerKind(..), DifficultyMode(..), ItemQualityKind(..), RejectionCode(..), SuggestedRecovery(..))
 
 {-| Ephemeral UI state owned exclusively by Elm (tabs, theme, stash tab preview,
 progression difficulty, paint mode, marquee coordinates, selected item, filter).
@@ -86,6 +89,15 @@ type alias FocusedInput =
     }
 
 
+type alias Toast =
+    { code : RejectionCode
+    , rawCode : String
+    , message : String
+    , targetId : Maybe String
+    , suggestedAction : Maybe SuggestedRecovery
+    }
+
+
 type alias UiState =
     { activeView : ViewTab
     , theme : ThemeMode
@@ -99,6 +111,7 @@ type alias UiState =
     , hoverMousePos : Maybe { x : Int, y : Int, vw : Int, vh : Int }
     , hoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int }
     , statusBanner : Maybe String
+    , toast : Maybe Toast
     , focusedInput : Maybe FocusedInput
     , combatLabOpen : Bool
     , skillTreeTab : String
@@ -122,6 +135,7 @@ init =
     , hoverMousePos = Nothing
     , hoveredDropTarget = Nothing
     , statusBanner = Nothing
+    , toast = Nothing
     , focusedInput = Nothing
     , combatLabOpen = False
     , skillTreeTab = "tree0"
@@ -234,6 +248,25 @@ setSelectedItem maybeIdx ui =
 setStatusBanner : Maybe String -> UiState -> UiState
 setStatusBanner maybeBanner ui =
     { ui | statusBanner = maybeBanner }
+
+
+setToast : ActionRejection -> UiState -> UiState
+setToast rej ui =
+    { ui
+        | toast =
+            Just
+                { code = rej.code
+                , rawCode = rej.rawCode
+                , message = rej.message
+                , targetId = rej.targetId
+                , suggestedAction = rej.suggestedAction
+                }
+    }
+
+
+clearToast : UiState -> UiState
+clearToast ui =
+    { ui | toast = Nothing }
 
 
 beginFocusInput : String -> String -> UiState -> UiState

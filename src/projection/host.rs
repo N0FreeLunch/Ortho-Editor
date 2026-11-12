@@ -70,6 +70,7 @@ impl HostSessionStore {
             }
             Err(err) => rejection_envelope(
                 self.session.as_ref().map(EditorSession::project),
+                super::RejectionCode::RejectionUnknown,
                 "load_failed",
                 err,
             ),
@@ -81,6 +82,7 @@ impl HostSessionStore {
             Ok(bytes) => self.load_save_bytes(&bytes, label),
             Err(err) => rejection_envelope(
                 self.session.as_ref().map(EditorSession::project),
+                super::RejectionCode::RejectionUnknown,
                 "invalid_hex",
                 format!("Invalid hex save payload: {err}"),
             ),
@@ -100,6 +102,7 @@ impl HostSessionStore {
             }
             Err(err) => rejection_envelope(
                 self.session.as_ref().map(EditorSession::project),
+                super::RejectionCode::RejectionUnknown,
                 "io_error",
                 format!("Failed to read `{}`: {err}", resolved.display()),
             ),
@@ -129,14 +132,18 @@ impl HostSessionStore {
 
     pub fn export_save_bytes(&self) -> Result<Vec<u8>, ActionRejection> {
         let Some(sess) = &self.session else {
-            return Err(ActionRejection {
-                code: "no_session_loaded".to_string(),
-                message: "Cannot export save before a session is loaded".to_string(),
-            });
+            return Err(ActionRejection::new(
+                super::RejectionCode::RejectionUnknown,
+                "no_session_loaded",
+                "Cannot export save before a session is loaded",
+            ));
         };
-        sess.to_save_bytes().map_err(|err| ActionRejection {
-            code: "export_failed".to_string(),
-            message: err,
+        sess.to_save_bytes().map_err(|err| {
+            ActionRejection::new(
+                super::RejectionCode::RejectionUnknown,
+                "export_failed",
+                err,
+            )
         })
     }
 
@@ -180,7 +187,12 @@ impl HostSessionStore {
                     },
                     Err(rej) => HostResponse {
                         ok: false,
-                        envelope: rejection_envelope(env.session, rej.code.clone(), rej.message.clone()),
+                        envelope: rejection_envelope(
+                            env.session,
+                            rej.code,
+                            rej.raw_code.clone(),
+                            rej.message.clone(),
+                        ),
                         export_hex: None,
                         export_byte_len: None,
                         error: Some(rej),
@@ -194,15 +206,17 @@ impl HostSessionStore {
         match serde_json::from_str::<HostRequest>(line) {
             Ok(req) => self.handle_request(req),
             Err(err) => {
-                let rej = ActionRejection {
-                    code: "invalid_host_request".to_string(),
-                    message: format!("Invalid HostRequest JSON: {err}"),
-                };
+                let rej = ActionRejection::new(
+                    super::RejectionCode::RejectionUnknown,
+                    "invalid_host_request",
+                    format!("Invalid HostRequest JSON: {err}"),
+                );
                 HostResponse {
                     ok: false,
                     envelope: rejection_envelope(
                         self.session.as_ref().map(EditorSession::project),
-                        rej.code.clone(),
+                        rej.code,
+                        rej.raw_code.clone(),
                         rej.message.clone(),
                     ),
                     export_hex: None,
@@ -251,25 +265,28 @@ fn no_session_envelope() -> SessionEnvelope {
     SessionEnvelope {
         ok: false,
         session: None,
-        rejection: Some(ActionRejection {
-            code: "no_session_loaded".to_string(),
-            message: "No save session is currently loaded".to_string(),
-        }),
+        rejection: Some(ActionRejection::new(
+            super::RejectionCode::RejectionUnknown,
+            "no_session_loaded",
+            "No save session is currently loaded",
+        )),
     }
 }
 
 fn rejection_envelope(
     session: Option<super::SessionView>,
-    code: impl Into<String>,
+    code: super::RejectionCode,
+    raw_code: impl Into<String>,
     message: impl Into<String>,
 ) -> SessionEnvelope {
     SessionEnvelope {
         ok: false,
         session,
-        rejection: Some(ActionRejection {
-            code: code.into(),
-            message: message.into(),
-        }),
+        rejection: Some(ActionRejection::new(
+            code,
+            raw_code,
+            message,
+        )),
     }
 }
 

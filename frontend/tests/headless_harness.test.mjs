@@ -368,7 +368,7 @@ test("Closed-loop scenario 1: full multi-step browser journey across Elm Headles
     );
     assert.equal(hellResStep.snap.dirty, false);
 
-    // 4. Boundary rejection & recovery via ClearBanner
+    // 4. Boundary rejection & recovery via Toast & Undo Resilience
     const rejected = await driver.requestHost({
       cmd: "dispatch_intent",
       intent: { SetMercLevel: { level: 120 } },
@@ -376,7 +376,12 @@ test("Closed-loop scenario 1: full multi-step browser journey across Elm Headles
     assert.equal(rejected.resp.ok, false);
     assert.equal(rejected.snap.rejectionCode, "merc_level_out_of_range");
     assert.match(rejected.snap.statusBanner, /merc_level_out_of_range/);
+    assert.equal(rejected.snap.hasToast, true);
+    assert.equal(rejected.snap.toastRawCode, "merc_level_out_of_range");
     assert.equal(rejected.snap.dirty, false);
+
+    const dismissedToast = await driver.stepCommand({ kind: "DismissToast" });
+    assert.equal(dismissedToast.snap.hasToast, false);
 
     const clearedBanner = await driver.stepCommand({ kind: "ClearBanner" });
     assert.equal(clearedBanner.snap.statusBanner, null);
@@ -521,6 +526,12 @@ test("Closed-loop scenario 3: focusedInput draft isolation, Rust boundary reject
     const rejectedGold = await driver.stepCommand({ kind: "CommitFocusedInput" });
     assert.equal(rejectedGold.resp.ok, false);
     assert.equal(rejectedGold.snap.rejectionCode, "invalid_character_mutation");
+    assert.equal(rejectedGold.snap.hasToast, true);
+    assert.equal(rejectedGold.snap.toastRawCode, "invalid_character_mutation");
+
+    // Dismiss the rejection toast (leaving valid edits intact)
+    const dismissed = await driver.stepCommand({ kind: "DismissToast" });
+    assert.equal(dismissed.snap.hasToast, false);
 
     // 6. Export checksum-valid .d2s and reload into fresh Rust session to verify true roundtrip fidelity
     const { snap: reloadedSnap } = await driver.exportAndReload("scenario3-character-loopback.d2s");

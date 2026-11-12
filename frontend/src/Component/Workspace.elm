@@ -4,12 +4,12 @@ import Component.CharacterPanel as CharacterPanel
 import Component.ContainersPanel as ContainersPanel
 import Component.MercenaryPanel as MercenaryPanel
 import Component.ProgressionPanel as ProgressionPanel
-import Generated.Protocol exposing (SessionView)
+import Generated.Protocol exposing (RejectionCode(..), SessionView, SuggestedRecovery(..))
 import Html exposing (Html, button, div, h1, h2, p, section, span, text)
 import Html.Attributes exposing (attribute, class, classList, disabled, title)
 import Html.Events exposing (on, onClick)
 import Json.Decode
-import State.UiState exposing (PaintMode(..), ThemeMode(..), ViewTab(..))
+import State.UiState exposing (PaintMode(..), ThemeMode(..), Toast, ViewTab(..))
 import Update exposing (Model, Msg(..))
 
 
@@ -22,6 +22,7 @@ view model =
             ]
         ]
         [ viewTopHeader model
+        , viewToastNotification model.ui.toast
         , case model.ui.statusBanner of
             Just banner ->
                 div [ class "status-banner", attribute "data-testid" "status-banner" ]
@@ -237,3 +238,93 @@ viewHeroCharacterBadge session isDirty =
                 ]
             ]
         ]
+
+
+viewToastNotification : Maybe Toast -> Html Msg
+viewToastNotification maybeToast =
+    case maybeToast of
+        Nothing ->
+            text ""
+
+        Just toast ->
+            let
+                codeLabel =
+                    case toast.code of
+                        RejectionInventoryFull ->
+                            "Inventory Full"
+
+                        RejectionSlotOccupied ->
+                            "Slot Occupied"
+
+                        RejectionInvalidPlacement ->
+                            "Invalid Placement"
+
+                        RejectionStatOutOfRange ->
+                            "Out of Range"
+
+                        RejectionSkillPrerequisiteNotMet ->
+                            "Requirement Not Met"
+
+                        RejectionOpaqueBitstreamViolation ->
+                            "Bitstream Violation"
+
+                        RejectionMercPersistenceNotSupported ->
+                            "Merc Read-only"
+
+                        RejectionNothingToUndo ->
+                            "Nothing to Undo"
+
+                        RejectionNothingToRedo ->
+                            "Nothing to Redo"
+
+                        RejectionShopSpawnFailed ->
+                            "Shop Spawn Failed"
+
+                        RejectionUnknown ->
+                            "Notice"
+
+                hasUndoAction =
+                    case toast.suggestedAction of
+                        Just SuggestUndo ->
+                            True
+
+                        _ ->
+                            case toast.code of
+                                RejectionInvalidPlacement ->
+                                    True
+
+                                RejectionSlotOccupied ->
+                                    True
+
+                                _ ->
+                                    False
+            in
+            div [ class "toast-container", attribute "data-testid" "toast-container" ]
+                [ div [ class "toast-notification is-rejection", attribute "data-testid" "rejection-toast" ]
+                    [ div [ class "toast-header" ]
+                        [ span [ class "toast-badge" ] [ text codeLabel ]
+                        , button
+                            [ class "toast-close-btn"
+                            , attribute "data-testid" "toast-close-btn"
+                            , onClick DismissToast
+                            , title "Close notification"
+                            ]
+                            [ text "×" ]
+                        ]
+                    , div [ class "toast-body" ]
+                        [ p [ class "toast-message" ] [ text toast.message ]
+                        ]
+                    , if hasUndoAction then
+                        div [ class "toast-actions" ]
+                            [ button
+                                [ class "btn-undo-action"
+                                , attribute "data-testid" "toast-undo-btn"
+                                , onClick TriggerToastUndo
+                                ]
+                                [ text "Undo Action" ]
+                            ]
+
+                      else
+                        text ""
+                    ]
+                ]

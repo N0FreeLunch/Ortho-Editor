@@ -1,11 +1,13 @@
 module HeadlessHarness exposing (main)
 
 import Bridge.Ports as Ports
-import Generated.Protocol
+import Generated.Protocol as Protocol
     exposing
         ( ContainerKind(..)
         , DifficultyMode(..)
         , EditMode(..)
+        , RejectionCode(..)
+        , SuggestedRecovery(..)
         , difficultyModeDecoder
         , editModeDecoder
         , uiIntentEncoder
@@ -234,6 +236,12 @@ commandDecoder =
                     "ClearBanner" ->
                         Json.Decode.succeed ClearBanner
 
+                    "DismissToast" ->
+                        Json.Decode.succeed DismissToast
+
+                    "TriggerToastUndo" ->
+                        Json.Decode.succeed TriggerToastUndo
+
                     other ->
                         Json.Decode.fail ("Unknown harness command: " ++ other)
             )
@@ -352,7 +360,7 @@ emitSnapshot model =
 
         rejectionCodeValue =
             model.lastRejection
-                |> Maybe.map (\r -> Json.Encode.string r.code)
+                |> Maybe.map (\r -> Json.Encode.string r.rawCode)
                 |> Maybe.withDefault Json.Encode.null
 
         dirtyValue =
@@ -476,6 +484,34 @@ emitSnapshot model =
             , ( "mercPersistenceSupported", mercPersistenceSupportedValue )
             , ( "exportSupported", exportSupportedValue )
             , ( "rejectionCode", rejectionCodeValue )
+            , ( "hasToast", Json.Encode.bool (model.ui.toast /= Nothing) )
+            , ( "toastRawCode"
+              , model.ui.toast
+                    |> Maybe.map (.rawCode >> Json.Encode.string)
+                    |> Maybe.withDefault Json.Encode.null
+              )
+            , ( "toastHasUndo"
+              , model.ui.toast
+                    |> Maybe.map
+                        (\t ->
+                            case t.suggestedAction of
+                                Just Protocol.SuggestUndo ->
+                                    True
+
+                                _ ->
+                                    case t.code of
+                                        Protocol.RejectionInvalidPlacement ->
+                                            True
+
+                                        Protocol.RejectionSlotOccupied ->
+                                            True
+
+                                        _ ->
+                                            False
+                        )
+                    |> Maybe.map Json.Encode.bool
+                    |> Maybe.withDefault Json.Encode.null
+              )
             , ( "decodeError", decodeErrorValue )
             ]
         )

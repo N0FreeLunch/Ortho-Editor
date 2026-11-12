@@ -103,7 +103,7 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
     let lvl_locked = session.apply_intent(UiIntent::SetMercLevel { level: 85 });
     assert!(!lvl_locked.ok);
     assert_eq!(
-        lvl_locked.rejection.as_ref().map(|r| r.code.as_str()),
+        lvl_locked.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("merc_persistence_not_supported")
     );
     let after_lvl_view = lvl_locked.session.expect("session retained");
@@ -113,7 +113,7 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
     let lvl_bad_low = session.apply_intent(UiIntent::SetMercLevel { level: 0 });
     assert!(!lvl_bad_low.ok);
     assert_eq!(
-        lvl_bad_low.rejection.as_ref().map(|r| r.code.as_str()),
+        lvl_bad_low.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("merc_level_out_of_range")
     );
     assert_eq!(
@@ -124,14 +124,14 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
     let lvl_bad_high = session.apply_intent(UiIntent::SetMercLevel { level: 99 });
     assert!(!lvl_bad_high.ok);
     assert_eq!(
-        lvl_bad_high.rejection.as_ref().map(|r| r.code.as_str()),
+        lvl_bad_high.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("merc_level_out_of_range")
     );
 
     let act5_locked = session.apply_intent(UiIntent::SelectMercAct { act_index: 5 });
     assert!(!act5_locked.ok);
     assert_eq!(
-        act5_locked.rejection.as_ref().map(|r| r.code.as_str()),
+        act5_locked.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("merc_persistence_not_supported")
     );
     let act5_view = act5_locked.session.expect("session retained");
@@ -141,7 +141,7 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
     let act4_bad = session.apply_intent(UiIntent::SelectMercAct { act_index: 4 });
     assert!(!act4_bad.ok);
     assert_eq!(
-        act4_bad.rejection.as_ref().map(|r| r.code.as_str()),
+        act4_bad.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("invalid_merc_act")
     );
 
@@ -317,14 +317,14 @@ fn host_store_command_loopback_handles_load_intent_rejection_and_export() {
     let empty_resp: HostResponse = store.handle_json_line(r#"{"cmd":"get_session"}"#);
     assert!(!empty_resp.ok);
     assert_eq!(
-        empty_resp.error.as_ref().map(|e| e.code.as_str()),
+        empty_resp.error.as_ref().map(|e| e.raw_code.as_str()),
         Some("no_session_loaded")
     );
 
     let malformed = store.handle_json_line(r#"{"cmd":"non_existent"}"#);
     assert!(!malformed.ok);
     assert_eq!(
-        malformed.error.as_ref().map(|e| e.code.as_str()),
+        malformed.error.as_ref().map(|e| e.raw_code.as_str()),
         Some("invalid_host_request")
     );
 
@@ -347,7 +347,7 @@ fn host_store_command_loopback_handles_load_intent_rejection_and_export() {
     );
     assert!(!bad_merc.ok);
     assert_eq!(
-        bad_merc.error.as_ref().map(|e| e.code.as_str()),
+        bad_merc.error.as_ref().map(|e| e.raw_code.as_str()),
         Some("merc_level_out_of_range")
     );
     assert!(
@@ -411,7 +411,7 @@ fn character_profile_and_stat_mutations_enforce_bounds_and_roundtrip_bytes() {
     });
     assert!(!bad_level.ok);
     assert_eq!(
-        bad_level.rejection.as_ref().map(|r| r.code.as_str()),
+        bad_level.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("invalid_character_mutation")
     );
     assert!(!bad_level.session.expect("session stays valid").dirty);
@@ -422,7 +422,7 @@ fn character_profile_and_stat_mutations_enforce_bounds_and_roundtrip_bytes() {
     });
     assert!(!bad_gold.ok);
     assert_eq!(
-        bad_gold.rejection.as_ref().map(|r| r.code.as_str()),
+        bad_gold.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("invalid_character_mutation")
     );
 
@@ -515,7 +515,7 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
     });
     assert!(!belt_reject.ok);
     assert_eq!(
-        belt_reject.rejection.as_ref().map(|r| r.code.as_str()),
+        belt_reject.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("belt_consumable_only")
     );
 

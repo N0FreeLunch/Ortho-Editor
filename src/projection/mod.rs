@@ -542,11 +542,79 @@ pub enum UiIntent {
     },
 }
 
+/// Domain taxonomy of rejection codes returned when Rust rejects a `UiIntent`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub enum RejectionCode {
+    RejectionInventoryFull,
+    RejectionSlotOccupied,
+    RejectionInvalidPlacement,
+    RejectionStatOutOfRange,
+    RejectionSkillPrerequisiteNotMet,
+    RejectionOpaqueBitstreamViolation,
+    RejectionMercPersistenceNotSupported,
+    RejectionNothingToUndo,
+    RejectionNothingToRedo,
+    RejectionShopSpawnFailed,
+    RejectionUnknown,
+}
+
+impl RejectionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RejectionInventoryFull => "inventory_full",
+            Self::RejectionSlotOccupied => "slot_occupied",
+            Self::RejectionInvalidPlacement => "invalid_placement",
+            Self::RejectionStatOutOfRange => "stat_out_of_range",
+            Self::RejectionSkillPrerequisiteNotMet => "skill_prerequisite_not_met",
+            Self::RejectionOpaqueBitstreamViolation => "opaque_bitstream_violation",
+            Self::RejectionMercPersistenceNotSupported => "merc_persistence_not_supported",
+            Self::RejectionNothingToUndo => "nothing_to_undo",
+            Self::RejectionNothingToRedo => "nothing_to_redo",
+            Self::RejectionShopSpawnFailed => "shop_spawn_failed",
+            Self::RejectionUnknown => "unknown_error",
+        }
+    }
+}
+
+/// Suggested recovery action guided to Elm when an intent is rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub enum SuggestedRecovery {
+    SuggestUndo,
+    SuggestClearSlot,
+    SuggestAdjustValue,
+    SuggestNone,
+}
+
 /// Structured rejection returned when Rust rejects a `UiIntent` invariant violation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct ActionRejection {
-    pub code: String,
+    pub code: RejectionCode,
+    pub raw_code: String,
     pub message: String,
+    pub target_id: Option<String>,
+    pub suggested_action: Option<SuggestedRecovery>,
+}
+
+impl ActionRejection {
+    pub fn new(code: RejectionCode, raw_code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            raw_code: raw_code.into(),
+            message: message.into(),
+            target_id: None,
+            suggested_action: None,
+        }
+    }
+
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target_id = Some(target.into());
+        self
+    }
+
+    pub fn with_recovery(mut self, recovery: SuggestedRecovery) -> Self {
+        self.suggested_action = Some(recovery);
+        self
+    }
 }
 
 /// Envelope returned from Rust over ports on load or `UiIntent` application.
@@ -1113,27 +1181,39 @@ impl EditorSession {
             }
             UiIntent::SetMercLevel { level } => {
                 if !(1..=98).contains(&level) {
-                    return Err(ActionRejection {
-                        code: "merc_level_out_of_range".to_string(),
-                        message: format!("Mercenary level must stay within 1..=98 (got {level})"),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "merc_level_out_of_range",
+                        format!("Mercenary level must stay within 1..=98 (got {level})"),
+                    )
+                    .with_target("merc_level")
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
-                Err(ActionRejection {
-                    code: "merc_persistence_not_supported".to_string(),
-                    message: "Mercenary edits are read-only until .d2s mercenary writeback is implemented.".to_string(),
-                })
+                Err(ActionRejection::new(
+                    RejectionCode::RejectionMercPersistenceNotSupported,
+                    "merc_persistence_not_supported",
+                    "Mercenary edits are read-only until .d2s mercenary writeback is implemented.",
+                )
+                .with_target("merc_persistence")
+                .with_recovery(SuggestedRecovery::SuggestNone))
             }
             UiIntent::SelectMercAct { act_index } => {
                 if !matches!(act_index, 1 | 2 | 3 | 5) {
-                    return Err(ActionRejection {
-                        code: "invalid_merc_act".to_string(),
-                        message: format!("Mercenary act must be 1, 2, 3, or 5 (got {act_index})"),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "invalid_merc_act",
+                        format!("Mercenary act must be 1, 2, 3, or 5 (got {act_index})"),
+                    )
+                    .with_target("merc_act")
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
-                Err(ActionRejection {
-                    code: "merc_persistence_not_supported".to_string(),
-                    message: "Mercenary edits are read-only until .d2s mercenary writeback is implemented.".to_string(),
-                })
+                Err(ActionRejection::new(
+                    RejectionCode::RejectionMercPersistenceNotSupported,
+                    "merc_persistence_not_supported",
+                    "Mercenary edits are read-only until .d2s mercenary writeback is implemented.",
+                )
+                .with_target("merc_persistence")
+                .with_recovery(SuggestedRecovery::SuggestNone))
             }
             UiIntent::ToggleQuest { difficulty, key } => {
                 let diff = difficulty.as_index();
@@ -1144,10 +1224,12 @@ impl EditorSession {
                     .iter_mut()
                     .find(|q| q.difficulty() == diff && quest_key(q.act(), q.index()) == key)
                 else {
-                    return Err(ActionRejection {
-                        code: "unknown_quest_key".to_string(),
-                        message: format!("Unknown quest key `{key}` for {difficulty:?}"),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionUnknown,
+                        "unknown_quest_key",
+                        format!("Unknown quest key `{key}` for {difficulty:?}"),
+                    )
+                    .with_target(key));
                 };
                 let next = !quest.is_completed();
                 quest.set_completed(next);
@@ -1171,10 +1253,11 @@ impl EditorSession {
                     }
                 }
                 if matched == 0 && !key_set.is_empty() {
-                    return Err(ActionRejection {
-                        code: "unknown_quest_batch".to_string(),
-                        message: format!("No matching quests found for {difficulty:?}"),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionUnknown,
+                        "unknown_quest_batch",
+                        format!("No matching quests found for {difficulty:?}"),
+                    ));
                 }
                 if matched > 0 {
                     self.dirty = true;
@@ -1195,10 +1278,13 @@ impl EditorSession {
                 let diff = difficulty.as_index() as usize;
                 let max_bits = self.waypoints_by_diff[diff].waypoints().len() as i32;
                 if bit < 0 || bit >= max_bits {
-                    return Err(ActionRejection {
-                        code: "waypoint_bit_out_of_range".to_string(),
-                        message: format!("Waypoint bit {bit} is outside 0..{max_bits}"),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "waypoint_bit_out_of_range",
+                        format!("Waypoint bit {bit} is outside 0..{max_bits}"),
+                    )
+                    .with_target(format!("wp_{diff}_{bit}"))
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
                 let wp = &mut self.waypoints_by_diff[diff].waypoints_mut()[bit as usize];
                 let next = !wp.is_active();
@@ -1216,13 +1302,13 @@ impl EditorSession {
                 let touched = !bits.is_empty();
                 for bit in bits {
                     if bit < 0 || (bit as usize) >= wps.len() {
-                        return Err(ActionRejection {
-                            code: "waypoint_bit_out_of_range".to_string(),
-                            message: format!(
-                                "Waypoint bit {bit} is outside 0..{}",
-                                wps.len()
-                            ),
-                        });
+                        return Err(ActionRejection::new(
+                            RejectionCode::RejectionStatOutOfRange,
+                            "waypoint_bit_out_of_range",
+                            format!("Waypoint bit {bit} is outside 0..{}", wps.len()),
+                        )
+                        .with_target(format!("wp_{diff}_{bit}"))
+                        .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                     }
                     wps[bit as usize].set_active(active);
                 }
@@ -1294,20 +1380,26 @@ impl EditorSession {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
                 {
-                    return Err(ActionRejection {
-                        code: "invalid_character_mutation".to_string(),
-                        message: "Character name must use 2 to 15 ASCII alphanumeric, '-' or '_' characters.".to_string(),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "invalid_character_mutation",
+                        "Character name must use 2 to 15 ASCII alphanumeric, '-' or '_' characters.",
+                    )
+                    .with_target("char_name")
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
                 let dto = CharacterWireDto {
                     name: Some(trimmed.clone()),
                     ..Default::default()
                 };
                 if let Err(err) = dto.validate() {
-                    return Err(ActionRejection {
-                        code: "invalid_character_mutation".to_string(),
-                        message: err.to_string(),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "invalid_character_mutation",
+                        err.to_string(),
+                    )
+                    .with_target("char_name")
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
                 self.apply_character_edit(|edits| {
                     edits.name = Some(trimmed);
@@ -1316,20 +1408,25 @@ impl EditorSession {
             }
             UiIntent::SelectItemForMove { item_index } => {
                 if self.item_cards.iter().any(|c| c.container == ContainerKind::Cursor) {
-                    return Err(ActionRejection {
-                        code: "cursor_item_must_be_placed".to_string(),
-                        message: "Place the swapped item held on the cursor into a slot or click Undo.".to_string(),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionInvalidPlacement,
+                        "cursor_item_must_be_placed",
+                        "Place the swapped item held on the cursor into a slot or click Undo.",
+                    )
+                    .with_target("cursor")
+                    .with_recovery(SuggestedRecovery::SuggestUndo));
                 }
                 if let Some(idx) = item_index {
                     let valid = usize::try_from(idx)
                         .ok()
                         .is_some_and(|i| i < self.player_items_with_container.len());
                     if !valid {
-                        return Err(ActionRejection {
-                            code: "item_not_found".to_string(),
-                            message: format!("Item index {idx} was not found in the player stream."),
-                        });
+                        return Err(ActionRejection::new(
+                            RejectionCode::RejectionUnknown,
+                            "item_not_found",
+                            format!("Item index {idx} was not found in the player stream."),
+                        )
+                        .with_target(format!("item_{idx}")));
                     }
                 }
                 self.selected_move_item_index = item_index;
@@ -1342,9 +1439,13 @@ impl EditorSession {
                 y,
             } => self.apply_move_item(item_index, target_container, x, y),
             UiIntent::Undo => {
-                let prev = self.undo_stack.pop().ok_or_else(|| ActionRejection {
-                    code: "nothing_to_undo".to_string(),
-                    message: "No actions available to undo.".to_string(),
+                let prev = self.undo_stack.pop().ok_or_else(|| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionNothingToUndo,
+                        "nothing_to_undo",
+                        "No actions available to undo.",
+                    )
+                    .with_recovery(SuggestedRecovery::SuggestNone)
                 })?;
                 let current = self.capture_snapshot();
                 self.redo_stack.push(current);
@@ -1352,9 +1453,13 @@ impl EditorSession {
                 Ok(())
             }
             UiIntent::Redo => {
-                let next = self.redo_stack.pop().ok_or_else(|| ActionRejection {
-                    code: "nothing_to_redo".to_string(),
-                    message: "No actions available to redo.".to_string(),
+                let next = self.redo_stack.pop().ok_or_else(|| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionNothingToRedo,
+                        "nothing_to_redo",
+                        "No actions available to redo.",
+                    )
+                    .with_recovery(SuggestedRecovery::SuggestNone)
                 })?;
                 let current = self.capture_snapshot();
                 self.undo_stack.push(current);
@@ -1385,9 +1490,12 @@ impl EditorSession {
                 Ok(())
             }
             UiIntent::DisposeHeldItem => {
-                let item_index = self.selected_move_item_index.ok_or_else(|| ActionRejection {
-                    code: "no_held_item".to_string(),
-                    message: "Pick up an item before disposing it at the shop.".to_string(),
+                let item_index = self.selected_move_item_index.ok_or_else(|| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionUnknown,
+                        "no_held_item",
+                        "Pick up an item before disposing it at the shop.",
+                    )
                 })?;
                 self.dispose_item_by_index(item_index)
             }
@@ -1452,9 +1560,13 @@ impl EditorSession {
         let idx = usize::try_from(item_index)
             .ok()
             .filter(|&i| i < self.player_items_with_container.len())
-            .ok_or_else(|| ActionRejection {
-                code: "item_not_found".to_string(),
-                message: format!("Item index {item_index} was not found in the player stream."),
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
             })?;
         self.player_items_with_container.remove(idx);
         self.item_cards.remove(idx);
@@ -1471,35 +1583,39 @@ impl EditorSession {
         if delta == 0 {
             return Ok(());
         }
-        let base_id = class_skill_base_id(self.char_class_id).ok_or_else(|| ActionRejection {
-            code: "invalid_skill_mutation".to_string(),
-            message: "Character class does not have a valid skill table.".to_string(),
+        let base_id = class_skill_base_id(self.char_class_id).ok_or_else(|| {
+            ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "invalid_skill_mutation",
+                "Character class does not have a valid skill table.",
+            )
         })?;
-        let sid = u32::try_from(skill_id).map_err(|_| ActionRejection {
-            code: "invalid_skill_mutation".to_string(),
-            message: format!("Skill ID {skill_id} is invalid."),
+        let sid = u32::try_from(skill_id).map_err(|_| {
+            ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "invalid_skill_mutation",
+                format!("Skill ID {skill_id} is invalid."),
+            )
         })?;
         if sid < base_id || (sid - base_id) as usize >= SKILL_SECTION_LEN {
-            return Err(ActionRejection {
-                code: "invalid_skill_mutation".to_string(),
-                message: format!(
-                    "Skill ID {skill_id} does not belong to {}.",
-                    self.char_class
-                ),
-            });
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "invalid_skill_mutation",
+                format!("Skill ID {skill_id} does not belong to {}.", self.char_class),
+            ));
         }
         let slot = (sid - base_id) as usize;
         let current = i32::from(self.skill_section.0[slot]);
         let max_rank = if self.skill_mode == EditMode::Free { 99 } else { 20 };
         let next = current + delta;
         if next < 0 || next > max_rank {
-            return Err(ActionRejection {
-                code: "skill_rank_out_of_range".to_string(),
-                message: format!(
-                    "Skill rank must stay within 0..={max_rank} in {:?} mode.",
-                    self.skill_mode
-                ),
-            });
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "skill_rank_out_of_range",
+                format!("Skill rank must stay within 0..={max_rank} in {:?} mode.", self.skill_mode),
+            )
+            .with_target(format!("skill_{sid}"))
+            .with_recovery(SuggestedRecovery::SuggestAdjustValue));
         }
         let alpha = self.save_version == 105;
         let unspent = self.attributes.actual_value(5, alpha).unwrap_or(0).max(0);
@@ -1510,19 +1626,22 @@ impl EditorSession {
                 .map(|s| s.reqlevel as i32)
                 .unwrap_or(1);
             if delta > 0 && i32::from(self.char_level) < req_level {
-                return Err(ActionRejection {
-                    code: "skill_level_requirement".to_string(),
-                    message: format!(
-                        "Requires character level {req_level} (current level {}).",
-                        self.char_level
-                    ),
-                });
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionSkillPrerequisiteNotMet,
+                    "skill_level_requirement",
+                    format!("Requires character level {req_level} (current level {}).", self.char_level),
+                )
+                .with_target(format!("skill_{sid}"))
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
             }
             if delta > 0 && unspent < delta {
-                return Err(ActionRejection {
-                    code: "insufficient_skill_points".to_string(),
-                    message: "No unspent skill points remaining in Legit mode.".to_string(),
-                });
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionSkillPrerequisiteNotMet,
+                    "insufficient_skill_points",
+                    "No unspent skill points remaining in Legit mode.",
+                )
+                .with_target(format!("skill_{sid}"))
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
             }
             let next_unspent = (unspent - delta).max(0);
             let save_add = crate::domain::stats::attribute::char_stat_save_add(5, alpha);
@@ -1541,10 +1660,11 @@ impl EditorSession {
 
     fn apply_reset_skills(&mut self) -> Result<(), ActionRejection> {
         let Some(base_id) = class_skill_base_id(self.char_class_id) else {
-            return Err(ActionRejection {
-                code: "invalid_skill_mutation".to_string(),
-                message: "Character class does not have a valid skill table.".to_string(),
-            });
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "invalid_skill_mutation",
+                "Character class does not have a valid skill table.",
+            ));
         };
         let total_spent: i32 = self
             .skill_section
@@ -1573,9 +1693,13 @@ impl EditorSession {
         let idx = usize::try_from(item_index)
             .ok()
             .filter(|&i| i < self.player_items_with_container.len())
-            .ok_or_else(|| ActionRejection {
-                code: "item_not_found".to_string(),
-                message: format!("Item index {item_index} was not found in the player stream."),
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
             })?;
 
         let (item_code, width, height) = {
@@ -1586,19 +1710,27 @@ impl EditorSession {
         if target_container == ContainerKind::Equipment {
             let slot_name = equipment_slot_label(x)
                 .filter(|_| y == 0)
-                .ok_or_else(|| ActionRejection {
-                    code: "out_of_bounds".to_string(),
-                    message: format!("Equipment slot ({x}, {y}) is not a valid body slot (1..=12)."),
+                .ok_or_else(|| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionInvalidPlacement,
+                        "out_of_bounds",
+                        format!("Equipment slot ({x}, {y}) is not a valid body slot (1..=12)."),
+                    )
+                    .with_target(format!("equip_{x}_{y}"))
+                    .with_recovery(SuggestedRecovery::SuggestUndo)
                 })?;
             if !item_fits_equipment_slot(&item_code, x) {
-                return Err(ActionRejection {
-                    code: "invalid_equipment_slot".to_string(),
-                    message: format!(
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    "invalid_equipment_slot",
+                    format!(
                         "Item '{}' cannot be equipped in the {} slot.",
                         item_code.trim(),
                         slot_name
                     ),
-                });
+                )
+                .with_target(slot_name)
+                .with_recovery(SuggestedRecovery::SuggestUndo));
             }
             let occupied: Vec<usize> = self
                 .item_cards
@@ -1614,10 +1746,13 @@ impl EditorSession {
             return match occupied.as_slice() {
                 [] => Ok((idx, ItemContainer::Equipment, None)),
                 [disp] => Ok((idx, ItemContainer::Equipment, Some(*disp))),
-                _ => Err(ActionRejection {
-                    code: "container_slot_occupied".to_string(),
-                    message: format!("Equipment slot {slot_name} has multiple overlapping items."),
-                }),
+                _ => Err(ActionRejection::new(
+                    RejectionCode::RejectionSlotOccupied,
+                    "container_slot_occupied",
+                    format!("Equipment slot {slot_name} has multiple overlapping items."),
+                )
+                .with_target(slot_name)
+                .with_recovery(SuggestedRecovery::SuggestUndo)),
             };
         }
 
@@ -1628,36 +1763,45 @@ impl EditorSession {
             ContainerKind::Belt => (ItemContainer::Belt, 4i32, 4i32, ContainerKind::Belt),
             ContainerKind::TempInventory => (ItemContainer::Unknown, 9i32, 4i32, ContainerKind::TempInventory),
             other => {
-                return Err(ActionRejection {
-                    code: "invalid_target_container".to_string(),
-                    message: format!(
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    "invalid_target_container",
+                    format!(
                         "Items cannot be moved to '{}'. Allowed targets: inventory, stash, cube, belt, temp_inventory, equipment, shop.",
                         other.as_label()
                     ),
-                });
+                )
+                .with_target(other.as_label())
+                .with_recovery(SuggestedRecovery::SuggestUndo));
             }
         };
 
         if target == ItemContainer::Belt
             && (!is_belt_consumable(&item_code) || width != 1 || height != 1)
         {
-            return Err(ActionRejection {
-                code: "belt_consumable_only".to_string(),
-                message: format!(
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionInvalidPlacement,
+                "belt_consumable_only",
+                format!(
                     "Only 1x1 belt consumables (potions/scrolls) can be placed in the belt ('{}' is not allowed).",
                     item_code.trim()
                 ),
-            });
+            )
+            .with_target("belt")
+            .with_recovery(SuggestedRecovery::SuggestUndo));
         }
 
         if x < 0 || y < 0 || x + width > max_w || y + height > max_h {
-            return Err(ActionRejection {
-                code: "out_of_bounds".to_string(),
-                message: format!(
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionInvalidPlacement,
+                "out_of_bounds",
+                format!(
                     "Placement ({x}, {y}) with size {width}x{height} exceeds {} bounds ({max_w}x{max_h}).",
                     target_container.as_label()
                 ),
-            });
+            )
+            .with_target(target_container.as_label())
+            .with_recovery(SuggestedRecovery::SuggestUndo));
         }
 
         let mut overlaps = Vec::new();
@@ -1675,14 +1819,17 @@ impl EditorSession {
         match overlaps.as_slice() {
             [] => Ok((idx, target, None)),
             [disp] => Ok((idx, target, Some(*disp))),
-            _ => Err(ActionRejection {
-                code: "container_slot_occupied".to_string(),
-                message: format!(
+            _ => Err(ActionRejection::new(
+                RejectionCode::RejectionSlotOccupied,
+                "container_slot_occupied",
+                format!(
                     "Target slot ({x}, {y}) in {} overlaps with {} items and cannot swap.",
                     target_container.as_label(),
                     overlaps.len()
                 ),
-            }),
+            )
+            .with_target(target_container.as_label())
+            .with_recovery(SuggestedRecovery::SuggestUndo)),
         }
     }
 
@@ -1720,7 +1867,7 @@ impl EditorSession {
         }
         let belt_restricted_reason =
             match self.validate_move_target(item_index, ContainerKind::Belt, 0, 0) {
-                Err(rej) if rej.code == "belt_consumable_only" => Some(rej.message),
+                Err(rej) if rej.raw_code == "belt_consumable_only" => Some(rej.message),
                 _ => None,
             };
         (targets, belt_restricted_reason)
@@ -1836,9 +1983,13 @@ impl EditorSession {
         target_container: ShopSpawnTarget,
     ) -> Result<(), ActionRejection> {
         let alpha = self.item_dialect == "alpha";
-        let mut item = build_shop_item_by_id(catalog_id, alpha).ok_or_else(|| ActionRejection {
-            code: "shop_item_not_found".to_string(),
-            message: format!("Shop catalog item '{catalog_id}' was not found."),
+        let mut item = build_shop_item_by_id(catalog_id, alpha).ok_or_else(|| {
+            ActionRejection::new(
+                RejectionCode::RejectionShopSpawnFailed,
+                "shop_item_not_found",
+                format!("Shop catalog item '{catalog_id}' was not found."),
+            )
+            .with_target(catalog_id)
         })?;
         let (w, h) = get_item_size(item.code.trim());
         let width = i32::from(w.max(1));
@@ -1848,9 +1999,14 @@ impl EditorSession {
             ShopSpawnTarget::SpawnInventory => {
                 let (x, y) = self
                     .find_free_grid_slot(ContainerKind::Inventory, 10, 4, width, height)
-                    .ok_or_else(|| ActionRejection {
-                        code: "no_free_slot".to_string(),
-                        message: "Inventory (10x4) has no free space for this item.".to_string(),
+                    .ok_or_else(|| {
+                        ActionRejection::new(
+                            RejectionCode::RejectionInventoryFull,
+                            "no_free_slot",
+                            "Inventory (10x4) has no free space for this item.",
+                        )
+                        .with_target("inventory")
+                        .with_recovery(SuggestedRecovery::SuggestClearSlot)
                     })?;
                 item.x = x as u8;
                 item.y = y as u8;
@@ -1863,9 +2019,14 @@ impl EditorSession {
             ShopSpawnTarget::SpawnTempInventory => {
                 let (x, y) = self
                     .find_free_grid_slot(ContainerKind::TempInventory, 9, 4, width, height)
-                    .ok_or_else(|| ActionRejection {
-                        code: "no_free_slot".to_string(),
-                        message: "Temp Inventory (9x4) has no free space for this item.".to_string(),
+                    .ok_or_else(|| {
+                        ActionRejection::new(
+                            RejectionCode::RejectionInventoryFull,
+                            "no_free_slot",
+                            "Temp Inventory (9x4) has no free space for this item.",
+                        )
+                        .with_target("temp_inventory")
+                        .with_recovery(SuggestedRecovery::SuggestClearSlot)
                     })?;
                 item.x = x as u8;
                 item.y = y as u8;
@@ -1897,11 +2058,13 @@ impl EditorSession {
                     item.body.y = y as u8;
                     (ContainerKind::TempInventory, ItemContainer::Unknown, 0u8)
                 } else {
-                    return Err(ActionRejection {
-                        code: "no_free_slot".to_string(),
-                        message: "Both Inventory (10x4) and Temp Inventory (9x4) are full."
-                            .to_string(),
-                    });
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionInventoryFull,
+                        "no_free_slot",
+                        "Both Inventory (10x4) and Temp Inventory (9x4) are full.",
+                    )
+                    .with_target("all_inventory")
+                    .with_recovery(SuggestedRecovery::SuggestClearSlot));
                 }
             }
         };
@@ -1940,24 +2103,36 @@ impl EditorSession {
             match solved {
                 Some(c) => c,
                 None => {
-                    item.to_bits_d2r_v3(&huffman).map_err(|e| ActionRejection {
-                        code: "shop_serialize_failed".to_string(),
-                        message: format!(
-                            "Failed to serialize spawned d2r-v3 item '{catalog_id}': {e}"
-                        ),
+                    item.to_bits_d2r_v3(&huffman).map_err(|e| {
+                        ActionRejection::new(
+                            RejectionCode::RejectionShopSpawnFailed,
+                            "shop_serialize_failed",
+                            format!(
+                                "Failed to serialize spawned d2r-v3 item '{catalog_id}': {e}"
+                            ),
+                        )
+                        .with_target(catalog_id)
                     })?;
                     item.clone()
                 }
             }
         } else {
-            let bytes = item.to_bytes(0, &huffman, alpha).map_err(|e| ActionRejection {
-                code: "shop_serialize_failed".to_string(),
-                message: format!("Failed to serialize spawned item '{catalog_id}': {e}"),
+            let bytes = item.to_bytes(0, &huffman, alpha).map_err(|e| {
+                ActionRejection::new(
+                    RejectionCode::RejectionShopSpawnFailed,
+                    "shop_serialize_failed",
+                    format!("Failed to serialize spawned item '{catalog_id}': {e}"),
+                )
+                .with_target(catalog_id)
             })?;
             Item::from_bytes_with_hint(&bytes, &huffman, alpha, Some(item.code.trim())).map_err(
-                |e| ActionRejection {
-                    code: "shop_roundtrip_failed".to_string(),
-                    message: format!("Failed to roundtrip spawned item '{catalog_id}': {e}"),
+                |e| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionShopSpawnFailed,
+                        "shop_roundtrip_failed",
+                        format!("Failed to roundtrip spawned item '{catalog_id}': {e}"),
+                    )
+                    .with_target(catalog_id)
                 },
             )?
         };
@@ -2002,25 +2177,41 @@ impl EditorSession {
         patch: impl FnOnce(&mut CharacterMutationContract) -> Result<(), String>,
     ) -> Result<(), ActionRejection> {
         let mut next_edits = self.char_edits.clone();
-        patch(&mut next_edits).map_err(|message| ActionRejection {
-            code: "invalid_character_mutation".to_string(),
-            message,
+        patch(&mut next_edits).map_err(|message| {
+            ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "invalid_character_mutation",
+                message,
+            )
+            .with_target("character_field")
+            .with_recovery(SuggestedRecovery::SuggestAdjustValue)
         })?;
         let huffman = HuffmanTree::new();
         let rebuilt = try_apply_character_mutation(&self.source_bytes, &next_edits, &huffman)
-            .map_err(|e| ActionRejection {
-                code: "invalid_character_mutation".to_string(),
-                message: e.to_string(),
+            .map_err(|e| {
+                ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "invalid_character_mutation",
+                    e.to_string(),
+                )
+                .with_target("character_field")
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue)
             })?;
-        let rebuilt_map = map_core_sections(&rebuilt).map_err(|e| ActionRejection {
-            code: "invalid_character_mutation".to_string(),
-            message: format!("Failed to remap character sections: {e}"),
+        let rebuilt_map = map_core_sections(&rebuilt).map_err(|e| {
+            ActionRejection::new(
+                RejectionCode::RejectionUnknown,
+                "invalid_character_mutation",
+                format!("Failed to remap character sections: {e}"),
+            )
         })?;
         let rebuilt_attrs =
             AttributeSection::parse(&rebuilt, rebuilt_map.gf_pos, rebuilt_map.if_pos).map_err(
-                |e| ActionRejection {
-                    code: "invalid_character_mutation".to_string(),
-                    message: format!("Failed to parse updated attributes: {e}"),
+                |e| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionUnknown,
+                        "invalid_character_mutation",
+                        format!("Failed to parse updated attributes: {e}"),
+                    )
                 },
             )?;
         let alpha = self.save_version == 105;
@@ -2825,6 +3016,8 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             SkillNodeView,
             ShopCatalogItemView,
             SessionView,
+            RejectionCode,
+            SuggestedRecovery,
             ActionRejection,
             SessionEnvelope,
         ],
