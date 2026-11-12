@@ -39,6 +39,7 @@ pulldown-cmark = "0.12"
 colored = "2.1"
 validator = { version = "0.18", features = ["derive"] }
 schemars = { version = "1.2.3", features = ["derive"] }
+elm_rs = "0.2.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
@@ -50,6 +51,14 @@ path = "src/bin/ortho.rs"
 [[bin]]
 name = "gen_api_docs"
 path = "src/bin/gen_api_docs.rs"
+
+[[bin]]
+name = "gen_elm_protocol"
+path = "src/bin/gen_elm_protocol.rs"
+
+[[bin]]
+name = "ortho_host_bridge"
+path = "src/bin/ortho_host_bridge.rs"
 
 [[bin]]
 name = "semantic-bit-diff"
