@@ -368,6 +368,8 @@ type alias MercSummaryView =
     , experience : Int
     , stats : MercStatsView
     , equippedCount : Int
+    , persistenceSupported : Bool
+    , previewOnlyReason : Maybe (String)
     }
 
 
@@ -381,6 +383,8 @@ mercSummaryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "experience" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stats" (mercStatsViewDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "equipped_count" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "persistence_supported" (Json.Decode.bool)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "preview_only_reason" (Json.Decode.nullable (Json.Decode.string))))
 
 
 type alias QuestCatalogEntryView =
@@ -448,6 +452,21 @@ progressionSummaryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "hell_waypoints_active" (Json.Decode.list (Json.Decode.int))))
 
 
+type alias SetBonusView =
+    { active : Bool
+    , requiredCount : Int
+    , lines : List (String)
+    }
+
+
+setBonusViewDecoder : Json.Decode.Decoder SetBonusView
+setBonusViewDecoder =
+    Json.Decode.succeed SetBonusView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "active" (Json.Decode.bool)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "required_count" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "lines" (Json.Decode.list (Json.Decode.string))))
+
+
 type alias ItemCardView =
     { index : Int
     , code : String
@@ -460,7 +479,15 @@ type alias ItemCardView =
     , y : Int
     , width : Int
     , height : Int
+    , itemLevel : Int
+    , baseAttributes : List (String)
     , properties : List (String)
+    , setName : Maybe (String)
+    , setPieces : List (String)
+    , pieceSetBonuses : List (SetBonusView)
+    , setBonuses : List (SetBonusView)
+    , socketedNames : List (String)
+    , imageUrl : Maybe (String)
     }
 
 
@@ -478,12 +505,22 @@ itemCardViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "y" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "width" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "height" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "item_level" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "base_attributes" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "properties" (Json.Decode.list (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_name" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_pieces" (Json.Decode.list (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "piece_set_bonuses" (Json.Decode.list (setBonusViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_bonuses" (Json.Decode.list (setBonusViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "socketed_names" (Json.Decode.list (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "image_url" (Json.Decode.nullable (Json.Decode.string))))
 
 
 type alias SessionView =
     { fixtureLabel : String
     , saveVersion : Int
+    , exportSupported : Bool
+    , exportUnsupportedReason : Maybe (String)
     , itemDialect : String
     , charName : String
     , charClass : String
@@ -510,6 +547,8 @@ sessionViewDecoder =
     Json.Decode.succeed SessionView
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "fixture_label" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "save_version" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "export_supported" (Json.Decode.bool)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "export_unsupported_reason" (Json.Decode.nullable (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "item_dialect" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "char_name" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "char_class" (Json.Decode.string)))

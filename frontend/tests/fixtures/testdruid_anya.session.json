@@ -1,6 +1,8 @@
 {
   "fixture_label": "TESTDRUID_Quest3_AnyaRescued.d2s",
   "save_version": 105,
+  "export_supported": true,
+  "export_unsupported_reason": null,
   "item_dialect": "d2r-v3",
   "char_name": "TESTDRUID",
   "char_class": "Druid",
@@ -89,7 +91,9 @@
       "innate_aura": "Paladin Aura (Act 2)",
       "equipment_auras": []
     },
-    "equipped_count": 3
+    "equipped_count": 3,
+    "persistence_supported": false,
+    "preview_only_reason": "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
   },
   "progression": {
     "is_expansion": false,
@@ -476,10 +480,20 @@
       "y": 0,
       "width": 1,
       "height": 2,
+      "item_level": 1,
+      "base_attributes": [
+        "Required Level: 5"
+      ],
       "properties": [
         "+2 to Dexterity",
         "+22 Maximum Stamina"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/charm/charm_medium3.svg"
     },
     {
       "index": 1,
@@ -493,10 +507,20 @@
       "y": 2,
       "width": 1,
       "height": 2,
+      "item_level": 7,
+      "base_attributes": [
+        "Required Level: 5"
+      ],
       "properties": [
         "Fire Resist +4%",
         "Adds 1-3 lightning damage"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/charm/charm_medium1.svg"
     },
     {
       "index": 2,
@@ -510,9 +534,19 @@
       "y": 9,
       "width": 1,
       "height": 1,
+      "item_level": 18,
+      "base_attributes": [
+        "Required Level: 3"
+      ],
       "properties": [
         "+10% Faster Cast Rate"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/amulet/amulet3.svg"
     },
     {
       "index": 3,
@@ -526,10 +560,65 @@
       "y": 8,
       "width": 1,
       "height": 1,
+      "item_level": 22,
+      "base_attributes": [
+        "Required Level: 11"
+      ],
       "properties": [
         "Damage Reduced by 2",
         "6% Life stolen per hit"
-      ]
+      ],
+      "set_name": "Cathan's Traps",
+      "set_pieces": [
+        "Cathan's Mesh",
+        "Cathan's Rule",
+        "Cathan's Seal",
+        "Cathan's Sigil",
+        "Cathan's Visage"
+      ],
+      "piece_set_bonuses": [
+        {
+          "active": false,
+          "required_count": 2,
+          "lines": [
+            "+10 to Strength"
+          ]
+        }
+      ],
+      "set_bonuses": [
+        {
+          "active": false,
+          "required_count": 2,
+          "lines": [
+            "+15 to Minimum Fire Damage",
+            "+15 to Maximum Fire Damage",
+            "Regenerate Mana 16%"
+          ]
+        },
+        {
+          "active": false,
+          "required_count": 3,
+          "lines": [
+            "Lightning Resist +25%"
+          ]
+        },
+        {
+          "active": false,
+          "required_count": 5,
+          "lines": [
+            "60% Bonus to Attack Rating",
+            "Magic Damage Reduced by 3",
+            "Fire Resist +25%",
+            "Lightning Resist +25%",
+            "Cold Resist +25%",
+            "Poison Resist +25%",
+            "+10% Faster Cast Rate",
+            "Increase Maximum Mana 20%"
+          ]
+        }
+      ],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/ring/rring5.svg"
     },
     {
       "index": 4,
@@ -543,9 +632,17 @@
       "y": 7,
       "width": 1,
       "height": 1,
+      "item_level": 21,
+      "base_attributes": [],
       "properties": [
         "21% Extra Gold from Monsters"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/gem/perfect_diamond4.svg"
     },
     {
       "index": 5,
@@ -559,12 +656,20 @@
       "y": 6,
       "width": 1,
       "height": 1,
+      "item_level": 1,
+      "base_attributes": [],
       "properties": [
         "+7 to Life",
         "+6 Defense",
         "+20 poison damage over 2 seconds",
         "Requirements -15%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/gem/perfect_diamond5.svg"
     },
     {
       "index": 6,
@@ -578,9 +683,19 @@
       "y": 3,
       "width": 1,
       "height": 1,
+      "item_level": 22,
+      "base_attributes": [
+        "Required Level: 10"
+      ],
       "properties": [
         "Fire Resist +7%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/charm/charm_small2.svg"
     },
     {
       "index": 7,
@@ -594,9 +709,19 @@
       "y": 2,
       "width": 1,
       "height": 1,
+      "item_level": 23,
+      "base_attributes": [
+        "Required Level: 10"
+      ],
       "properties": [
         "Fire Resist +6%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/charm/charm_small1.svg"
     },
     {
       "index": 8,
@@ -610,7 +735,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 180"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
     },
     {
       "index": 9,
@@ -624,7 +759,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 100"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/healing_potion2.svg"
     },
     {
       "index": 10,
@@ -638,9 +783,19 @@
       "y": 2,
       "width": 1,
       "height": 1,
+      "item_level": 8,
+      "base_attributes": [
+        "Required Level: 3"
+      ],
       "properties": [
         "+10% Faster Cast Rate"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/ring/rring5.svg"
     },
     {
       "index": 11,
@@ -654,9 +809,19 @@
       "y": 1,
       "width": 1,
       "height": 1,
+      "item_level": 30,
+      "base_attributes": [
+        "Required Level: 10"
+      ],
       "properties": [
         "Fire Resist +7%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/charm/charm_small1.svg"
     },
     {
       "index": 12,
@@ -670,6 +835,14 @@
       "y": 0,
       "width": 2,
       "height": 2,
+      "item_level": 26,
+      "base_attributes": [
+        "Defense: 54",
+        "Durability: 11 of 11",
+        "Required Strength: 13",
+        "Required Level: 12",
+        "Ethereal (Cannot be Repaired)"
+      ],
       "properties": [
         "+7 to Energy",
         "+29% Enhanced Defense",
@@ -677,7 +850,13 @@
         "+2 to Light Radius",
         "Poison Length Reduced by 25%",
         "Repairs 1 durability in 33 seconds"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/helmet/mask.svg"
     },
     {
       "index": 13,
@@ -691,10 +870,20 @@
       "y": 0,
       "width": 1,
       "height": 1,
+      "item_level": 27,
+      "base_attributes": [
+        "Required Level: 13"
+      ],
       "properties": [
         "+7 to Energy",
         "Lightning Resist +25%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/amulet/amulet1.svg"
     },
     {
       "index": 14,
@@ -708,12 +897,22 @@
       "y": 0,
       "width": 1,
       "height": 1,
+      "item_level": 21,
+      "base_attributes": [
+        "Required Level: 15"
+      ],
       "properties": [
         "+3 to Strength",
         "+4 to Energy",
         "Lightning Resist +6%",
         "+1 Half Freeze Duration"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/ring/rring4.svg"
     },
     {
       "index": 15,
@@ -727,10 +926,20 @@
       "y": 0,
       "width": 1,
       "height": 1,
+      "item_level": 28,
+      "base_attributes": [
+        "Required Level: 9"
+      ],
       "properties": [
         "Lightning Resist +17%",
         "39% Extra Gold from Monsters"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/ring/rring4.svg"
     },
     {
       "index": 16,
@@ -744,6 +953,14 @@
       "y": 0,
       "width": 2,
       "height": 2,
+      "item_level": 18,
+      "base_attributes": [
+        "Defense: 8",
+        "Kick Damage: 4 to 10",
+        "Durability: 14 of 14",
+        "Required Strength: 18",
+        "Required Level: 9"
+      ],
       "properties": [
         "+19 Maximum Stamina",
         "+17% Enhanced Defense",
@@ -751,7 +968,13 @@
         "+1 Half Freeze Duration",
         "5% Chance to cast level 3 Frost Nova when struck",
         "Repairs 1 durability in 33 seconds"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/boot/heavy_boots.svg"
     },
     {
       "index": 17,
@@ -765,6 +988,12 @@
       "y": 0,
       "width": 2,
       "height": 2,
+      "item_level": 22,
+      "base_attributes": [
+        "Defense: 17",
+        "Durability: 14 of 14",
+        "Required Level: 9"
+      ],
       "properties": [
         "+40 to Life",
         "+14% Enhanced Defense",
@@ -772,7 +1001,13 @@
         "+10 Defense",
         "+10% Increased Attack Speed",
         "+30% Faster Hit Recovery"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/glove/heavy_gloves.svg"
     },
     {
       "index": 18,
@@ -786,13 +1021,26 @@
       "y": 0,
       "width": 2,
       "height": 1,
+      "item_level": 40,
+      "base_attributes": [
+        "Defense: 9",
+        "Durability: 24 of 24",
+        "Required Strength: 60",
+        "Required Level: 13"
+      ],
       "properties": [
         "Cold Resist +28%",
         "Poison Resist +20%",
         "Attacker Takes Damage of 1",
         "+17% Faster Hit Recovery",
         "Poison Length Reduced by 25%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/belt/girdle_h.svg"
     },
     {
       "index": 19,
@@ -806,7 +1054,17 @@
       "y": 1,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 320"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
     },
     {
       "index": 20,
@@ -820,7 +1078,17 @@
       "y": 2,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 100"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/healing_potion2.svg"
     },
     {
       "index": 21,
@@ -834,7 +1102,17 @@
       "y": 3,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 180"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
     },
     {
       "index": 22,
@@ -848,7 +1126,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 320"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
     },
     {
       "index": 23,
@@ -862,7 +1150,17 @@
       "y": 1,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Heals 35% Life and Mana"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
     },
     {
       "index": 24,
@@ -876,6 +1174,15 @@
       "y": 0,
       "width": 2,
       "height": 4,
+      "item_level": 17,
+      "base_attributes": [
+        "Two-Hand Damage: 11 to 19",
+        "Very Fast Attack Speed [0]",
+        "Durability: 30 of 35",
+        "Required Strength: 38",
+        "Required Dexterity: 24",
+        "Required Level: 12"
+      ],
       "properties": [
         "+15 to Strength",
         "+8 to Dexterity",
@@ -883,7 +1190,13 @@
         "+30% Increased Attack Speed",
         "-50% Target Defense",
         "Slows Target by 25%"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/weapon/spear/razortine.svg"
     },
     {
       "index": 25,
@@ -897,6 +1210,14 @@
       "y": 0,
       "width": 2,
       "height": 3,
+      "item_level": 45,
+      "base_attributes": [
+        "Defense: 137",
+        "Durability: 49 of 50",
+        "Required Strength: 30",
+        "Required Level: 20",
+        "Socketed (1)"
+      ],
       "properties": [
         "+99% Enhanced Defense",
         "Poison Resist +90%",
@@ -904,7 +1225,15 @@
         "+2 to Light Radius",
         "Poison Length Reduced by 50%",
         "+38 to Mana"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [
+        "Perfect Sapphire"
+      ],
+      "image_url": "/item-vectors/armor/armor/breast_plate.svg"
     },
     {
       "index": 26,
@@ -918,7 +1247,17 @@
       "y": 2,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Heals 35% Life and Mana"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
     },
     {
       "index": 27,
@@ -932,7 +1271,15 @@
       "y": 1,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/stamina_potion.svg"
     },
     {
       "index": 28,
@@ -946,7 +1293,17 @@
       "y": 2,
       "width": 1,
       "height": 2,
-      "properties": []
+      "item_level": 9,
+      "base_attributes": [
+        "Quantity: 13 of 20"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/book/identify_book.svg"
     },
     {
       "index": 29,
@@ -960,7 +1317,18 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 35,
+      "base_attributes": [
+        "Unidentified",
+        "Required Level: 12"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/ring/rring4.svg"
     },
     {
       "index": 30,
@@ -974,7 +1342,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 320"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
     },
     {
       "index": 31,
@@ -988,7 +1366,17 @@
       "y": 1,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 60"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/light_healing_potion.svg"
     },
     {
       "index": 32,
@@ -1002,7 +1390,17 @@
       "y": 1,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 180"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
     },
     {
       "index": 33,
@@ -1016,7 +1414,17 @@
       "y": 2,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 320"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
     },
     {
       "index": 34,
@@ -1030,7 +1438,17 @@
       "y": 2,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 180"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
     },
     {
       "index": 35,
@@ -1044,7 +1462,15 @@
       "y": 0,
       "width": 2,
       "height": 2,
-      "properties": []
+      "item_level": 13,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/quest/horadric_cube.svg"
     },
     {
       "index": 36,
@@ -1058,7 +1484,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Heals 35% Life and Mana"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
     },
     {
       "index": 37,
@@ -1072,7 +1508,17 @@
       "y": 3,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Heals 35% Life and Mana"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
     },
     {
       "index": 38,
@@ -1086,7 +1532,17 @@
       "y": 3,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Heals 35% Life and Mana"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
     },
     {
       "index": 39,
@@ -1100,7 +1556,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 250"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/greater_mana_potion.svg"
     },
     {
       "index": 40,
@@ -1114,7 +1580,17 @@
       "y": 0,
       "width": 1,
       "height": 2,
-      "properties": []
+      "item_level": 9,
+      "base_attributes": [
+        "Quantity: 16 of 20"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/book/town_portal_book.svg"
     },
     {
       "index": 41,
@@ -1128,6 +1604,14 @@
       "y": 0,
       "width": 1,
       "height": 3,
+      "item_level": 55,
+      "base_attributes": [
+        "One-Hand Damage: 4 to 15",
+        "Normal Attack Speed [0]",
+        "Durability: 60 of 60",
+        "Required Strength: 27",
+        "Required Level: 9"
+      ],
       "properties": [
         "+15 to Strength",
         "+55% Enhanced Damage",
@@ -1135,7 +1619,13 @@
         "+1 Knockback",
         "+2 to Light Radius",
         "+33% Chance of Crushing Blow"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/weapon/mace/mace.svg"
     },
     {
       "index": 42,
@@ -1149,6 +1639,15 @@
       "y": 0,
       "width": 2,
       "height": 3,
+      "item_level": 40,
+      "base_attributes": [
+        "Defense: 40",
+        "Chance to Block: 34%",
+        "Smite Damage: 1 to 5",
+        "Durability: 60 of 60",
+        "Required Strength: 75",
+        "Required Level: 18"
+      ],
       "properties": [
         "+55% Enhanced Defense",
         "Damage Reduced by 2",
@@ -1156,7 +1655,13 @@
         "Fire Resist +19%",
         "Lightning Resist +17%",
         "Attacker Takes Damage of 1"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/shield/tower_shield.svg"
     }
   ],
   "merc_items": [
@@ -1172,9 +1677,22 @@
       "y": 0,
       "width": 2,
       "height": 3,
+      "item_level": 20,
+      "base_attributes": [
+        "Defense: 99",
+        "Durability: 45 of 45",
+        "Required Strength: 48",
+        "Required Level: 6"
+      ],
       "properties": [
         "+31% Enhanced Defense"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/armor/chain_mail.svg"
     },
     {
       "index": 1,
@@ -1188,7 +1706,20 @@
       "y": 0,
       "width": 2,
       "height": 2,
-      "properties": []
+      "item_level": 20,
+      "base_attributes": [
+        "Defense: 17",
+        "Durability: 24 of 24",
+        "Required Strength: 26",
+        "Socketed (2)"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/helmet/helm.svg"
     },
     {
       "index": 2,
@@ -1202,11 +1733,26 @@
       "y": 0,
       "width": 2,
       "height": 4,
+      "item_level": 34,
+      "base_attributes": [
+        "Two-Hand Damage: 30 to 58",
+        "Normal Attack Speed [0]",
+        "Durability: 22 of 35",
+        "Required Strength: 77",
+        "Required Dexterity: 25",
+        "Required Level: 24"
+      ],
       "properties": [
         "+59% Enhanced Damage",
         "+36 to Attack Rating",
         "5% Chance to cast level 1 Amplify Damage on striking"
-      ]
+      ],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/weapon/spear/trident.svg"
     }
   ],
   "temp_items": []

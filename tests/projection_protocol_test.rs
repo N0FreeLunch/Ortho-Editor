@@ -52,6 +52,11 @@ fn real_fixtures_project_cleanly_and_survive_json_roundtrip() {
         let view = session.project();
         assert_eq!(view.fixture_label, label);
         assert!(!view.char_name.is_empty(), "{label} char_name");
+        assert_eq!(view.export_supported, view.save_version == 105);
+        assert_eq!(
+            view.export_unsupported_reason.is_some(),
+            !view.export_supported
+        );
 
         let env = SessionEnvelope {
             ok: true,
@@ -91,9 +96,19 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
     assert!(mode_env.ok);
     assert_eq!(mode_env.session.unwrap().skill_mode, EditMode::Free);
 
-    let lvl_ok = session.apply_intent(UiIntent::SetMercLevel { level: 85 });
-    assert!(lvl_ok.ok);
-    assert_eq!(lvl_ok.session.unwrap().merc.stats.level, 85);
+    let merc_before = session.project().merc;
+    assert!(!merc_before.persistence_supported);
+    assert!(merc_before.preview_only_reason.is_some());
+
+    let lvl_locked = session.apply_intent(UiIntent::SetMercLevel { level: 85 });
+    assert!(!lvl_locked.ok);
+    assert_eq!(
+        lvl_locked.rejection.as_ref().map(|r| r.code.as_str()),
+        Some("merc_persistence_not_supported")
+    );
+    let after_lvl_view = lvl_locked.session.expect("session retained");
+    assert!(!after_lvl_view.dirty);
+    assert_eq!(after_lvl_view.merc.stats.level, merc_before.stats.level);
 
     let lvl_bad_low = session.apply_intent(UiIntent::SetMercLevel { level: 0 });
     assert!(!lvl_bad_low.ok);
@@ -101,7 +116,10 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         lvl_bad_low.rejection.as_ref().map(|r| r.code.as_str()),
         Some("merc_level_out_of_range")
     );
-    assert_eq!(lvl_bad_low.session.unwrap().merc.stats.level, 85);
+    assert_eq!(
+        lvl_bad_low.session.unwrap().merc.stats.level,
+        merc_before.stats.level
+    );
 
     let lvl_bad_high = session.apply_intent(UiIntent::SetMercLevel { level: 99 });
     assert!(!lvl_bad_high.ok);
@@ -110,11 +128,15 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         Some("merc_level_out_of_range")
     );
 
-    let act5_ok = session.apply_intent(UiIntent::SelectMercAct { act_index: 5 });
-    assert!(act5_ok.ok);
-    let act5_merc = act5_ok.session.unwrap().merc;
-    assert_eq!(act5_merc.act_index, 5);
-    assert_eq!(act5_merc.class_name, "Barbarian (Act 5)");
+    let act5_locked = session.apply_intent(UiIntent::SelectMercAct { act_index: 5 });
+    assert!(!act5_locked.ok);
+    assert_eq!(
+        act5_locked.rejection.as_ref().map(|r| r.code.as_str()),
+        Some("merc_persistence_not_supported")
+    );
+    let act5_view = act5_locked.session.expect("session retained");
+    assert!(!act5_view.dirty);
+    assert_eq!(act5_view.merc.act_index, merc_before.act_index);
 
     let act4_bad = session.apply_intent(UiIntent::SelectMercAct { act_index: 4 });
     assert!(!act4_bad.ok);
@@ -177,8 +199,29 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         y: 0,
         width: 1,
         height: 1,
+        item_level: 1,
+        base_attributes: vec![],
         properties: vec![],
+        set_name: None,
+        set_pieces: vec![],
+        piece_set_bonuses: vec![],
+        set_bonuses: vec![],
+        socketed_names: vec![],
+        image_url: None,
     });
+    let projected = session.project();
+    assert!(
+        projected.items.iter().any(|item| {
+            item.image_url
+                .as_deref()
+                .is_some_and(|url| url.starts_with("/item-vectors/") || url.starts_with("/item-images/"))
+        }),
+        "expected projected fixture items to resolve at least one local image/vector URL"
+    );
+    assert!(
+        projected.items.iter().any(|item| !item.base_attributes.is_empty()),
+        "expected projected fixture items to include formatter base_attributes (defense/damage/durability/req)"
+    );
     assert_eq!(session.project().container_counts.temp_inventory, 1);
     let cleared = session.apply_intent(UiIntent::ClearTempInventory);
     assert!(cleared.ok);

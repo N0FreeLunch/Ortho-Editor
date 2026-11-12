@@ -1,6 +1,8 @@
 {
   "fixture_label": "amazon_10_scrolls.d2s",
   "save_version": 105,
+  "export_supported": true,
+  "export_unsupported_reason": null,
   "item_dialect": "d2r-v3",
   "char_name": "TESTAMAZON",
   "char_class": "Amazon",
@@ -89,7 +91,9 @@
       "innate_aura": "None",
       "equipment_auras": []
     },
-    "equipped_count": 0
+    "equipped_count": 0,
+    "persistence_supported": false,
+    "preview_only_reason": "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
   },
   "progression": {
     "is_expansion": false,
@@ -427,7 +431,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 30"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg"
     },
     {
       "index": 1,
@@ -441,7 +455,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 30"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg"
     },
     {
       "index": 2,
@@ -455,7 +479,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 30"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg"
     },
     {
       "index": 3,
@@ -469,7 +503,17 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [
+        "Points: 30"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg"
     },
     {
       "index": 4,
@@ -483,7 +527,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 5,
@@ -497,7 +549,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 6,
@@ -511,7 +571,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 7,
@@ -525,7 +593,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 8,
@@ -539,7 +615,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 9,
@@ -553,7 +637,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 10,
@@ -567,7 +659,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 11,
@@ -581,7 +681,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 12,
@@ -595,7 +703,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 13,
@@ -609,7 +725,15 @@
       "y": 0,
       "width": 1,
       "height": 1,
-      "properties": []
+      "item_level": 0,
+      "base_attributes": [],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg"
     },
     {
       "index": 14,
@@ -623,7 +747,20 @@
       "y": 0,
       "width": 1,
       "height": 3,
-      "properties": []
+      "item_level": 1,
+      "base_attributes": [
+        "One-Hand Damage: 1 to 5",
+        "Fast Attack Speed [-10]",
+        "Durability: 2 of 2",
+        "Quantity: 90 of 90"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/weapon/javelin/javelin.svg"
     },
     {
       "index": 15,
@@ -637,7 +774,21 @@
       "y": 0,
       "width": 2,
       "height": 2,
-      "properties": []
+      "item_level": 1,
+      "base_attributes": [
+        "Defense: 6",
+        "Chance to Block: 20%",
+        "Smite Damage: 1 to 3",
+        "Durability: 12 of 12",
+        "Required Strength: 12"
+      ],
+      "properties": [],
+      "set_name": null,
+      "set_pieces": [],
+      "piece_set_bonuses": [],
+      "set_bonuses": [],
+      "socketed_names": [],
+      "image_url": "/item-vectors/armor/shield/buckler.svg"
     }
   ],
   "merc_items": [],

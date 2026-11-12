@@ -6,7 +6,9 @@
 
 pub mod host;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use elm_rs::{Elm, ElmDecode, ElmEncode};
 use serde::{Deserialize, Serialize};
@@ -20,6 +22,7 @@ use crate::domain::contracts::character::{
 };
 use crate::domain::forensic::v105::mercenary::MercenaryState;
 use crate::domain::header::axiom::EXPANSION_FLAG_OFFSET;
+use crate::domain::item::image::{ItemImageCatalog, ItemImageKey, resolve_item_image};
 use crate::domain::item::stream::{ItemContainer, PlayerItemStream};
 use crate::domain::progression::Progression;
 use crate::domain::progression::axiom::{
@@ -187,6 +190,8 @@ pub struct MercSummaryView {
     pub experience: i32,
     pub stats: MercStatsView,
     pub equipped_count: i32,
+    pub persistence_supported: bool,
+    pub preview_only_reason: Option<String>,
 }
 
 /// Canonical quest definition projected from `d2r-data` (`V105_QUESTS`).
@@ -223,6 +228,14 @@ pub struct ProgressionSummaryView {
     pub hell_waypoints_active: Vec<i32>,
 }
 
+/// Projected set bonus tier for an item tooltip (`2 items`, `3 items`, or full set).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct SetBonusView {
+    pub active: bool,
+    pub required_count: i32,
+    pub lines: Vec<String>,
+}
+
 /// Projected item summary for View A container grids and View B mercenary slots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct ItemCardView {
@@ -237,7 +250,23 @@ pub struct ItemCardView {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    #[serde(default)]
+    pub item_level: i32,
+    #[serde(default)]
+    pub base_attributes: Vec<String>,
     pub properties: Vec<String>,
+    #[serde(default)]
+    pub set_name: Option<String>,
+    #[serde(default)]
+    pub set_pieces: Vec<String>,
+    #[serde(default)]
+    pub piece_set_bonuses: Vec<SetBonusView>,
+    #[serde(default)]
+    pub set_bonuses: Vec<SetBonusView>,
+    #[serde(default)]
+    pub socketed_names: Vec<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
 }
 
 /// Complete Elm-facing read-only save session snapshot projected by Rust.
@@ -245,6 +274,8 @@ pub struct ItemCardView {
 pub struct SessionView {
     pub fixture_label: String,
     pub save_version: i32,
+    pub export_supported: bool,
+    pub export_unsupported_reason: Option<String>,
     pub item_dialect: String,
     pub char_name: String,
     pub char_class: String,
@@ -607,9 +638,14 @@ impl EditorSession {
             gold_stash_max: StashGoldValue::MAX_STASH_GOLD as i32,
         };
 
+        let export_unsupported_reason = export_unsupported_reason(self.save_version);
+        let export_supported = export_unsupported_reason.is_none();
+
         SessionView {
             fixture_label: self.fixture_label.clone(),
             save_version: self.save_version,
+            export_supported,
+            export_unsupported_reason,
             item_dialect: self.item_dialect.clone(),
             char_name: self.char_name.clone(),
             char_class: self.char_class.clone(),
@@ -671,8 +707,10 @@ impl EditorSession {
                         message: format!("Mercenary level must stay within 1..=98 (got {level})"),
                     });
                 }
-                self.merc_level = level;
-                Ok(())
+                Err(ActionRejection {
+                    code: "merc_persistence_not_supported".to_string(),
+                    message: "Mercenary edits are read-only until .d2s mercenary writeback is implemented.".to_string(),
+                })
             }
             UiIntent::SelectMercAct { act_index } => {
                 if !matches!(act_index, 1 | 2 | 3 | 5) {
@@ -681,8 +719,10 @@ impl EditorSession {
                         message: format!("Mercenary act must be 1, 2, 3, or 5 (got {act_index})"),
                     });
                 }
-                self.merc_act_override = Some(act_index);
-                Ok(())
+                Err(ActionRejection {
+                    code: "merc_persistence_not_supported".to_string(),
+                    message: "Mercenary edits are read-only until .d2s mercenary writeback is implemented.".to_string(),
+                })
             }
             UiIntent::ToggleQuest { difficulty, key } => {
                 let diff = difficulty.as_index();
@@ -916,11 +956,8 @@ impl EditorSession {
 
     /// Serializes save-persisted edits back into a checksum-valid `.d2s` byte vector.
     pub fn to_save_bytes(&self) -> Result<Vec<u8>, String> {
-        if self.save_version != 105 {
-            return Err(format!(
-                "Binary writeback only supports v105 saves (got v{})",
-                self.save_version
-            ));
+        if let Some(reason) = export_unsupported_reason(self.save_version) {
+            return Err(reason);
         }
         if self.source_bytes.len() <= V105_WAYPOINT_OFFSET {
             return Err("Source save buffer is too small for progression writeback".to_string());
@@ -973,6 +1010,67 @@ fn quality_label(quality: Option<ItemQuality>, is_runeword: bool) -> &'static st
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct VectorAssetRecord {
+    file: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct VectorAssetCatalog {
+    assets: BTreeMap<String, VectorAssetRecord>,
+}
+
+struct ProjectionImageCatalogs {
+    images: Option<ItemImageCatalog>,
+    vectors: Option<VectorAssetCatalog>,
+}
+
+fn d2r_data_assets_root() -> PathBuf {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let data = std::env::var_os("D2R_DATA_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| manifest_dir.join("../d2r-data"));
+    let root = if data.is_absolute() {
+        data
+    } else {
+        manifest_dir.join(data)
+    };
+    root.join("assets")
+}
+
+fn projection_image_catalogs() -> &'static ProjectionImageCatalogs {
+    static CATALOGS: OnceLock<ProjectionImageCatalogs> = OnceLock::new();
+    CATALOGS.get_or_init(|| {
+        let assets = d2r_data_assets_root();
+        let images = std::fs::read(assets.join("item-images/catalog.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ItemImageCatalog>(&bytes).ok());
+        let vectors = std::fs::read(assets.join("item-vectors/catalog.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<VectorAssetCatalog>(&bytes).ok());
+        ProjectionImageCatalogs { images, vectors }
+    })
+}
+
+fn resolve_item_image_url(item: &Item) -> Option<String> {
+    let catalogs = projection_image_catalogs();
+    let key = ItemImageKey::from(item);
+    let binding = resolve_item_image(&key, catalogs.images.as_ref());
+    let image_ref = binding.image()?;
+    if let Some(rec) = catalogs
+        .vectors
+        .as_ref()
+        .and_then(|vc| vc.assets.get(&image_ref.asset_key))
+    {
+        return Some(format!("/item-vectors/{}", rec.file));
+    }
+    catalogs
+        .images
+        .as_ref()
+        .and_then(|ic| ic.assets.get(&image_ref.asset_key))
+        .map(|file| format!("/item-images/{}", file.file))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_item_card(
     index: i32,
@@ -987,6 +1085,21 @@ fn build_item_card(
     let en = format_item(item, "en", active_set_count, level);
     let ko = format_item(item, "ko", active_set_count, level);
     let (w, h) = get_item_size(&item.code);
+    let socketed_names = item
+        .socketed_items
+        .iter()
+        .map(|child| format_item(child, "en", 0, level).name)
+        .collect();
+    let map_bonuses = |bonuses: Vec<crate::engine::formatter::FormattedSetBonus>| -> Vec<SetBonusView> {
+        bonuses
+            .into_iter()
+            .map(|b| SetBonusView {
+                active: b.active,
+                required_count: i32::from(b.required_count),
+                lines: b.lines,
+            })
+            .collect()
+    };
     ItemCardView {
         index,
         code: item.code.trim().to_string(),
@@ -999,7 +1112,15 @@ fn build_item_card(
         y,
         width: i32::from(w),
         height: i32::from(h),
+        item_level: i32::from(en.level),
+        base_attributes: en.base_attributes,
         properties: en.properties,
+        set_name: en.set_name,
+        set_pieces: en.set_pieces,
+        piece_set_bonuses: map_bonuses(en.piece_set_bonuses),
+        set_bonuses: map_bonuses(en.set_bonuses),
+        socketed_names,
+        image_url: resolve_item_image_url(item),
     }
 }
 
@@ -1186,6 +1307,21 @@ fn project_mercenary(
             equipment_auras,
         },
         equipped_count: merc_cards.len() as i32,
+        persistence_supported: false,
+        preview_only_reason: Some(
+            "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
+                .to_string(),
+        ),
+    }
+}
+
+fn export_unsupported_reason(save_version: i32) -> Option<String> {
+    if save_version == 105 {
+        None
+    } else {
+        Some(format!(
+            "Binary .d2s export supports v105 saves only (loaded v{save_version})."
+        ))
     }
 }
 
@@ -1211,6 +1347,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             QuestCatalogEntryView,
             WaypointCatalogEntryView,
             ProgressionSummaryView,
+            SetBonusView,
             ItemCardView,
             SessionView,
             ActionRejection,
