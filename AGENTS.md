@@ -194,3 +194,4 @@ To prevent amnesia and ensure project-wide knowledge preservation, all agents MU
    - "Did I accidentally delete a [CRITICAL] marker?"
    - "Did I silently drop a previous strategic insight?"
    - "Is this replacement actually necessary, or am I just paraphrasing?"
+   - "Did any change cross the Data/Publication Boundary (e.g., hardcoded game tables, raw assets, private `d2r-spec` references/paths, or non-English comments without backticks in `d2r-core`)?"
