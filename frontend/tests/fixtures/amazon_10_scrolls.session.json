@@ -1,0 +1,645 @@
+{
+  "fixture_label": "amazon_10_scrolls.d2s",
+  "save_version": 105,
+  "item_dialect": "d2r-v3",
+  "char_name": "TESTAMAZON",
+  "char_class": "Amazon",
+  "char_level": 1,
+  "experience": 0,
+  "is_expansion": false,
+  "res_difficulty": "Normal",
+  "skill_mode": "Legit",
+  "dirty": false,
+  "schema": {
+    "name_min_len": 2,
+    "name_max_len": 15,
+    "level_min": 1,
+    "level_max": 99,
+    "stat_min": 1,
+    "stat_max": 1023,
+    "stat_points_min": 0,
+    "stat_points_max": 1023,
+    "gold_character_max": 10000,
+    "gold_stash_max": 2500000
+  },
+  "stats": {
+    "strength_base": 20,
+    "strength_bonus": 0,
+    "dexterity_base": 25,
+    "dexterity_bonus": 0,
+    "vitality_base": 20,
+    "vitality_bonus": 0,
+    "energy_base": 15,
+    "energy_bonus": 0,
+    "life": 50,
+    "max_life": 50,
+    "mana": 15,
+    "max_mana": 15,
+    "stamina": 84,
+    "max_stamina": 84,
+    "unspent_stat_points": 0,
+    "unspent_skill_points": 0,
+    "gold_inventory": 0,
+    "gold_stash": 0,
+    "active_skill_count": 0
+  },
+  "resistances": {
+    "difficulty": "Normal",
+    "fire": 0,
+    "cold": 0,
+    "light": 0,
+    "poison": 0,
+    "fire_cap": 75,
+    "cold_cap": 75,
+    "light_cap": 75,
+    "poison_cap": 75,
+    "anya_bonus": 0,
+    "difficulty_penalty": 0
+  },
+  "container_counts": {
+    "equipment": 2,
+    "inventory": 10,
+    "belt": 4,
+    "stash": 0,
+    "cube": 0,
+    "temp_inventory": 0,
+    "unknown": 0,
+    "mercenary": 0
+  },
+  "merc": {
+    "hired": false,
+    "act_index": 0,
+    "class_name": "Rogue (Act 1)",
+    "subtype_name": "N/A",
+    "experience": 0,
+    "stats": {
+      "level": 1,
+      "base_str": 0,
+      "bonus_str": 0,
+      "base_dex": 0,
+      "bonus_dex": 0,
+      "base_life": 0,
+      "bonus_life": 0,
+      "base_def": 0,
+      "bonus_def": 0,
+      "fire_res": 0,
+      "cold_res": 0,
+      "light_res": 0,
+      "poison_res": 0,
+      "innate_aura": "None",
+      "equipment_auras": []
+    },
+    "equipped_count": 0
+  },
+  "progression": {
+    "is_expansion": false,
+    "total_quests_per_difficulty": 21,
+    "total_waypoints_per_difficulty": 30,
+    "quest_catalog": [
+      {
+        "key": "a1q1",
+        "act": 1,
+        "index": 0,
+        "name": "Den of Evil"
+      },
+      {
+        "key": "a1q2",
+        "act": 1,
+        "index": 1,
+        "name": "Sisters' Burial Grounds"
+      },
+      {
+        "key": "a1q3",
+        "act": 1,
+        "index": 2,
+        "name": "The Search for Cain"
+      },
+      {
+        "key": "a1q4",
+        "act": 1,
+        "index": 3,
+        "name": "The Forgotten Tower"
+      },
+      {
+        "key": "a1q5",
+        "act": 1,
+        "index": 4,
+        "name": "The Tools of the Trade"
+      },
+      {
+        "key": "a1q6",
+        "act": 1,
+        "index": 5,
+        "name": "Sisters to the Slaughter"
+      },
+      {
+        "key": "a2q1",
+        "act": 2,
+        "index": 0,
+        "name": "Radament's Lair"
+      },
+      {
+        "key": "a2q2",
+        "act": 2,
+        "index": 1,
+        "name": "The Horadric Staff"
+      },
+      {
+        "key": "a2q3",
+        "act": 2,
+        "index": 2,
+        "name": "Tainted Sun"
+      },
+      {
+        "key": "a2q4",
+        "act": 2,
+        "index": 3,
+        "name": "Arcane Sanctuary"
+      },
+      {
+        "key": "a2q5",
+        "act": 2,
+        "index": 4,
+        "name": "The Summoner"
+      },
+      {
+        "key": "a2q6",
+        "act": 2,
+        "index": 5,
+        "name": "The Seven Tombs"
+      },
+      {
+        "key": "a3q1",
+        "act": 3,
+        "index": 0,
+        "name": "The Golden Bird"
+      },
+      {
+        "key": "a3q2",
+        "act": 3,
+        "index": 1,
+        "name": "Blade of the Old Religion"
+      },
+      {
+        "key": "a3q3",
+        "act": 3,
+        "index": 2,
+        "name": "Lam Esen's Tome"
+      },
+      {
+        "key": "a3q4",
+        "act": 3,
+        "index": 3,
+        "name": "Khalim's Will"
+      },
+      {
+        "key": "a3q5",
+        "act": 3,
+        "index": 4,
+        "name": "The Blackened Temple"
+      },
+      {
+        "key": "a3q6",
+        "act": 3,
+        "index": 5,
+        "name": "The Guardian"
+      },
+      {
+        "key": "a4q1",
+        "act": 4,
+        "index": 0,
+        "name": "The Fallen Angel"
+      },
+      {
+        "key": "a4q2",
+        "act": 4,
+        "index": 1,
+        "name": "Terror's End"
+      },
+      {
+        "key": "a4q3",
+        "act": 4,
+        "index": 2,
+        "name": "Hellforge"
+      }
+    ],
+    "waypoint_catalog": [
+      {
+        "bit": 0,
+        "act": 1,
+        "index": 0,
+        "name": "Act 1 - Town"
+      },
+      {
+        "bit": 1,
+        "act": 1,
+        "index": 1,
+        "name": "Act 1 - Wilderness 2"
+      },
+      {
+        "bit": 2,
+        "act": 1,
+        "index": 2,
+        "name": "Act 1 - Wilderness 3"
+      },
+      {
+        "bit": 3,
+        "act": 1,
+        "index": 3,
+        "name": "Act 1 - Wilderness 4"
+      },
+      {
+        "bit": 4,
+        "act": 1,
+        "index": 4,
+        "name": "Act 1 - Wilderness 5"
+      },
+      {
+        "bit": 5,
+        "act": 1,
+        "index": 5,
+        "name": "Act 1 - Courtyard 1"
+      },
+      {
+        "bit": 6,
+        "act": 1,
+        "index": 6,
+        "name": "Act 1 - Jail 1"
+      },
+      {
+        "bit": 7,
+        "act": 1,
+        "index": 7,
+        "name": "Act 1 - Courtyard 2"
+      },
+      {
+        "bit": 8,
+        "act": 1,
+        "index": 8,
+        "name": "Act 1 - Catacombs 2"
+      },
+      {
+        "bit": 9,
+        "act": 2,
+        "index": 0,
+        "name": "Act 2 - Town"
+      },
+      {
+        "bit": 10,
+        "act": 2,
+        "index": 1,
+        "name": "Act 2 - Sewer 1 B"
+      },
+      {
+        "bit": 11,
+        "act": 2,
+        "index": 2,
+        "name": "Act 2 - Desert 2"
+      },
+      {
+        "bit": 12,
+        "act": 2,
+        "index": 3,
+        "name": "Act 2 - Tomb 2 B"
+      },
+      {
+        "bit": 13,
+        "act": 2,
+        "index": 4,
+        "name": "Act 2 - Desert 3"
+      },
+      {
+        "bit": 14,
+        "act": 2,
+        "index": 5,
+        "name": "Act 2 - Desert 4"
+      },
+      {
+        "bit": 15,
+        "act": 2,
+        "index": 6,
+        "name": "Act 2 - Basement 1"
+      },
+      {
+        "bit": 16,
+        "act": 2,
+        "index": 7,
+        "name": "Act 2 - Arcane"
+      },
+      {
+        "bit": 17,
+        "act": 2,
+        "index": 8,
+        "name": "Act 2 - Valley of the Kings"
+      },
+      {
+        "bit": 18,
+        "act": 3,
+        "index": 0,
+        "name": "Act 3 - Town"
+      },
+      {
+        "bit": 19,
+        "act": 3,
+        "index": 1,
+        "name": "Act 3 - Jungle 1"
+      },
+      {
+        "bit": 20,
+        "act": 3,
+        "index": 2,
+        "name": "Act 3 - Jungle 2"
+      },
+      {
+        "bit": 21,
+        "act": 3,
+        "index": 3,
+        "name": "Act 3 - Jungle 3"
+      },
+      {
+        "bit": 22,
+        "act": 3,
+        "index": 4,
+        "name": "Act 3 - Kurast 1"
+      },
+      {
+        "bit": 23,
+        "act": 3,
+        "index": 5,
+        "name": "Act 3 - Kurast 2"
+      },
+      {
+        "bit": 24,
+        "act": 3,
+        "index": 6,
+        "name": "Act 3 - Kurast 3"
+      },
+      {
+        "bit": 25,
+        "act": 3,
+        "index": 7,
+        "name": "Act 3 - Travincal"
+      },
+      {
+        "bit": 26,
+        "act": 3,
+        "index": 8,
+        "name": "Act 3 - Mephisto 2"
+      },
+      {
+        "bit": 27,
+        "act": 4,
+        "index": 0,
+        "name": "Act 4 - Town"
+      },
+      {
+        "bit": 28,
+        "act": 4,
+        "index": 1,
+        "name": "Act 4 - Mesa 3"
+      },
+      {
+        "bit": 29,
+        "act": 4,
+        "index": 2,
+        "name": "Act 4 - Lava 1"
+      }
+    ],
+    "normal_quests_completed": [],
+    "nightmare_quests_completed": [],
+    "hell_quests_completed": [],
+    "normal_waypoints_active": [
+      0
+    ],
+    "nightmare_waypoints_active": [],
+    "hell_waypoints_active": []
+  },
+  "items": [
+    {
+      "index": 0,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 1,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 1,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 2,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 2,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 3,
+      "code": "hp1",
+      "name_en": "Minor Healing Potion",
+      "name_ko": "미량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 3,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 4,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 5,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 1,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 6,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 2,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 7,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 3,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 8,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 4,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 9,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 5,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 10,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 6,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 11,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 7,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 12,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 8,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 13,
+      "code": "tsc",
+      "name_en": "Scroll of Town Portal",
+      "name_ko": "타운포탈 스크롤",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 9,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 14,
+      "code": "jav",
+      "name_en": "Javelin",
+      "name_ko": "재벌린",
+      "quality": "Normal",
+      "container": "equipment",
+      "slot_label": "Weapon1",
+      "x": 4,
+      "y": 0,
+      "width": 1,
+      "height": 3,
+      "properties": []
+    },
+    {
+      "index": 15,
+      "code": "buc",
+      "name_en": "Buckler",
+      "name_ko": "버클러",
+      "quality": "Normal",
+      "container": "equipment",
+      "slot_label": "Weapon2",
+      "x": 5,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "properties": []
+    }
+  ],
+  "merc_items": [],
+  "temp_items": []
+}

@@ -1,0 +1,1213 @@
+{
+  "fixture_label": "TESTDRUID_Quest3_AnyaRescued.d2s",
+  "save_version": 105,
+  "item_dialect": "d2r-v3",
+  "char_name": "TESTDRUID",
+  "char_class": "Druid",
+  "char_level": 31,
+  "experience": 6105692,
+  "is_expansion": false,
+  "res_difficulty": "Normal",
+  "skill_mode": "Legit",
+  "dirty": false,
+  "schema": {
+    "name_min_len": 2,
+    "name_max_len": 15,
+    "level_min": 1,
+    "level_max": 99,
+    "stat_min": 1,
+    "stat_max": 1023,
+    "stat_points_min": 0,
+    "stat_points_max": 1023,
+    "gold_character_max": 310000,
+    "gold_stash_max": 2500000
+  },
+  "stats": {
+    "strength_base": 60,
+    "strength_bonus": 18,
+    "dexterity_base": 20,
+    "dexterity_bonus": 2,
+    "vitality_base": 60,
+    "vitality_bonus": 0,
+    "energy_base": 20,
+    "energy_bonus": 18,
+    "life": 230,
+    "max_life": 190,
+    "mana": 126,
+    "max_mana": 80,
+    "stamina": 190,
+    "max_stamina": 149,
+    "unspent_stat_points": 75,
+    "unspent_skill_points": 1,
+    "gold_inventory": 229492,
+    "gold_stash": 281974,
+    "active_skill_count": 11
+  },
+  "resistances": {
+    "difficulty": "Normal",
+    "fire": 75,
+    "cold": 42,
+    "light": 65,
+    "poison": 90,
+    "fire_cap": 75,
+    "cold_cap": 75,
+    "light_cap": 75,
+    "poison_cap": 90,
+    "anya_bonus": 0,
+    "difficulty_penalty": 0
+  },
+  "container_counts": {
+    "equipment": 10,
+    "inventory": 17,
+    "belt": 11,
+    "stash": 5,
+    "cube": 0,
+    "temp_inventory": 0,
+    "unknown": 0,
+    "mercenary": 3
+  },
+  "merc": {
+    "hired": true,
+    "act_index": 2,
+    "class_name": "Desert Mercenary (Act 2)",
+    "subtype_name": "N/A",
+    "experience": 3357936,
+    "stats": {
+      "level": 28,
+      "base_str": 90,
+      "bonus_str": 0,
+      "base_dex": 80,
+      "bonus_dex": 0,
+      "base_life": 330,
+      "bonus_life": 0,
+      "base_def": 214,
+      "bonus_def": 93,
+      "fire_res": 63,
+      "cold_res": 63,
+      "light_res": 63,
+      "poison_res": 63,
+      "innate_aura": "Paladin Aura (Act 2)",
+      "equipment_auras": []
+    },
+    "equipped_count": 3
+  },
+  "progression": {
+    "is_expansion": false,
+    "total_quests_per_difficulty": 21,
+    "total_waypoints_per_difficulty": 30,
+    "quest_catalog": [
+      {
+        "key": "a1q1",
+        "act": 1,
+        "index": 0,
+        "name": "Den of Evil"
+      },
+      {
+        "key": "a1q2",
+        "act": 1,
+        "index": 1,
+        "name": "Sisters' Burial Grounds"
+      },
+      {
+        "key": "a1q3",
+        "act": 1,
+        "index": 2,
+        "name": "The Search for Cain"
+      },
+      {
+        "key": "a1q4",
+        "act": 1,
+        "index": 3,
+        "name": "The Forgotten Tower"
+      },
+      {
+        "key": "a1q5",
+        "act": 1,
+        "index": 4,
+        "name": "The Tools of the Trade"
+      },
+      {
+        "key": "a1q6",
+        "act": 1,
+        "index": 5,
+        "name": "Sisters to the Slaughter"
+      },
+      {
+        "key": "a2q1",
+        "act": 2,
+        "index": 0,
+        "name": "Radament's Lair"
+      },
+      {
+        "key": "a2q2",
+        "act": 2,
+        "index": 1,
+        "name": "The Horadric Staff"
+      },
+      {
+        "key": "a2q3",
+        "act": 2,
+        "index": 2,
+        "name": "Tainted Sun"
+      },
+      {
+        "key": "a2q4",
+        "act": 2,
+        "index": 3,
+        "name": "Arcane Sanctuary"
+      },
+      {
+        "key": "a2q5",
+        "act": 2,
+        "index": 4,
+        "name": "The Summoner"
+      },
+      {
+        "key": "a2q6",
+        "act": 2,
+        "index": 5,
+        "name": "The Seven Tombs"
+      },
+      {
+        "key": "a3q1",
+        "act": 3,
+        "index": 0,
+        "name": "The Golden Bird"
+      },
+      {
+        "key": "a3q2",
+        "act": 3,
+        "index": 1,
+        "name": "Blade of the Old Religion"
+      },
+      {
+        "key": "a3q3",
+        "act": 3,
+        "index": 2,
+        "name": "Lam Esen's Tome"
+      },
+      {
+        "key": "a3q4",
+        "act": 3,
+        "index": 3,
+        "name": "Khalim's Will"
+      },
+      {
+        "key": "a3q5",
+        "act": 3,
+        "index": 4,
+        "name": "The Blackened Temple"
+      },
+      {
+        "key": "a3q6",
+        "act": 3,
+        "index": 5,
+        "name": "The Guardian"
+      },
+      {
+        "key": "a4q1",
+        "act": 4,
+        "index": 0,
+        "name": "The Fallen Angel"
+      },
+      {
+        "key": "a4q2",
+        "act": 4,
+        "index": 1,
+        "name": "Terror's End"
+      },
+      {
+        "key": "a4q3",
+        "act": 4,
+        "index": 2,
+        "name": "Hellforge"
+      }
+    ],
+    "waypoint_catalog": [
+      {
+        "bit": 0,
+        "act": 1,
+        "index": 0,
+        "name": "Act 1 - Town"
+      },
+      {
+        "bit": 1,
+        "act": 1,
+        "index": 1,
+        "name": "Act 1 - Wilderness 2"
+      },
+      {
+        "bit": 2,
+        "act": 1,
+        "index": 2,
+        "name": "Act 1 - Wilderness 3"
+      },
+      {
+        "bit": 3,
+        "act": 1,
+        "index": 3,
+        "name": "Act 1 - Wilderness 4"
+      },
+      {
+        "bit": 4,
+        "act": 1,
+        "index": 4,
+        "name": "Act 1 - Wilderness 5"
+      },
+      {
+        "bit": 5,
+        "act": 1,
+        "index": 5,
+        "name": "Act 1 - Courtyard 1"
+      },
+      {
+        "bit": 6,
+        "act": 1,
+        "index": 6,
+        "name": "Act 1 - Jail 1"
+      },
+      {
+        "bit": 7,
+        "act": 1,
+        "index": 7,
+        "name": "Act 1 - Courtyard 2"
+      },
+      {
+        "bit": 8,
+        "act": 1,
+        "index": 8,
+        "name": "Act 1 - Catacombs 2"
+      },
+      {
+        "bit": 9,
+        "act": 2,
+        "index": 0,
+        "name": "Act 2 - Town"
+      },
+      {
+        "bit": 10,
+        "act": 2,
+        "index": 1,
+        "name": "Act 2 - Sewer 1 B"
+      },
+      {
+        "bit": 11,
+        "act": 2,
+        "index": 2,
+        "name": "Act 2 - Desert 2"
+      },
+      {
+        "bit": 12,
+        "act": 2,
+        "index": 3,
+        "name": "Act 2 - Tomb 2 B"
+      },
+      {
+        "bit": 13,
+        "act": 2,
+        "index": 4,
+        "name": "Act 2 - Desert 3"
+      },
+      {
+        "bit": 14,
+        "act": 2,
+        "index": 5,
+        "name": "Act 2 - Desert 4"
+      },
+      {
+        "bit": 15,
+        "act": 2,
+        "index": 6,
+        "name": "Act 2 - Basement 1"
+      },
+      {
+        "bit": 16,
+        "act": 2,
+        "index": 7,
+        "name": "Act 2 - Arcane"
+      },
+      {
+        "bit": 17,
+        "act": 2,
+        "index": 8,
+        "name": "Act 2 - Valley of the Kings"
+      },
+      {
+        "bit": 18,
+        "act": 3,
+        "index": 0,
+        "name": "Act 3 - Town"
+      },
+      {
+        "bit": 19,
+        "act": 3,
+        "index": 1,
+        "name": "Act 3 - Jungle 1"
+      },
+      {
+        "bit": 20,
+        "act": 3,
+        "index": 2,
+        "name": "Act 3 - Jungle 2"
+      },
+      {
+        "bit": 21,
+        "act": 3,
+        "index": 3,
+        "name": "Act 3 - Jungle 3"
+      },
+      {
+        "bit": 22,
+        "act": 3,
+        "index": 4,
+        "name": "Act 3 - Kurast 1"
+      },
+      {
+        "bit": 23,
+        "act": 3,
+        "index": 5,
+        "name": "Act 3 - Kurast 2"
+      },
+      {
+        "bit": 24,
+        "act": 3,
+        "index": 6,
+        "name": "Act 3 - Kurast 3"
+      },
+      {
+        "bit": 25,
+        "act": 3,
+        "index": 7,
+        "name": "Act 3 - Travincal"
+      },
+      {
+        "bit": 26,
+        "act": 3,
+        "index": 8,
+        "name": "Act 3 - Mephisto 2"
+      },
+      {
+        "bit": 27,
+        "act": 4,
+        "index": 0,
+        "name": "Act 4 - Town"
+      },
+      {
+        "bit": 28,
+        "act": 4,
+        "index": 1,
+        "name": "Act 4 - Mesa 3"
+      },
+      {
+        "bit": 29,
+        "act": 4,
+        "index": 2,
+        "name": "Act 4 - Lava 1"
+      }
+    ],
+    "normal_quests_completed": [
+      "a1q1",
+      "a1q2",
+      "a1q3",
+      "a1q4",
+      "a1q5",
+      "a1q6",
+      "a2q1",
+      "a2q2",
+      "a2q3",
+      "a2q4",
+      "a2q5",
+      "a2q6",
+      "a3q1",
+      "a3q2",
+      "a3q3",
+      "a3q4",
+      "a3q5",
+      "a3q6",
+      "a4q1",
+      "a4q2",
+      "a4q3",
+      "a5q1",
+      "a5q2"
+    ],
+    "nightmare_quests_completed": [],
+    "hell_quests_completed": [],
+    "normal_waypoints_active": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      13,
+      15,
+      16,
+      17,
+      18,
+      20,
+      21,
+      22,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29
+    ],
+    "nightmare_waypoints_active": [],
+    "hell_waypoints_active": []
+  },
+  "items": [
+    {
+      "index": 0,
+      "code": "cm2",
+      "name_en": "Rugged Large Charm of Dexterity",
+      "name_ko": "러기드 라지 차암오브 덱스터리티",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 9,
+      "y": 0,
+      "width": 1,
+      "height": 2,
+      "properties": [
+        "+2 to Dexterity",
+        "+22 Maximum Stamina"
+      ]
+    },
+    {
+      "index": 1,
+      "code": "cm2",
+      "name_en": "Crimson Large Charm of Shock",
+      "name_ko": "크림슨 라지 차암오브 쇼크",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 9,
+      "y": 2,
+      "width": 1,
+      "height": 2,
+      "properties": [
+        "Fire Resist +4%",
+        "Adds 1-3 lightning damage"
+      ]
+    },
+    {
+      "index": 2,
+      "code": "amu",
+      "name_en": "Amulet of the Apprentice",
+      "name_ko": "아뮬렛오브 더 어프렌티스",
+      "quality": "Magic",
+      "container": "stash",
+      "slot_label": null,
+      "x": 9,
+      "y": 9,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "+10% Faster Cast Rate"
+      ]
+    },
+    {
+      "index": 3,
+      "code": "rin",
+      "name_en": "Cathan's Seal",
+      "name_ko": "캐산의 씨일",
+      "quality": "Set",
+      "container": "stash",
+      "slot_label": null,
+      "x": 9,
+      "y": 8,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "Damage Reduced by 2",
+        "6% Life stolen per hit"
+      ]
+    },
+    {
+      "index": 4,
+      "code": "jew",
+      "name_en": "Jewel of Avarice",
+      "name_ko": "주얼오브 애버리스",
+      "quality": "Magic",
+      "container": "stash",
+      "slot_label": null,
+      "x": 9,
+      "y": 7,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "21% Extra Gold from Monsters"
+      ]
+    },
+    {
+      "index": 5,
+      "code": "jew",
+      "name_en": "Stone Eye",
+      "name_ko": "스톤아이",
+      "quality": "Rare",
+      "container": "stash",
+      "slot_label": null,
+      "x": 9,
+      "y": 6,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "+7 to Life",
+        "+6 Defense",
+        "+20 poison damage over 2 seconds",
+        "Requirements -15%"
+      ]
+    },
+    {
+      "index": 6,
+      "code": "cm1",
+      "name_en": "Russet Small Charm",
+      "name_ko": "러셋 스몰 차암",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 8,
+      "y": 3,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "Fire Resist +7%"
+      ]
+    },
+    {
+      "index": 7,
+      "code": "cm1",
+      "name_en": "Russet Small Charm",
+      "name_ko": "러셋 스몰 차암",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 8,
+      "y": 2,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "Fire Resist +6%"
+      ]
+    },
+    {
+      "index": 8,
+      "code": "hp4",
+      "name_en": "Greater Healing Potion",
+      "name_ko": "대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 8,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 9,
+      "code": "hp3",
+      "name_en": "Healing Potion",
+      "name_ko": "힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 3,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 10,
+      "code": "rin",
+      "name_en": "Ring of the Apprentice",
+      "name_ko": "링오브 더 어프렌티스",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 7,
+      "y": 2,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "+10% Faster Cast Rate"
+      ]
+    },
+    {
+      "index": 11,
+      "code": "cm1",
+      "name_en": "Russet Small Charm",
+      "name_ko": "러셋 스몰 차암",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 8,
+      "y": 1,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "Fire Resist +7%"
+      ]
+    },
+    {
+      "index": 12,
+      "code": "msk",
+      "name_en": "Havoc Horn",
+      "name_ko": "헤벅혼",
+      "quality": "Rare",
+      "container": "equipment",
+      "slot_label": "Head",
+      "x": 1,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "properties": [
+        "+7 to Energy",
+        "+29% Enhanced Defense",
+        "Fire Resist +20%",
+        "+2 to Light Radius",
+        "Poison Length Reduced by 25%",
+        "Repairs 1 durability in 33 seconds"
+      ]
+    },
+    {
+      "index": 13,
+      "code": "amu",
+      "name_en": "Coral Amulet of Brilliance",
+      "name_ko": "코럴 아뮬렛오브 브릴리언스",
+      "quality": "Magic",
+      "container": "equipment",
+      "slot_label": "Amulet",
+      "x": 2,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "+7 to Energy",
+        "Lightning Resist +25%"
+      ]
+    },
+    {
+      "index": 14,
+      "code": "rin",
+      "name_en": "Storm Grip",
+      "name_ko": "스톰그립",
+      "quality": "Rare",
+      "container": "equipment",
+      "slot_label": "Ring1",
+      "x": 6,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "+3 to Strength",
+        "+4 to Energy",
+        "Lightning Resist +6%",
+        "+1 Half Freeze Duration"
+      ]
+    },
+    {
+      "index": 15,
+      "code": "rin",
+      "name_en": "Ocher Ring of Greed",
+      "name_ko": "오우커 링오브 그리드",
+      "quality": "Magic",
+      "container": "equipment",
+      "slot_label": "Ring2",
+      "x": 7,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": [
+        "Lightning Resist +17%",
+        "39% Extra Gold from Monsters"
+      ]
+    },
+    {
+      "index": 16,
+      "code": "vbt",
+      "name_en": "Shadow Slippers",
+      "name_ko": "섀도우슬리퍼",
+      "quality": "Rare",
+      "container": "equipment",
+      "slot_label": "Boots",
+      "x": 9,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "properties": [
+        "+19 Maximum Stamina",
+        "+17% Enhanced Defense",
+        "Cold Resist +14%",
+        "+1 Half Freeze Duration",
+        "5% Chance to cast level 3 Frost Nova when struck",
+        "Repairs 1 durability in 33 seconds"
+      ]
+    },
+    {
+      "index": 17,
+      "code": "vgl",
+      "name_en": "Bloodfist",
+      "name_ko": "블러드피스트",
+      "quality": "Unique",
+      "container": "equipment",
+      "slot_label": "Gloves",
+      "x": 10,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "properties": [
+        "+40 to Life",
+        "+14% Enhanced Defense",
+        "+5 to Minimum Damage",
+        "+10 Defense",
+        "+10% Increased Attack Speed",
+        "+30% Faster Hit Recovery"
+      ]
+    },
+    {
+      "index": 18,
+      "code": "hbl",
+      "name_en": "Bramble Fringe",
+      "name_ko": "브렘블프린지",
+      "quality": "Rare",
+      "container": "equipment",
+      "slot_label": "Belt",
+      "x": 8,
+      "y": 0,
+      "width": 2,
+      "height": 1,
+      "properties": [
+        "Cold Resist +28%",
+        "Poison Resist +20%",
+        "Attacker Takes Damage of 1",
+        "+17% Faster Hit Recovery",
+        "Poison Length Reduced by 25%"
+      ]
+    },
+    {
+      "index": 19,
+      "code": "hp5",
+      "name_en": "Super Healing Potion",
+      "name_ko": "초대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 3,
+      "y": 1,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 20,
+      "code": "hp3",
+      "name_en": "Healing Potion",
+      "name_ko": "힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 3,
+      "y": 2,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 21,
+      "code": "hp4",
+      "name_en": "Greater Healing Potion",
+      "name_ko": "대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 3,
+      "y": 3,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 22,
+      "code": "hp5",
+      "name_en": "Super Healing Potion",
+      "name_ko": "초대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 2,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 23,
+      "code": "rvs",
+      "name_en": "Rejuvenation Potion",
+      "name_ko": "활력포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 7,
+      "y": 1,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 24,
+      "code": "tri",
+      "name_en": "Razortine",
+      "name_ko": "레이저타인",
+      "quality": "Unique",
+      "container": "stash",
+      "slot_label": null,
+      "x": 0,
+      "y": 0,
+      "width": 2,
+      "height": 4,
+      "properties": [
+        "+15 to Strength",
+        "+8 to Dexterity",
+        "+31% Enhanced Damage",
+        "+30% Increased Attack Speed",
+        "-50% Target Defense",
+        "Slows Target by 25%"
+      ]
+    },
+    {
+      "index": 25,
+      "code": "brs",
+      "name_en": "Venom Ward",
+      "name_ko": "베넘 워드",
+      "quality": "Unique",
+      "container": "equipment",
+      "slot_label": "Armor",
+      "x": 3,
+      "y": 0,
+      "width": 2,
+      "height": 3,
+      "properties": [
+        "+99% Enhanced Defense",
+        "Poison Resist +90%",
+        "+15% to Maximum Poison Resist",
+        "+2 to Light Radius",
+        "Poison Length Reduced by 50%",
+        "+38 to Mana"
+      ]
+    },
+    {
+      "index": 26,
+      "code": "rvs",
+      "name_en": "Rejuvenation Potion",
+      "name_ko": "활력포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 6,
+      "y": 2,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 27,
+      "code": "vps",
+      "name_en": "Stamina Potion",
+      "name_ko": "스태미나 포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 6,
+      "y": 1,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 28,
+      "code": "ibk",
+      "name_en": "Tome of Identify",
+      "name_ko": "아이템 식별 책",
+      "quality": "Normal",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 0,
+      "y": 2,
+      "width": 1,
+      "height": 2,
+      "properties": []
+    },
+    {
+      "index": 29,
+      "code": "rin",
+      "name_en": "Ring",
+      "name_ko": "링",
+      "quality": "Magic",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 6,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 30,
+      "code": "hp5",
+      "name_en": "Super Healing Potion",
+      "name_ko": "초대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 1,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 31,
+      "code": "hp2",
+      "name_en": "Light Healing Potion",
+      "name_ko": "소량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 1,
+      "y": 1,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 32,
+      "code": "hp4",
+      "name_en": "Greater Healing Potion",
+      "name_ko": "대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 2,
+      "y": 1,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 33,
+      "code": "hp5",
+      "name_en": "Super Healing Potion",
+      "name_ko": "초대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 2,
+      "y": 2,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 34,
+      "code": "hp4",
+      "name_en": "Greater Healing Potion",
+      "name_ko": "대량의 힐링포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 1,
+      "y": 2,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 35,
+      "code": "box",
+      "name_en": "Horadric Cube",
+      "name_ko": "호라드릭 큐브",
+      "quality": "Normal",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 1,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "properties": []
+    },
+    {
+      "index": 36,
+      "code": "rvs",
+      "name_en": "Rejuvenation Potion",
+      "name_ko": "활력포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 7,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 37,
+      "code": "rvs",
+      "name_en": "Rejuvenation Potion",
+      "name_ko": "활력포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 6,
+      "y": 3,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 38,
+      "code": "rvs",
+      "name_en": "Rejuvenation Potion",
+      "name_ko": "활력포션",
+      "quality": "Unknown",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 5,
+      "y": 3,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 39,
+      "code": "mp5",
+      "name_en": "Super Mana Potion",
+      "name_ko": "초대량의 마나포션",
+      "quality": "Unknown",
+      "container": "belt",
+      "slot_label": null,
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1,
+      "properties": []
+    },
+    {
+      "index": 40,
+      "code": "tbk",
+      "name_en": "Tome of Town Portal",
+      "name_ko": "타운포탈 책",
+      "quality": "Normal",
+      "container": "inventory",
+      "slot_label": null,
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 2,
+      "properties": []
+    },
+    {
+      "index": 41,
+      "code": "mac",
+      "name_en": "Crushflange",
+      "name_ko": "크러쉬플랜지",
+      "quality": "Unique",
+      "container": "equipment",
+      "slot_label": "Weapon1",
+      "x": 4,
+      "y": 0,
+      "width": 1,
+      "height": 3,
+      "properties": [
+        "+15 to Strength",
+        "+55% Enhanced Damage",
+        "Fire Resist +50%",
+        "+1 Knockback",
+        "+2 to Light Radius",
+        "+33% Chance of Crushing Blow"
+      ]
+    },
+    {
+      "index": 42,
+      "code": "tow",
+      "name_en": "Viper Ward",
+      "name_ko": "바이퍼워드",
+      "quality": "Rare",
+      "container": "equipment",
+      "slot_label": "Weapon2",
+      "x": 5,
+      "y": 0,
+      "width": 2,
+      "height": 3,
+      "properties": [
+        "+55% Enhanced Defense",
+        "Damage Reduced by 2",
+        "Magic Damage Reduced by 1",
+        "Fire Resist +19%",
+        "Lightning Resist +17%",
+        "Attacker Takes Damage of 1"
+      ]
+    }
+  ],
+  "merc_items": [
+    {
+      "index": 0,
+      "code": "chn",
+      "name_en": "Strong Chain Mail",
+      "name_ko": "스트롱 체인메일",
+      "quality": "Magic",
+      "container": "mercenary",
+      "slot_label": "Armor",
+      "x": 3,
+      "y": 0,
+      "width": 2,
+      "height": 3,
+      "properties": [
+        "+31% Enhanced Defense"
+      ]
+    },
+    {
+      "index": 1,
+      "code": "hlm",
+      "name_en": "Helm",
+      "name_ko": "헬름",
+      "quality": "Normal",
+      "container": "mercenary",
+      "slot_label": "Helm",
+      "x": 1,
+      "y": 0,
+      "width": 2,
+      "height": 2,
+      "properties": []
+    },
+    {
+      "index": 2,
+      "code": "9tr",
+      "name_en": "Brimstone Mar",
+      "name_ko": "브림스톤마어",
+      "quality": "Rare",
+      "container": "mercenary",
+      "slot_label": "Weapon1",
+      "x": 4,
+      "y": 0,
+      "width": 2,
+      "height": 4,
+      "properties": [
+        "+59% Enhanced Damage",
+        "+36 to Attack Rating",
+        "5% Chance to cast level 1 Amplify Damage on striking"
+      ]
+    }
+  ],
+  "temp_items": []
+}

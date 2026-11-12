@@ -1,0 +1,17 @@
+{
+  "name": "ortho-editor-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ortho Editor pure Elm presentation frontend and headless Node.js harness (ADR-0026)",
+  "scripts": {
+    "build:main": "elm make src/Main.elm --output=build/main.js",
+    "build:headless": "elm make src/HeadlessHarness.elm --output=build/headless.js",
+    "test:elm": "elm-test",
+    "test:node": "node --test tests/headless_harness.test.mjs",
+    "test": "npm run test:elm && npm run build:main && npm run build:headless && npm run test:node"
+  },
+  "devDependencies": {
+    "elm": "^0.19.3-0",
+    "elm-test": "^0.19.3-0"
+  }
+}

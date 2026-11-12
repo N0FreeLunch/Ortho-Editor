@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ortho Editor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="host-toolbar" data-testid="host-toolbar">
+    <div class="host-toolbar-group">
+      <span class="host-pill" id="host-mode-pill">Connecting...</span>
+      <label class="host-label" for="host-fixture-select">Save Fixture</label>
+      <select class="host-select" id="host-fixture-select"></select>
+      <button class="host-btn" id="host-reload-btn" type="button">Load Fixture</button>
+      <label class="host-btn host-upload-label" for="host-file-input">Open .d2s</label>
+      <input type="file" id="host-file-input" accept=".d2s" hidden />
+    </div>
+    <div class="host-toolbar-group">
+      <span class="host-meta" id="host-active-file"></span>
+      <button class="host-btn" id="host-export-btn" type="button">Export .d2s</button>
+      <a class="host-btn" href="/studio-prototype" target="_blank" rel="noopener">Studio Prototype</a>
+    </div>
+  </div>
+  <div id="ortho-root"></div>
+  <script src="build/main.js"></script>
+  <script>
+    (function bootstrapOrthoHost() {
+      const node = document.getElementById("ortho-root");
+      if (!window.Elm || !window.Elm.Main || !node) {
+        return;
+      }
+
+      const app = window.Elm.Main.init({ node, flags: null });
+      window.__orthoApp = app;
+
+      const modePill = document.getElementById("host-mode-pill");
+      const fixtureSelect = document.getElementById("host-fixture-select");
+      const reloadBtn = document.getElementById("host-reload-btn");
+      const exportBtn = document.getElementById("host-export-btn");
+      const fileInput = document.getElementById("host-file-input");
+      const activeFileEl = document.getElementById("host-active-file");
+
+      function deliverEnvelope(envelope) {
+        if (envelope && app.ports && app.ports.receiveSessionEnvelope) {
+          app.ports.receiveSessionEnvelope.send(envelope);
+          const name = envelope.session && envelope.session.fixture_label;
+          if (name && activeFileEl) {
+            activeFileEl.textContent = name;
+          }
+        }
+      }
+
+      if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
+        if (modePill) modePill.textContent = "Tauri Desktop IPC";
+        const invoke = window.__TAURI_INTERNALS__.invoke;
+        invoke("load_initial_session", {})
+          .then(deliverEnvelope)
+          .catch((err) => console.error("Tauri load_initial_session failed:", err));
+        if (app.ports && app.ports.sendIntent) {
+          app.ports.sendIntent.subscribe((intent) => {
+            invoke("dispatch_intent", { intent })
+              .then(deliverEnvelope)
+              .catch((err) => console.error("Tauri dispatch_intent failed:", err));
+          });
+        }
+        return;
+      }
+
+      if (modePill) modePill.textContent = "HTTP Preview Store";
+
+      async function fetchJson(url, options) {
+        const resp = await fetch(url, options);
+        return resp.json();
+      }
+
+      async function refreshFixtures() {
+        if (!fixtureSelect) return;
+        try {
+          const data = await fetchJson("/api/elm/fixtures");
+          fixtureSelect.innerHTML = "";
+          for (const key of data.fixtures || []) {
+            const opt = document.createElement("option");
+            opt.value = key;
+            opt.textContent = key;
+            if (key === data.active) opt.selected = true;
+            fixtureSelect.appendChild(opt);
+          }
+          if (data.active && activeFileEl) {
+            activeFileEl.textContent = data.active;
+          }
+        } catch (err) {
+          console.warn("Unable to list fixtures:", err);
+        }
+      }
+
+      fetchJson("/api/elm/session")
+        .then((env) => {
+          deliverEnvelope(env);
+          refreshFixtures();
+        })
+        .catch((err) => console.error("Failed to fetch /api/elm/session:", err));
+
+      if (app.ports && app.ports.sendIntent) {
+        app.ports.sendIntent.subscribe((intent) => {
+          fetchJson("/api/elm/intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(intent),
+          })
+            .then(deliverEnvelope)
+            .catch((err) => console.error("Failed to dispatch /api/elm/intent:", err));
+        });
+      }
+
+      if (reloadBtn && fixtureSelect) {
+        reloadBtn.addEventListener("click", () => {
+          const fixture = fixtureSelect.value;
+          if (!fixture) return;
+          fetchJson("/api/elm/load", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fixture }),
+          })
+            .then((env) => {
+              deliverEnvelope(env);
+              refreshFixtures();
+            })
+            .catch((err) => console.error("Failed to load fixture:", err));
+        });
+      }
+
+      if (exportBtn) {
+        exportBtn.addEventListener("click", () => {
+          window.location.href = "/api/elm/export";
+        });
+      }
+
+      if (fileInput) {
+        fileInput.addEventListener("change", async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          try {
+            const buf = await file.arrayBuffer();
+            const env = await fetchJson("/api/elm/upload", {
+              method: "POST",
+              headers: { "Content-Type": "application/octet-stream" },
+              body: buf,
+            });
+            deliverEnvelope(env);
+            if (activeFileEl) activeFileEl.textContent = file.name;
+          } catch (err) {
+            console.error("Failed to upload .d2s save:", err);
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
