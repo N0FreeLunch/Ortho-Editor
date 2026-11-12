@@ -43,7 +43,13 @@
     "unspent_skill_points": 1,
     "gold_inventory": 229492,
     "gold_stash": 281974,
-    "active_skill_count": 11
+    "active_skill_count": 11,
+    "fcr": 0,
+    "fhr": 47,
+    "frw": 0,
+    "ias": 10,
+    "magic_find": 0,
+    "all_skills_bonus": 0
   },
   "resistances": {
     "difficulty": "Normal",
@@ -493,7 +499,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/charm/charm_medium3.svg"
+      "image_url": "/item-vectors/misc/charm/charm_medium3.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 1,
@@ -520,7 +527,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/charm/charm_medium1.svg"
+      "image_url": "/item-vectors/misc/charm/charm_medium1.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 2,
@@ -546,7 +554,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/amulet/amulet3.svg"
+      "image_url": "/item-vectors/misc/amulet/amulet3.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 3,
@@ -618,7 +627,8 @@
         }
       ],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/ring/rring5.svg"
+      "image_url": "/item-vectors/misc/ring/rring5.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 4,
@@ -642,7 +652,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/gem/perfect_diamond4.svg"
+      "image_url": "/item-vectors/misc/gem/perfect_diamond4.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 5,
@@ -669,7 +680,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/gem/perfect_diamond5.svg"
+      "image_url": "/item-vectors/misc/gem/perfect_diamond5.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 6,
@@ -695,7 +707,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/charm/charm_small2.svg"
+      "image_url": "/item-vectors/misc/charm/charm_small2.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 7,
@@ -721,7 +734,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/charm/charm_small1.svg"
+      "image_url": "/item-vectors/misc/charm/charm_small1.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 8,
@@ -745,7 +759,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 9,
@@ -769,7 +784,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/healing_potion2.svg"
+      "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 10,
@@ -795,7 +811,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/ring/rring5.svg"
+      "image_url": "/item-vectors/misc/ring/rring5.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 11,
@@ -821,7 +838,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/charm/charm_small1.svg"
+      "image_url": "/item-vectors/misc/charm/charm_small1.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 12,
@@ -856,7 +874,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/helmet/mask.svg"
+      "image_url": "/item-vectors/armor/helmet/mask.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 13,
@@ -883,7 +902,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/amulet/amulet1.svg"
+      "image_url": "/item-vectors/misc/amulet/amulet1.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 14,
@@ -912,7 +932,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/ring/rring4.svg"
+      "image_url": "/item-vectors/misc/ring/rring4.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 15,
@@ -939,7 +960,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/ring/rring4.svg"
+      "image_url": "/item-vectors/misc/ring/rring4.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 16,
@@ -974,7 +996,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/boot/heavy_boots.svg"
+      "image_url": "/item-vectors/armor/boot/heavy_boots.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 17,
@@ -1007,7 +1030,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/glove/heavy_gloves.svg"
+      "image_url": "/item-vectors/armor/glove/heavy_gloves.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 18,
@@ -1040,7 +1064,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/belt/girdle_h.svg"
+      "image_url": "/item-vectors/armor/belt/girdle_h.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 19,
@@ -1064,7 +1089,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 20,
@@ -1088,7 +1114,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/healing_potion2.svg"
+      "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 21,
@@ -1112,7 +1139,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 22,
@@ -1136,7 +1164,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 23,
@@ -1160,7 +1189,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 24,
@@ -1196,7 +1226,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/weapon/spear/razortine.svg"
+      "image_url": "/item-vectors/weapon/spear/razortine.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 25,
@@ -1233,7 +1264,8 @@
       "socketed_names": [
         "Perfect Sapphire"
       ],
-      "image_url": "/item-vectors/armor/armor/breast_plate.svg"
+      "image_url": "/item-vectors/armor/armor/breast_plate.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 26,
@@ -1257,7 +1289,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 27,
@@ -1279,7 +1312,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/stamina_potion.svg"
+      "image_url": "/item-vectors/misc/potion/stamina_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 28,
@@ -1303,7 +1337,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/book/identify_book.svg"
+      "image_url": "/item-vectors/misc/book/identify_book.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 29,
@@ -1328,7 +1363,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/ring/rring4.svg"
+      "image_url": "/item-vectors/misc/ring/rring4.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 30,
@@ -1352,7 +1388,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 31,
@@ -1376,7 +1413,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/light_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/light_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 32,
@@ -1400,7 +1438,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 33,
@@ -1424,7 +1463,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 34,
@@ -1448,7 +1488,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg"
+      "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 35,
@@ -1470,7 +1511,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/quest/horadric_cube.svg"
+      "image_url": "/item-vectors/misc/quest/horadric_cube.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 36,
@@ -1494,7 +1536,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 37,
@@ -1518,7 +1561,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 38,
@@ -1542,7 +1586,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg"
+      "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 39,
@@ -1566,7 +1611,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/potion/greater_mana_potion.svg"
+      "image_url": "/item-vectors/misc/potion/greater_mana_potion.svg",
+      "is_belt_consumable": true
     },
     {
       "index": 40,
@@ -1590,7 +1636,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/misc/book/town_portal_book.svg"
+      "image_url": "/item-vectors/misc/book/town_portal_book.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 41,
@@ -1625,7 +1672,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/weapon/mace/mace.svg"
+      "image_url": "/item-vectors/weapon/mace/mace.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 42,
@@ -1661,7 +1709,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/shield/tower_shield.svg"
+      "image_url": "/item-vectors/armor/shield/tower_shield.svg",
+      "is_belt_consumable": false
     }
   ],
   "merc_items": [
@@ -1692,7 +1741,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/armor/chain_mail.svg"
+      "image_url": "/item-vectors/armor/armor/chain_mail.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 1,
@@ -1719,7 +1769,8 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/armor/helmet/helm.svg"
+      "image_url": "/item-vectors/armor/helmet/helm.svg",
+      "is_belt_consumable": false
     },
     {
       "index": 2,
@@ -1752,8 +1803,377 @@
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
-      "image_url": "/item-vectors/weapon/spear/trident.svg"
+      "image_url": "/item-vectors/weapon/spear/trident.svg",
+      "is_belt_consumable": false
     }
   ],
-  "temp_items": []
+  "temp_items": [],
+  "selected_move_item_index": null,
+  "allowed_move_targets": [],
+  "belt_move_restricted_reason": null,
+  "can_undo": false,
+  "can_redo": false,
+  "active_weapon_set": 1,
+  "skills": [
+    {
+      "skill_id": 221,
+      "slot_index": 0,
+      "tree_index": 0,
+      "row": 1,
+      "col": 1,
+      "name_en": "Raven",
+      "name_ko": "레이번",
+      "req_level": 1,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 222,
+      "slot_index": 1,
+      "tree_index": 0,
+      "row": 1,
+      "col": 2,
+      "name_en": "Poison Creeper",
+      "name_ko": "워울프",
+      "req_level": 1,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 223,
+      "slot_index": 2,
+      "tree_index": 0,
+      "row": 1,
+      "col": 3,
+      "name_en": "Werewolf",
+      "name_ko": "워울프",
+      "req_level": 1,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 224,
+      "slot_index": 3,
+      "tree_index": 0,
+      "row": 2,
+      "col": 1,
+      "name_en": "Lycanthropy",
+      "name_ko": "변신술",
+      "req_level": 1,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 225,
+      "slot_index": 4,
+      "tree_index": 0,
+      "row": 2,
+      "col": 2,
+      "name_en": "Firestorm",
+      "name_ko": "파이어스톰",
+      "req_level": 1,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 226,
+      "slot_index": 5,
+      "tree_index": 0,
+      "row": 2,
+      "col": 3,
+      "name_en": "Oak Sage",
+      "name_ko": "오크 세이지",
+      "req_level": 6,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 227,
+      "slot_index": 6,
+      "tree_index": 0,
+      "row": 3,
+      "col": 1,
+      "name_en": "Summon Spirit Wolf",
+      "name_ko": "스피리트 울프",
+      "req_level": 6,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 228,
+      "slot_index": 7,
+      "tree_index": 0,
+      "row": 3,
+      "col": 2,
+      "name_en": "Werebear",
+      "name_ko": "워베어",
+      "req_level": 6,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 229,
+      "slot_index": 8,
+      "tree_index": 0,
+      "row": 3,
+      "col": 3,
+      "name_en": "Molten Boulder",
+      "name_ko": "몰튼 보울더",
+      "req_level": 6,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 230,
+      "slot_index": 9,
+      "tree_index": 0,
+      "row": 4,
+      "col": 1,
+      "name_en": "Arctic Blast",
+      "name_ko": "아틱 블라스트",
+      "req_level": 6,
+      "level": 8,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 231,
+      "slot_index": 10,
+      "tree_index": 1,
+      "row": 1,
+      "col": 1,
+      "name_en": "Carrion Vine",
+      "name_ko": "캐리언 바인",
+      "req_level": 12,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 232,
+      "slot_index": 11,
+      "tree_index": 1,
+      "row": 1,
+      "col": 2,
+      "name_en": "Feral Rage",
+      "name_ko": "피어럴 레이지",
+      "req_level": 12,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 233,
+      "slot_index": 12,
+      "tree_index": 1,
+      "row": 1,
+      "col": 3,
+      "name_en": "Maul",
+      "name_ko": "마울",
+      "req_level": 12,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 234,
+      "slot_index": 13,
+      "tree_index": 1,
+      "row": 2,
+      "col": 1,
+      "name_en": "Fissure",
+      "name_ko": "피셔",
+      "req_level": 12,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 235,
+      "slot_index": 14,
+      "tree_index": 1,
+      "row": 2,
+      "col": 2,
+      "name_en": "Cyclone Armor",
+      "name_ko": "사이클론 아머",
+      "req_level": 12,
+      "level": 2,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 236,
+      "slot_index": 15,
+      "tree_index": 1,
+      "row": 2,
+      "col": 3,
+      "name_en": "Heart of Wolverine",
+      "name_ko": "하트 오브 울버린",
+      "req_level": 18,
+      "level": 4,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 237,
+      "slot_index": 16,
+      "tree_index": 1,
+      "row": 3,
+      "col": 1,
+      "name_en": "Summon Dire Wolf",
+      "name_ko": "다이어 울프",
+      "req_level": 18,
+      "level": 12,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 238,
+      "slot_index": 17,
+      "tree_index": 1,
+      "row": 3,
+      "col": 2,
+      "name_en": "Rabies",
+      "name_ko": "레이비즈",
+      "req_level": 18,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 239,
+      "slot_index": 18,
+      "tree_index": 1,
+      "row": 3,
+      "col": 3,
+      "name_en": "Fire Claws",
+      "name_ko": "파이러 클러",
+      "req_level": 18,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 240,
+      "slot_index": 19,
+      "tree_index": 1,
+      "row": 4,
+      "col": 1,
+      "name_en": "Twister",
+      "name_ko": "트위스터",
+      "req_level": 18,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 241,
+      "slot_index": 20,
+      "tree_index": 2,
+      "row": 1,
+      "col": 1,
+      "name_en": "Solar Creeper",
+      "name_ko": "솔라 크리퍼",
+      "req_level": 24,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 242,
+      "slot_index": 21,
+      "tree_index": 2,
+      "row": 1,
+      "col": 2,
+      "name_en": "Hunger",
+      "name_ko": "헝거",
+      "req_level": 24,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 243,
+      "slot_index": 22,
+      "tree_index": 2,
+      "row": 1,
+      "col": 3,
+      "name_en": "Shock Wave",
+      "name_ko": "쇼크 웨이브",
+      "req_level": 24,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 244,
+      "slot_index": 23,
+      "tree_index": 2,
+      "row": 2,
+      "col": 1,
+      "name_en": "Volcano",
+      "name_ko": "볼케이노",
+      "req_level": 24,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 245,
+      "slot_index": 24,
+      "tree_index": 2,
+      "row": 2,
+      "col": 2,
+      "name_en": "Tornado",
+      "name_ko": "토네이도",
+      "req_level": 24,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 246,
+      "slot_index": 25,
+      "tree_index": 2,
+      "row": 2,
+      "col": 3,
+      "name_en": "Spirit of Barbs",
+      "name_ko": "스피리트 오브 바브",
+      "req_level": 30,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 247,
+      "slot_index": 26,
+      "tree_index": 2,
+      "row": 3,
+      "col": 1,
+      "name_en": "Summon Grizzly",
+      "name_ko": "그리즐리",
+      "req_level": 30,
+      "level": 1,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 248,
+      "slot_index": 27,
+      "tree_index": 2,
+      "row": 3,
+      "col": 2,
+      "name_en": "Fury",
+      "name_ko": "퓨리",
+      "req_level": 30,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 249,
+      "slot_index": 28,
+      "tree_index": 2,
+      "row": 3,
+      "col": 3,
+      "name_en": "Armageddon",
+      "name_ko": "아마게돈",
+      "req_level": 30,
+      "level": 0,
+      "bonus_level": 0
+    },
+    {
+      "skill_id": 250,
+      "slot_index": 29,
+      "tree_index": 2,
+      "row": 4,
+      "col": 1,
+      "name_en": "Hurricane",
+      "name_ko": "허리케인",
+      "req_level": 30,
+      "level": 0,
+      "bonus_level": 0
+    }
+  ]
 }

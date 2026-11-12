@@ -101,7 +101,15 @@ type UiIntent
     | ToggleWaypoint { difficulty : DifficultyMode, bit : Int }
     | SetWaypointsBatch { difficulty : DifficultyMode, bits : List (Int), active : Bool }
     | SetAllDiffWaypoints { active : Bool }
+    | SelectItemForMove { itemIndex : Maybe (Int) }
+    | MoveItem { itemIndex : Int, targetContainer : String, x : Int, y : Int }
+    | Undo
+    | Redo
     | ClearTempInventory
+    | ToggleWeaponSwap
+    | DisposeHeldItem
+    | AdjustSkillRank { skillId : Int, delta : Int }
+    | ResetSkills
 
 
 uiIntentEncoder : UiIntent -> Json.Encode.Value
@@ -131,8 +139,24 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "SetWaypointsBatch", Json.Encode.object [ ( "difficulty", (difficultyModeEncoder) difficulty ), ( "bits", (Json.Encode.list (Json.Encode.int)) bits ), ( "active", (Json.Encode.bool) active ) ] ) ]
         SetAllDiffWaypoints { active } ->
             Json.Encode.object [ ( "SetAllDiffWaypoints", Json.Encode.object [ ( "active", (Json.Encode.bool) active ) ] ) ]
+        SelectItemForMove { itemIndex } ->
+            Json.Encode.object [ ( "SelectItemForMove", Json.Encode.object [ ( "item_index", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) itemIndex ) ] ) ]
+        MoveItem { itemIndex, targetContainer, x, y } ->
+            Json.Encode.object [ ( "MoveItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "target_container", (Json.Encode.string) targetContainer ), ( "x", (Json.Encode.int) x ), ( "y", (Json.Encode.int) y ) ] ) ]
+        Undo ->
+            Json.Encode.string "Undo"
+        Redo ->
+            Json.Encode.string "Redo"
         ClearTempInventory ->
             Json.Encode.string "ClearTempInventory"
+        ToggleWeaponSwap ->
+            Json.Encode.string "ToggleWeaponSwap"
+        DisposeHeldItem ->
+            Json.Encode.string "DisposeHeldItem"
+        AdjustSkillRank { skillId, delta } ->
+            Json.Encode.object [ ( "AdjustSkillRank", Json.Encode.object [ ( "skill_id", (Json.Encode.int) skillId ), ( "delta", (Json.Encode.int) delta ) ] ) ]
+        ResetSkills ->
+            Json.Encode.string "ResetSkills"
 
 difficultyModeDecoder : Json.Decode.Decoder DifficultyMode
 difficultyModeDecoder = 
@@ -269,6 +293,12 @@ type alias CharacterStatsView =
     , goldInventory : Int
     , goldStash : Int
     , activeSkillCount : Int
+    , fcr : Int
+    , fhr : Int
+    , frw : Int
+    , ias : Int
+    , magicFind : Int
+    , allSkillsBonus : Int
     }
 
 
@@ -294,6 +324,12 @@ characterStatsViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "gold_inventory" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "gold_stash" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "active_skill_count" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "fcr" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "fhr" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "frw" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "ias" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "magic_find" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "all_skills_bonus" (Json.Decode.int)))
 
 
 type alias ContainerCountsView =
@@ -488,6 +524,7 @@ type alias ItemCardView =
     , setBonuses : List (SetBonusView)
     , socketedNames : List (String)
     , imageUrl : Maybe (String)
+    , isBeltConsumable : Bool
     }
 
 
@@ -514,6 +551,51 @@ itemCardViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_bonuses" (Json.Decode.list (setBonusViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "socketed_names" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "image_url" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "is_belt_consumable" (Json.Decode.bool)))
+
+
+type alias AllowedMoveTargetView =
+    { container : String
+    , x : Int
+    , y : Int
+    }
+
+
+allowedMoveTargetViewDecoder : Json.Decode.Decoder AllowedMoveTargetView
+allowedMoveTargetViewDecoder =
+    Json.Decode.succeed AllowedMoveTargetView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "container" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "x" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "y" (Json.Decode.int)))
+
+
+type alias SkillNodeView =
+    { skillId : Int
+    , slotIndex : Int
+    , treeIndex : Int
+    , row : Int
+    , col : Int
+    , nameEn : String
+    , nameKo : String
+    , reqLevel : Int
+    , level : Int
+    , bonusLevel : Int
+    }
+
+
+skillNodeViewDecoder : Json.Decode.Decoder SkillNodeView
+skillNodeViewDecoder =
+    Json.Decode.succeed SkillNodeView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skill_id" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "slot_index" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "tree_index" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "row" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "col" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_en" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "req_level" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "level" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "bonus_level" (Json.Decode.int)))
 
 
 type alias SessionView =
@@ -539,6 +621,13 @@ type alias SessionView =
     , items : List (ItemCardView)
     , mercItems : List (ItemCardView)
     , tempItems : List (ItemCardView)
+    , selectedMoveItemIndex : Maybe (Int)
+    , allowedMoveTargets : List (AllowedMoveTargetView)
+    , beltMoveRestrictedReason : Maybe (String)
+    , canUndo : Bool
+    , canRedo : Bool
+    , activeWeaponSet : Int
+    , skills : List (SkillNodeView)
     }
 
 
@@ -567,6 +656,13 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "items" (Json.Decode.list (itemCardViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "merc_items" (Json.Decode.list (itemCardViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "temp_items" (Json.Decode.list (itemCardViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "selected_move_item_index" (Json.Decode.nullable (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "allowed_move_targets" (Json.Decode.list (allowedMoveTargetViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "belt_move_restricted_reason" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "can_undo" (Json.Decode.bool)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "can_redo" (Json.Decode.bool)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "active_weapon_set" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skills" (Json.Decode.list (skillNodeViewDecoder))))
 
 
 type alias ActionRejection =

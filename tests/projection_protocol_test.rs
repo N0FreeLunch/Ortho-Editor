@@ -208,6 +208,7 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         set_bonuses: vec![],
         socketed_names: vec![],
         image_url: None,
+        is_belt_consumable: false,
     });
     let projected = session.project();
     assert!(
@@ -242,6 +243,10 @@ fn elm_wire_intent_json_samples_decode_into_rust_ui_intent() {
         r#"{"SetWaypointsBatch":{"difficulty":"Normal","bits":[0,1,2],"active":false}}"#,
         r#"{"SetAllDiffWaypoints":{"active":true}}"#,
         r#""ClearTempInventory""#,
+        r#""ToggleWeaponSwap""#,
+        r#""DisposeHeldItem""#,
+        r#"{"AdjustSkillRank":{"skill_id":221,"delta":1}}"#,
+        r#""ResetSkills""#,
     ];
 
     for raw in samples {
@@ -478,4 +483,233 @@ fn character_profile_and_stat_mutations_enforce_bounds_and_roundtrip_bytes() {
     assert_eq!(reloaded_view.stats.gold_stash, 1_234_567);
     assert_eq!(reloaded_view.char_name, "OrthoDruid");
     assert_eq!(reloaded_view.items.len(), initial.items.len());
+}
+
+#[test]
+fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
+    let bytes = fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("parse fixture");
+    let view = session.project();
+
+    // Find a non-consumable 1x1 or larger item in inventory/stash/cube to verify belt rejection.
+    let non_consumable = view
+        .items
+        .iter()
+        .find(|item| {
+            !item.is_belt_consumable
+                && matches!(item.container.as_str(), "inventory" | "stash" | "cube")
+        })
+        .expect("fixture should have a non-consumable container item")
+        .clone();
+
+    // Unknown container target is rejected cleanly; dropping on `"shop"` disposes the item with Undo recovery.
+    let unknown_reject = session.apply_intent(UiIntent::MoveItem {
+        item_index: non_consumable.index,
+        target_container: "mercenary".to_string(),
+        x: 0,
+        y: 0,
+    });
+    assert!(!unknown_reject.ok);
+    assert_eq!(
+        unknown_reject.rejection.as_ref().map(|r| r.code.as_str()),
+        Some("invalid_target_container")
+    );
+
+    let belt_reject = session.apply_intent(UiIntent::MoveItem {
+        item_index: non_consumable.index,
+        target_container: "belt".to_string(),
+        x: 0,
+        y: 0,
+    });
+    assert!(!belt_reject.ok);
+    assert_eq!(
+        belt_reject.rejection.as_ref().map(|r| r.code.as_str()),
+        Some("belt_consumable_only")
+    );
+
+    // Select item for move: Rust projects allowed_move_targets and belt restriction without Undo pollution.
+    let select_env = session.apply_intent(UiIntent::SelectItemForMove {
+        item_index: Some(non_consumable.index),
+    });
+    assert!(select_env.ok);
+    let select_view = select_env.session.expect("select view");
+    assert_eq!(select_view.selected_move_item_index, Some(non_consumable.index));
+    assert!(!select_view.can_undo);
+    assert!(select_view.belt_move_restricted_reason.is_some());
+    assert!(
+        select_view
+            .allowed_move_targets
+            .iter()
+            .any(|t| t.container == "stash" && t.x == 8 && t.y == 8)
+    );
+    assert!(
+        !select_view
+            .allowed_move_targets
+            .iter()
+            .any(|t| t.container == "belt")
+    );
+
+    // Move a compact/stashable item to a free slot in stash (or cube) and verify Undo/Redo + .d2s roundtrip.
+    let target_x = 8;
+    let target_y = 8;
+    let moved = session.apply_intent(UiIntent::MoveItem {
+        item_index: non_consumable.index,
+        target_container: "stash".to_string(),
+        x: target_x,
+        y: target_y,
+    });
+    assert!(moved.ok, "unexpected rejection: {:?}", moved.rejection);
+    let moved_view = moved.session.expect("moved session");
+    assert!(moved_view.can_undo);
+    assert!(!moved_view.can_redo);
+    assert_eq!(moved_view.selected_move_item_index, None);
+    let moved_card = moved_view
+        .items
+        .iter()
+        .find(|item| item.index == non_consumable.index)
+        .expect("moved card");
+    assert_eq!(moved_card.container, "stash");
+    assert_eq!(moved_card.x, target_x);
+    assert_eq!(moved_card.y, target_y);
+
+    // Undo restores the original container and coordinates.
+    let undone = session.apply_intent(UiIntent::Undo);
+    assert!(undone.ok);
+    let undone_view = undone.session.expect("undone view");
+    assert!(!undone_view.can_undo);
+    assert!(undone_view.can_redo);
+    let restored_card = undone_view
+        .items
+        .iter()
+        .find(|item| item.index == non_consumable.index)
+        .expect("restored card");
+    assert_eq!(restored_card.container, non_consumable.container);
+    assert_eq!(restored_card.x, non_consumable.x);
+    assert_eq!(restored_card.y, non_consumable.y);
+
+    // Redo re-applies the move to stash (8, 8).
+    let redone = session.apply_intent(UiIntent::Redo);
+    assert!(redone.ok);
+    let redone_view = redone.session.expect("redone view");
+    assert!(redone_view.can_undo);
+    assert!(!redone_view.can_redo);
+    let redone_card = redone_view
+        .items
+        .iter()
+        .find(|item| item.index == non_consumable.index)
+        .expect("redone card");
+    assert_eq!(redone_card.container, "stash");
+    assert_eq!(redone_card.x, target_x);
+    assert_eq!(redone_card.y, target_y);
+
+    // Export and reload from .d2s bytes to verify binary persistence.
+    let exported = session.to_save_bytes().expect("export moved item .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "moved.d2s").expect("reload moved .d2s");
+    let reloaded_view = reloaded.project();
+    assert_eq!(reloaded_view.items.len(), view.items.len());
+    let reloaded_card = reloaded_view
+        .items
+        .iter()
+        .find(|item| {
+            item.code == non_consumable.code
+                && item.container == "stash"
+                && item.x == target_x
+                && item.y == target_y
+        })
+        .expect("moved item should persist in stash at (8, 8) after .d2s reload");
+    assert_eq!(reloaded_card.name_en, non_consumable.name_en);
+}
+
+#[test]
+fn cycle_13_shop_dispose_temp_inv_weapon_swap_and_skill_tree_roundtrip_d2s() {
+    let bytes =
+        fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("parse fixture");
+    let initial = session.project();
+    assert_eq!(initial.active_weapon_set, 1);
+    assert_eq!(initial.skills.len(), 30);
+    let initial_item_count = initial.items.len();
+
+    // 1. Toggle Weapon Swap I <-> II
+    let swap_env = session.apply_intent(UiIntent::ToggleWeaponSwap);
+    assert!(swap_env.ok);
+    assert_eq!(swap_env.session.unwrap().active_weapon_set, 2);
+    let swap_back = session.apply_intent(UiIntent::ToggleWeaponSwap);
+    assert!(swap_back.ok);
+    assert_eq!(swap_back.session.unwrap().active_weapon_set, 1);
+
+    // 2. Move item to Temp Inventory (9x4), verify export guard, then move back or Undo
+    let candidate = initial
+        .items
+        .iter()
+        .find(|it| matches!(it.container.as_str(), "inventory" | "stash"))
+        .expect("find inventory or stash item")
+        .clone();
+    let to_temp = session.apply_intent(UiIntent::MoveItem {
+        item_index: candidate.index,
+        target_container: "temp_inventory".to_string(),
+        x: 2,
+        y: 1,
+    });
+    assert!(to_temp.ok);
+    let temp_view = to_temp.session.unwrap();
+    assert_eq!(temp_view.container_counts.temp_inventory, 1);
+    assert!(
+        session.to_save_bytes().is_err(),
+        "export must be blocked while items remain in temp_inventory"
+    );
+    let undo_temp = session.apply_intent(UiIntent::Undo);
+    assert!(undo_temp.ok);
+    assert_eq!(undo_temp.session.unwrap().container_counts.temp_inventory, 0);
+
+    // 3. Shop Dispose + Undo recovery
+    assert!(
+        session
+            .apply_intent(UiIntent::SelectItemForMove {
+                item_index: Some(candidate.index),
+            })
+            .ok
+    );
+    let disposed = session.apply_intent(UiIntent::DisposeHeldItem);
+    assert!(disposed.ok);
+    let disposed_view = disposed.session.unwrap();
+    assert_eq!(disposed_view.items.len(), initial_item_count - 1);
+    assert_eq!(disposed_view.selected_move_item_index, None);
+    let undo_dispose = session.apply_intent(UiIntent::Undo);
+    assert!(undo_dispose.ok);
+    assert_eq!(undo_dispose.session.unwrap().items.len(), initial_item_count);
+
+    // 4. Skill Tree Rank Allocation & ResetSkills + .d2s binary roundtrip
+    let first_skill_id = initial.skills[0].skill_id;
+    let reset_env = session.apply_intent(UiIntent::ResetSkills);
+    assert!(reset_env.ok);
+    let reset_view = reset_env.session.unwrap();
+    assert_eq!(reset_view.stats.active_skill_count, 0);
+    assert!(reset_view.stats.unspent_skill_points > 0);
+    let unspent_after_reset = reset_view.stats.unspent_skill_points;
+
+    let rank_up = session.apply_intent(UiIntent::AdjustSkillRank {
+        skill_id: first_skill_id,
+        delta: 1,
+    });
+    assert!(rank_up.ok);
+    let ranked_view = rank_up.session.unwrap();
+    assert_eq!(ranked_view.skills[0].level, 1);
+    assert_eq!(
+        ranked_view.stats.unspent_skill_points,
+        unspent_after_reset - 1
+    );
+    assert_eq!(ranked_view.stats.active_skill_count, 1);
+
+    let exported = session.to_save_bytes().expect("export skill edits .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "skills.d2s").expect("reload skills .d2s");
+    let reloaded_view = reloaded.project();
+    assert_eq!(reloaded_view.skills[0].level, 1);
+    assert_eq!(
+        reloaded_view.stats.unspent_skill_points,
+        unspent_after_reset - 1
+    );
+    assert_eq!(reloaded_view.stats.active_skill_count, 1);
 }

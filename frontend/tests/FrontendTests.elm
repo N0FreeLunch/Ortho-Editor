@@ -62,7 +62,13 @@ sampleSessionJson =
           "unspent_skill_points": 1,
           "gold_inventory": 229492,
           "gold_stash": 281974,
-          "active_skill_count": 11
+          "active_skill_count": 11,
+          "fcr": 20,
+          "fhr": 30,
+          "frw": 25,
+          "ias": 15,
+          "magic_find": 55,
+          "all_skills_bonus": 2
         },
         "resistances": {
           "difficulty": "Normal",
@@ -125,7 +131,8 @@ sampleSessionJson =
             "properties": ["+30% Better Chance of Getting Magic Items"],
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
             "socketed_names": [],
-            "image_url": "/item-vectors/misc/ring/ring.svg"
+            "image_url": "/item-vectors/misc/ring/ring.svg",
+            "is_belt_consumable": false
           }
         ],
         "merc_items": [
@@ -138,7 +145,8 @@ sampleSessionJson =
             "properties": ["Level 15 Meditation Aura When Equipped"],
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
             "socketed_names": ["Ral Rune", "Tir Rune", "Tal Rune", "Sol Rune"],
-            "image_url": null
+            "image_url": null,
+            "is_belt_consumable": false
           }
         ],
         "temp_items": [
@@ -151,7 +159,52 @@ sampleSessionJson =
             "properties": [],
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
             "socketed_names": [],
-            "image_url": null
+            "image_url": null,
+            "is_belt_consumable": false
+          }
+        ],
+        "selected_move_item_index": null,
+        "allowed_move_targets": [],
+        "belt_move_restricted_reason": null,
+        "can_undo": false,
+        "can_redo": false,
+        "active_weapon_set": 1,
+        "skills": [
+          {
+            "skill_id": 221,
+            "slot_index": 0,
+            "tree_index": 0,
+            "row": 1,
+            "col": 1,
+            "name_en": "Raven",
+            "name_ko": "큰까마귀",
+            "req_level": 1,
+            "level": 5,
+            "bonus_level": 2
+          },
+          {
+            "skill_id": 225,
+            "slot_index": 4,
+            "tree_index": 0,
+            "row": 2,
+            "col": 2,
+            "name_en": "Firestorm",
+            "name_ko": "화염 폭풍",
+            "req_level": 1,
+            "level": 0,
+            "bonus_level": 0
+          },
+          {
+            "skill_id": 231,
+            "slot_index": 10,
+            "tree_index": 1,
+            "row": 1,
+            "col": 1,
+            "name_en": "Werewolf",
+            "name_ko": "늑대인간",
+            "req_level": 1,
+            "level": 3,
+            "bonus_level": 2
           }
         ]
       },
@@ -794,10 +847,10 @@ suite =
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.has [ Selector.class "ortho-shell", Selector.class "theme-light" ]
-                        , Query.find [ testId "undo-preview-btn" ]
+                        , Query.find [ testId "undo-btn" ]
                             >> Query.has [ Selector.attribute (Html.Attributes.disabled True) ]
                         , Query.find [ testId "weapon-swap-preview-btn" ]
-                            >> Query.has [ Selector.attribute (Html.Attributes.disabled True) ]
+                            >> Query.has [ Selector.text "Swap I / II", Selector.text "Set I" ]
                         , Query.find [ testId "item-shop-preview" ]
                             >> Query.has [ Selector.text "Preview only" ]
                         , Query.find [ testId "paperdoll-panel" ]
@@ -811,7 +864,7 @@ suite =
                         , Query.find [ testId "selected-item-inspector" ]
                             >> Query.has [ Selector.text "Nagelring", Selector.text "Better Chance" ]
                         ]
-        , test "Cycle 10 View B 4-Col .spec-grid renders vitals gauges, preview skill frame, 3-diff compact quest dots, 5-act waypoints, and combat lab accordion" <|
+        , test "Cycle 10 View B 4-Col .spec-grid renders vitals gauges, skill tree, 3-diff compact quest dots, 5-act waypoints, and combat lab accordion" <|
             \_ ->
                 let
                     ( labOpened, _ ) =
@@ -830,7 +883,7 @@ suite =
                                 , Query.find [ testId "vitals-gauges" ]
                                     >> Query.has [ Selector.text "Life", Selector.text "Mana", Selector.text "Stamina" ]
                                 , Query.find [ testId "skill-tree-preview" ]
-                                    >> Query.has [ Selector.text "Preview only" ]
+                                    >> Query.has [ Selector.text "Reset Skills", Selector.text "Werewolf" ]
                                 , Query.find [ testId "skill-tree-tab-tree1" ]
                                     >> Query.has [ Selector.class "active" ]
                                 , Query.find [ testId "quests-panel" ]
@@ -840,7 +893,7 @@ suite =
                                 , Query.find [ testId "waypoint-matrix" ]
                                     >> Query.has [ Selector.text "Act 1", Selector.text "Act 5" ]
                                 , Query.find [ testId "combat-lab-content" ]
-                                    >> Query.has [ Selector.text "Preview only" ]
+                                    >> Query.has [ Selector.text "Combat Sheet Projection" ]
                                 ]
                     , \_ ->
                         Workspace.view loadedModel
@@ -886,6 +939,7 @@ suite =
                         , setBonuses = [ { active = False, requiredCount = 2, lines = [ "10% Life stolen per hit" ] } ]
                         , socketedNames = [ "Perfect Diamond" ]
                         , imageUrl = Just "/item-vectors/misc/potion/lesser_healing_potion.svg"
+                        , isBeltConsumable = True
                         }
 
                     viewAModel =
@@ -972,6 +1026,327 @@ suite =
                                             , Selector.style "bottom" "54px"
                                             ]
                                 ]
+                    ]
+                    ()
+        , test "Cycle 12 View A renders Rust-projected allowedMoveTargets, belt restriction, MoveItem, and Undo/Redo" <|
+            \_ ->
+                let
+                    nonConsumableModel =
+                        let
+                            base =
+                                loadedModel
+                                    |> Update.update (SwitchView ViewA)
+                                    |> Tuple.first
+                        in
+                        { base
+                            | session =
+                                Maybe.map
+                                    (\s ->
+                                        { s
+                                            | selectedMoveItemIndex = Just 0
+                                            , allowedMoveTargets = [ { container = "stash", x = 5, y = 6 } ]
+                                            , beltMoveRestrictedReason = Just "Only 1x1 belt consumables can be placed in the belt."
+                                            , canUndo = True
+                                            , canRedo = True
+                                        }
+                                    )
+                                    base.session
+                        }
+
+                    potionModel =
+                        let
+                            base =
+                                loadedModel
+                                    |> Update.update (SwitchView ViewA)
+                                    |> Tuple.first
+
+                            potion =
+                                { index = 901
+                                , code = "hp1"
+                                , nameEn = "Minor Healing Potion"
+                                , nameKo = "하급 치유 물약"
+                                , quality = "Normal"
+                                , container = "inventory"
+                                , slotLabel = Nothing
+                                , x = 0
+                                , y = 0
+                                , width = 1
+                                , height = 1
+                                , itemLevel = 1
+                                , baseAttributes = []
+                                , properties = []
+                                , setName = Nothing
+                                , setPieces = []
+                                , pieceSetBonuses = []
+                                , setBonuses = []
+                                , socketedNames = []
+                                , imageUrl = Nothing
+                                , isBeltConsumable = True
+                                }
+                        in
+                        { base
+                            | session =
+                                Maybe.map
+                                    (\s ->
+                                        { s
+                                            | items = potion :: s.items
+                                            , selectedMoveItemIndex = Just 901
+                                            , allowedMoveTargets = [ { container = "belt", x = 2, y = 0 } ]
+                                            , beltMoveRestrictedReason = Nothing
+                                        }
+                                    )
+                                    base.session
+                        }
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view nonConsumableModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "belt-restricted-pill" ]
+                                    >> Query.has [ Selector.text "Belt restricted (consumables only)" ]
+                                , Query.find [ testId "spatial-grid-belt" ]
+                                    >> Query.has [ Selector.class "is-restricted" ]
+                                , Query.find [ testId "grid-cell-stash-5-6" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (MoveSelectedItemTo "stash" 5 6)
+                                , Query.find [ testId "grid-cell-belt-0-0" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (MoveSelectedItemTo "belt" 0 0)
+                                , Query.find [ testId "undo-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickUndo
+                                , Query.find [ testId "redo-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickRedo
+                                ]
+                    , \_ ->
+                        nonConsumableModel
+                            |> Update.update (MoveTooltipHover 320 240 1440 900)
+                            |> Tuple.first
+                            |> Workspace.view
+                            |> Query.fromHtml
+                            |> Query.find [ testId "held-item-ghost" ]
+                            |> Query.has
+                                [ Selector.style "left" "320px"
+                                , Selector.style "top" "240px"
+                                ]
+                    , \_ ->
+                        nonConsumableModel
+                            |> Update.update (HoverDropTarget (Just { container = "stash", x = 5, y = 6 }))
+                            |> Tuple.first
+                            |> Workspace.view
+                            |> Query.fromHtml
+                            |> Query.find [ testId "grid-footprint-preview-stash" ]
+                            |> Query.has [ Selector.class "valid" ]
+                    , \_ ->
+                        nonConsumableModel
+                            |> Update.update (HoverDropTarget (Just { container = "belt", x = 0, y = 0 }))
+                            |> Tuple.first
+                            |> Workspace.view
+                            |> Query.fromHtml
+                            |> Query.find [ testId "grid-footprint-preview-belt" ]
+                            |> Query.has [ Selector.class "invalid" ]
+                    , \_ ->
+                        Update.update (SelectItem (Just 0)) nonConsumableModel
+                            |> Tuple.second
+                            |> Expect.equal (EmitIntent (Protocol.SelectItemForMove { itemIndex = Just 0 }))
+                    , \_ ->
+                        Update.update (MoveSelectedItemTo "stash" 5 6) nonConsumableModel
+                            |> Tuple.second
+                            |> Expect.equal
+                                (EmitIntent
+                                    (Protocol.MoveItem
+                                        { itemIndex = 0
+                                        , targetContainer = "stash"
+                                        , x = 5
+                                        , y = 6
+                                        }
+                                    )
+                                )
+                    , \_ ->
+                        Update.update ClickUndo nonConsumableModel
+                            |> Tuple.second
+                            |> Expect.equal (EmitIntent Protocol.Undo)
+                    , \_ ->
+                        Update.update ClickRedo nonConsumableModel
+                            |> Tuple.second
+                            |> Expect.equal (EmitIntent Protocol.Redo)
+                    , \_ ->
+                        Workspace.view potionModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "grid-cell-belt-2-0" ]
+                            >> Event.simulate Event.click
+                            >> Event.expect (MoveSelectedItemTo "belt" 2 0)
+                    ]
+                    ()
+        , test "Cycle 13 View A & B render shop sell/dispose, weapon swap I/II, gear breakpoints, and interactive 30-skill tree" <|
+            \_ ->
+                let
+                    holdingViewA =
+                        let
+                            base =
+                                loadedModel
+                                    |> Update.update (SwitchView ViewA)
+                                    |> Tuple.first
+                        in
+                        { base
+                            | session =
+                                Maybe.map
+                                    (\s ->
+                                        { s
+                                            | selectedMoveItemIndex = Just 0
+                                            , allowedMoveTargets = [ { container = "temp_inventory", x = 2, y = 1 } ]
+                                        }
+                                    )
+                                    base.session
+                        }
+                            |> Update.update (HoverDropTarget (Just { container = "shop", x = 0, y = 0 }))
+                            |> Tuple.first
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view holdingViewA
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "shop-dispose-grid" ]
+                                    >> Query.has [ Selector.class "shop-sell-drop-active" ]
+                                , Query.find [ testId "shop-dispose-grid" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickDisposeHeldItem
+                                , Query.find [ testId "weapon-swap-preview-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickToggleWeaponSwap
+                                , Query.find [ testId "bp-fcr" ]
+                                    >> Query.has [ Selector.text "20%" ]
+                                , Query.find [ testId "bp-mf" ]
+                                    >> Query.has [ Selector.text "55%" ]
+                                , Query.find [ testId "bp-skills" ]
+                                    >> Query.has [ Selector.text "+2" ]
+                                ]
+                    , \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "skill-node-221" ]
+                                    >> Query.has [ Selector.text "Raven", Selector.text "5 (7)" ]
+                                , Query.find [ testId "skill-plus-221" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ClickAdjustSkillRank 221 1)
+                                , Query.find [ testId "skill-minus-221" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ClickAdjustSkillRank 221 -1)
+                                , Query.find [ testId "reset-skills-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickResetSkills
+                                ]
+                    ]
+                    ()
+        , test "Equipment item can be picked up and placed back onto the same or another equipment slot" <|
+            \_ ->
+                let
+                    ringItem =
+                        { index = 0
+                        , code = "rin"
+                        , nameEn = "Nagelring"
+                        , nameKo = "나겔링"
+                        , quality = "Unique"
+                        , container = "equipment"
+                        , slotLabel = Just "Ring1"
+                        , x = 0
+                        , y = 0
+                        , width = 1
+                        , height = 1
+                        , itemLevel = 10
+                        , baseAttributes = []
+                        , properties = []
+                        , setName = Nothing
+                        , setPieces = []
+                        , pieceSetBonuses = []
+                        , setBonuses = []
+                        , socketedNames = []
+                        , imageUrl = Nothing
+                        , isBeltConsumable = False
+                        }
+
+                    baseViewA =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+
+                    withEquip =
+                        { baseViewA
+                            | session =
+                                Maybe.map
+                                    (\s ->
+                                        { s
+                                            | items = [ ringItem ]
+                                            , selectedMoveItemIndex = Nothing
+                                            , allowedMoveTargets = []
+                                        }
+                                    )
+                                    baseViewA.session
+                        }
+
+                    holdingEquip =
+                        { withEquip
+                            | session =
+                                Maybe.map
+                                    (\s ->
+                                        { s
+                                            | selectedMoveItemIndex = Just 0
+                                            , allowedMoveTargets =
+                                                [ { container = "equipment", x = 6, y = 0 }
+                                                , { container = "equipment", x = 7, y = 0 }
+                                                ]
+                                        }
+                                    )
+                                    withEquip.session
+                        }
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view withEquip
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "move-mode-bar" ]
+                                    >> Query.has [ Selector.class "is-idle" ]
+                                , Query.find [ testId "equip-slot-6" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (SelectItem (Just 0))
+                                ]
+                    , \_ ->
+                        let
+                            hoveredEquip =
+                                holdingEquip
+                                    |> Update.update (HoverDropTarget (Just { container = "equipment", x = 6, y = 0 }))
+                                    |> Tuple.first
+                        in
+                        Expect.all
+                            [ \_ ->
+                                Workspace.view holdingEquip
+                                    |> Query.fromHtml
+                                    |> Expect.all
+                                        [ Query.find [ testId "move-mode-bar" ]
+                                            >> Query.hasNot [ Selector.class "is-idle" ]
+                                        , Query.find [ testId "equip-slot-6" ]
+                                            >> Query.has [ Selector.class "is-held-source" ]
+                                        , Query.find [ testId "equip-slot-6" ]
+                                            >> Query.hasNot [ Selector.class "footprint-valid" ]
+                                        , Query.find [ testId "equip-slot-6" ]
+                                            >> Event.simulate Event.click
+                                            >> Event.expect (SelectItem Nothing)
+                                        , Query.find [ testId "equip-slot-7" ]
+                                            >> Event.simulate Event.click
+                                            >> Event.expect (MoveSelectedItemTo "equipment" 7 0)
+                                        ]
+                            , \_ ->
+                                Workspace.view hoveredEquip
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "equip-slot-6" ]
+                                    >> Query.has [ Selector.class "is-held-source", Selector.class "footprint-valid" ]
+                            ]
+                            ()
                     ]
                     ()
         ]

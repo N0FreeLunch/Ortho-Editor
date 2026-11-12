@@ -354,7 +354,7 @@ test("Closed-loop scenario 1: full multi-step browser journey across Elm Headles
     assert.equal(filterStash.snap.containerFilter, "stash");
 
     const selectItem = await driver.stepCommand({ kind: "SelectItem", index: 0 });
-    assert.equal(selectItem.emittedIntents.length, 0);
+    assert.deepEqual(selectItem.emittedIntents, [{ SelectItemForMove: { item_index: 0 } }]);
     assert.equal(selectItem.snap.selectedItemIndex, 0);
 
     // 3. Return to View B and verify Rust re-projects Hell resistance penalty

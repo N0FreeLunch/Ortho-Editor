@@ -162,15 +162,17 @@ viewTopHeader model =
         , div [ class "header-right" ]
             [ div [ class "history-controls" ]
                 [ button
-                    [ attribute "data-testid" "undo-preview-btn"
-                    , disabled True
-                    , title "Preview only: Undo history requires Rust session slice"
+                    [ attribute "data-testid" "undo-btn"
+                    , disabled (not (model.session |> Maybe.map .canUndo |> Maybe.withDefault False))
+                    , title "Undo last state change (Rust snapshot)"
+                    , onClick ClickUndo
                     ]
                     [ text "Undo" ]
                 , button
-                    [ attribute "data-testid" "redo-preview-btn"
-                    , disabled True
-                    , title "Preview only: Redo history requires Rust session slice"
+                    [ attribute "data-testid" "redo-btn"
+                    , disabled (not (model.session |> Maybe.map .canRedo |> Maybe.withDefault False))
+                    , title "Redo last undone state change (Rust snapshot)"
+                    , onClick ClickRedo
                     ]
                     [ text "Redo" ]
                 ]

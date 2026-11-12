@@ -15,15 +15,17 @@ use serde::{Deserialize, Serialize};
 
 use validator::Validate;
 
-use crate::domain::character::skills::parse_skill_section;
+use crate::domain::character::skills::{SKILL_SECTION_LEN, SkillSection, parse_skill_section};
 use crate::domain::contracts::NumericOp;
 use crate::domain::contracts::character::{
     CharacterMutationContract, CharacterWireDto, LevelValue, StashGoldValue, StatPointValue,
 };
+use crate::domain::contracts::skill::SkillMutationContract;
 use crate::domain::forensic::v105::mercenary::MercenaryState;
 use crate::domain::header::axiom::EXPANSION_FLAG_OFFSET;
 use crate::domain::item::image::{ItemImageCatalog, ItemImageKey, resolve_item_image};
 use crate::domain::item::stream::{ItemContainer, PlayerItemStream};
+use crate::verify::alpha_inventory_routing::is_belt_consumable;
 use crate::domain::progression::Progression;
 use crate::domain::progression::axiom::{
     PROG_START_FILE, V105WaypointAxiom, V105_NPC_OFFSET, V105_WAYPOINT_OFFSET,
@@ -33,13 +35,13 @@ use crate::engine::character_sheet::{
     Difficulty, calculate_combat_sheet,
 };
 use crate::engine::defense::equipped_set_piece_counts;
-use crate::engine::formatter::format_item;
+use crate::engine::formatter::{format_item, get_loc};
 use crate::engine::mercenary_items::{collect_mercenary_items, mercenary_item_slot};
 use crate::inventory::get_item_size;
 use crate::item::{HuffmanTree, Item, ItemQuality};
 use crate::save::{
     AttributeSection, Save, class_name, class_skill_base_id, map_core_sections,
-    try_apply_character_mutation,
+    try_apply_character_mutation, try_apply_skill_mutation,
 };
 
 /// Active difficulty tab for resistance projection and progression editing.
@@ -117,6 +119,33 @@ pub struct CharacterStatsView {
     pub gold_inventory: i32,
     pub gold_stash: i32,
     pub active_skill_count: i32,
+    #[serde(default)]
+    pub fcr: i32,
+    #[serde(default)]
+    pub fhr: i32,
+    #[serde(default)]
+    pub frw: i32,
+    #[serde(default)]
+    pub ias: i32,
+    #[serde(default)]
+    pub magic_find: i32,
+    #[serde(default)]
+    pub all_skills_bonus: i32,
+}
+
+/// Projected class skill node for the 30-skill tree in View B.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct SkillNodeView {
+    pub skill_id: i32,
+    pub slot_index: i32,
+    pub tree_index: i32,
+    pub row: i32,
+    pub col: i32,
+    pub name_en: String,
+    pub name_ko: String,
+    pub req_level: i32,
+    pub level: i32,
+    pub bonus_level: i32,
 }
 
 /// Editable character profile/attribute fields mapped onto Rust `CharacterMutationContract`.
@@ -267,6 +296,16 @@ pub struct ItemCardView {
     pub socketed_names: Vec<String>,
     #[serde(default)]
     pub image_url: Option<String>,
+    #[serde(default)]
+    pub is_belt_consumable: bool,
+}
+
+/// Valid placement slot projected by Rust for the currently selected move item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct AllowedMoveTargetView {
+    pub container: String,
+    pub x: i32,
+    pub y: i32,
 }
 
 /// Complete Elm-facing read-only save session snapshot projected by Rust.
@@ -294,6 +333,20 @@ pub struct SessionView {
     pub items: Vec<ItemCardView>,
     pub merc_items: Vec<ItemCardView>,
     pub temp_items: Vec<ItemCardView>,
+    #[serde(default)]
+    pub selected_move_item_index: Option<i32>,
+    #[serde(default)]
+    pub allowed_move_targets: Vec<AllowedMoveTargetView>,
+    #[serde(default)]
+    pub belt_move_restricted_reason: Option<String>,
+    #[serde(default)]
+    pub can_undo: bool,
+    #[serde(default)]
+    pub can_redo: bool,
+    #[serde(default)]
+    pub active_weapon_set: i32,
+    #[serde(default)]
+    pub skills: Vec<SkillNodeView>,
 }
 
 /// Typed user intents sent from Elm `Main`/`HeadlessHarness` to the Rust store.
@@ -342,7 +395,25 @@ pub enum UiIntent {
     SetAllDiffWaypoints {
         active: bool,
     },
+    SelectItemForMove {
+        item_index: Option<i32>,
+    },
+    MoveItem {
+        item_index: i32,
+        target_container: String,
+        x: i32,
+        y: i32,
+    },
+    Undo,
+    Redo,
     ClearTempInventory,
+    ToggleWeaponSwap,
+    DisposeHeldItem,
+    AdjustSkillRank {
+        skill_id: i32,
+        delta: i32,
+    },
+    ResetSkills,
 }
 
 /// Structured rejection returned when Rust rejects a `UiIntent` invariant violation.
@@ -370,6 +441,7 @@ pub struct EditorSession {
     item_dialect: String,
     char_name: String,
     char_class: String,
+    char_class_id: u8,
     char_level: u8,
     experience: i32,
     is_expansion: bool,
@@ -386,9 +458,41 @@ pub struct EditorSession {
     merc_state: MercenaryState,
     merc_level: i32,
     merc_act_override: Option<i32>,
+    skill_section: SkillSection,
+    has_skill_edits: bool,
     active_skill_count: i32,
+    active_weapon_set: i32,
     char_edits: CharacterMutationContract,
     has_char_edits: bool,
+    has_item_edits: bool,
+    selected_move_item_index: Option<i32>,
+    undo_stack: Vec<SessionSnapshot>,
+    redo_stack: Vec<SessionSnapshot>,
+}
+
+/// In-memory state snapshot for Rust-owned Undo/Redo history.
+#[derive(Debug, Clone)]
+struct SessionSnapshot {
+    dirty: bool,
+    res_difficulty: DifficultyMode,
+    skill_mode: EditMode,
+    attributes: AttributeSection,
+    progression: Progression,
+    waypoints_by_diff: [WaypointSet; 3],
+    player_items_with_container: Vec<(Item, ItemContainer)>,
+    item_cards: Vec<ItemCardView>,
+    temp_items: Vec<ItemCardView>,
+    merc_state: MercenaryState,
+    merc_level: i32,
+    merc_act_override: Option<i32>,
+    skill_section: SkillSection,
+    has_skill_edits: bool,
+    active_skill_count: i32,
+    active_weapon_set: i32,
+    char_edits: CharacterMutationContract,
+    has_char_edits: bool,
+    has_item_edits: bool,
+    selected_move_item_index: Option<i32>,
 }
 
 impl EditorSession {
@@ -406,15 +510,13 @@ impl EditorSession {
         let experience = get_stat(13);
 
         let mut active_skill_count = 0;
-        if let Ok(parsed_skills) =
-            parse_skill_section(bytes, map.if_pos, map.jm_positions.first().copied())
-        {
-            if let Some(base_id) = class_skill_base_id(save.header.char_class) {
-                active_skill_count = parsed_skills
-                    .iter_skills(base_id)
-                    .filter(|skill| skill.level > 0)
-                    .count() as i32;
-            }
+        let skill_section = parse_skill_section(bytes, map.if_pos, map.jm_positions.first().copied())
+            .unwrap_or(SkillSection([0u8; SKILL_SECTION_LEN]));
+        if let Some(base_id) = class_skill_base_id(save.header.char_class) {
+            active_skill_count = skill_section
+                .iter_skills(base_id)
+                .filter(|skill| skill.level > 0)
+                .count() as i32;
         }
 
         let is_expansion = bytes
@@ -468,13 +570,23 @@ impl EditorSession {
                 0
             };
             let container_name = container_label(placement.container).to_string();
+            let resolved_slot_label = placement
+                .equipment_slot
+                .map(str::to_string)
+                .or_else(|| {
+                    if placement.container == ItemContainer::Equipment {
+                        equipment_slot_label(i32::from(item.location)).map(str::to_string)
+                    } else {
+                        None
+                    }
+                });
             item_cards.push(build_item_card(
                 idx as i32,
                 item,
                 char_level,
                 active_set_count,
                 container_name,
-                placement.equipment_slot.map(str::to_string),
+                resolved_slot_label,
                 i32::from(placement.x),
                 i32::from(placement.y),
             ));
@@ -516,6 +628,7 @@ impl EditorSession {
             item_dialect: dialect_str,
             char_name: save.header.char_name.clone(),
             char_class: class_name(save.header.char_class).to_string(),
+            char_class_id: save.header.char_class,
             char_level,
             experience,
             is_expansion,
@@ -532,9 +645,16 @@ impl EditorSession {
             merc_state,
             merc_level,
             merc_act_override: None,
+            skill_section,
+            has_skill_edits: false,
             active_skill_count,
+            active_weapon_set: 1,
             char_edits: CharacterMutationContract::default(),
             has_char_edits: false,
+            has_item_edits: false,
+            selected_move_item_index: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         })
     }
 
@@ -568,6 +688,47 @@ impl EditorSession {
             difficulty_penalty: sheet.fire_res.difficulty_penalty,
         };
 
+        let mut frw = 0;
+        let mut magic_find = 0;
+        let mut all_skills_bonus = 0;
+        let mut single_skill_bonuses: BTreeMap<u32, i32> = BTreeMap::new();
+        for (idx, (item, _)) in self.player_items_with_container.iter().enumerate() {
+            let Some(card) = self.item_cards.get(idx) else {
+                continue;
+            };
+            let is_equipped = card.container == "equipment"
+                && match card.slot_label.as_deref() {
+                    Some("Weapon1") | Some("Weapon2") => self.active_weapon_set == 1,
+                    Some("Weapon1Swap") | Some("Weapon2Swap") => self.active_weapon_set == 2,
+                    _ => true,
+                };
+            let is_inv_charm = card.container == "inventory"
+                && matches!(item.code.trim(), "cm1" | "cm2" | "cm3");
+            if !is_equipped && !is_inv_charm {
+                continue;
+            }
+            for prop in item
+                .properties
+                .iter()
+                .chain(item.runeword_attributes.iter())
+                .chain(item.set_attributes.iter().flatten())
+            {
+                match prop.stat_id {
+                    96 => frw += prop.value,
+                    80 => magic_find += prop.value,
+                    240 => magic_find += (prop.value * i32::from(self.char_level)) / 8,
+                    127 => all_skills_bonus += prop.value,
+                    83 if prop.param == u32::from(self.char_class_id) => {
+                        all_skills_bonus += prop.value;
+                    }
+                    107 | 97 => {
+                        *single_skill_bonuses.entry(prop.param).or_insert(0) += prop.value;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let stats = CharacterStatsView {
             strength_base: sheet.strength.base,
             strength_bonus: sheet.strength.bonus,
@@ -588,6 +749,12 @@ impl EditorSession {
             gold_inventory: get_stat(14),
             gold_stash: get_stat(15),
             active_skill_count: self.active_skill_count,
+            fcr: sheet.fcr,
+            fhr: sheet.fhr,
+            frw,
+            ias: sheet.ias,
+            magic_find,
+            all_skills_bonus,
         };
 
         let mut counts = ContainerCountsView {
@@ -600,16 +767,20 @@ impl EditorSession {
             unknown: 0,
             mercenary: self.merc_cards.len() as i32,
         };
-        for (_, container) in &self.player_items_with_container {
-            match container {
-                ItemContainer::Equipment => counts.equipment += 1,
-                ItemContainer::Inventory => counts.inventory += 1,
-                ItemContainer::Belt => counts.belt += 1,
-                ItemContainer::Stash => counts.stash += 1,
-                ItemContainer::Cube => counts.cube += 1,
-                ItemContainer::Unknown => counts.unknown += 1,
+        for card in &self.item_cards {
+            match card.container.as_str() {
+                "equipment" => counts.equipment += 1,
+                "inventory" => counts.inventory += 1,
+                "belt" => counts.belt += 1,
+                "stash" => counts.stash += 1,
+                "cube" => counts.cube += 1,
+                "temp_inventory" => counts.temp_inventory += 1,
+                "cursor" => {}
+                _ => counts.unknown += 1,
             }
         }
+
+        let skills = self.project_skills(all_skills_bonus, &single_skill_bonuses);
 
         let progression = ProgressionSummaryView {
             is_expansion: self.is_expansion,
@@ -641,6 +812,9 @@ impl EditorSession {
         let export_unsupported_reason = export_unsupported_reason(self.save_version);
         let export_supported = export_unsupported_reason.is_none();
 
+        let (allowed_move_targets, belt_move_restricted_reason) =
+            self.project_allowed_move_targets();
+
         SessionView {
             fixture_label: self.fixture_label.clone(),
             save_version: self.save_version,
@@ -671,17 +845,101 @@ impl EditorSession {
             items: self.item_cards.clone(),
             merc_items: self.merc_cards.clone(),
             temp_items: self.temp_items.clone(),
+            selected_move_item_index: self.selected_move_item_index,
+            allowed_move_targets,
+            belt_move_restricted_reason,
+            can_undo: !self.undo_stack.is_empty(),
+            can_redo: !self.redo_stack.is_empty(),
+            active_weapon_set: self.active_weapon_set,
+            skills,
         }
+    }
+
+    fn capture_snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            dirty: self.dirty,
+            res_difficulty: self.res_difficulty,
+            skill_mode: self.skill_mode,
+            attributes: self.attributes.clone(),
+            progression: self.progression.clone(),
+            waypoints_by_diff: self.waypoints_by_diff.clone(),
+            player_items_with_container: self.player_items_with_container.clone(),
+            item_cards: self.item_cards.clone(),
+            temp_items: self.temp_items.clone(),
+            merc_state: self.merc_state.clone(),
+            merc_level: self.merc_level,
+            merc_act_override: self.merc_act_override,
+            skill_section: self.skill_section.clone(),
+            has_skill_edits: self.has_skill_edits,
+            active_skill_count: self.active_skill_count,
+            active_weapon_set: self.active_weapon_set,
+            char_edits: self.char_edits.clone(),
+            has_char_edits: self.has_char_edits,
+            has_item_edits: self.has_item_edits,
+            selected_move_item_index: self.selected_move_item_index,
+        }
+    }
+
+    fn restore_snapshot(&mut self, snap: SessionSnapshot) {
+        self.dirty = snap.dirty;
+        self.res_difficulty = snap.res_difficulty;
+        self.skill_mode = snap.skill_mode;
+        self.attributes = snap.attributes;
+        self.progression = snap.progression;
+        self.waypoints_by_diff = snap.waypoints_by_diff;
+        self.player_items_with_container = snap.player_items_with_container;
+        self.item_cards = snap.item_cards;
+        self.temp_items = snap.temp_items;
+        self.merc_state = snap.merc_state;
+        self.merc_level = snap.merc_level;
+        self.merc_act_override = snap.merc_act_override;
+        self.skill_section = snap.skill_section;
+        self.has_skill_edits = snap.has_skill_edits;
+        self.active_skill_count = snap.active_skill_count;
+        self.active_weapon_set = snap.active_weapon_set;
+        self.char_edits = snap.char_edits;
+        self.has_char_edits = snap.has_char_edits;
+        self.has_item_edits = snap.has_item_edits;
+        self.selected_move_item_index = snap.selected_move_item_index;
     }
 
     /// Applies one `UiIntent` in Rust and returns a `SessionEnvelope`.
     pub fn apply_intent(&mut self, intent: UiIntent) -> SessionEnvelope {
+        let mutates_history = matches!(
+            intent,
+            UiIntent::SetMercLevel { .. }
+                | UiIntent::SelectMercAct { .. }
+                | UiIntent::ToggleQuest { .. }
+                | UiIntent::SetQuestsBatch { .. }
+                | UiIntent::SetAllDiffQuests { .. }
+                | UiIntent::ToggleWaypoint { .. }
+                | UiIntent::SetWaypointsBatch { .. }
+                | UiIntent::SetAllDiffWaypoints { .. }
+                | UiIntent::SetCharacterField { .. }
+                | UiIntent::SetCharacterName { .. }
+                | UiIntent::MoveItem { .. }
+                | UiIntent::ClearTempInventory
+                | UiIntent::DisposeHeldItem
+                | UiIntent::AdjustSkillRank { .. }
+                | UiIntent::ResetSkills
+        );
+        let pre_snapshot = if mutates_history {
+            Some(self.capture_snapshot())
+        } else {
+            None
+        };
         match self.apply_intent_inner(intent) {
-            Ok(()) => SessionEnvelope {
-                ok: true,
-                session: Some(self.project()),
-                rejection: None,
-            },
+            Ok(()) => {
+                if let Some(snap) = pre_snapshot {
+                    self.undo_stack.push(snap);
+                    self.redo_stack.clear();
+                }
+                SessionEnvelope {
+                    ok: true,
+                    session: Some(self.project()),
+                    rejection: None,
+                }
+            }
             Err(rejection) => SessionEnvelope {
                 ok: false,
                 session: Some(self.project()),
@@ -903,11 +1161,490 @@ impl EditorSession {
                     Ok(())
                 })
             }
-            UiIntent::ClearTempInventory => {
-                self.temp_items.clear();
+            UiIntent::SelectItemForMove { item_index } => {
+                if self.item_cards.iter().any(|c| c.container == "cursor") {
+                    return Err(ActionRejection {
+                        code: "cursor_item_must_be_placed".to_string(),
+                        message: "Place the swapped item held on the cursor into a slot or click Undo.".to_string(),
+                    });
+                }
+                if let Some(idx) = item_index {
+                    let valid = usize::try_from(idx)
+                        .ok()
+                        .is_some_and(|i| i < self.player_items_with_container.len());
+                    if !valid {
+                        return Err(ActionRejection {
+                            code: "item_not_found".to_string(),
+                            message: format!("Item index {idx} was not found in the player stream."),
+                        });
+                    }
+                }
+                self.selected_move_item_index = item_index;
                 Ok(())
             }
+            UiIntent::MoveItem {
+                item_index,
+                target_container,
+                x,
+                y,
+            } => self.apply_move_item(item_index, &target_container, x, y),
+            UiIntent::Undo => {
+                let prev = self.undo_stack.pop().ok_or_else(|| ActionRejection {
+                    code: "nothing_to_undo".to_string(),
+                    message: "No actions available to undo.".to_string(),
+                })?;
+                let current = self.capture_snapshot();
+                self.redo_stack.push(current);
+                self.restore_snapshot(prev);
+                Ok(())
+            }
+            UiIntent::Redo => {
+                let next = self.redo_stack.pop().ok_or_else(|| ActionRejection {
+                    code: "nothing_to_redo".to_string(),
+                    message: "No actions available to redo.".to_string(),
+                })?;
+                let current = self.capture_snapshot();
+                self.undo_stack.push(current);
+                self.restore_snapshot(next);
+                Ok(())
+            }
+            UiIntent::ClearTempInventory => {
+                self.temp_items.clear();
+                let mut idx = 0;
+                while idx < self.item_cards.len() {
+                    if self.item_cards[idx].container == "temp_inventory" {
+                        self.player_items_with_container.remove(idx);
+                        self.item_cards.remove(idx);
+                        self.has_item_edits = true;
+                        self.dirty = true;
+                    } else {
+                        idx += 1;
+                    }
+                }
+                for (new_i, card) in self.item_cards.iter_mut().enumerate() {
+                    card.index = new_i as i32;
+                }
+                self.selected_move_item_index = None;
+                Ok(())
+            }
+            UiIntent::ToggleWeaponSwap => {
+                self.active_weapon_set = if self.active_weapon_set == 2 { 1 } else { 2 };
+                Ok(())
+            }
+            UiIntent::DisposeHeldItem => {
+                let item_index = self.selected_move_item_index.ok_or_else(|| ActionRejection {
+                    code: "no_held_item".to_string(),
+                    message: "Pick up an item before disposing it at the shop.".to_string(),
+                })?;
+                self.dispose_item_by_index(item_index)
+            }
+            UiIntent::AdjustSkillRank { skill_id, delta } => {
+                self.apply_adjust_skill_rank(skill_id, delta)
+            }
+            UiIntent::ResetSkills => self.apply_reset_skills(),
         }
+    }
+
+    fn project_skills(
+        &self,
+        all_skills_bonus: i32,
+        single_skill_bonuses: &BTreeMap<u32, i32>,
+    ) -> Vec<SkillNodeView> {
+        let Some(base_id) = class_skill_base_id(self.char_class_id) else {
+            return Vec::new();
+        };
+        let mut nodes = Vec::with_capacity(SKILL_SECTION_LEN);
+        for slot in 0..SKILL_SECTION_LEN {
+            let sid = base_id + slot as u32;
+            let level = i32::from(self.skill_section.0[slot]);
+            let (name_en, name_ko, req_level) = crate::data::skills::SKILLS
+                .iter()
+                .find(|s| s.id == sid)
+                .map(|s| {
+                    (
+                        get_loc(s.key, "en").to_string(),
+                        get_loc(s.key, "ko").to_string(),
+                        s.reqlevel as i32,
+                    )
+                })
+                .unwrap_or_else(|| (format!("Skill #{sid}"), format!("Skill #{sid}"), 1));
+            let single_bonus = single_skill_bonuses.get(&sid).copied().unwrap_or(0);
+            let bonus_level = if level > 0 || single_bonus > 0 {
+                all_skills_bonus + single_bonus
+            } else {
+                0
+            };
+            let within = (slot % 10) as i32;
+            nodes.push(SkillNodeView {
+                skill_id: sid as i32,
+                slot_index: slot as i32,
+                tree_index: (slot / 10) as i32,
+                row: (within / 3) + 1,
+                col: (within % 3) + 1,
+                name_en,
+                name_ko,
+                req_level,
+                level,
+                bonus_level,
+            });
+        }
+        nodes
+    }
+
+    fn dispose_item_by_index(&mut self, item_index: i32) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| ActionRejection {
+                code: "item_not_found".to_string(),
+                message: format!("Item index {item_index} was not found in the player stream."),
+            })?;
+        self.player_items_with_container.remove(idx);
+        self.item_cards.remove(idx);
+        for (new_i, card) in self.item_cards.iter_mut().enumerate() {
+            card.index = new_i as i32;
+        }
+        self.selected_move_item_index = None;
+        self.has_item_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn apply_adjust_skill_rank(&mut self, skill_id: i32, delta: i32) -> Result<(), ActionRejection> {
+        if delta == 0 {
+            return Ok(());
+        }
+        let base_id = class_skill_base_id(self.char_class_id).ok_or_else(|| ActionRejection {
+            code: "invalid_skill_mutation".to_string(),
+            message: "Character class does not have a valid skill table.".to_string(),
+        })?;
+        let sid = u32::try_from(skill_id).map_err(|_| ActionRejection {
+            code: "invalid_skill_mutation".to_string(),
+            message: format!("Skill ID {skill_id} is invalid."),
+        })?;
+        if sid < base_id || (sid - base_id) as usize >= SKILL_SECTION_LEN {
+            return Err(ActionRejection {
+                code: "invalid_skill_mutation".to_string(),
+                message: format!(
+                    "Skill ID {skill_id} does not belong to {}.",
+                    self.char_class
+                ),
+            });
+        }
+        let slot = (sid - base_id) as usize;
+        let current = i32::from(self.skill_section.0[slot]);
+        let max_rank = if self.skill_mode == EditMode::Free { 99 } else { 20 };
+        let next = current + delta;
+        if next < 0 || next > max_rank {
+            return Err(ActionRejection {
+                code: "skill_rank_out_of_range".to_string(),
+                message: format!(
+                    "Skill rank must stay within 0..={max_rank} in {:?} mode.",
+                    self.skill_mode
+                ),
+            });
+        }
+        let alpha = self.save_version == 105;
+        let unspent = self.attributes.actual_value(5, alpha).unwrap_or(0).max(0);
+        if self.skill_mode == EditMode::Legit {
+            let req_level = crate::data::skills::SKILLS
+                .iter()
+                .find(|s| s.id == sid)
+                .map(|s| s.reqlevel as i32)
+                .unwrap_or(1);
+            if delta > 0 && i32::from(self.char_level) < req_level {
+                return Err(ActionRejection {
+                    code: "skill_level_requirement".to_string(),
+                    message: format!(
+                        "Requires character level {req_level} (current level {}).",
+                        self.char_level
+                    ),
+                });
+            }
+            if delta > 0 && unspent < delta {
+                return Err(ActionRejection {
+                    code: "insufficient_skill_points".to_string(),
+                    message: "No unspent skill points remaining in Legit mode.".to_string(),
+                });
+            }
+            let next_unspent = (unspent - delta).max(0);
+            let save_add = crate::domain::stats::attribute::char_stat_save_add(5, alpha);
+            self.attributes.set_value(5, next_unspent, save_add);
+        }
+        self.skill_section.0[slot] = next as u8;
+        self.active_skill_count = self
+            .skill_section
+            .iter_skills(base_id)
+            .filter(|s| s.level > 0)
+            .count() as i32;
+        self.has_skill_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn apply_reset_skills(&mut self) -> Result<(), ActionRejection> {
+        let Some(base_id) = class_skill_base_id(self.char_class_id) else {
+            return Err(ActionRejection {
+                code: "invalid_skill_mutation".to_string(),
+                message: "Character class does not have a valid skill table.".to_string(),
+            });
+        };
+        let total_spent: i32 = self
+            .skill_section
+            .iter_skills(base_id)
+            .map(|s| i32::from(s.level))
+            .sum();
+        self.skill_section = SkillSection([0u8; SKILL_SECTION_LEN]);
+        let alpha = self.save_version == 105;
+        let current_unspent = self.attributes.actual_value(5, alpha).unwrap_or(0).max(0);
+        let save_add = crate::domain::stats::attribute::char_stat_save_add(5, alpha);
+        self.attributes
+            .set_value(5, current_unspent + total_spent, save_add);
+        self.active_skill_count = 0;
+        self.has_skill_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn validate_move_target(
+        &self,
+        item_index: i32,
+        target_container: &str,
+        x: i32,
+        y: i32,
+    ) -> Result<(usize, ItemContainer, Option<usize>), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| ActionRejection {
+                code: "item_not_found".to_string(),
+                message: format!("Item index {item_index} was not found in the player stream."),
+            })?;
+
+        let (item_code, width, height) = {
+            let card = &self.item_cards[idx];
+            (card.code.clone(), card.width.max(1), card.height.max(1))
+        };
+
+        if target_container == "equipment" {
+            let slot_name = equipment_slot_label(x)
+                .filter(|_| y == 0)
+                .ok_or_else(|| ActionRejection {
+                    code: "out_of_bounds".to_string(),
+                    message: format!("Equipment slot ({x}, {y}) is not a valid body slot (1..=12)."),
+                })?;
+            if !item_fits_equipment_slot(&item_code, x) {
+                return Err(ActionRejection {
+                    code: "invalid_equipment_slot".to_string(),
+                    message: format!(
+                        "Item '{}' cannot be equipped in the {} slot.",
+                        item_code.trim(),
+                        slot_name
+                    ),
+                });
+            }
+            let occupied: Vec<usize> = self
+                .item_cards
+                .iter()
+                .enumerate()
+                .filter(|&(other_idx, other)| {
+                    other_idx != idx
+                        && other.container == "equipment"
+                        && other.slot_label.as_deref() == Some(slot_name)
+                })
+                .map(|(other_idx, _)| other_idx)
+                .collect();
+            return match occupied.as_slice() {
+                [] => Ok((idx, ItemContainer::Equipment, None)),
+                [disp] => Ok((idx, ItemContainer::Equipment, Some(*disp))),
+                _ => Err(ActionRejection {
+                    code: "container_slot_occupied".to_string(),
+                    message: format!("Equipment slot {slot_name} has multiple overlapping items."),
+                }),
+            };
+        }
+
+        let (target, max_w, max_h, target_label) = match target_container {
+            "inventory" => (ItemContainer::Inventory, 10i32, 4i32, "inventory"),
+            "stash" => (ItemContainer::Stash, 10i32, 10i32, "stash"),
+            "cube" => (ItemContainer::Cube, 3i32, 4i32, "cube"),
+            "belt" => (ItemContainer::Belt, 4i32, 4i32, "belt"),
+            "temp_inventory" => (ItemContainer::Unknown, 9i32, 4i32, "temp_inventory"),
+            _ => {
+                return Err(ActionRejection {
+                    code: "invalid_target_container".to_string(),
+                    message: format!(
+                        "Items cannot be moved to '{target_container}'. Allowed targets: inventory, stash, cube, belt, temp_inventory, equipment, shop."
+                    ),
+                });
+            }
+        };
+
+        if target == ItemContainer::Belt
+            && (!is_belt_consumable(&item_code) || width != 1 || height != 1)
+        {
+            return Err(ActionRejection {
+                code: "belt_consumable_only".to_string(),
+                message: format!(
+                    "Only 1x1 belt consumables (potions/scrolls) can be placed in the belt ('{}' is not allowed).",
+                    item_code.trim()
+                ),
+            });
+        }
+
+        if x < 0 || y < 0 || x + width > max_w || y + height > max_h {
+            return Err(ActionRejection {
+                code: "out_of_bounds".to_string(),
+                message: format!(
+                    "Placement ({x}, {y}) with size {width}x{height} exceeds {target_container} bounds ({max_w}x{max_h})."
+                ),
+            });
+        }
+
+        let mut overlaps = Vec::new();
+        for (other_idx, other) in self.item_cards.iter().enumerate() {
+            if other_idx == idx || other.container != target_label {
+                continue;
+            }
+            let ow = other.width.max(1);
+            let oh = other.height.max(1);
+            if x < other.x + ow && x + width > other.x && y < other.y + oh && y + height > other.y {
+                overlaps.push(other_idx);
+            }
+        }
+
+        match overlaps.as_slice() {
+            [] => Ok((idx, target, None)),
+            [disp] => Ok((idx, target, Some(*disp))),
+            _ => Err(ActionRejection {
+                code: "container_slot_occupied".to_string(),
+                message: format!(
+                    "Target slot ({x}, {y}) in {target_container} overlaps with {} items and cannot swap.",
+                    overlaps.len()
+                ),
+            }),
+        }
+    }
+
+    fn project_allowed_move_targets(&self) -> (Vec<AllowedMoveTargetView>, Option<String>) {
+        let Some(item_index) = self.selected_move_item_index else {
+            return (Vec::new(), None);
+        };
+        let mut targets = Vec::new();
+        for (container, max_w, max_h) in [
+            ("inventory", 10i32, 4i32),
+            ("stash", 10i32, 10i32),
+            ("cube", 3i32, 4i32),
+            ("belt", 4i32, 4i32),
+            ("temp_inventory", 9i32, 4i32),
+        ] {
+            for y in 0..max_h {
+                for x in 0..max_w {
+                    if self.validate_move_target(item_index, container, x, y).is_ok() {
+                        targets.push(AllowedMoveTargetView {
+                            container: container.to_string(),
+                            x,
+                            y,
+                        });
+                    }
+                }
+            }
+        }
+        for body_loc in 1..=12 {
+            if self
+                .validate_move_target(item_index, "equipment", body_loc, 0)
+                .is_ok()
+            {
+                targets.push(AllowedMoveTargetView {
+                    container: "equipment".to_string(),
+                    x: body_loc,
+                    y: 0,
+                });
+            }
+        }
+        let belt_restricted_reason = match self.validate_move_target(item_index, "belt", 0, 0) {
+            Err(rej) if rej.code == "belt_consumable_only" => Some(rej.message),
+            _ => None,
+        };
+        (targets, belt_restricted_reason)
+    }
+
+    fn apply_move_item(
+        &mut self,
+        item_index: i32,
+        target_container: &str,
+        x: i32,
+        y: i32,
+    ) -> Result<(), ActionRejection> {
+        if target_container == "shop" {
+            return self.dispose_item_by_index(item_index);
+        }
+        let (idx, target, displaced_idx) =
+            self.validate_move_target(item_index, target_container, x, y)?;
+        let target_label = if target_container == "temp_inventory" {
+            "temp_inventory"
+        } else {
+            container_label(target)
+        };
+
+        let (raw_x, raw_y, page, location, mode, stored_in, new_slot_label, card_x, card_y) =
+            match target {
+                ItemContainer::Inventory => (x as u8, y as u8, 0u8, 0u8, 0u8, Some(1u8), None, x, y),
+                ItemContainer::Cube => (x as u8, y as u8, 3u8, 0u8, 0u8, Some(4u8), None, x, y),
+                ItemContainer::Stash => (x as u8, y as u8, 4u8, 0u8, 0u8, Some(5u8), None, x, y),
+                ItemContainer::Belt => ((y * 4 + x) as u8, 0u8, 0u8, 0u8, 2u8, None, None, x, y),
+                ItemContainer::Equipment => (
+                    0u8,
+                    0u8,
+                    0u8,
+                    x as u8,
+                    1u8,
+                    None,
+                    equipment_slot_label(x).map(str::to_string),
+                    0,
+                    0,
+                ),
+                ItemContainer::Unknown => (x as u8, y as u8, 0u8, 0u8, 0u8, None, None, x, y),
+            };
+
+        let (item, container_slot) = &mut self.player_items_with_container[idx];
+        item.x = raw_x;
+        item.y = raw_y;
+        item.page = page;
+        item.location = location;
+        item.mode = mode;
+        item.header.x = raw_x;
+        item.header.y = raw_y;
+        item.header.page = page;
+        item.header.location = location;
+        item.header.mode = mode;
+        item.body.x = raw_x;
+        item.body.y = raw_y;
+        item.body.page = page;
+        item.body.location = location;
+        item.body.mode = mode;
+        if let Some(aux) = item.body.d2r_v3_auxiliary.as_mut() {
+            aux.stored_in = stored_in;
+        }
+        item.bits.clear();
+        *container_slot = target;
+
+        let card = &mut self.item_cards[idx];
+        card.container = target_label.to_string();
+        card.slot_label = new_slot_label;
+        card.x = card_x;
+        card.y = card_y;
+
+        self.has_item_edits = true;
+        self.dirty = true;
+        if let Some(disp) = displaced_idx {
+            self.item_cards[disp].container = "cursor".to_string();
+            self.item_cards[disp].slot_label = None;
+            self.selected_move_item_index = Some(disp as i32);
+        } else {
+            self.selected_move_item_index = None;
+        }
+        Ok(())
     }
 
     fn apply_character_edit(
@@ -956,6 +1693,12 @@ impl EditorSession {
 
     /// Serializes save-persisted edits back into a checksum-valid `.d2s` byte vector.
     pub fn to_save_bytes(&self) -> Result<Vec<u8>, String> {
+        if self.item_cards.iter().any(|c| c.container == "cursor") {
+            return Err("Cannot export .d2s while a swapped item is held on the cursor. Place it in a slot or click Undo.".to_string());
+        }
+        if self.item_cards.iter().any(|c| c.container == "temp_inventory") {
+            return Err("Cannot export .d2s while items remain in Temp Inventory (9x4). Move them to a permanent container or clear Temp Inventory.".to_string());
+        }
         if let Some(reason) = export_unsupported_reason(self.save_version) {
             return Err(reason);
         }
@@ -969,6 +1712,29 @@ impl EditorSession {
         } else {
             self.source_bytes.clone()
         };
+        if self.has_skill_edits {
+            if let Some(base_id) = class_skill_base_id(self.char_class_id) {
+                let huffman = HuffmanTree::new();
+                let alpha = self.save_version == 105;
+                let unspent = self
+                    .attributes
+                    .actual_value(5, alpha)
+                    .unwrap_or(0)
+                    .clamp(0, 255) as u8;
+                let skills: Vec<(u32, u8)> = self
+                    .skill_section
+                    .iter_skills(base_id)
+                    .map(|s| (s.skill_id, s.level))
+                    .collect();
+                let contract = SkillMutationContract {
+                    skills,
+                    skill_points: Some(unspent),
+                    respec: false,
+                };
+                working = try_apply_skill_mutation(&working, &contract, &huffman)
+                    .map_err(|e| format!("Failed to write skill mutations: {e}"))?;
+            }
+        }
         // Sync quests first; `Progression::sync_to_bytes` also writes `self.progression.waypoints`,
         // so per-difficulty `waypoints_by_diff` are written immediately afterward.
         self.progression.sync_to_bytes(&mut working, true);
@@ -976,9 +1742,55 @@ impl EditorSession {
         for wp_set in &self.waypoints_by_diff {
             wp_set.sync_to_bytes(&mut working[V105_WAYPOINT_OFFSET..], wp_anchor);
         }
+        if self.has_item_edits {
+            let huffman = HuffmanTree::new();
+            let items: Vec<Item> = self
+                .player_items_with_container
+                .iter()
+                .map(|(item, _)| item.clone())
+                .collect();
+            let alpha = self.item_dialect == "alpha";
+            working = crate::save::rebuild_item_section(&working, &items, &huffman, alpha)
+                .map_err(|e| format!("Failed to write item mutations: {e}"))?;
+        }
         crate::save::finalize_save_bytes(&mut working, false)
             .map_err(|e| format!("Failed to finalize exported save checksum: {e}"))?;
         Ok(working)
+    }
+}
+
+fn equipment_slot_label(body_loc: i32) -> Option<&'static str> {
+    match body_loc {
+        1 => Some("Head"),
+        2 => Some("Amulet"),
+        3 => Some("Armor"),
+        4 => Some("Weapon1"),
+        5 => Some("Weapon2"),
+        6 => Some("Ring1"),
+        7 => Some("Ring2"),
+        8 => Some("Belt"),
+        9 => Some("Boots"),
+        10 => Some("Gloves"),
+        11 => Some("Weapon1Swap"),
+        12 => Some("Weapon2Swap"),
+        _ => None,
+    }
+}
+
+fn item_fits_equipment_slot(item_code: &str, body_loc: i32) -> bool {
+    let types = crate::engine::validation::get_all_item_types(item_code);
+    let has_any = |candidates: &[&str]| types.iter().any(|t| candidates.contains(t));
+    match body_loc {
+        1 => has_any(&["helm", "circ", "pelt", "phlm"]),
+        2 => has_any(&["amul"]),
+        3 => has_any(&["tors"]),
+        4 | 11 => has_any(&["weap"]),
+        5 | 12 => has_any(&["shld", "ashd", "head", "bowq", "xboq", "weap"]),
+        6 | 7 => has_any(&["ring"]),
+        8 => has_any(&["belt"]),
+        9 => has_any(&["boot"]),
+        10 => has_any(&["glov"]),
+        _ => false,
     }
 }
 
@@ -1121,6 +1933,7 @@ fn build_item_card(
         set_bonuses: map_bonuses(en.set_bonuses),
         socketed_names,
         image_url: resolve_item_image_url(item),
+        is_belt_consumable: is_belt_consumable(&item.code),
     }
 }
 
@@ -1349,6 +2162,8 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             ProgressionSummaryView,
             SetBonusView,
             ItemCardView,
+            AllowedMoveTargetView,
+            SkillNodeView,
             SessionView,
             ActionRejection,
             SessionEnvelope,

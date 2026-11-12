@@ -15,6 +15,7 @@ module State.UiState exposing
     , init
     , setContainerFilter
     , setHoverMousePos
+    , setHoveredDropTarget
     , setHoveredItem
     , setPaintMode
     , setProgressionDifficulty
@@ -91,6 +92,7 @@ type alias UiState =
     , selectedItemIndex : Maybe Int
     , hoveredItemIndex : Maybe Int
     , hoverMousePos : Maybe { x : Int, y : Int, vw : Int, vh : Int }
+    , hoveredDropTarget : Maybe { container : String, x : Int, y : Int }
     , statusBanner : Maybe String
     , focusedInput : Maybe FocusedInput
     , combatLabOpen : Bool
@@ -110,6 +112,7 @@ init =
     , selectedItemIndex = Nothing
     , hoveredItemIndex = Nothing
     , hoverMousePos = Nothing
+    , hoveredDropTarget = Nothing
     , statusBanner = Nothing
     , focusedInput = Nothing
     , combatLabOpen = False
@@ -119,7 +122,7 @@ init =
 
 setView : ViewTab -> UiState -> UiState
 setView tab ui =
-    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing }
+    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing }
 
 
 setProgressionDifficulty : DifficultyMode -> UiState -> UiState
@@ -287,3 +290,8 @@ setHoveredItem maybeIdx ui =
 setHoverMousePos : Int -> Int -> Int -> Int -> UiState -> UiState
 setHoverMousePos x y vw vh ui =
     { ui | hoverMousePos = Just { x = x, y = y, vw = vw, vh = vh } }
+
+
+setHoveredDropTarget : Maybe { container : String, x : Int, y : Int } -> UiState -> UiState
+setHoveredDropTarget target ui =
+    { ui | hoveredDropTarget = target }

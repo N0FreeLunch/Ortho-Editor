@@ -8,6 +8,7 @@ import Generated.Protocol
         , EditMode(..)
         , ResistanceCardView
         , SessionView
+        , SkillNodeView
         )
 import Html exposing (Html, button, div, h2, input, p, section, span, text)
 import Html.Attributes exposing (attribute, class, classList, disabled, style, title, type_, value)
@@ -162,6 +163,20 @@ viewResistancesSection res =
 viewSkillTreePreview : UiState -> SessionView -> Html Msg
 viewSkillTreePreview ui session =
     let
+        activeTreeIndex =
+            case ui.skillTreeTab of
+                "tree1" ->
+                    1
+
+                "tree2" ->
+                    2
+
+                _ ->
+                    0
+
+        treeSkills =
+            List.filter (\s -> s.treeIndex == activeTreeIndex) session.skills
+
         treeTab key label =
             button
                 [ classList [ ( "skill-tab-btn", True ), ( "active", ui.skillTreeTab == key ) ]
@@ -169,26 +184,16 @@ viewSkillTreePreview ui session =
                 , onClick (SelectSkillTreeTab key)
                 ]
                 [ text label ]
-
-        tierRow lvl =
-            [ div [ class "skill-tier-badge" ] [ text ("Tier Lv " ++ String.fromInt lvl) ]
-            , skillPreviewBtn ("Lv " ++ String.fromInt lvl ++ " A")
-            , skillPreviewBtn ("Lv " ++ String.fromInt lvl ++ " B")
-            , skillPreviewBtn ("Lv " ++ String.fromInt lvl ++ " C")
-            ]
-
-        skillPreviewBtn titleText =
-            button
-                [ class "skill-node-preview"
-                , disabled True
-                , title "Preview only · Skill allocation intents require a dedicated Rust skill-tree slice"
-                ]
-                [ text titleText ]
     in
     section [ class "glass-panel col2-skill-panel", attribute "data-testid" "skill-tree-preview" ]
         [ div [ class "panel-header" ]
             [ div [ class "panel-title" ] [ text ("Skill Tree (" ++ session.charClass ++ ")") ]
-            , span [ class "preview-only-pill" ] [ text "Preview only" ]
+            , button
+                [ class "btn-danger-ghost"
+                , attribute "data-testid" "reset-skills-btn"
+                , onClick ClickResetSkills
+                ]
+                [ text "Reset Skills" ]
             ]
         , div [ class "meta-line" ]
             [ text
@@ -196,6 +201,8 @@ viewSkillTreePreview ui session =
                     ++ String.fromInt session.stats.unspentSkillPoints
                     ++ " · Active Skills: "
                     ++ String.fromInt session.stats.activeSkillCount
+                    ++ " · All Skills Bonus: +"
+                    ++ String.fromInt session.stats.allSkillsBonus
                 )
             ]
         , div [ class "skill-subtabs" ]
@@ -203,10 +210,75 @@ viewSkillTreePreview ui session =
             , treeTab "tree1" "Tree II"
             , treeTab "tree2" "Tree III"
             ]
-        , div [ class "skill-tree-preview-grid" ]
-            (List.concatMap tierRow [ 1, 6, 12, 18, 24, 30 ])
-        , div [ class "readonly-note" ]
-            [ text "Skill rank editing is locked (Preview only) until Rust skill-tree intents are wired." ]
+        , div [ class "skill-tree-preview-grid", attribute "data-testid" "skill-tree-grid" ]
+            (List.map (viewSkillNode session) treeSkills)
+        ]
+
+
+viewSkillNode : SessionView -> SkillNodeView -> Html Msg
+viewSkillNode session s =
+    let
+        effectiveRank =
+            if s.level > 0 then
+                s.level + s.bonusLevel
+
+            else
+                0
+
+        canDecrease =
+            s.level > 0
+
+        canIncrease =
+            case session.skillMode of
+                Free ->
+                    s.level < 99
+
+                Legit ->
+                    s.level < 20
+                        && session.stats.unspentSkillPoints > 0
+                        && session.charLevel >= s.reqLevel
+    in
+    div
+        [ classList
+            [ ( "skill-node-card", True )
+            , ( "is-allocated", s.level > 0 )
+            ]
+        , attribute "data-testid" ("skill-node-" ++ String.fromInt s.skillId)
+        ]
+        [ div [ class "skill-node-header" ]
+            [ span [ class "skill-node-name" ] [ text s.nameEn ]
+            , span [ class "skill-node-req" ] [ text ("Req Lv " ++ String.fromInt s.reqLevel) ]
+            ]
+        , div [ class "skill-node-controls" ]
+            [ button
+                [ class "btn-tiny"
+                , attribute "data-testid" ("skill-minus-" ++ String.fromInt s.skillId)
+                , disabled (not canDecrease)
+                , onClick (ClickAdjustSkillRank s.skillId -1)
+                ]
+                [ text "-" ]
+            , span
+                [ class "skill-node-rank"
+                , attribute "data-testid" ("skill-rank-" ++ String.fromInt s.skillId)
+                ]
+                [ text
+                    (String.fromInt s.level
+                        ++ (if s.bonusLevel > 0 && s.level > 0 then
+                                " (" ++ String.fromInt effectiveRank ++ ")"
+
+                            else
+                                ""
+                           )
+                    )
+                ]
+            , button
+                [ class "btn-tiny"
+                , attribute "data-testid" ("skill-plus-" ++ String.fromInt s.skillId)
+                , disabled (not canIncrease)
+                , onClick (ClickAdjustSkillRank s.skillId 1)
+                ]
+                [ text "+" ]
+            ]
         ]
 
 
@@ -231,9 +303,17 @@ viewCombatLabAccordion ui session =
             ]
         , if ui.combatLabOpen then
             div [ class "combat-lab-content", attribute "data-testid" "combat-lab-content" ]
-                [ p []
+                [ div [ class "stat-strip", attribute "data-testid" "combat-lab-breakpoints" ]
+                    [ plainChip "FCR" (String.fromInt session.stats.fcr ++ "%")
+                    , plainChip "FHR" (String.fromInt session.stats.fhr ++ "%")
+                    , plainChip "FRW" (String.fromInt session.stats.frw ++ "%")
+                    , plainChip "IAS" (String.fromInt session.stats.ias ++ "%")
+                    , plainChip "MF" (String.fromInt session.stats.magicFind ++ "%")
+                    , plainChip "+Skills" ("+" ++ String.fromInt session.stats.allSkillsBonus)
+                    ]
+                , p []
                     [ text
-                        ("Preview only: Simulation tables will consume Rust combat projection outputs ("
+                        ("Combat Sheet Projection ("
                             ++ session.charClass
                             ++ " Lv "
                             ++ String.fromInt session.charLevel

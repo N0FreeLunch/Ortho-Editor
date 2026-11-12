@@ -56,7 +56,11 @@ type Msg
     | SelectContainerFilter String
     | ClearTempInventory
     | SelectItem (Maybe Int)
+    | MoveSelectedItemTo String Int Int
+    | ClickUndo
+    | ClickRedo
     | HoverItem (Maybe Int)
+    | HoverDropTarget (Maybe { container : String, x : Int, y : Int })
     | MoveTooltipHover Int Int Int Int
     | FocusField String String
     | EditFocusedInput String
@@ -67,6 +71,10 @@ type Msg
     | SelectStashTab StashTab
     | ToggleCombatLab
     | SelectSkillTreeTab String
+    | ClickToggleWeaponSwap
+    | ClickDisposeHeldItem
+    | ClickAdjustSkillRank Int Int
+    | ClickResetSkills
 
 
 type OutMsg
@@ -312,7 +320,9 @@ update msg model =
             ( model, EmitIntent Protocol.ClearTempInventory )
 
         SelectItem maybeIdx ->
-            ( { model | ui = UiState.setSelectedItem maybeIdx model.ui }, NoOut )
+            ( { model | ui = UiState.setSelectedItem maybeIdx model.ui }
+            , EmitIntent (Protocol.SelectItemForMove { itemIndex = maybeIdx })
+            )
 
         FocusField key initialRaw ->
             ( { model | ui = UiState.beginFocusInput key initialRaw model.ui }, NoOut )
@@ -341,8 +351,53 @@ update msg model =
         SelectSkillTreeTab treeId ->
             ( { model | ui = UiState.setSkillTreeTab treeId model.ui }, NoOut )
 
+        ClickToggleWeaponSwap ->
+            ( model, EmitIntent Protocol.ToggleWeaponSwap )
+
+        ClickDisposeHeldItem ->
+            ( model, EmitIntent Protocol.DisposeHeldItem )
+
+        ClickAdjustSkillRank skillId delta ->
+            ( model
+            , EmitIntent
+                (Protocol.AdjustSkillRank
+                    { skillId = skillId
+                    , delta = delta
+                    }
+                )
+            )
+
+        ClickResetSkills ->
+            ( model, EmitIntent Protocol.ResetSkills )
+
         HoverItem maybeIdx ->
             ( { model | ui = UiState.setHoveredItem maybeIdx model.ui }, NoOut )
+
+        HoverDropTarget maybeTarget ->
+            ( { model | ui = UiState.setHoveredDropTarget maybeTarget model.ui }, NoOut )
+
+        MoveSelectedItemTo targetContainer x y ->
+            case Maybe.andThen .selectedMoveItemIndex model.session of
+                Just idx ->
+                    ( model
+                    , EmitIntent
+                        (Protocol.MoveItem
+                            { itemIndex = idx
+                            , targetContainer = targetContainer
+                            , x = x
+                            , y = y
+                            }
+                        )
+                    )
+
+                Nothing ->
+                    ( model, NoOut )
+
+        ClickUndo ->
+            ( model, EmitIntent Protocol.Undo )
+
+        ClickRedo ->
+            ( model, EmitIntent Protocol.Redo )
 
         MoveTooltipHover x y vw vh ->
             ( { model | ui = UiState.setHoverMousePos x y vw vh model.ui }, NoOut )
