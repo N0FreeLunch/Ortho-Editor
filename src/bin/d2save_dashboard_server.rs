@@ -15,6 +15,7 @@ use d2r_core::engine::defense::equipped_set_piece_counts;
 use d2r_core::engine::formatter::{FormattedSetBonus, format_item};
 use d2r_core::item::{HuffmanTree, Item, ItemProperty};
 use d2r_core::save::{AttributeSection, Save, class_skill_base_id, map_core_sections};
+use d2r_core::projection::{EditorSession, SessionEnvelope, UiIntent};
 use d2r_core::verify::player_stream_observer::{
     PlayerStreamConsumer, ProducerFailure, attach_player_stream_observation,
 };
@@ -23,8 +24,10 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 const MAX_SAVE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_INTENT_BYTES: usize = 1024 * 1024;
 
 fn main() -> std::io::Result<()> {
     if std::env::args().any(|arg| arg == "--help" || arg == "-h") {
@@ -55,8 +58,155 @@ fn handle(mut stream: TcpStream, observe: bool) -> std::io::Result<()> {
     let head = String::from_utf8_lossy(head);
     let mut words = head.lines().next().unwrap_or_default().split_whitespace();
     let method = words.next().unwrap_or_default();
-    let path = words.next().unwrap_or_default();
+    let raw_path = words.next().unwrap_or_default();
+    let path = raw_path.split('?').next().unwrap_or(raw_path);
     match (method, path) {
+        ("GET", "/studio-prototype") => serve_file(
+            &mut stream,
+            frontend_root().join("studio-prototype.html"),
+            "text/html; charset=utf-8",
+        ),
+        ("GET", "/elm") | ("GET", "/elm/") | ("GET", "/elm/index.html") => serve_file(
+            &mut stream,
+            elm_frontend_root().join("index.html"),
+            "text/html; charset=utf-8",
+        ),
+        ("GET", "/elm/build/main.js") | ("GET", "/build/main.js") => serve_file(
+            &mut stream,
+            elm_frontend_root().join("build/main.js"),
+            "application/javascript; charset=utf-8",
+        ),
+        ("GET", "/elm/styles.css") | ("GET", "/styles.css") => serve_file(
+            &mut stream,
+            elm_frontend_root().join("styles.css"),
+            "text/css; charset=utf-8",
+        ),
+        ("GET", "/api/elm/session") => {
+            let guard = elm_host_store()
+                .lock()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            let envelope = SessionEnvelope {
+                ok: true,
+                session: Some(guard.session.project()),
+                rejection: None,
+            };
+            json_reply(&mut stream, 200, &envelope)
+        }
+        ("GET", "/api/elm/fixtures") => {
+            let guard = elm_host_store()
+                .lock()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            let fixtures: Vec<String> = elm_fixture_entries()
+                .into_iter()
+                .filter(|(_, p)| p.exists())
+                .map(|(k, _)| k.to_string())
+                .collect();
+            json_reply(
+                &mut stream,
+                200,
+                &json!({ "active": guard.active_fixture, "fixtures": fixtures }),
+            )
+        }
+        ("GET", "/api/elm/export") => {
+            let guard = elm_host_store()
+                .lock()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            let filename = guard
+                .active_fixture
+                .replace(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '_' && c != '-', "_");
+            match guard.session.to_save_bytes() {
+                Ok(bytes) => reply_attachment(
+                    &mut stream,
+                    &format!("edited_{filename}"),
+                    &bytes,
+                ),
+                Err(error) => json_reply(&mut stream, 422, &json!({"error": error})),
+            }
+        }
+        ("POST", "/api/elm/intent") => {
+            if body.len() > MAX_INTENT_BYTES {
+                return json_reply(&mut stream, 413, &json!({"error": "intent payload too large"}));
+            }
+            let intent: UiIntent = match serde_json::from_slice(body) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    return json_reply(
+                        &mut stream,
+                        400,
+                        &json!({"error": format!("invalid UiIntent JSON: {error}")}),
+                    );
+                }
+            };
+            let mut guard = elm_host_store()
+                .lock()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            let envelope = guard.session.apply_intent(intent);
+            json_reply(&mut stream, 200, &envelope)
+        }
+        ("POST", "/api/elm/load") => {
+            if body.len() > MAX_INTENT_BYTES {
+                return json_reply(&mut stream, 413, &json!({"error": "load payload too large"}));
+            }
+            let payload: Value = match serde_json::from_slice(body) {
+                Ok(val) => val,
+                Err(error) => {
+                    return json_reply(&mut stream, 400, &json!({"error": error.to_string()}));
+                }
+            };
+            let Some(key) = payload.get("fixture").and_then(Value::as_str) else {
+                return json_reply(&mut stream, 400, &json!({"error": "missing `fixture` field"}));
+            };
+            let Some(path) = resolve_elm_fixture(key) else {
+                return json_reply(
+                    &mut stream,
+                    404,
+                    &json!({"error": format!("unknown fixture `{key}`")}),
+                );
+            };
+            let bytes = match fs::read(&path) {
+                Ok(data) => data,
+                Err(error) => {
+                    return json_reply(&mut stream, 404, &json!({"error": error.to_string()}));
+                }
+            };
+            match EditorSession::from_bytes(&bytes, key) {
+                Ok(session) => {
+                    let envelope = SessionEnvelope {
+                        ok: true,
+                        session: Some(session.project()),
+                        rejection: None,
+                    };
+                    let mut guard = elm_host_store()
+                        .lock()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    guard.active_fixture = key.to_string();
+                    guard.session = session;
+                    json_reply(&mut stream, 200, &envelope)
+                }
+                Err(error) => json_reply(&mut stream, 422, &json!({"error": error})),
+            }
+        }
+        ("POST", "/api/elm/upload") => {
+            if body.len() > MAX_SAVE_BYTES {
+                return json_reply(&mut stream, 413, &json!({"error": "save too large"}));
+            }
+            match EditorSession::from_bytes(body, "uploaded.d2s") {
+                Ok(session) => {
+                    let envelope = SessionEnvelope {
+                        ok: true,
+                        session: Some(session.project()),
+                        rejection: None,
+                    };
+                    let mut guard = elm_host_store()
+                        .lock()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    guard.active_fixture = "uploaded.d2s".to_string();
+                    guard.session = session;
+                    json_reply(&mut stream, 200, &envelope)
+                }
+                Err(error) => json_reply(&mut stream, 422, &json!({"error": error})),
+            }
+        }
         ("POST", "/api/item-images/resolve") => {
             if body.len() > MAX_SAVE_BYTES {
                 return reply(
@@ -196,6 +346,91 @@ fn frontend_root() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../d2r-spec"))
         .join("examples/dashboard")
+}
+
+fn elm_frontend_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("frontend")
+}
+
+struct ElmHostState {
+    active_fixture: String,
+    session: EditorSession,
+}
+
+fn elm_fixture_entries() -> Vec<(&'static str, PathBuf)> {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/savegames");
+    vec![
+        (
+            "TESTDRUID_Quest3_AnyaRescued.d2s",
+            base.join("gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s"),
+        ),
+        (
+            "TESTASSASSIN_Act3_ColdMercLvl21.d2s",
+            base.join("gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s"),
+        ),
+        (
+            "TESTASSASSIN_Act1_FreshStart.d2s",
+            base.join("gameplay/normal/act1/TESTASSASSIN_Act1_FreshStart.d2s"),
+        ),
+        (
+            "amazon_10_scrolls.d2s",
+            base.join("original/amazon_10_scrolls.d2s"),
+        ),
+        (
+            "amazon_authority_runeword.d2s",
+            base.join("original/amazon_authority_runeword.d2s"),
+        ),
+        (
+            "amazon_lvl2_progression_complex.d2s",
+            base.join("original/amazon_lvl2_progression_complex.d2s"),
+        ),
+    ]
+}
+
+fn resolve_elm_fixture(key: &str) -> Option<PathBuf> {
+    if key.contains("..") || key.contains('/') || key.contains('\\') {
+        return None;
+    }
+    elm_fixture_entries()
+        .into_iter()
+        .find(|(name, path)| *name == key && path.exists())
+        .map(|(_, path)| path)
+}
+
+fn elm_host_store() -> &'static Mutex<ElmHostState> {
+    static STORE: OnceLock<Mutex<ElmHostState>> = OnceLock::new();
+    STORE.get_or_init(|| {
+        for (label, path) in elm_fixture_entries() {
+            if let Ok(bytes) = fs::read(&path) {
+                if let Ok(session) = EditorSession::from_bytes(&bytes, label) {
+                    return Mutex::new(ElmHostState {
+                        active_fixture: label.to_string(),
+                        session,
+                    });
+                }
+            }
+        }
+        panic!("No readable .d2s fixture found to seed Elm host session store");
+    })
+}
+
+fn json_reply(
+    stream: &mut TcpStream,
+    status: u16,
+    payload: &impl serde::Serialize,
+) -> std::io::Result<()> {
+    let body = serde_json::to_vec(payload)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    reply(stream, status, "application/json; charset=utf-8", &body)
+}
+
+fn reply_attachment(stream: &mut TcpStream, filename: &str, body: &[u8]) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{filename}\"\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(body)
 }
 
 fn read_request(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
@@ -927,5 +1162,223 @@ mod mercenary_dashboard_tests {
         assert_eq!(payload["item_stream"]["status"], "absent");
         assert_eq!(payload["item_stream"]["exported_count"], 0);
         assert!(payload["equipped_items"].as_array().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod elm_host_bridge_tests {
+    use super::*;
+
+    fn http_request(
+        addr: std::net::SocketAddr,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        content_type: &str,
+    ) -> (u16, String, Vec<u8>) {
+        let mut conn = TcpStream::connect(addr).expect("connect ephemeral server");
+        let payload = body.unwrap_or(&[]);
+        let head = if body.is_some() {
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                payload.len()
+            )
+        } else {
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            )
+        };
+        conn.write_all(head.as_bytes()).expect("write request head");
+        if !payload.is_empty() {
+            conn.write_all(payload).expect("write request body");
+        }
+        let mut raw = Vec::new();
+        conn.read_to_end(&mut raw).expect("read HTTP response");
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("HTTP response header boundary");
+        let headers = String::from_utf8_lossy(&raw[..split]).to_string();
+        let status = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())
+            .expect("HTTP status code");
+        (status, headers, raw[split + 4..].to_vec())
+    }
+
+    #[test]
+    fn elm_preview_and_intent_store_roundtrip_over_http() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let expected_requests = 15;
+        let server = std::thread::spawn(move || {
+            for _ in 0..expected_requests {
+                let (stream, _) = listener.accept().expect("accept request");
+                handle(stream, false).expect("handle request");
+            }
+        });
+
+        let (status, _, html_body) = http_request(addr, "GET", "/elm", None, "text/plain");
+        assert_eq!(status, 200);
+        let html = String::from_utf8(html_body).expect("utf8 html");
+        assert!(html.contains("Elm.Main.init"), "/elm must mount Elm.Main");
+        assert!(html.contains("/api/elm/intent"), "/elm must wire HTTP intent bridge");
+
+        let (status, _, html_slash) = http_request(addr, "GET", "/elm/", None, "text/plain");
+        assert_eq!(status, 200);
+        assert!(!html_slash.is_empty());
+
+        let (status, headers, css_body) =
+            http_request(addr, "GET", "/elm/styles.css", None, "text/plain");
+        assert_eq!(status, 200);
+        assert!(headers.contains("text/css"));
+        assert!(String::from_utf8_lossy(&css_body).contains(".host-toolbar"));
+
+        let (status, _, root_css) = http_request(addr, "GET", "/styles.css", None, "text/plain");
+        assert_eq!(status, 200);
+        assert_eq!(root_css.len(), css_body.len());
+
+        let (status, headers, main_js) =
+            http_request(addr, "GET", "/elm/build/main.js", None, "text/plain");
+        assert_eq!(status, 200);
+        assert!(headers.contains("application/javascript"));
+        assert!(!main_js.is_empty(), "frontend/build/main.js must be compiled and non-empty");
+
+        let (status, _, proto_html) =
+            http_request(addr, "GET", "/studio-prototype", None, "text/plain");
+        assert_eq!(status, 200);
+        assert!(String::from_utf8_lossy(&proto_html).contains("<!DOCTYPE html>"));
+
+        let (status, _, fixtures_json) =
+            http_request(addr, "GET", "/api/elm/fixtures", None, "text/plain");
+        assert_eq!(status, 200);
+        let fixtures_val: Value = serde_json::from_slice(&fixtures_json).expect("fixtures json");
+        assert!(
+            fixtures_val["fixtures"]
+                .as_array()
+                .map(|arr| !arr.is_empty())
+                .unwrap_or(false)
+        );
+
+        let (status, _, initial_env_bytes) =
+            http_request(addr, "GET", "/api/elm/session", None, "text/plain");
+        assert_eq!(status, 200);
+        let initial_env: SessionEnvelope =
+            serde_json::from_slice(&initial_env_bytes).expect("initial SessionEnvelope");
+        assert!(initial_env.ok);
+        assert!(initial_env.session.is_some());
+
+        // Apply valid UiIntent -> verify updated SessionEnvelope
+        let (status, _, ok_env_bytes) = http_request(
+            addr,
+            "POST",
+            "/api/elm/intent",
+            Some(br#"{"SetMercLevel":{"level":55}}"#),
+            "application/json",
+        );
+        assert_eq!(status, 200);
+        let ok_env: SessionEnvelope =
+            serde_json::from_slice(&ok_env_bytes).expect("valid intent envelope");
+        assert!(ok_env.ok);
+        assert_eq!(ok_env.session.unwrap().merc.stats.level, 55);
+
+        // Apply out-of-range UiIntent -> structured ActionRejection preserving state
+        let (status, _, err_env_bytes) = http_request(
+            addr,
+            "POST",
+            "/api/elm/intent",
+            Some(br#"{"SetMercLevel":{"level":999}}"#),
+            "application/json",
+        );
+        assert_eq!(status, 200);
+        let err_env: SessionEnvelope =
+            serde_json::from_slice(&err_env_bytes).expect("rejected intent envelope");
+        assert!(!err_env.ok);
+        assert_eq!(
+            err_env.rejection.as_ref().map(|r| r.code.as_str()),
+            Some("merc_level_out_of_range")
+        );
+        assert_eq!(err_env.session.unwrap().merc.stats.level, 55);
+
+        // Mutate a quest -> verify dirty == true -> export .d2s -> verify checksum & item count -> re-upload
+        let (status, _, quest_env_bytes) = http_request(
+            addr,
+            "POST",
+            "/api/elm/intent",
+            Some(br#"{"SetQuestsBatch":{"difficulty":"Normal","keys":["a1q2"],"completed":true}}"#),
+            "application/json",
+        );
+        assert_eq!(status, 200);
+        let quest_env: SessionEnvelope =
+            serde_json::from_slice(&quest_env_bytes).expect("quest batch envelope");
+        assert!(quest_env.ok);
+        let q_session = quest_env.session.unwrap();
+        assert!(q_session.dirty, "mutated session must report dirty=true");
+        let pre_export_items = q_session.container_counts.equipment
+            + q_session.container_counts.inventory
+            + q_session.container_counts.belt
+            + q_session.container_counts.stash
+            + q_session.container_counts.cube;
+
+        let (status, headers, exported_d2s) =
+            http_request(addr, "GET", "/api/elm/export", None, "text/plain");
+        assert_eq!(status, 200);
+        assert!(headers.contains("Content-Disposition: attachment"));
+        let reparsed_header = Save::from_bytes(&exported_d2s).expect("exported save parses cleanly");
+        let recalc = d2r_core::engine::checksum::recalculate_checksum(&exported_d2s)
+            .expect("recalculate checksum");
+        assert_eq!(reparsed_header.header.checksum, recalc, "exported .d2s checksum must match");
+
+        let (status, _, uploaded_bytes) = http_request(
+            addr,
+            "POST",
+            "/api/elm/upload",
+            Some(&exported_d2s),
+            "application/octet-stream",
+        );
+        assert_eq!(status, 200);
+        let uploaded_env: SessionEnvelope =
+            serde_json::from_slice(&uploaded_bytes).expect("re-uploaded save envelope");
+        assert!(uploaded_env.ok);
+        let up_session = uploaded_env.session.unwrap();
+        assert!(!up_session.dirty);
+        assert!(
+            up_session.progression.normal_quests_completed.contains(&"a1q2".to_string()),
+            "exported save must persist mutated quest a1q2 across re-upload"
+        );
+        let post_export_items = up_session.container_counts.equipment
+            + up_session.container_counts.inventory
+            + up_session.container_counts.belt
+            + up_session.container_counts.stash
+            + up_session.container_counts.cube;
+        assert_eq!(post_export_items, pre_export_items, "exported save must preserve all player items");
+
+        // Switch fixture via /api/elm/load
+        let (status, _, switched_bytes) = http_request(
+            addr,
+            "POST",
+            "/api/elm/load",
+            Some(br#"{"fixture":"amazon_10_scrolls.d2s"}"#),
+            "application/json",
+        );
+        assert_eq!(status, 200);
+        let switched_env: SessionEnvelope =
+            serde_json::from_slice(&switched_bytes).expect("switched fixture envelope");
+        assert!(switched_env.ok);
+        assert_eq!(switched_env.session.unwrap().char_class, "Amazon");
+
+        // Restore default fixture cleanly for any subsequent manual inspection
+        let (status, _, _) = http_request(
+            addr,
+            "POST",
+            "/api/elm/load",
+            Some(br#"{"fixture":"TESTDRUID_Quest3_AnyaRescued.d2s"}"#),
+            "application/json",
+        );
+        assert_eq!(status, 200);
+
+        server.join().expect("server thread finish cleanly");
     }
 }
