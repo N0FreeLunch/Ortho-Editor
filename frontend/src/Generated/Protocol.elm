@@ -88,6 +88,96 @@ characterFieldEncoder enum =
         GoldStash ->
             Json.Encode.string "GoldStash"
 
+type ContainerKind
+    = Stash
+    | Inventory
+    | TempInventory
+    | Cube
+    | Belt
+    | Equipment
+    | MercEquipment
+    | Cursor
+    | Shop
+    | UnknownContainer
+
+
+containerKindEncoder : ContainerKind -> Json.Encode.Value
+containerKindEncoder enum =
+    case enum of
+        Stash ->
+            Json.Encode.string "Stash"
+        Inventory ->
+            Json.Encode.string "Inventory"
+        TempInventory ->
+            Json.Encode.string "TempInventory"
+        Cube ->
+            Json.Encode.string "Cube"
+        Belt ->
+            Json.Encode.string "Belt"
+        Equipment ->
+            Json.Encode.string "Equipment"
+        MercEquipment ->
+            Json.Encode.string "MercEquipment"
+        Cursor ->
+            Json.Encode.string "Cursor"
+        Shop ->
+            Json.Encode.string "Shop"
+        UnknownContainer ->
+            Json.Encode.string "UnknownContainer"
+
+type ItemQualityKind
+    = QualityLow
+    | QualityNormal
+    | QualitySuperior
+    | QualityMagic
+    | QualitySet
+    | QualityRare
+    | QualityUnique
+    | QualityCrafted
+    | QualityRuneword
+    | QualityUnknown
+
+
+itemQualityKindEncoder : ItemQualityKind -> Json.Encode.Value
+itemQualityKindEncoder enum =
+    case enum of
+        QualityLow ->
+            Json.Encode.string "QualityLow"
+        QualityNormal ->
+            Json.Encode.string "QualityNormal"
+        QualitySuperior ->
+            Json.Encode.string "QualitySuperior"
+        QualityMagic ->
+            Json.Encode.string "QualityMagic"
+        QualitySet ->
+            Json.Encode.string "QualitySet"
+        QualityRare ->
+            Json.Encode.string "QualityRare"
+        QualityUnique ->
+            Json.Encode.string "QualityUnique"
+        QualityCrafted ->
+            Json.Encode.string "QualityCrafted"
+        QualityRuneword ->
+            Json.Encode.string "QualityRuneword"
+        QualityUnknown ->
+            Json.Encode.string "QualityUnknown"
+
+type ShopSpawnTarget
+    = SpawnAuto
+    | SpawnInventory
+    | SpawnTempInventory
+
+
+shopSpawnTargetEncoder : ShopSpawnTarget -> Json.Encode.Value
+shopSpawnTargetEncoder enum =
+    case enum of
+        SpawnAuto ->
+            Json.Encode.string "SpawnAuto"
+        SpawnInventory ->
+            Json.Encode.string "SpawnInventory"
+        SpawnTempInventory ->
+            Json.Encode.string "SpawnTempInventory"
+
 type UiIntent
     = SelectResDifficulty { difficulty : DifficultyMode }
     | SelectSkillMode { mode : EditMode }
@@ -102,7 +192,7 @@ type UiIntent
     | SetWaypointsBatch { difficulty : DifficultyMode, bits : List (Int), active : Bool }
     | SetAllDiffWaypoints { active : Bool }
     | SelectItemForMove { itemIndex : Maybe (Int) }
-    | MoveItem { itemIndex : Int, targetContainer : String, x : Int, y : Int }
+    | MoveItem { itemIndex : Int, targetContainer : ContainerKind, x : Int, y : Int }
     | Undo
     | Redo
     | ClearTempInventory
@@ -110,6 +200,7 @@ type UiIntent
     | DisposeHeldItem
     | AdjustSkillRank { skillId : Int, delta : Int }
     | ResetSkills
+    | SpawnShopItem { catalogId : String, targetContainer : ShopSpawnTarget }
 
 
 uiIntentEncoder : UiIntent -> Json.Encode.Value
@@ -142,7 +233,7 @@ uiIntentEncoder enum =
         SelectItemForMove { itemIndex } ->
             Json.Encode.object [ ( "SelectItemForMove", Json.Encode.object [ ( "item_index", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) itemIndex ) ] ) ]
         MoveItem { itemIndex, targetContainer, x, y } ->
-            Json.Encode.object [ ( "MoveItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "target_container", (Json.Encode.string) targetContainer ), ( "x", (Json.Encode.int) x ), ( "y", (Json.Encode.int) y ) ] ) ]
+            Json.Encode.object [ ( "MoveItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "target_container", (containerKindEncoder) targetContainer ), ( "x", (Json.Encode.int) x ), ( "y", (Json.Encode.int) y ) ] ) ]
         Undo ->
             Json.Encode.string "Undo"
         Redo ->
@@ -157,6 +248,8 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "AdjustSkillRank", Json.Encode.object [ ( "skill_id", (Json.Encode.int) skillId ), ( "delta", (Json.Encode.int) delta ) ] ) ]
         ResetSkills ->
             Json.Encode.string "ResetSkills"
+        SpawnShopItem { catalogId, targetContainer } ->
+            Json.Encode.object [ ( "SpawnShopItem", Json.Encode.object [ ( "catalog_id", (Json.Encode.string) catalogId ), ( "target_container", (shopSpawnTargetEncoder) targetContainer ) ] ) ]
 
 difficultyModeDecoder : Json.Decode.Decoder DifficultyMode
 difficultyModeDecoder = 
@@ -208,6 +301,228 @@ editModeDecoder =
                     case x of
                         "Free" ->
                             Json.Decode.succeed Free
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
+containerKindDecoder : Json.Decode.Decoder ContainerKind
+containerKindDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Stash" ->
+                            Json.Decode.succeed Stash
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Inventory" ->
+                            Json.Decode.succeed Inventory
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "TempInventory" ->
+                            Json.Decode.succeed TempInventory
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Cube" ->
+                            Json.Decode.succeed Cube
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Belt" ->
+                            Json.Decode.succeed Belt
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Equipment" ->
+                            Json.Decode.succeed Equipment
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "MercEquipment" ->
+                            Json.Decode.succeed MercEquipment
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Cursor" ->
+                            Json.Decode.succeed Cursor
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "Shop" ->
+                            Json.Decode.succeed Shop
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "UnknownContainer" ->
+                            Json.Decode.succeed UnknownContainer
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
+itemQualityKindDecoder : Json.Decode.Decoder ItemQualityKind
+itemQualityKindDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityLow" ->
+                            Json.Decode.succeed QualityLow
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityNormal" ->
+                            Json.Decode.succeed QualityNormal
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualitySuperior" ->
+                            Json.Decode.succeed QualitySuperior
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityMagic" ->
+                            Json.Decode.succeed QualityMagic
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualitySet" ->
+                            Json.Decode.succeed QualitySet
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityRare" ->
+                            Json.Decode.succeed QualityRare
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityUnique" ->
+                            Json.Decode.succeed QualityUnique
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityCrafted" ->
+                            Json.Decode.succeed QualityCrafted
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityRuneword" ->
+                            Json.Decode.succeed QualityRuneword
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QualityUnknown" ->
+                            Json.Decode.succeed QualityUnknown
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
+shopSpawnTargetDecoder : Json.Decode.Decoder ShopSpawnTarget
+shopSpawnTargetDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SpawnAuto" ->
+                            Json.Decode.succeed SpawnAuto
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SpawnInventory" ->
+                            Json.Decode.succeed SpawnInventory
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "SpawnTempInventory" ->
+                            Json.Decode.succeed SpawnTempInventory
                         unexpected ->
                             Json.Decode.fail <| "Unexpected variant " ++ unexpected
                 )
@@ -508,8 +823,8 @@ type alias ItemCardView =
     , code : String
     , nameEn : String
     , nameKo : String
-    , quality : String
-    , container : String
+    , quality : ItemQualityKind
+    , container : ContainerKind
     , slotLabel : Maybe (String)
     , x : Int
     , y : Int
@@ -535,8 +850,8 @@ itemCardViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "code" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_en" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "quality" (Json.Decode.string)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "container" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "quality" (itemQualityKindDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "container" (containerKindDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "slot_label" (Json.Decode.nullable (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "x" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "y" (Json.Decode.int)))
@@ -555,7 +870,7 @@ itemCardViewDecoder =
 
 
 type alias AllowedMoveTargetView =
-    { container : String
+    { container : ContainerKind
     , x : Int
     , y : Int
     }
@@ -564,7 +879,7 @@ type alias AllowedMoveTargetView =
 allowedMoveTargetViewDecoder : Json.Decode.Decoder AllowedMoveTargetView
 allowedMoveTargetViewDecoder =
     Json.Decode.succeed AllowedMoveTargetView
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "container" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "container" (containerKindDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "x" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "y" (Json.Decode.int)))
 
@@ -598,8 +913,38 @@ skillNodeViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "bonus_level" (Json.Decode.int)))
 
 
+type alias ShopCatalogItemView =
+    { catalogId : String
+    , code : String
+    , nameEn : String
+    , nameKo : String
+    , quality : ItemQualityKind
+    , category : String
+    , width : Int
+    , height : Int
+    , imageUrl : Maybe (String)
+    , summary : String
+    }
+
+
+shopCatalogItemViewDecoder : Json.Decode.Decoder ShopCatalogItemView
+shopCatalogItemViewDecoder =
+    Json.Decode.succeed ShopCatalogItemView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "catalog_id" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "code" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_en" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "quality" (itemQualityKindDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "category" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "width" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "height" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "image_url" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "summary" (Json.Decode.string)))
+
+
 type alias SessionView =
-    { fixtureLabel : String
+    { revision : Int
+    , fixtureLabel : String
     , saveVersion : Int
     , exportSupported : Bool
     , exportUnsupportedReason : Maybe (String)
@@ -628,12 +973,14 @@ type alias SessionView =
     , canRedo : Bool
     , activeWeaponSet : Int
     , skills : List (SkillNodeView)
+    , shopCatalog : List (ShopCatalogItemView)
     }
 
 
 sessionViewDecoder : Json.Decode.Decoder SessionView
 sessionViewDecoder =
     Json.Decode.succeed SessionView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "revision" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "fixture_label" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "save_version" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "export_supported" (Json.Decode.bool)))
@@ -663,6 +1010,7 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "can_redo" (Json.Decode.bool)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "active_weapon_set" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skills" (Json.Decode.list (skillNodeViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "shop_catalog" (Json.Decode.list (shopCatalogItemViewDecoder))))
 
 
 type alias ActionRejection =

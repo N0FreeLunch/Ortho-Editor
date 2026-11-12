@@ -4,8 +4,10 @@ import Component.Workspace as Workspace
 import Expect
 import Generated.Protocol as Protocol
     exposing
-        ( DifficultyMode(..)
+        ( ContainerKind(..)
+        , DifficultyMode(..)
         , EditMode(..)
+        , ItemQualityKind(..)
         , uiIntentEncoder
         )
 import Html.Attributes
@@ -37,6 +39,7 @@ sampleSessionJson =
         "is_expansion": true,
         "res_difficulty": "Normal",
         "skill_mode": "Legit",
+        "revision": 1,
         "dirty": false,
         "schema": {
           "name_min_len": 2,
@@ -124,7 +127,7 @@ sampleSessionJson =
         "items": [
           {
             "index": 0, "code": "rin", "name_en": "Nagelring", "name_ko": "나겔링",
-            "quality": "Unique", "container": "equipment", "slot_label": "Left Finger",
+            "quality": "QualityUnique", "container": "Equipment", "slot_label": "Left Finger",
             "x": 0, "y": 0, "width": 1, "height": 1,
             "item_level": 49,
             "base_attributes": ["Required Level: 7"],
@@ -138,7 +141,7 @@ sampleSessionJson =
         "merc_items": [
           {
             "index": 0, "code": "vou", "name_en": "Insight", "name_ko": "통찰",
-            "quality": "Runeword", "container": "mercenary", "slot_label": "Right Hand",
+            "quality": "QualityRuneword", "container": "MercEquipment", "slot_label": "Right Hand",
             "x": 0, "y": 0, "width": 2, "height": 4,
             "item_level": 45,
             "base_attributes": ["Two-Hand Damage: 24 to 105", "Durability: 25 of 50"],
@@ -152,7 +155,7 @@ sampleSessionJson =
         "temp_items": [
           {
             "index": 0, "code": "r01", "name_en": "El Rune", "name_ko": "엘 룬",
-            "quality": "Normal", "container": "temp_inventory", "slot_label": null,
+            "quality": "QualityNormal", "container": "TempInventory", "slot_label": null,
             "x": 0, "y": 0, "width": 1, "height": 1,
             "item_level": 1,
             "base_attributes": [],
@@ -205,6 +208,32 @@ sampleSessionJson =
             "req_level": 1,
             "level": 3,
             "bonus_level": 2
+          }
+        ],
+        "shop_catalog": [
+          {
+            "catalog_id": "uniq:345",
+            "code": "usk",
+            "name_en": "Andariel's Visage",
+            "name_ko": "안다리엘의 두개골",
+            "quality": "QualityUnique",
+            "category": "armor",
+            "width": 2,
+            "height": 2,
+            "image_url": null,
+            "summary": "Unique · qlvl 85"
+          },
+          {
+            "catalog_id": "base:r33",
+            "code": "r33",
+            "name_en": "Zod Rune",
+            "name_ko": "조드 룬",
+            "quality": "QualityNormal",
+            "category": "runes_gems",
+            "width": 1,
+            "height": 1,
+            "image_url": null,
+            "summary": "Normal · r33"
           }
         ]
       },
@@ -816,7 +845,7 @@ suite =
                                     |> Query.fromHtml
                                     |> Query.find [ testId "container-filter-equipment" ]
                                     |> Event.simulate Event.click
-                                    |> Event.expect (SelectContainerFilter "equipment")
+                                    |> Event.expect (SelectContainerFilter (Just Equipment))
                            , \_ ->
                                 Workspace.view viewAModel
                                     |> Query.fromHtml
@@ -852,7 +881,7 @@ suite =
                         , Query.find [ testId "weapon-swap-preview-btn" ]
                             >> Query.has [ Selector.text "Swap I / II", Selector.text "Set I" ]
                         , Query.find [ testId "item-shop-preview" ]
-                            >> Query.has [ Selector.text "Preview only" ]
+                            >> Query.has [ Selector.text "Live Spawn" ]
                         , Query.find [ testId "paperdoll-panel" ]
                             >> Query.has [ Selector.text "Equipped Gear (Zone 2)" ]
                         , Query.find [ testId "gear-breakpoint-bar" ]
@@ -923,8 +952,8 @@ suite =
                         , code = "hp1"
                         , nameEn = "Lesser Healing Potion"
                         , nameKo = "하급 치유 물약"
-                        , quality = "Normal"
-                        , container = "belt"
+                        , quality = QualityNormal
+                        , container = Belt
                         , slotLabel = Nothing
                         , x = 0
                         , y = 0
@@ -1044,7 +1073,7 @@ suite =
                                     (\s ->
                                         { s
                                             | selectedMoveItemIndex = Just 0
-                                            , allowedMoveTargets = [ { container = "stash", x = 5, y = 6 } ]
+                                            , allowedMoveTargets = [ { container = Stash, x = 5, y = 6 } ]
                                             , beltMoveRestrictedReason = Just "Only 1x1 belt consumables can be placed in the belt."
                                             , canUndo = True
                                             , canRedo = True
@@ -1065,8 +1094,8 @@ suite =
                                 , code = "hp1"
                                 , nameEn = "Minor Healing Potion"
                                 , nameKo = "하급 치유 물약"
-                                , quality = "Normal"
-                                , container = "inventory"
+                                , quality = QualityNormal
+                                , container = Inventory
                                 , slotLabel = Nothing
                                 , x = 0
                                 , y = 0
@@ -1091,7 +1120,7 @@ suite =
                                         { s
                                             | items = potion :: s.items
                                             , selectedMoveItemIndex = Just 901
-                                            , allowedMoveTargets = [ { container = "belt", x = 2, y = 0 } ]
+                                            , allowedMoveTargets = [ { container = Belt, x = 2, y = 0 } ]
                                             , beltMoveRestrictedReason = Nothing
                                         }
                                     )
@@ -1109,10 +1138,10 @@ suite =
                                     >> Query.has [ Selector.class "is-restricted" ]
                                 , Query.find [ testId "grid-cell-stash-5-6" ]
                                     >> Event.simulate Event.click
-                                    >> Event.expect (MoveSelectedItemTo "stash" 5 6)
+                                    >> Event.expect (MoveSelectedItemTo Stash 5 6)
                                 , Query.find [ testId "grid-cell-belt-0-0" ]
                                     >> Event.simulate Event.click
-                                    >> Event.expect (MoveSelectedItemTo "belt" 0 0)
+                                    >> Event.expect (MoveSelectedItemTo Belt 0 0)
                                 , Query.find [ testId "undo-btn" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect ClickUndo
@@ -1133,7 +1162,7 @@ suite =
                                 ]
                     , \_ ->
                         nonConsumableModel
-                            |> Update.update (HoverDropTarget (Just { container = "stash", x = 5, y = 6 }))
+                            |> Update.update (HoverDropTarget (Just { container = Stash, x = 5, y = 6 }))
                             |> Tuple.first
                             |> Workspace.view
                             |> Query.fromHtml
@@ -1141,7 +1170,7 @@ suite =
                             |> Query.has [ Selector.class "valid" ]
                     , \_ ->
                         nonConsumableModel
-                            |> Update.update (HoverDropTarget (Just { container = "belt", x = 0, y = 0 }))
+                            |> Update.update (HoverDropTarget (Just { container = Belt, x = 0, y = 0 }))
                             |> Tuple.first
                             |> Workspace.view
                             |> Query.fromHtml
@@ -1152,13 +1181,13 @@ suite =
                             |> Tuple.second
                             |> Expect.equal (EmitIntent (Protocol.SelectItemForMove { itemIndex = Just 0 }))
                     , \_ ->
-                        Update.update (MoveSelectedItemTo "stash" 5 6) nonConsumableModel
+                        Update.update (MoveSelectedItemTo Stash 5 6) nonConsumableModel
                             |> Tuple.second
                             |> Expect.equal
                                 (EmitIntent
                                     (Protocol.MoveItem
                                         { itemIndex = 0
-                                        , targetContainer = "stash"
+                                        , targetContainer = Stash
                                         , x = 5
                                         , y = 6
                                         }
@@ -1177,7 +1206,7 @@ suite =
                             |> Query.fromHtml
                             |> Query.find [ testId "grid-cell-belt-2-0" ]
                             >> Event.simulate Event.click
-                            >> Event.expect (MoveSelectedItemTo "belt" 2 0)
+                            >> Event.expect (MoveSelectedItemTo Belt 2 0)
                     ]
                     ()
         , test "Cycle 13 View A & B render shop sell/dispose, weapon swap I/II, gear breakpoints, and interactive 30-skill tree" <|
@@ -1196,12 +1225,12 @@ suite =
                                     (\s ->
                                         { s
                                             | selectedMoveItemIndex = Just 0
-                                            , allowedMoveTargets = [ { container = "temp_inventory", x = 2, y = 1 } ]
+                                            , allowedMoveTargets = [ { container = TempInventory, x = 2, y = 1 } ]
                                         }
                                     )
                                     base.session
                         }
-                            |> Update.update (HoverDropTarget (Just { container = "shop", x = 0, y = 0 }))
+                            |> Update.update (HoverDropTarget (Just { container = Shop, x = 0, y = 0 }))
                             |> Tuple.first
                 in
                 Expect.all
@@ -1250,8 +1279,8 @@ suite =
                         , code = "rin"
                         , nameEn = "Nagelring"
                         , nameKo = "나겔링"
-                        , quality = "Unique"
-                        , container = "equipment"
+                        , quality = QualityUnique
+                        , container = Equipment
                         , slotLabel = Just "Ring1"
                         , x = 0
                         , y = 0
@@ -1296,8 +1325,8 @@ suite =
                                         { s
                                             | selectedMoveItemIndex = Just 0
                                             , allowedMoveTargets =
-                                                [ { container = "equipment", x = 6, y = 0 }
-                                                , { container = "equipment", x = 7, y = 0 }
+                                                [ { container = Equipment, x = 6, y = 0 }
+                                                , { container = Equipment, x = 7, y = 0 }
                                                 ]
                                         }
                                     )
@@ -1319,7 +1348,7 @@ suite =
                         let
                             hoveredEquip =
                                 holdingEquip
-                                    |> Update.update (HoverDropTarget (Just { container = "equipment", x = 6, y = 0 }))
+                                    |> Update.update (HoverDropTarget (Just { container = Equipment, x = 6, y = 0 }))
                                     |> Tuple.first
                         in
                         Expect.all
@@ -1338,7 +1367,7 @@ suite =
                                             >> Event.expect (SelectItem Nothing)
                                         , Query.find [ testId "equip-slot-7" ]
                                             >> Event.simulate Event.click
-                                            >> Event.expect (MoveSelectedItemTo "equipment" 7 0)
+                                            >> Event.expect (MoveSelectedItemTo Equipment 7 0)
                                         ]
                             , \_ ->
                                 Workspace.view hoveredEquip
@@ -1347,6 +1376,104 @@ suite =
                                     >> Query.has [ Selector.class "is-held-source", Selector.class "footprint-valid" ]
                             ]
                             ()
+                    ]
+                    ()
+        , test "Cycle 14 Item Shop switches quality tabs and emits ClickSpawnShopItem on catalog tile click" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+
+                    normalTabModel =
+                        viewAModel
+                            |> Update.update (SelectShopQualityTab QualityNormal)
+                            |> Tuple.first
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view viewAModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "shop-item-uniq:345" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ClickSpawnShopItem "uniq:345")
+                                , Query.find [ testId "shop-tab-normal" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (SelectShopQualityTab QualityNormal)
+                                ]
+                    , \_ ->
+                        Workspace.view normalTabModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "shop-item-base:r33" ]
+                            >> Event.simulate Event.click
+                            >> Event.expect (ClickSpawnShopItem "base:r33")
+                    ]
+                    ()
+        , test "Cycle 15 revision guard ignores stale responses and preserves cached shopCatalog across intents" <|
+            \_ ->
+                let
+                    decodeEnvelopeJson raw =
+                        case Json.Decode.decodeString Json.Decode.value raw of
+                            Ok val ->
+                                val
+
+                            Err _ ->
+                                Json.Encode.null
+
+                    newerEmptyCatalogJson =
+                        sampleSessionJson
+                            |> String.replace "\"revision\": 1," "\"revision\": 2,"
+                            |> String.replace "\"char_level\": 31," "\"char_level\": 99,"
+                            |> String.replace "\"catalog_id\": \"uniq:345\"," "\"__unused_marker\": \"x\","
+
+                    newerMinimalJson =
+                        sampleSessionJson
+                            |> String.replace "\"revision\": 1," "\"revision\": 2,"
+                            |> String.replace "\"dirty\": false," "\"dirty\": true,"
+                            |> String.replace "\"char_level\": 31," "\"char_level\": 99,"
+                            |> (\s ->
+                                    case String.indexes "\"shop_catalog\": [" s of
+                                        idx :: _ ->
+                                            String.left idx s ++ "\"shop_catalog\": [] }, \"rejection\": null }"
+
+                                        _ ->
+                                            s
+                               )
+
+                    staleJson =
+                        sampleSessionJson
+                            |> String.replace "\"revision\": 1," "\"revision\": 1,"
+                            |> String.replace "\"dirty\": false," "\"dirty\": true,"
+                            |> String.replace "\"char_level\": 31," "\"char_level\": 12,"
+
+                    afterNewer =
+                        loadedModel
+                            |> Update.update (ReceiveSessionEnvelope (decodeEnvelopeJson newerMinimalJson))
+                            |> Tuple.first
+
+                    afterStale =
+                        afterNewer
+                            |> Update.update (ReceiveSessionEnvelope (decodeEnvelopeJson staleJson))
+                            |> Tuple.first
+
+                    _ =
+                        newerEmptyCatalogJson
+                in
+                Expect.all
+                    [ \_ ->
+                        afterNewer.session
+                            |> Maybe.map .charLevel
+                            |> Expect.equal (Just 99)
+                    , \_ ->
+                        afterNewer.session
+                            |> Maybe.map (.shopCatalog >> List.length)
+                            |> Expect.equal (Just 2)
+                    , \_ ->
+                        afterStale.session
+                            |> Maybe.map .charLevel
+                            |> Expect.equal (Just 99)
                     ]
                     ()
         ]

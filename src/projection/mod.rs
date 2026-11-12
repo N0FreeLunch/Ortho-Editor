@@ -23,8 +23,11 @@ use crate::domain::contracts::character::{
 use crate::domain::contracts::skill::SkillMutationContract;
 use crate::domain::forensic::v105::mercenary::MercenaryState;
 use crate::domain::header::axiom::EXPANSION_FLAG_OFFSET;
+use crate::domain::item::builder::ItemBuilder;
+use crate::domain::item::entity::ItemBitRange;
 use crate::domain::item::image::{ItemImageCatalog, ItemImageKey, resolve_item_image};
 use crate::domain::item::stream::{ItemContainer, PlayerItemStream};
+use crate::domain::stats::entity::ItemProperty;
 use crate::verify::alpha_inventory_routing::is_belt_consumable;
 use crate::domain::progression::Progression;
 use crate::domain::progression::axiom::{
@@ -265,6 +268,106 @@ pub struct SetBonusView {
     pub lines: Vec<String>,
 }
 
+/// Authoritative container classification projected by Rust for View A/B placement and intents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub enum ContainerKind {
+    Stash,
+    Inventory,
+    TempInventory,
+    Cube,
+    Belt,
+    Equipment,
+    MercEquipment,
+    Cursor,
+    Shop,
+    UnknownContainer,
+}
+
+impl ContainerKind {
+    pub fn from_item_container(container: ItemContainer) -> Self {
+        match container {
+            ItemContainer::Equipment => ContainerKind::Equipment,
+            ItemContainer::Inventory => ContainerKind::Inventory,
+            ItemContainer::Belt => ContainerKind::Belt,
+            ItemContainer::Stash => ContainerKind::Stash,
+            ItemContainer::Cube => ContainerKind::Cube,
+            ItemContainer::Unknown => ContainerKind::UnknownContainer,
+        }
+    }
+
+    pub fn as_label(self) -> &'static str {
+        match self {
+            ContainerKind::Stash => "stash",
+            ContainerKind::Inventory => "inventory",
+            ContainerKind::TempInventory => "temp_inventory",
+            ContainerKind::Cube => "cube",
+            ContainerKind::Belt => "belt",
+            ContainerKind::Equipment => "equipment",
+            ContainerKind::MercEquipment => "merc_equipment",
+            ContainerKind::Cursor => "cursor",
+            ContainerKind::Shop => "shop",
+            ContainerKind::UnknownContainer => "unknown",
+        }
+    }
+}
+
+/// Authoritative item quality / tier classification projected by Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub enum ItemQualityKind {
+    QualityLow,
+    QualityNormal,
+    QualitySuperior,
+    QualityMagic,
+    QualitySet,
+    QualityRare,
+    QualityUnique,
+    QualityCrafted,
+    QualityRuneword,
+    QualityUnknown,
+}
+
+impl ItemQualityKind {
+    pub fn from_item(quality: Option<ItemQuality>, is_runeword: bool) -> Self {
+        if is_runeword {
+            return ItemQualityKind::QualityRuneword;
+        }
+        match quality {
+            Some(ItemQuality::Low) => ItemQualityKind::QualityLow,
+            Some(ItemQuality::Normal) => ItemQualityKind::QualityNormal,
+            Some(ItemQuality::High) => ItemQualityKind::QualitySuperior,
+            Some(ItemQuality::Magic) => ItemQualityKind::QualityMagic,
+            Some(ItemQuality::Set) => ItemQualityKind::QualitySet,
+            Some(ItemQuality::Rare) => ItemQualityKind::QualityRare,
+            Some(ItemQuality::Unique) => ItemQualityKind::QualityUnique,
+            Some(ItemQuality::Crafted) => ItemQualityKind::QualityCrafted,
+            None => ItemQualityKind::QualityUnknown,
+        }
+    }
+
+    pub fn as_label(self) -> &'static str {
+        match self {
+            ItemQualityKind::QualityLow => "Low",
+            ItemQualityKind::QualityNormal => "Normal",
+            ItemQualityKind::QualitySuperior => "Superior",
+            ItemQualityKind::QualityMagic => "Magic",
+            ItemQualityKind::QualitySet => "Set",
+            ItemQualityKind::QualityRare => "Rare",
+            ItemQualityKind::QualityUnique => "Unique",
+            ItemQualityKind::QualityCrafted => "Crafted",
+            ItemQualityKind::QualityRuneword => "Runeword",
+            ItemQualityKind::QualityUnknown => "Unknown",
+        }
+    }
+}
+
+/// Target container selection for `UiIntent::SpawnShopItem`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub enum ShopSpawnTarget {
+    SpawnAuto,
+    SpawnInventory,
+    SpawnTempInventory,
+}
+
 /// Projected item summary for View A container grids and View B mercenary slots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct ItemCardView {
@@ -272,8 +375,8 @@ pub struct ItemCardView {
     pub code: String,
     pub name_en: String,
     pub name_ko: String,
-    pub quality: String,
-    pub container: String,
+    pub quality: ItemQualityKind,
+    pub container: ContainerKind,
     pub slot_label: Option<String>,
     pub x: i32,
     pub y: i32,
@@ -303,14 +406,31 @@ pub struct ItemCardView {
 /// Valid placement slot projected by Rust for the currently selected move item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct AllowedMoveTargetView {
-    pub container: String,
+    pub container: ContainerKind,
     pub x: i32,
     pub y: i32,
+}
+
+/// Curated or data-driven item shop catalog entry projected from `d2r-data`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct ShopCatalogItemView {
+    pub catalog_id: String,
+    pub code: String,
+    pub name_en: String,
+    pub name_ko: String,
+    pub quality: ItemQualityKind,
+    pub category: String,
+    pub width: i32,
+    pub height: i32,
+    pub image_url: Option<String>,
+    pub summary: String,
 }
 
 /// Complete Elm-facing read-only save session snapshot projected by Rust.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct SessionView {
+    #[serde(default)]
+    pub revision: i32,
     pub fixture_label: String,
     pub save_version: i32,
     pub export_supported: bool,
@@ -347,6 +467,8 @@ pub struct SessionView {
     pub active_weapon_set: i32,
     #[serde(default)]
     pub skills: Vec<SkillNodeView>,
+    #[serde(default)]
+    pub shop_catalog: Vec<ShopCatalogItemView>,
 }
 
 /// Typed user intents sent from Elm `Main`/`HeadlessHarness` to the Rust store.
@@ -400,7 +522,7 @@ pub enum UiIntent {
     },
     MoveItem {
         item_index: i32,
-        target_container: String,
+        target_container: ContainerKind,
         x: i32,
         y: i32,
     },
@@ -414,6 +536,10 @@ pub enum UiIntent {
         delta: i32,
     },
     ResetSkills,
+    SpawnShopItem {
+        catalog_id: String,
+        target_container: ShopSpawnTarget,
+    },
 }
 
 /// Structured rejection returned when Rust rejects a `UiIntent` invariant violation.
@@ -434,6 +560,7 @@ pub struct SessionEnvelope {
 /// Stateful Rust editor session backing `SessionView` projection and `UiIntent` mutations.
 #[derive(Debug, Clone)]
 pub struct EditorSession {
+    revision: i32,
     source_bytes: Vec<u8>,
     dirty: bool,
     fixture_label: String,
@@ -569,7 +696,7 @@ impl EditorSession {
             } else {
                 0
             };
-            let container_name = container_label(placement.container).to_string();
+            let container_kind = ContainerKind::from_item_container(placement.container);
             let resolved_slot_label = placement
                 .equipment_slot
                 .map(str::to_string)
@@ -585,7 +712,7 @@ impl EditorSession {
                 item,
                 char_level,
                 active_set_count,
-                container_name,
+                container_kind,
                 resolved_slot_label,
                 i32::from(placement.x),
                 i32::from(placement.y),
@@ -612,7 +739,7 @@ impl EditorSession {
                 &item,
                 merc_level.clamp(1, 98) as u8,
                 0,
-                "mercenary".to_string(),
+                ContainerKind::MercEquipment,
                 Some(slot.to_string()),
                 i32::from(item.x),
                 i32::from(item.y),
@@ -621,6 +748,7 @@ impl EditorSession {
         }
 
         Ok(Self {
+            revision: 1,
             source_bytes: bytes.to_vec(),
             dirty: false,
             fixture_label: fixture_label.into(),
@@ -665,6 +793,15 @@ impl EditorSession {
 
     /// Projects the current store state into an immutable `SessionView` for Elm.
     pub fn project(&self) -> SessionView {
+        self.project_with_catalog(true)
+    }
+
+    /// Projects the current store state after an intent, omitting static shop catalog entries.
+    pub fn project_after_intent(&self) -> SessionView {
+        self.project_with_catalog(false)
+    }
+
+    fn project_with_catalog(&self, include_catalog: bool) -> SessionView {
         let sheet = calculate_combat_sheet(
             Some(&self.attributes),
             Some(&self.progression.quests),
@@ -696,13 +833,13 @@ impl EditorSession {
             let Some(card) = self.item_cards.get(idx) else {
                 continue;
             };
-            let is_equipped = card.container == "equipment"
+            let is_equipped = card.container == ContainerKind::Equipment
                 && match card.slot_label.as_deref() {
                     Some("Weapon1") | Some("Weapon2") => self.active_weapon_set == 1,
                     Some("Weapon1Swap") | Some("Weapon2Swap") => self.active_weapon_set == 2,
                     _ => true,
                 };
-            let is_inv_charm = card.container == "inventory"
+            let is_inv_charm = card.container == ContainerKind::Inventory
                 && matches!(item.code.trim(), "cm1" | "cm2" | "cm3");
             if !is_equipped && !is_inv_charm {
                 continue;
@@ -768,14 +905,14 @@ impl EditorSession {
             mercenary: self.merc_cards.len() as i32,
         };
         for card in &self.item_cards {
-            match card.container.as_str() {
-                "equipment" => counts.equipment += 1,
-                "inventory" => counts.inventory += 1,
-                "belt" => counts.belt += 1,
-                "stash" => counts.stash += 1,
-                "cube" => counts.cube += 1,
-                "temp_inventory" => counts.temp_inventory += 1,
-                "cursor" => {}
+            match card.container {
+                ContainerKind::Equipment => counts.equipment += 1,
+                ContainerKind::Inventory => counts.inventory += 1,
+                ContainerKind::Belt => counts.belt += 1,
+                ContainerKind::Stash => counts.stash += 1,
+                ContainerKind::Cube => counts.cube += 1,
+                ContainerKind::TempInventory => counts.temp_inventory += 1,
+                ContainerKind::Cursor => {}
                 _ => counts.unknown += 1,
             }
         }
@@ -809,13 +946,22 @@ impl EditorSession {
             gold_stash_max: StashGoldValue::MAX_STASH_GOLD as i32,
         };
 
-        let export_unsupported_reason = export_unsupported_reason(self.save_version);
+        let export_unsupported_reason = export_unsupported_reason(self.save_version).or_else(|| {
+            if self.item_cards.iter().any(|c| c.container == ContainerKind::Cursor) {
+                Some("Cannot export .d2s while a swapped item is held on the cursor. Place it in a slot or click Undo.".to_string())
+            } else if self.item_cards.iter().any(|c| c.container == ContainerKind::TempInventory) {
+                Some("Cannot export .d2s while items remain in Temp Inventory (9x4). Move them to a permanent container or clear Temp Inventory.".to_string())
+            } else {
+                None
+            }
+        });
         let export_supported = export_unsupported_reason.is_none();
 
         let (allowed_move_targets, belt_move_restricted_reason) =
             self.project_allowed_move_targets();
 
         SessionView {
+            revision: self.revision,
             fixture_label: self.fixture_label.clone(),
             save_version: self.save_version,
             export_supported,
@@ -852,6 +998,11 @@ impl EditorSession {
             can_redo: !self.redo_stack.is_empty(),
             active_weapon_set: self.active_weapon_set,
             skills,
+            shop_catalog: if include_catalog {
+                cached_shop_catalog().to_vec()
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -922,6 +1073,7 @@ impl EditorSession {
                 | UiIntent::DisposeHeldItem
                 | UiIntent::AdjustSkillRank { .. }
                 | UiIntent::ResetSkills
+                | UiIntent::SpawnShopItem { .. }
         );
         let pre_snapshot = if mutates_history {
             Some(self.capture_snapshot())
@@ -934,15 +1086,16 @@ impl EditorSession {
                     self.undo_stack.push(snap);
                     self.redo_stack.clear();
                 }
+                self.revision = self.revision.saturating_add(1);
                 SessionEnvelope {
                     ok: true,
-                    session: Some(self.project()),
+                    session: Some(self.project_after_intent()),
                     rejection: None,
                 }
             }
             Err(rejection) => SessionEnvelope {
                 ok: false,
-                session: Some(self.project()),
+                session: Some(self.project_after_intent()),
                 rejection: Some(rejection),
             },
         }
@@ -1162,7 +1315,7 @@ impl EditorSession {
                 })
             }
             UiIntent::SelectItemForMove { item_index } => {
-                if self.item_cards.iter().any(|c| c.container == "cursor") {
+                if self.item_cards.iter().any(|c| c.container == ContainerKind::Cursor) {
                     return Err(ActionRejection {
                         code: "cursor_item_must_be_placed".to_string(),
                         message: "Place the swapped item held on the cursor into a slot or click Undo.".to_string(),
@@ -1187,7 +1340,7 @@ impl EditorSession {
                 target_container,
                 x,
                 y,
-            } => self.apply_move_item(item_index, &target_container, x, y),
+            } => self.apply_move_item(item_index, target_container, x, y),
             UiIntent::Undo => {
                 let prev = self.undo_stack.pop().ok_or_else(|| ActionRejection {
                     code: "nothing_to_undo".to_string(),
@@ -1212,7 +1365,7 @@ impl EditorSession {
                 self.temp_items.clear();
                 let mut idx = 0;
                 while idx < self.item_cards.len() {
-                    if self.item_cards[idx].container == "temp_inventory" {
+                    if self.item_cards[idx].container == ContainerKind::TempInventory {
                         self.player_items_with_container.remove(idx);
                         self.item_cards.remove(idx);
                         self.has_item_edits = true;
@@ -1242,6 +1395,10 @@ impl EditorSession {
                 self.apply_adjust_skill_rank(skill_id, delta)
             }
             UiIntent::ResetSkills => self.apply_reset_skills(),
+            UiIntent::SpawnShopItem {
+                catalog_id,
+                target_container,
+            } => self.apply_spawn_shop_item(&catalog_id, target_container),
         }
     }
 
@@ -1409,7 +1566,7 @@ impl EditorSession {
     fn validate_move_target(
         &self,
         item_index: i32,
-        target_container: &str,
+        target_container: ContainerKind,
         x: i32,
         y: i32,
     ) -> Result<(usize, ItemContainer, Option<usize>), ActionRejection> {
@@ -1426,7 +1583,7 @@ impl EditorSession {
             (card.code.clone(), card.width.max(1), card.height.max(1))
         };
 
-        if target_container == "equipment" {
+        if target_container == ContainerKind::Equipment {
             let slot_name = equipment_slot_label(x)
                 .filter(|_| y == 0)
                 .ok_or_else(|| ActionRejection {
@@ -1449,7 +1606,7 @@ impl EditorSession {
                 .enumerate()
                 .filter(|&(other_idx, other)| {
                     other_idx != idx
-                        && other.container == "equipment"
+                        && other.container == ContainerKind::Equipment
                         && other.slot_label.as_deref() == Some(slot_name)
                 })
                 .map(|(other_idx, _)| other_idx)
@@ -1464,17 +1621,18 @@ impl EditorSession {
             };
         }
 
-        let (target, max_w, max_h, target_label) = match target_container {
-            "inventory" => (ItemContainer::Inventory, 10i32, 4i32, "inventory"),
-            "stash" => (ItemContainer::Stash, 10i32, 10i32, "stash"),
-            "cube" => (ItemContainer::Cube, 3i32, 4i32, "cube"),
-            "belt" => (ItemContainer::Belt, 4i32, 4i32, "belt"),
-            "temp_inventory" => (ItemContainer::Unknown, 9i32, 4i32, "temp_inventory"),
-            _ => {
+        let (target, max_w, max_h, target_kind) = match target_container {
+            ContainerKind::Inventory => (ItemContainer::Inventory, 10i32, 4i32, ContainerKind::Inventory),
+            ContainerKind::Stash => (ItemContainer::Stash, 10i32, 10i32, ContainerKind::Stash),
+            ContainerKind::Cube => (ItemContainer::Cube, 3i32, 4i32, ContainerKind::Cube),
+            ContainerKind::Belt => (ItemContainer::Belt, 4i32, 4i32, ContainerKind::Belt),
+            ContainerKind::TempInventory => (ItemContainer::Unknown, 9i32, 4i32, ContainerKind::TempInventory),
+            other => {
                 return Err(ActionRejection {
                     code: "invalid_target_container".to_string(),
                     message: format!(
-                        "Items cannot be moved to '{target_container}'. Allowed targets: inventory, stash, cube, belt, temp_inventory, equipment, shop."
+                        "Items cannot be moved to '{}'. Allowed targets: inventory, stash, cube, belt, temp_inventory, equipment, shop.",
+                        other.as_label()
                     ),
                 });
             }
@@ -1496,14 +1654,15 @@ impl EditorSession {
             return Err(ActionRejection {
                 code: "out_of_bounds".to_string(),
                 message: format!(
-                    "Placement ({x}, {y}) with size {width}x{height} exceeds {target_container} bounds ({max_w}x{max_h})."
+                    "Placement ({x}, {y}) with size {width}x{height} exceeds {} bounds ({max_w}x{max_h}).",
+                    target_container.as_label()
                 ),
             });
         }
 
         let mut overlaps = Vec::new();
         for (other_idx, other) in self.item_cards.iter().enumerate() {
-            if other_idx == idx || other.container != target_label {
+            if other_idx == idx || other.container != target_kind {
                 continue;
             }
             let ow = other.width.max(1);
@@ -1519,7 +1678,8 @@ impl EditorSession {
             _ => Err(ActionRejection {
                 code: "container_slot_occupied".to_string(),
                 message: format!(
-                    "Target slot ({x}, {y}) in {target_container} overlaps with {} items and cannot swap.",
+                    "Target slot ({x}, {y}) in {} overlaps with {} items and cannot swap.",
+                    target_container.as_label(),
                     overlaps.len()
                 ),
             }),
@@ -1532,59 +1692,56 @@ impl EditorSession {
         };
         let mut targets = Vec::new();
         for (container, max_w, max_h) in [
-            ("inventory", 10i32, 4i32),
-            ("stash", 10i32, 10i32),
-            ("cube", 3i32, 4i32),
-            ("belt", 4i32, 4i32),
-            ("temp_inventory", 9i32, 4i32),
+            (ContainerKind::Inventory, 10i32, 4i32),
+            (ContainerKind::Stash, 10i32, 10i32),
+            (ContainerKind::Cube, 3i32, 4i32),
+            (ContainerKind::Belt, 4i32, 4i32),
+            (ContainerKind::TempInventory, 9i32, 4i32),
         ] {
             for y in 0..max_h {
                 for x in 0..max_w {
                     if self.validate_move_target(item_index, container, x, y).is_ok() {
-                        targets.push(AllowedMoveTargetView {
-                            container: container.to_string(),
-                            x,
-                            y,
-                        });
+                        targets.push(AllowedMoveTargetView { container, x, y });
                     }
                 }
             }
         }
         for body_loc in 1..=12 {
             if self
-                .validate_move_target(item_index, "equipment", body_loc, 0)
+                .validate_move_target(item_index, ContainerKind::Equipment, body_loc, 0)
                 .is_ok()
             {
                 targets.push(AllowedMoveTargetView {
-                    container: "equipment".to_string(),
+                    container: ContainerKind::Equipment,
                     x: body_loc,
                     y: 0,
                 });
             }
         }
-        let belt_restricted_reason = match self.validate_move_target(item_index, "belt", 0, 0) {
-            Err(rej) if rej.code == "belt_consumable_only" => Some(rej.message),
-            _ => None,
-        };
+        let belt_restricted_reason =
+            match self.validate_move_target(item_index, ContainerKind::Belt, 0, 0) {
+                Err(rej) if rej.code == "belt_consumable_only" => Some(rej.message),
+                _ => None,
+            };
         (targets, belt_restricted_reason)
     }
 
     fn apply_move_item(
         &mut self,
         item_index: i32,
-        target_container: &str,
+        target_container: ContainerKind,
         x: i32,
         y: i32,
     ) -> Result<(), ActionRejection> {
-        if target_container == "shop" {
+        if target_container == ContainerKind::Shop {
             return self.dispose_item_by_index(item_index);
         }
         let (idx, target, displaced_idx) =
             self.validate_move_target(item_index, target_container, x, y)?;
-        let target_label = if target_container == "temp_inventory" {
-            "temp_inventory"
+        let target_kind = if target_container == ContainerKind::TempInventory {
+            ContainerKind::TempInventory
         } else {
-            container_label(target)
+            ContainerKind::from_item_container(target)
         };
 
         let (raw_x, raw_y, page, location, mode, stored_in, new_slot_label, card_x, card_y) =
@@ -1630,7 +1787,7 @@ impl EditorSession {
         *container_slot = target;
 
         let card = &mut self.item_cards[idx];
-        card.container = target_label.to_string();
+        card.container = target_kind;
         card.slot_label = new_slot_label;
         card.x = card_x;
         card.y = card_y;
@@ -1638,12 +1795,205 @@ impl EditorSession {
         self.has_item_edits = true;
         self.dirty = true;
         if let Some(disp) = displaced_idx {
-            self.item_cards[disp].container = "cursor".to_string();
+            self.item_cards[disp].container = ContainerKind::Cursor;
             self.item_cards[disp].slot_label = None;
             self.selected_move_item_index = Some(disp as i32);
         } else {
             self.selected_move_item_index = None;
         }
+        Ok(())
+    }
+
+    fn find_free_grid_slot(
+        &self,
+        container_kind: ContainerKind,
+        max_w: i32,
+        max_h: i32,
+        w: i32,
+        h: i32,
+    ) -> Option<(i32, i32)> {
+        for y in 0..=(max_h - h).max(-1) {
+            for x in 0..=(max_w - w).max(-1) {
+                let overlaps = self.item_cards.iter().any(|other| {
+                    if other.container != container_kind {
+                        return false;
+                    }
+                    let ow = other.width.max(1);
+                    let oh = other.height.max(1);
+                    x < other.x + ow && x + w > other.x && y < other.y + oh && y + h > other.y
+                });
+                if !overlaps {
+                    return Some((x, y));
+                }
+            }
+        }
+        None
+    }
+
+    fn apply_spawn_shop_item(
+        &mut self,
+        catalog_id: &str,
+        target_container: ShopSpawnTarget,
+    ) -> Result<(), ActionRejection> {
+        let alpha = self.item_dialect == "alpha";
+        let mut item = build_shop_item_by_id(catalog_id, alpha).ok_or_else(|| ActionRejection {
+            code: "shop_item_not_found".to_string(),
+            message: format!("Shop catalog item '{catalog_id}' was not found."),
+        })?;
+        let (w, h) = get_item_size(item.code.trim());
+        let width = i32::from(w.max(1));
+        let height = i32::from(h.max(1));
+
+        let (dest_kind, dest_enum, raw_page) = match target_container {
+            ShopSpawnTarget::SpawnInventory => {
+                let (x, y) = self
+                    .find_free_grid_slot(ContainerKind::Inventory, 10, 4, width, height)
+                    .ok_or_else(|| ActionRejection {
+                        code: "no_free_slot".to_string(),
+                        message: "Inventory (10x4) has no free space for this item.".to_string(),
+                    })?;
+                item.x = x as u8;
+                item.y = y as u8;
+                item.header.x = x as u8;
+                item.header.y = y as u8;
+                item.body.x = x as u8;
+                item.body.y = y as u8;
+                (ContainerKind::Inventory, ItemContainer::Inventory, 0u8)
+            }
+            ShopSpawnTarget::SpawnTempInventory => {
+                let (x, y) = self
+                    .find_free_grid_slot(ContainerKind::TempInventory, 9, 4, width, height)
+                    .ok_or_else(|| ActionRejection {
+                        code: "no_free_slot".to_string(),
+                        message: "Temp Inventory (9x4) has no free space for this item.".to_string(),
+                    })?;
+                item.x = x as u8;
+                item.y = y as u8;
+                item.header.x = x as u8;
+                item.header.y = y as u8;
+                item.body.x = x as u8;
+                item.body.y = y as u8;
+                (ContainerKind::TempInventory, ItemContainer::Unknown, 0u8)
+            }
+            ShopSpawnTarget::SpawnAuto => {
+                if let Some((x, y)) =
+                    self.find_free_grid_slot(ContainerKind::Inventory, 10, 4, width, height)
+                {
+                    item.x = x as u8;
+                    item.y = y as u8;
+                    item.header.x = x as u8;
+                    item.header.y = y as u8;
+                    item.body.x = x as u8;
+                    item.body.y = y as u8;
+                    (ContainerKind::Inventory, ItemContainer::Inventory, 0u8)
+                } else if let Some((x, y)) =
+                    self.find_free_grid_slot(ContainerKind::TempInventory, 9, 4, width, height)
+                {
+                    item.x = x as u8;
+                    item.y = y as u8;
+                    item.header.x = x as u8;
+                    item.header.y = y as u8;
+                    item.body.x = x as u8;
+                    item.body.y = y as u8;
+                    (ContainerKind::TempInventory, ItemContainer::Unknown, 0u8)
+                } else {
+                    return Err(ActionRejection {
+                        code: "no_free_slot".to_string(),
+                        message: "Both Inventory (10x4) and Temp Inventory (9x4) are full."
+                            .to_string(),
+                    });
+                }
+            }
+        };
+
+        item.page = raw_page;
+        item.location = 0;
+        item.mode = 0;
+        item.header.page = raw_page;
+        item.header.location = 0;
+        item.header.mode = 0;
+        item.body.page = raw_page;
+        item.body.location = 0;
+        item.body.mode = 0;
+        item.bits.clear();
+        if self.item_dialect == "d2r-v3" {
+            let aux = item
+                .body
+                .d2r_v3_auxiliary
+                .get_or_insert_with(Default::default);
+            aux.save_version = self.save_version.max(0) as u32;
+            aux.stored_in = Some(1);
+        }
+
+        let huffman = HuffmanTree::new();
+        let mut canonical = if self.item_dialect == "d2r-v3" {
+            let mut solved = None;
+            for pad in 0..8 {
+                if let Some(aux) = item.body.d2r_v3_auxiliary.as_mut() {
+                    aux.alignment_padding = Some(vec![false; pad]);
+                }
+                if item.to_bits_d2r_v3(&huffman).is_ok() {
+                    solved = Some(item.clone());
+                    break;
+                }
+            }
+            match solved {
+                Some(c) => c,
+                None => {
+                    item.to_bits_d2r_v3(&huffman).map_err(|e| ActionRejection {
+                        code: "shop_serialize_failed".to_string(),
+                        message: format!(
+                            "Failed to serialize spawned d2r-v3 item '{catalog_id}': {e}"
+                        ),
+                    })?;
+                    item.clone()
+                }
+            }
+        } else {
+            let bytes = item.to_bytes(0, &huffman, alpha).map_err(|e| ActionRejection {
+                code: "shop_serialize_failed".to_string(),
+                message: format!("Failed to serialize spawned item '{catalog_id}': {e}"),
+            })?;
+            Item::from_bytes_with_hint(&bytes, &huffman, alpha, Some(item.code.trim())).map_err(
+                |e| ActionRejection {
+                    code: "shop_roundtrip_failed".to_string(),
+                    message: format!("Failed to roundtrip spawned item '{catalog_id}': {e}"),
+                },
+            )?
+        };
+        canonical.x = item.x;
+        canonical.y = item.y;
+        canonical.page = raw_page;
+        canonical.location = 0;
+        canonical.mode = 0;
+        canonical.header.x = item.x;
+        canonical.header.y = item.y;
+        canonical.header.page = raw_page;
+        canonical.header.location = 0;
+        canonical.header.mode = 0;
+        canonical.body.x = item.x;
+        canonical.body.y = item.y;
+        canonical.body.page = raw_page;
+        canonical.body.location = 0;
+        canonical.body.mode = 0;
+
+        let new_idx = self.item_cards.len();
+        let card = build_item_card(
+            new_idx as i32,
+            &canonical,
+            self.char_level,
+            0,
+            dest_kind,
+            None,
+            i32::from(canonical.x),
+            i32::from(canonical.y),
+        );
+
+        self.player_items_with_container.push((canonical, dest_enum));
+        self.item_cards.push(card);
+        self.selected_move_item_index = None;
+        self.has_item_edits = true;
+        self.dirty = true;
         Ok(())
     }
 
@@ -1693,10 +2043,10 @@ impl EditorSession {
 
     /// Serializes save-persisted edits back into a checksum-valid `.d2s` byte vector.
     pub fn to_save_bytes(&self) -> Result<Vec<u8>, String> {
-        if self.item_cards.iter().any(|c| c.container == "cursor") {
+        if self.item_cards.iter().any(|c| c.container == ContainerKind::Cursor) {
             return Err("Cannot export .d2s while a swapped item is held on the cursor. Place it in a slot or click Undo.".to_string());
         }
-        if self.item_cards.iter().any(|c| c.container == "temp_inventory") {
+        if self.item_cards.iter().any(|c| c.container == ContainerKind::TempInventory) {
             return Err("Cannot export .d2s while items remain in Temp Inventory (9x4). Move them to a permanent container or clear Temp Inventory.".to_string());
         }
         if let Some(reason) = export_unsupported_reason(self.save_version) {
@@ -1889,7 +2239,7 @@ fn build_item_card(
     item: &Item,
     level: u8,
     active_set_count: usize,
-    container: String,
+    container: ContainerKind,
     slot_label: Option<String>,
     x: i32,
     y: i32,
@@ -1917,7 +2267,7 @@ fn build_item_card(
         code: item.code.trim().to_string(),
         name_en: en.name,
         name_ko: ko.name,
-        quality: quality_label(item.header.quality, item.header.is_runeword).to_string(),
+        quality: ItemQualityKind::from_item(item.header.quality, item.header.is_runeword),
         container,
         slot_label,
         x,
@@ -2138,6 +2488,309 @@ fn export_unsupported_reason(save_version: i32) -> Option<String> {
     }
 }
 
+fn shop_category_for_code(code: &str) -> &'static str {
+    let trimmed = code.trim();
+    if is_belt_consumable(trimmed) {
+        "consumables"
+    } else if (trimmed.starts_with('r') && trimmed.len() == 3 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))
+        || matches!(trimmed, "gpv" | "gpw" | "gpr" | "gpb" | "gpg" | "gpy" | "skz")
+    {
+        "runes_gems"
+    } else if matches!(trimmed, "rin" | "amu" | "cm1" | "cm2" | "cm3" | "jew") {
+        "jewelry_charms"
+    } else if crate::engine::validation::get_all_item_types(trimmed).contains(&"weap") {
+        "weapons"
+    } else {
+        "armor"
+    }
+}
+
+fn shop_is_compact_code(code: &str) -> bool {
+    let trimmed = code.trim();
+    is_belt_consumable(trimmed)
+        || (trimmed.starts_with('r') && trimmed.len() == 3 && trimmed[1..].chars().all(|c| c.is_ascii_digit()))
+        || matches!(trimmed, "gpv" | "gpw" | "gpr" | "gpb" | "gpg" | "gpy" | "skz")
+}
+
+fn shop_make_property(stat_id: u32, raw_val: i32, param: u32) -> Option<ItemProperty> {
+    let sc = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id)?;
+    let bits = sc.save_bits;
+    if bits == 0 || (sc.save_param_bits > 0 && param == 0 && stat_id == 204) {
+        return None;
+    }
+    let raw_value = raw_val + sc.save_add;
+    if raw_value < 0 {
+        return None;
+    }
+    Some(ItemProperty::new(
+        stat_id,
+        sc.name.to_string(),
+        param,
+        raw_value,
+        raw_val,
+        ItemBitRange { start: 0, end: 0 },
+    ))
+}
+
+fn shop_build_base_item(
+    code: &str,
+    quality: ItemQuality,
+    is_compact: bool,
+    alpha: bool,
+    magic_prefix: Option<u16>,
+    magic_suffix: Option<u16>,
+    unique_id: Option<u16>,
+    set_id: Option<u16>,
+    stats: &[crate::data::item_specs::ItemStatRange],
+) -> Item {
+    let padded = format!("{code:<4}");
+    let mut header = crate::domain::item::ItemHeader::default();
+    header.flags = 0x0010; // Identified
+    if is_compact {
+        header.flags |= 1 << 21;
+    }
+    header.is_identified = true;
+    header.version = if alpha { 5 } else { 2 };
+    header.is_compact = is_compact;
+    header.save_is_alpha = alpha;
+    if !is_compact {
+        header.quality = Some(quality);
+        header.level = Some(85);
+        header.id = Some(0x12345678);
+    }
+    if alpha {
+        header.alpha_quality_raw = Some(quality as u8);
+    }
+
+    let mut props: Vec<ItemProperty> = if is_compact {
+        Vec::new()
+    } else {
+        let mut list: Vec<ItemProperty> = stats
+            .iter()
+            .filter_map(|sr| {
+                let val = if sr.max >= sr.min { sr.max } else { sr.min };
+                shop_make_property(sr.stat_id, val, sr.param)
+            })
+            .collect();
+        if !alpha {
+            list.push(ItemProperty::new(
+                511,
+                "end".to_string(),
+                0,
+                0,
+                0,
+                ItemBitRange { start: 0, end: 0 },
+            ));
+        }
+        list
+    };
+
+    let mut builder = ItemBuilder::new().header(header).code(padded);
+    if !is_compact {
+        builder = builder
+            .quality(quality)
+            .magic_affixes(magic_prefix, magic_suffix)
+            .properties(props)
+            .properties_complete(true);
+    }
+    let mut item = builder.build();
+    item.is_compact = is_compact;
+    if is_compact {
+        item.quality = None;
+        item.header.quality = None;
+        item.level = None;
+        item.header.level = None;
+        item.id = None;
+        item.header.id = None;
+    } else {
+        item.level = Some(85);
+        item.header.level = Some(85);
+        item.id = Some(0x12345678);
+        item.header.id = Some(0x12345678);
+        item.unique_id = unique_id.or(set_id);
+        let template = crate::data::repository::legacy_item_template(code.trim());
+        if template.is_some_and(|t| t.is_armor) {
+            item.defense = Some(100);
+            item.body.defense = Some(100);
+        }
+        if template.is_some_and(|t| t.has_durability) {
+            item.max_durability = Some(30);
+            item.body.max_durability = Some(30);
+            item.current_durability = Some(30);
+            item.body.current_durability = Some(30);
+        }
+        if quality == ItemQuality::Magic {
+            if item.magic_prefix.is_none() {
+                item.magic_prefix = Some(0);
+            }
+            if item.magic_suffix.is_none() {
+                item.magic_suffix = Some(0);
+            }
+        }
+        if quality == ItemQuality::Rare {
+            item.rare_name_1 = Some(1);
+            item.rare_name_2 = Some(2);
+        }
+    }
+    if !alpha {
+        item.body.d2r_v3_auxiliary = Some(crate::domain::item::entity::D2rV3AuxiliaryData {
+            save_version: 105,
+            stored_in: Some(1),
+            ..Default::default()
+        });
+    }
+    item
+}
+
+fn shop_catalog_entries_spec() -> Vec<(&'static str, ItemQuality, &'static str)> {
+    vec![
+        // Normal: Runes, Gems, Consumables, Bases
+        ("base:r33", ItemQuality::Normal, "r33"),
+        ("base:r31", ItemQuality::Normal, "r31"),
+        ("base:r30", ItemQuality::Normal, "r30"),
+        ("base:r29", ItemQuality::Normal, "r29"),
+        ("base:r28", ItemQuality::Normal, "r28"),
+        ("base:r27", ItemQuality::Normal, "r27"),
+        ("base:r26", ItemQuality::Normal, "r26"),
+        ("base:r24", ItemQuality::Normal, "r24"),
+        ("base:hp5", ItemQuality::Normal, "hp5"),
+        ("base:mp5", ItemQuality::Normal, "mp5"),
+        ("base:rvl", ItemQuality::Normal, "rvl"),
+        ("base:tsc", ItemQuality::Normal, "tsc"),
+        ("base:isc", ItemQuality::Normal, "isc"),
+        ("base:gpv", ItemQuality::Normal, "gpv"),
+        ("base:gpw", ItemQuality::Normal, "gpw"),
+        ("base:xtp", ItemQuality::Normal, "xtp"),
+        ("base:uap", ItemQuality::Normal, "uap"),
+        ("base:ci3", ItemQuality::Normal, "ci3"),
+        // Magic
+        ("magic:cm1", ItemQuality::Magic, "cm1"),
+        ("magic:cm3", ItemQuality::Magic, "cm3"),
+        ("magic:rin", ItemQuality::Magic, "rin"),
+        ("magic:amu", ItemQuality::Magic, "amu"),
+        ("magic:ci3", ItemQuality::Magic, "ci3"),
+        ("magic:jew", ItemQuality::Magic, "jew"),
+        // Rare
+        ("rare:rin", ItemQuality::Rare, "rin"),
+        ("rare:amu", ItemQuality::Rare, "amu"),
+        ("rare:ci3", ItemQuality::Rare, "ci3"),
+        ("rare:ulb", ItemQuality::Rare, "ulb"),
+        ("rare:tbt", ItemQuality::Rare, "tbt"),
+    ]
+}
+
+fn build_shop_item_by_id(catalog_id: &str, alpha: bool) -> Option<Item> {
+    if let Some(id_str) = catalog_id.strip_prefix("uniq:") {
+        let id: u32 = id_str.parse().ok()?;
+        let entry = crate::data::unique_items::UNIQUE_ITEMS.iter().find(|u| u.id == id)?;
+        return Some(shop_build_base_item(
+            entry.code,
+            ItemQuality::Unique,
+            false,
+            alpha,
+            None,
+            None,
+            Some(entry.id as u16),
+            None,
+            entry.stats,
+        ));
+    }
+    if let Some(id_str) = catalog_id.strip_prefix("set:") {
+        let id: u32 = id_str.parse().ok()?;
+        let entry = crate::data::set_items::SET_ITEMS.iter().find(|s| s.id == id)?;
+        return Some(shop_build_base_item(
+            entry.code,
+            ItemQuality::Set,
+            false,
+            alpha,
+            None,
+            None,
+            None,
+            Some(entry.id as u16),
+            entry.stats,
+        ));
+    }
+    let (_, quality, code) = shop_catalog_entries_spec()
+        .into_iter()
+        .find(|(cid, _, _)| *cid == catalog_id)?;
+    let (prefix, suffix) = match quality {
+        ItemQuality::Magic => (Some(12), Some(34)),
+        ItemQuality::Rare => (Some(10), Some(15)),
+        _ => (None, None),
+    };
+    Some(shop_build_base_item(
+        code,
+        quality,
+        shop_is_compact_code(code),
+        alpha,
+        prefix,
+        suffix,
+        None,
+        None,
+        &[],
+    ))
+}
+
+fn cached_shop_catalog() -> &'static [ShopCatalogItemView] {
+    static CATALOG: OnceLock<Vec<ShopCatalogItemView>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        let huffman = HuffmanTree::new();
+        let mut out = Vec::new();
+        let mut try_push = |catalog_id: String, name_en: String, name_ko: String, summary: String| {
+            let Some(item) = build_shop_item_by_id(&catalog_id, true) else {
+                return;
+            };
+            let Ok(bytes) = item.to_bytes(0, &huffman, true) else {
+                return;
+            };
+            if Item::from_bytes_with_hint(&bytes, &huffman, true, Some(item.code.trim())).is_err() {
+                return;
+            }
+            let (w, h) = get_item_size(item.code.trim());
+            let quality = ItemQualityKind::from_item(item.header.quality, item.header.is_runeword);
+            let category = shop_category_for_code(item.code.trim()).to_string();
+            let image_url = resolve_item_image_url(&item);
+            out.push(ShopCatalogItemView {
+                catalog_id,
+                code: item.code.trim().to_string(),
+                name_en,
+                name_ko,
+                quality,
+                category,
+                width: i32::from(w.max(1)),
+                height: i32::from(h.max(1)),
+                image_url,
+                summary,
+            });
+        };
+
+        for (cid, quality, code) in shop_catalog_entries_spec() {
+            let name_en = get_loc(code, "en").to_string();
+            let name_ko = get_loc(code, "ko").to_string();
+            let summary = format!("{} · {}", quality_label(Some(quality), false), code);
+            try_push(cid.to_string(), name_en, name_ko, summary);
+        }
+
+        for s in crate::data::set_items::SET_ITEMS.iter().take(24) {
+            let cid = format!("set:{}", s.id);
+            let name_en = get_loc(s.index, "en").to_string();
+            let name_ko = get_loc(s.index, "ko").to_string();
+            let summary = format!("Set · {}", s.set_id);
+            try_push(cid, name_en, name_ko, summary);
+        }
+
+        for u in crate::data::unique_items::UNIQUE_ITEMS.iter().take(36) {
+            let cid = format!("uniq:{}", u.id);
+            let name_en = get_loc(u.index, "en").to_string();
+            let name_ko = get_loc(u.index, "ko").to_string();
+            let summary = format!("Unique · qlvl {}", u.qlvl);
+            try_push(cid, name_en, name_ko, summary);
+        }
+
+        out
+    })
+}
+
 /// Exports the Elm `Generated.Protocol` module source string via `elm_rs::export!`.
 pub fn generate_elm_protocol_module() -> Result<String, String> {
     let mut target = Vec::<u8>::new();
@@ -2146,11 +2799,17 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             DifficultyMode,
             EditMode,
             CharacterField,
+            ContainerKind,
+            ItemQualityKind,
+            ShopSpawnTarget,
             UiIntent,
         ],
         decoders: [
             DifficultyMode,
             EditMode,
+            ContainerKind,
+            ItemQualityKind,
+            ShopSpawnTarget,
             ResistanceCardView,
             CharacterSchemaView,
             CharacterStatsView,
@@ -2164,6 +2823,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             ItemCardView,
             AllowedMoveTargetView,
             SkillNodeView,
+            ShopCatalogItemView,
             SessionView,
             ActionRejection,
             SessionEnvelope,

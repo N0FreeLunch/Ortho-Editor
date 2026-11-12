@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use d2r_core::projection::{
-    DifficultyMode, EditMode, EditorSession, ItemCardView, SessionEnvelope, UiIntent,
-    generate_elm_protocol_module,
+    ContainerKind, DifficultyMode, EditMode, EditorSession, ItemCardView, ItemQualityKind,
+    SessionEnvelope, ShopSpawnTarget, UiIntent, generate_elm_protocol_module,
 };
 
 fn fixture_bytes(rel: &str) -> Vec<u8> {
@@ -192,8 +192,8 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         code: "r01".to_string(),
         name_en: "El Rune".to_string(),
         name_ko: "엘 룬".to_string(),
-        quality: "Normal".to_string(),
-        container: "temp_inventory".to_string(),
+        quality: ItemQualityKind::QualityNormal,
+        container: ContainerKind::TempInventory,
         slot_label: None,
         x: 0,
         y: 0,
@@ -498,27 +498,18 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
         .iter()
         .find(|item| {
             !item.is_belt_consumable
-                && matches!(item.container.as_str(), "inventory" | "stash" | "cube")
+                && matches!(
+                    item.container,
+                    ContainerKind::Inventory | ContainerKind::Stash | ContainerKind::Cube
+                )
         })
         .expect("fixture should have a non-consumable container item")
         .clone();
 
-    // Unknown container target is rejected cleanly; dropping on `"shop"` disposes the item with Undo recovery.
-    let unknown_reject = session.apply_intent(UiIntent::MoveItem {
-        item_index: non_consumable.index,
-        target_container: "mercenary".to_string(),
-        x: 0,
-        y: 0,
-    });
-    assert!(!unknown_reject.ok);
-    assert_eq!(
-        unknown_reject.rejection.as_ref().map(|r| r.code.as_str()),
-        Some("invalid_target_container")
-    );
-
+    // Dropping on `"belt"` with non-consumable is rejected cleanly.
     let belt_reject = session.apply_intent(UiIntent::MoveItem {
         item_index: non_consumable.index,
-        target_container: "belt".to_string(),
+        target_container: ContainerKind::Belt,
         x: 0,
         y: 0,
     });
@@ -541,13 +532,13 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
         select_view
             .allowed_move_targets
             .iter()
-            .any(|t| t.container == "stash" && t.x == 8 && t.y == 8)
+            .any(|t| t.container == ContainerKind::Stash && t.x == 8 && t.y == 8)
     );
     assert!(
         !select_view
             .allowed_move_targets
             .iter()
-            .any(|t| t.container == "belt")
+            .any(|t| t.container == ContainerKind::Belt)
     );
 
     // Move a compact/stashable item to a free slot in stash (or cube) and verify Undo/Redo + .d2s roundtrip.
@@ -555,7 +546,7 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
     let target_y = 8;
     let moved = session.apply_intent(UiIntent::MoveItem {
         item_index: non_consumable.index,
-        target_container: "stash".to_string(),
+        target_container: ContainerKind::Stash,
         x: target_x,
         y: target_y,
     });
@@ -569,7 +560,7 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
         .iter()
         .find(|item| item.index == non_consumable.index)
         .expect("moved card");
-    assert_eq!(moved_card.container, "stash");
+    assert_eq!(moved_card.container, ContainerKind::Stash);
     assert_eq!(moved_card.x, target_x);
     assert_eq!(moved_card.y, target_y);
 
@@ -599,7 +590,7 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
         .iter()
         .find(|item| item.index == non_consumable.index)
         .expect("redone card");
-    assert_eq!(redone_card.container, "stash");
+    assert_eq!(redone_card.container, ContainerKind::Stash);
     assert_eq!(redone_card.x, target_x);
     assert_eq!(redone_card.y, target_y);
 
@@ -613,7 +604,7 @@ fn move_item_validates_belt_shop_collisions_and_roundtrips_d2s() {
         .iter()
         .find(|item| {
             item.code == non_consumable.code
-                && item.container == "stash"
+                && item.container == ContainerKind::Stash
                 && item.x == target_x
                 && item.y == target_y
         })
@@ -644,12 +635,12 @@ fn cycle_13_shop_dispose_temp_inv_weapon_swap_and_skill_tree_roundtrip_d2s() {
     let candidate = initial
         .items
         .iter()
-        .find(|it| matches!(it.container.as_str(), "inventory" | "stash"))
+        .find(|it| matches!(it.container, ContainerKind::Inventory | ContainerKind::Stash))
         .expect("find inventory or stash item")
         .clone();
     let to_temp = session.apply_intent(UiIntent::MoveItem {
         item_index: candidate.index,
-        target_container: "temp_inventory".to_string(),
+        target_container: ContainerKind::TempInventory,
         x: 2,
         y: 1,
     });
@@ -712,4 +703,106 @@ fn cycle_13_shop_dispose_temp_inv_weapon_swap_and_skill_tree_roundtrip_d2s() {
         unspent_after_reset - 1
     );
     assert_eq!(reloaded_view.stats.active_skill_count, 1);
+}
+
+#[test]
+fn cycle_14_shop_catalog_spawn_and_roundtrip_d2s() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let bytes = fs::read(&path).expect("read TESTDRUID fixture");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("parse fixture");
+    let initial = session.project();
+    assert!(!initial.shop_catalog.is_empty(), "shop_catalog must be populated from d2r-data");
+    let initial_count = initial.items.len();
+
+    // 1. Spawn a Normal compact rune ("base:r33") into inventory and verify Undo/Redo
+    let spawned_rune = session.apply_intent(UiIntent::SpawnShopItem {
+        catalog_id: "base:r33".to_string(),
+        target_container: ShopSpawnTarget::SpawnAuto,
+    });
+    assert!(spawned_rune.ok, "{}", spawned_rune.rejection.map(|r| r.message).unwrap_or_default());
+    let view1 = spawned_rune.session.unwrap();
+    assert!(view1.dirty);
+    assert!(view1.can_undo);
+    assert_eq!(view1.items.len(), initial_count + 1);
+    assert_eq!(view1.items.last().unwrap().code.trim(), "r33");
+
+    let undone = session.apply_intent(UiIntent::Undo);
+    assert!(undone.ok);
+    assert_eq!(undone.session.unwrap().items.len(), initial_count);
+
+    let redone = session.apply_intent(UiIntent::Redo);
+    assert!(redone.ok);
+    assert_eq!(redone.session.unwrap().items.len(), initial_count + 1);
+
+    // 2. Spawn a Unique item from shop_catalog into temp_inventory, verify export guard, move to stash, and export/reload .d2s
+    let unique_entry = initial
+        .shop_catalog
+        .iter()
+        .find(|c| c.quality == ItemQualityKind::QualityUnique)
+        .expect("at least one Unique item in shop_catalog")
+        .clone();
+    let spawned_uniq = session.apply_intent(UiIntent::SpawnShopItem {
+        catalog_id: unique_entry.catalog_id.clone(),
+        target_container: ShopSpawnTarget::SpawnTempInventory,
+    });
+    assert!(spawned_uniq.ok, "{}", spawned_uniq.rejection.map(|r| r.message).unwrap_or_default());
+    let view2 = spawned_uniq.session.unwrap();
+    assert!(!view2.export_supported, "temp_inventory should guard .d2s export");
+    let uniq_idx = view2.items.last().unwrap().index;
+
+    assert!(
+        session
+            .apply_intent(UiIntent::SelectItemForMove {
+                item_index: Some(uniq_idx),
+            })
+            .ok
+    );
+    let moved_to_stash = session.apply_intent(UiIntent::MoveItem {
+        item_index: uniq_idx,
+        target_container: ContainerKind::Stash,
+        x: 6,
+        y: 6,
+    });
+    assert!(moved_to_stash.ok, "{}", moved_to_stash.rejection.map(|r| r.message).unwrap_or_default());
+
+    let exported = session.to_save_bytes().expect("export spawned shop items .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "shop_spawned.d2s")
+        .expect("reload exported save with spawned shop items");
+    let reloaded_view = reloaded.project();
+    assert_eq!(reloaded_view.items.len(), initial_count + 2);
+}
+
+#[test]
+fn cycle_15_revision_increments_and_intent_omits_static_shop_catalog() {
+    let bytes =
+        fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("parse fixture");
+
+    let initial = session.project();
+    assert_eq!(initial.revision, 1);
+    assert!(!initial.shop_catalog.is_empty());
+
+    let env1 = session.apply_intent(UiIntent::SelectResDifficulty {
+        difficulty: DifficultyMode::Hell,
+    });
+    assert!(env1.ok);
+    let view1 = env1.session.expect("session after intent");
+    assert_eq!(view1.revision, 2);
+    assert!(
+        view1.shop_catalog.is_empty(),
+        "apply_intent must omit static shop_catalog to avoid per-intent payload bloat"
+    );
+
+    // Failed intent must NOT increment revision.
+    let bad = session.apply_intent(UiIntent::SetMercLevel { level: 0 });
+    assert!(!bad.ok);
+    assert_eq!(
+        bad.session.as_ref().map(|s| s.revision),
+        Some(2),
+        "Failed intent must preserve current revision"
+    );
+    assert_eq!(session.project().revision, 2);
 }

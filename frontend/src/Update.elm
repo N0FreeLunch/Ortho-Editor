@@ -13,10 +13,13 @@ import Generated.Protocol as Protocol
     exposing
         ( ActionRejection
         , CharacterField(..)
+        , ContainerKind(..)
         , DifficultyMode(..)
         , EditMode(..)
+        , ItemQualityKind(..)
         , SessionEnvelope
         , SessionView
+        , ShopSpawnTarget(..)
         , UiIntent
         , sessionEnvelopeDecoder
         )
@@ -53,14 +56,14 @@ type Msg
     | SetWaypointsBatch DifficultyMode (List Int) Bool
     | ToggleAllDiffQuests
     | ToggleAllDiffWaypoints
-    | SelectContainerFilter String
+    | SelectContainerFilter (Maybe ContainerKind)
     | ClearTempInventory
     | SelectItem (Maybe Int)
-    | MoveSelectedItemTo String Int Int
+    | MoveSelectedItemTo ContainerKind Int Int
     | ClickUndo
     | ClickRedo
     | HoverItem (Maybe Int)
-    | HoverDropTarget (Maybe { container : String, x : Int, y : Int })
+    | HoverDropTarget (Maybe { container : ContainerKind, x : Int, y : Int })
     | MoveTooltipHover Int Int Int Int
     | FocusField String String
     | EditFocusedInput String
@@ -75,6 +78,10 @@ type Msg
     | ClickDisposeHeldItem
     | ClickAdjustSkillRank Int Int
     | ClickResetSkills
+    | SelectShopQualityTab ItemQualityKind
+    | SelectShopCategory String
+    | ChangeShopPage Int
+    | ClickSpawnShopItem String
 
 
 type OutMsg
@@ -402,6 +409,25 @@ update msg model =
         MoveTooltipHover x y vw vh ->
             ( { model | ui = UiState.setHoverMousePos x y vw vh model.ui }, NoOut )
 
+        SelectShopQualityTab tab ->
+            ( { model | ui = UiState.setShopQualityTab tab model.ui }, NoOut )
+
+        SelectShopCategory cat ->
+            ( { model | ui = UiState.setShopCategoryFilter cat model.ui }, NoOut )
+
+        ChangeShopPage delta ->
+            ( { model | ui = UiState.setShopPage (model.ui.shopPage + delta) model.ui }, NoOut )
+
+        ClickSpawnShopItem catalogId ->
+            ( model
+            , EmitIntent
+                (Protocol.SpawnShopItem
+                    { catalogId = catalogId
+                    , targetContainer = SpawnAuto
+                    }
+                )
+            )
+
 
 characterFieldFromKey : String -> Maybe CharacterField
 characterFieldFromKey key =
@@ -484,15 +510,45 @@ applyEnvelope envelope model =
 
                 Nothing ->
                     model.ui.statusBanner
-    in
-    { model
-        | session =
+
+        nextSession =
             case envelope.session of
-                Just nextSession ->
-                    Just nextSession
+                Just newSession ->
+                    case model.session of
+                        Just currentSession ->
+                            let
+                                isStaleWithinSession =
+                                    newSession.fixtureLabel == currentSession.fixtureLabel
+                                        && currentSession.dirty
+                                        && newSession.dirty
+                                        && newSession.revision > 0
+                                        && currentSession.revision > 0
+                                        && newSession.revision < currentSession.revision
+                            in
+                            if isStaleWithinSession then
+                                -- Drop stale out-of-order response within the same dirty editing session
+                                model.session
+
+                            else
+                                -- Merge cached static shopCatalog if incoming session omitted it
+                                let
+                                    mergedCatalog =
+                                        if List.isEmpty newSession.shopCatalog then
+                                            currentSession.shopCatalog
+
+                                        else
+                                            newSession.shopCatalog
+                                in
+                                Just { newSession | shopCatalog = mergedCatalog }
+
+                        Nothing ->
+                            Just newSession
 
                 Nothing ->
                     model.session
+    in
+    { model
+        | session = nextSession
         , lastRejection = envelope.rejection
         , lastDecodeError = Nothing
         , ui = UiState.setStatusBanner nextBanner model.ui

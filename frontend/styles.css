@@ -2243,5 +2243,73 @@ button:disabled {
   box-shadow: 0 0 8px rgba(250, 204, 21, 0.35);
 }
 
+/* Cycle 14: Live Item Shop */
+.shop-live-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-success, #4ade80) 45%, transparent);
+  color: var(--c-success, #4ade80);
+  background: color-mix(in srgb, var(--c-success, #4ade80) 12%, transparent);
+}
+
+.shop-interactive-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shop-controls-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.shop-tier-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pill-btn {
+  padding: 2px 7px;
+  font-size: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--btn-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.pill-btn.active {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+  background: rgba(201, 162, 74, 0.14);
+  font-weight: 600;
+}
+
+.shop-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shop-page-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.shop-catalog-tile {
+  cursor: pointer;
+}
+
+.shop-catalog-tile:hover {
+  outline: 1.5px solid var(--accent-gold);
+  z-index: 4;
+}
+
 
 

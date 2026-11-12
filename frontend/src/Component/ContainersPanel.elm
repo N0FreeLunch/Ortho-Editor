@@ -1,11 +1,11 @@
 module Component.ContainersPanel exposing (view)
 
-import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ItemCardView, MercSummaryView, SessionView, SetBonusView)
+import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ContainerKind(..), ItemCardView, ItemQualityKind(..), MercSummaryView, SessionView, SetBonusView, ShopCatalogItemView)
 import Html exposing (Html, button, div, h2, h3, img, li, section, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, classList, disabled, src, style, title)
 import Html.Events exposing (custom, on, onClick, onMouseEnter, onMouseLeave)
 import Json.Decode as Decode
-import State.UiState exposing (StashTab(..), UiState)
+import State.UiState as UiState exposing (StashTab(..), UiState)
 import Update exposing (Msg(..))
 
 
@@ -13,22 +13,22 @@ view : UiState -> SessionView -> Html Msg
 view ui session =
     let
         stashItems =
-            List.filter (\it -> it.container == "stash") session.items
+            List.filter (\it -> it.container == Stash) session.items
 
         inventoryItems =
-            List.filter (\it -> it.container == "inventory") session.items
+            List.filter (\it -> it.container == Inventory) session.items
 
         cubeItems =
-            List.filter (\it -> it.container == "cube") session.items
+            List.filter (\it -> it.container == Cube) session.items
 
         beltItems =
-            List.filter (\it -> it.container == "belt") session.items
+            List.filter (\it -> it.container == Belt) session.items
 
         equippedItems =
-            List.filter (\it -> it.container == "equipment") session.items
+            List.filter (\it -> it.container == Equipment) session.items
 
         tempInventoryItems =
-            List.filter (\it -> it.container == "temp_inventory") session.items
+            List.filter (\it -> it.container == TempInventory) session.items
 
         selectedMoveItem =
             session.selectedMoveItemIndex
@@ -149,7 +149,7 @@ viewZone1LeftStack ui session stashItems =
         isShopDropHovered =
             case ui.hoveredDropTarget of
                 Just t ->
-                    t.container == "shop"
+                    t.container == Shop
 
                 Nothing ->
                     False
@@ -169,54 +169,255 @@ viewZone1LeftStack ui session stashItems =
                 [ span [] [ text "Personal Stash (10 x 10)" ]
                 , span [ class "stash-gold" ] [ text ("Gold: " ++ String.fromInt session.stats.goldStash) ]
                 ]
-            , viewSpatialGrid "stash" 10 10 "grid-10x10" ui session stashItems
+            , viewSpatialGrid Stash 10 10 "grid-10x10" ui session stashItems
             ]
         , section [ class "glass-panel zone1-shop-panel", attribute "data-testid" "item-shop-preview" ]
             [ div [ class "panel-header" ]
                 [ div [ class "panel-title" ] [ text "Item Shop" ]
-                , span [ class "preview-only-pill" ] [ text "Preview only · Item spawn pending" ]
+                , span [ class "shop-live-pill" ] [ text "Live Spawn · Click to Add" ]
                 ]
-            , div [ class "shop-quality-tabs" ]
-                [ button [ class "shop-tab-btn", disabled True ] [ text "Normal" ]
-                , button [ class "shop-tab-btn", disabled True ] [ text "Magic" ]
-                , button [ class "shop-tab-btn", disabled True ] [ text "Rare" ]
-                , button [ class "shop-tab-btn", disabled True ] [ text "Set" ]
-                , button [ class "shop-tab-btn", disabled True ] [ text "Unique" ]
-                ]
-            , div [ class "shop-preview-note" ]
-                [ text "Shop catalog spawning requires a dedicated Rust template intent slice." ]
-            , div [ class "d2-grid-wrap" ]
-                [ div
-                    ([ attribute "data-testid" "shop-dispose-grid"
-                     , classList
-                        [ ( "d2-grid", True )
-                        , ( "grid-10x6", True )
-                        , ( "shop-sell-drop-active", isHolding && isShopDropHovered )
+            , viewShopBody ui session isHolding isShopDropHovered
+            ]
+        ]
+
+
+viewShopBody : UiState -> SessionView -> Bool -> Bool -> Html Msg
+viewShopBody ui session isHolding isShopDropHovered =
+    let
+        filteredByQuality =
+            List.filter (\it -> it.quality == ui.shopQualityTab) session.shopCatalog
+
+        filteredCatalog =
+            if ui.shopCategoryFilter == "all" then
+                filteredByQuality
+
+            else
+                List.filter (\it -> it.category == ui.shopCategoryFilter) filteredByQuality
+
+        pages =
+            packShopPages filteredCatalog
+
+        totalPages =
+            max 1 (List.length pages)
+
+        clampedPage =
+            clamp 0 (totalPages - 1) ui.shopPage
+
+        currentPageItems =
+            pages
+                |> List.drop clampedPage
+                |> List.head
+                |> Maybe.withDefault []
+
+        qualityTabs =
+            [ ( QualityNormal, "Normal" )
+            , ( QualityMagic, "Magic" )
+            , ( QualityRare, "Rare" )
+            , ( QualitySet, "Set" )
+            , ( QualityUnique, "Unique" )
+            ]
+
+        categoryPills =
+            [ ( "all", "All" )
+            , ( "consumables", "Consumables" )
+            , ( "runes_gems", "Runes & Gems" )
+            , ( "weapons", "Weapons" )
+            , ( "armor", "Armor" )
+            , ( "jewelry_charms", "Jewelry & Charms" )
+            ]
+    in
+    div [ class "shop-interactive-body" ]
+        [ div [ class "shop-quality-tabs" ]
+            (List.map
+                (\( qKey, qLabel ) ->
+                    button
+                        [ classList
+                            [ ( "shop-tab-btn", True )
+                            , ( "active", ui.shopQualityTab == qKey )
+                            ]
+                        , attribute "data-testid" ("shop-tab-" ++ String.toLower qLabel)
+                        , onClick (SelectShopQualityTab qKey)
                         ]
-                     ]
-                        ++ (if isHolding then
-                                [ onClick ClickDisposeHeldItem
-                                , onMouseEnter (HoverDropTarget (Just { container = "shop", x = 0, y = 0 }))
-                                , onMouseLeave (HoverDropTarget Nothing)
+                        [ text qLabel ]
+                )
+                qualityTabs
+            )
+        , div [ class "shop-controls-bar" ]
+            [ div [ class "shop-tier-pills" ]
+                (List.map
+                    (\( cKey, cLabel ) ->
+                        button
+                            [ classList
+                                [ ( "pill-btn", True )
+                                , ( "active", ui.shopCategoryFilter == cKey )
                                 ]
-
-                            else
-                                []
-                           )
+                            , attribute "data-testid" ("shop-cat-" ++ cKey)
+                            , onClick (SelectShopCategory cKey)
+                            ]
+                            [ text cLabel ]
                     )
-                    (gridBackgroundCells 10 6
-                        ++ (if isHolding then
-                                [ div [ class "shop-sell-overlay", attribute "data-testid" "shop-sell-overlay" ]
-                                    [ text "Drop Held Item Here to Dispose / Sell (Undo Supported)" ]
-                                ]
+                    categoryPills
+                )
+            ]
+        , div [ class "d2-grid-wrap" ]
+            [ div
+                ([ attribute "data-testid" "shop-dispose-grid"
+                 , classList
+                    [ ( "d2-grid", True )
+                    , ( "grid-10x6", True )
+                    , ( "shop-sell-drop-active", isHolding && isShopDropHovered )
+                    ]
+                 ]
+                    ++ (if isHolding then
+                            [ onClick ClickDisposeHeldItem
+                            , onMouseEnter (HoverDropTarget (Just { container = Shop, x = 0, y = 0 }))
+                            , onMouseLeave (HoverDropTarget Nothing)
+                            ]
 
-                            else
-                                []
-                           )
+                        else
+                            []
+                       )
+                )
+                (gridBackgroundCells 10 6
+                    ++ List.map (viewShopCatalogTile isHolding) currentPageItems
+                    ++ (if isHolding then
+                            [ div [ class "shop-sell-overlay", attribute "data-testid" "shop-sell-overlay" ]
+                                [ text "Drop Held Item Here to Dispose / Sell (Undo Supported)" ]
+                            ]
+
+                        else
+                            []
+                       )
+                )
+            ]
+        , div [ class "shop-pagination-bar" ]
+            [ span [ class "meta-line", attribute "data-testid" "shop-page-indicator" ]
+                [ text
+                    ("Page "
+                        ++ String.fromInt (clampedPage + 1)
+                        ++ " / "
+                        ++ String.fromInt totalPages
+                        ++ " ("
+                        ++ String.fromInt (List.length filteredCatalog)
+                        ++ " items)"
                     )
+                ]
+            , div [ class "shop-page-actions" ]
+                [ button
+                    [ class "btn-ghost btn-tiny"
+                    , attribute "data-testid" "shop-prev-btn"
+                    , disabled (clampedPage <= 0)
+                    , onClick (ChangeShopPage -1)
+                    ]
+                    [ text "Prev" ]
+                , button
+                    [ class "btn-ghost btn-tiny"
+                    , attribute "data-testid" "shop-next-btn"
+                    , disabled (clampedPage >= totalPages - 1)
+                    , onClick (ChangeShopPage 1)
+                    ]
+                    [ text "Next" ]
                 ]
             ]
         ]
+
+
+type alias PlacedShopTile =
+    { item : ShopCatalogItemView
+    , x : Int
+    , y : Int
+    }
+
+
+packShopPages : List ShopCatalogItemView -> List (List PlacedShopTile)
+packShopPages items =
+    packShopPagesStep items [] []
+
+
+packShopPagesStep : List ShopCatalogItemView -> List PlacedShopTile -> List (List PlacedShopTile) -> List (List PlacedShopTile)
+packShopPagesStep remaining currentPage accPages =
+    case remaining of
+        [] ->
+            if List.isEmpty currentPage && not (List.isEmpty accPages) then
+                List.reverse accPages
+
+            else
+                List.reverse (List.reverse currentPage :: accPages)
+
+        item :: rest ->
+            case findShopFreeSlot item.width item.height currentPage of
+                Just ( px, py ) ->
+                    packShopPagesStep rest ({ item = item, x = px, y = py } :: currentPage) accPages
+
+                Nothing ->
+                    if List.isEmpty currentPage then
+                        -- Oversized fallback: drop item to avoid infinite recursion
+                        packShopPagesStep rest [] accPages
+
+                    else
+                        packShopPagesStep remaining [] (List.reverse currentPage :: accPages)
+
+
+findShopFreeSlot : Int -> Int -> List PlacedShopTile -> Maybe ( Int, Int )
+findShopFreeSlot w h placed =
+    let
+        coords =
+            List.concatMap (\y -> List.map (\x -> ( x, y )) (List.range 0 (10 - w))) (List.range 0 (6 - h))
+
+        fits ( x, y ) =
+            not
+                (List.any
+                    (\p ->
+                        x < p.x + p.item.width
+                            && x + w > p.x
+                            && y < p.y + p.item.height
+                            && y + h > p.y
+                    )
+                    placed
+                )
+    in
+    coords |> List.filter fits |> List.head
+
+
+viewShopCatalogTile : Bool -> PlacedShopTile -> Html Msg
+viewShopCatalogTile isHolding { item, x, y } =
+    let
+        cellPx =
+            26
+
+        tileContent =
+            case item.imageUrl of
+                Just url ->
+                    [ img [ class "item-tile-img", src url, alt item.nameEn ] []
+                    , span [ class "item-tile-code-badge" ] [ text item.code ]
+                    ]
+
+                Nothing ->
+                    [ div [ class "item-tile-title" ] [ text item.nameEn ]
+                    , div [ class "item-tile-code" ] [ text item.code ]
+                    ]
+    in
+    div
+        ([ classList
+            [ ( "placed-item", True )
+            , ( "shop-catalog-tile", True )
+            , ( qualityClass item.quality, True )
+            ]
+         , attribute "data-testid" ("shop-item-" ++ item.catalogId)
+         , title (item.nameEn ++ " (" ++ item.summary ++ ") - Click to add to Inventory")
+         , style "left" (String.fromInt (x * cellPx + 2) ++ "px")
+         , style "top" (String.fromInt (y * cellPx + 2) ++ "px")
+         , style "width" (String.fromInt (item.width * cellPx - 4) ++ "px")
+         , style "height" (String.fromInt (item.height * cellPx - 4) ++ "px")
+         ]
+            ++ (if isHolding then
+                    []
+
+                else
+                    [ onClick (ClickSpawnShopItem item.catalogId) ]
+               )
+        )
+        tileContent
 
 
 stashTabBtn : StashTab -> StashTab -> String -> Bool -> Html Msg
@@ -253,7 +454,7 @@ viewZone2CenterStack ui session equippedItems tempInventoryItems =
                 viewTempSpatialGrid ui.selectedItemIndex session.tempItems
 
             else
-                viewSpatialGrid "temp_inventory" 9 4 "grid-9x4" ui session tempInventoryItems
+                viewSpatialGrid TempInventory 9 4 "grid-9x4" ui session tempInventoryItems
     in
     div [ class "studio-col2-stack" ]
         [ section [ class "glass-panel zone2-paperdoll-panel", attribute "data-testid" "paperdoll-panel" ]
@@ -361,13 +562,13 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
         isValidEquipTarget =
             moveActive
                 && List.any
-                    (\t -> t.container == "equipment" && t.x == bodyLoc && t.y == 0)
+                    (\t -> t.container == Equipment && t.x == bodyLoc && t.y == 0)
                     session.allowedMoveTargets
 
         isHoveredEquipSlot =
             case ui.hoveredDropTarget of
                 Just target ->
-                    target.container == "equipment" && target.x == bodyLoc
+                    target.container == Equipment && target.x == bodyLoc
 
                 Nothing ->
                     False
@@ -387,7 +588,7 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
 
         equipHoverAttrs =
             if moveActive then
-                [ onMouseEnter (HoverDropTarget (Just { container = "equipment", x = bodyLoc, y = 0 }))
+                [ onMouseEnter (HoverDropTarget (Just { container = Equipment, x = bodyLoc, y = 0 }))
                 , onMouseLeave (HoverDropTarget Nothing)
                 ]
 
@@ -407,7 +608,7 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
                  , style "grid-row" rowSpec
                  ]
                     ++ (if moveActive then
-                            onClick (MoveSelectedItemTo "equipment" bodyLoc 0) :: equipHoverAttrs
+                            onClick (MoveSelectedItemTo Equipment bodyLoc 0) :: equipHoverAttrs
 
                         else
                             []
@@ -430,7 +631,7 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
                                 SelectItem Nothing
 
                             else
-                                MoveSelectedItemTo "equipment" bodyLoc 0
+                                MoveSelectedItemTo Equipment bodyLoc 0
 
                         Nothing ->
                             SelectItem (Just item.index)
@@ -510,7 +711,7 @@ viewZone3RightStack ui session inventoryItems cubeItems beltItems =
                 [ div [ class "panel-title" ] [ text "Inventory (10 x 4)" ]
                 , span [ class "meta-line" ] [ text ("Items: " ++ String.fromInt (List.length inventoryItems)) ]
                 ]
-            , viewSpatialGrid "inventory" 10 4 "grid-10x4" ui session inventoryItems
+            , viewSpatialGrid Inventory 10 4 "grid-10x4" ui session inventoryItems
             ]
         , section [ class "glass-panel zone3-utility-panel" ]
             [ div [ class "panel-header" ]
@@ -520,11 +721,11 @@ viewZone3RightStack ui session inventoryItems cubeItems beltItems =
             , div [ class "utility-dock" ]
                 [ div [ class "dock-card" ]
                     [ div [ class "dock-card-header" ] [ text "Horadric Cube (3x4)" ]
-                    , viewSpatialGrid "cube" 3 4 "grid-3x4" ui session cubeItems
+                    , viewSpatialGrid Cube 3 4 "grid-3x4" ui session cubeItems
                     ]
                 , div [ class "dock-card" ]
                     [ div [ class "dock-card-header" ] [ text "Belt (4x4)" ]
-                    , viewSpatialGrid "belt" 4 4 "grid-4x4" ui session beltItems
+                    , viewSpatialGrid Belt 4 4 "grid-4x4" ui session beltItems
                     ]
                 ]
             ]
@@ -670,9 +871,12 @@ viewTempSpatialGrid selectedIdx items =
         ]
 
 
-viewSpatialGrid : String -> Int -> Int -> String -> UiState -> SessionView -> List ItemCardView -> Html Msg
+viewSpatialGrid : ContainerKind -> Int -> Int -> String -> UiState -> SessionView -> List ItemCardView -> Html Msg
 viewSpatialGrid containerTag cols rows gridClass ui session items =
     let
+        containerSlug =
+            UiState.containerLabel containerTag
+
         selectedIdx =
             ui.selectedItemIndex
 
@@ -689,7 +893,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
             heldItem /= Nothing
 
         beltRestricted =
-            moveActive && containerTag == "belt" && session.beltMoveRestrictedReason /= Nothing
+            moveActive && containerTag == Belt && session.beltMoveRestrictedReason /= Nothing
 
         isAllowedTarget col logicalY =
             List.any
@@ -730,7 +934,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
         renderCell row col =
             let
                 logicalY =
-                    if containerTag == "belt" then
+                    if containerTag == Belt then
                         rows - 1 - row
 
                     else
@@ -739,7 +943,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
             if moveActive then
                 let
                     cellTestId =
-                        attribute "data-testid" ("grid-cell-" ++ containerTag ++ "-" ++ String.fromInt col ++ "-" ++ String.fromInt logicalY)
+                        attribute "data-testid" ("grid-cell-" ++ containerSlug ++ "-" ++ String.fromInt col ++ "-" ++ String.fromInt logicalY)
 
                     dropAnchor =
                         case hoverFootprint of
@@ -790,7 +994,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                     if fp.fitsBounds then
                         let
                             visualY =
-                                if containerTag == "belt" then
+                                if containerTag == Belt then
                                     rows - 1 - (fp.gy + fp.h - 1)
 
                                 else
@@ -802,7 +1006,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                                 , ( "valid", fp.valid )
                                 , ( "invalid", not fp.valid )
                                 ]
-                            , attribute "data-testid" ("grid-footprint-preview-" ++ containerTag)
+                            , attribute "data-testid" ("grid-footprint-preview-" ++ containerSlug)
                             , style "left" (String.fromInt (fp.gx * 40 + 1) ++ "px")
                             , style "top" (String.fromInt (visualY * 40 + 1) ++ "px")
                             , style "width" (String.fromInt (fp.w * 40 - 2) ++ "px")
@@ -831,7 +1035,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                     clamp 0 (rows - 1) item.y
 
                 visualY =
-                    if containerTag == "belt" then
+                    if containerTag == Belt then
                         rows - 1 - gy
 
                     else
@@ -886,7 +1090,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                 , ( gridClass, True )
                 , ( "is-restricted", beltRestricted )
                 ]
-            , attribute "data-testid" ("spatial-grid-" ++ containerTag)
+            , attribute "data-testid" ("spatial-grid-" ++ containerSlug)
             , onMouseLeave (HoverDropTarget Nothing)
             ]
             (interactiveCells ++ List.map renderPlaced items ++ footprintPreviewNodes)
@@ -902,11 +1106,12 @@ viewSelectedItemInspectorAndBrowser : UiState -> SessionView -> Html Msg
 viewSelectedItemInspectorAndBrowser ui session =
     let
         filteredItems =
-            if ui.selectedContainerFilter == "all" then
-                session.items
+            case ui.selectedContainerFilter of
+                Nothing ->
+                    session.items
 
-            else
-                List.filter (\it -> it.container == ui.selectedContainerFilter) session.items
+                Just targetContainer ->
+                    List.filter (\it -> it.container == targetContainer) session.items
 
         selectedItem =
             ui.selectedItemIndex
@@ -941,11 +1146,11 @@ viewSelectedItemInspectorAndBrowser ui session =
                         [ h3 [ class ("inspector-title " ++ qualityClass item.quality) ] [ text item.nameEn ]
                         , div [ class "meta-line" ]
                             [ text
-                                (item.quality
+                                (UiState.qualityLabel item.quality
                                     ++ " · ilvl "
                                     ++ String.fromInt item.itemLevel
                                     ++ " · "
-                                    ++ item.container
+                                    ++ UiState.containerLabel item.container
                                     ++ " ("
                                     ++ String.fromInt item.x
                                     ++ ","
@@ -973,13 +1178,13 @@ viewSelectedItemInspectorAndBrowser ui session =
                 )
             , div []
                 [ div [ class "segmented", attribute "data-testid" "container-filters" ]
-                    [ filterButton ui.selectedContainerFilter "all" "All"
-                    , filterButton ui.selectedContainerFilter "equipment" "Equipment"
-                    , filterButton ui.selectedContainerFilter "inventory" "Inventory"
-                    , filterButton ui.selectedContainerFilter "belt" "Belt"
-                    , filterButton ui.selectedContainerFilter "stash" "Stash"
-                    , filterButton ui.selectedContainerFilter "cube" "Cube"
-                    , filterButton ui.selectedContainerFilter "temp_inventory" "Temp"
+                    [ filterButton ui.selectedContainerFilter Nothing "All" "all"
+                    , filterButton ui.selectedContainerFilter (Just Equipment) "Equipment" "equipment"
+                    , filterButton ui.selectedContainerFilter (Just Inventory) "Inventory" "inventory"
+                    , filterButton ui.selectedContainerFilter (Just Belt) "Belt" "belt"
+                    , filterButton ui.selectedContainerFilter (Just Stash) "Stash" "stash"
+                    , filterButton ui.selectedContainerFilter (Just Cube) "Cube" "cube"
+                    , filterButton ui.selectedContainerFilter (Just TempInventory) "Temp" "temp_inventory"
                     ]
                 , div [ class "item-card-grid", attribute "data-testid" "container-items" ]
                     (List.map (viewIndexTile ui.selectedItemIndex) filteredItems)
@@ -996,12 +1201,12 @@ countBadge label count =
         ]
 
 
-filterButton : String -> String -> String -> Html Msg
-filterButton active key label =
+filterButton : Maybe ContainerKind -> Maybe ContainerKind -> String -> String -> Html Msg
+filterButton active target label testSlug =
     button
-        [ classList [ ( "seg-btn", True ), ( "is-active", active == key ) ]
-        , attribute "data-testid" ("container-filter-" ++ key)
-        , onClick (SelectContainerFilter key)
+        [ classList [ ( "seg-btn", True ), ( "is-active", active == target ) ]
+        , attribute "data-testid" ("container-filter-" ++ testSlug)
+        , onClick (SelectContainerFilter target)
         ]
         [ text label ]
 
@@ -1031,11 +1236,11 @@ viewIndexTile selectedIdx item =
                 Nothing ->
                     text ""
             , span [ class "item-name" ] [ text item.nameEn ]
-            , span [ class "item-quality-pill" ] [ text item.quality ]
+            , span [ class "item-quality-pill" ] [ text (UiState.qualityLabel item.quality) ]
             ]
         , div [ class "meta-line" ]
             [ text
-                (item.container
+                (UiState.containerLabel item.container
                     ++ " ("
                     ++ String.fromInt item.x
                     ++ ","
@@ -1049,25 +1254,25 @@ viewIndexTile selectedIdx item =
         ]
 
 
-qualityClass : String -> String
+qualityClass : ItemQualityKind -> String
 qualityClass quality =
-    case String.toLower quality of
-        "magic" ->
+    case quality of
+        QualityMagic ->
             "q-magic"
 
-        "rare" ->
+        QualityRare ->
             "q-rare"
 
-        "unique" ->
+        QualityUnique ->
             "q-unique"
 
-        "set" ->
+        QualitySet ->
             "q-set"
 
-        "runeword" ->
+        QualityRuneword ->
             "q-runeword"
 
-        "unknown" ->
+        QualityUnknown ->
             "q-unknown"
 
         _ ->
@@ -1082,14 +1287,14 @@ viewItemTileGraphic item =
                 [ class "item-tile-img"
                 , src url
                 , alt item.nameEn
-                , title (item.nameEn ++ " (" ++ item.quality ++ ")")
+                , title (item.nameEn ++ " (" ++ UiState.qualityLabel item.quality ++ ")")
                 ]
                 []
             ]
 
         Nothing ->
             [ span [ class "item-tile-name" ] [ text item.nameEn ]
-            , span [ class "item-tile-type" ] [ text item.quality ]
+            , span [ class "item-tile-type" ] [ text (UiState.qualityLabel item.quality) ]
             ]
 
 
@@ -1225,13 +1430,13 @@ viewHoverTooltip maybeIdx maybePos items =
                 ([ div [ class ("tooltip-title " ++ qualityClass item.quality) ] [ text item.nameEn ]
                  , div [ class "tooltip-base" ]
                     [ text
-                        (item.quality
+                        (UiState.qualityLabel item.quality
                             ++ " · ilvl "
                             ++ String.fromInt item.itemLevel
                             ++ " · "
                             ++ item.code
                             ++ " ("
-                            ++ item.container
+                            ++ UiState.containerLabel item.container
                             ++ " "
                             ++ String.fromInt item.x
                             ++ ","
@@ -1252,7 +1457,7 @@ viewSetDetails allItems item =
     let
         equippedNames =
             allItems
-                |> List.filter (\entry -> entry.container == "equipment" || entry.container == "merc_equipment")
+                |> List.filter (\entry -> entry.container == Equipment || entry.container == MercEquipment)
                 |> List.map .nameEn
 
         isPieceEquipped pieceName =

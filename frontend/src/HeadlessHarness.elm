@@ -3,7 +3,8 @@ module HeadlessHarness exposing (main)
 import Bridge.Ports as Ports
 import Generated.Protocol
     exposing
-        ( DifficultyMode(..)
+        ( ContainerKind(..)
+        , DifficultyMode(..)
         , EditMode(..)
         , difficultyModeDecoder
         , editModeDecoder
@@ -182,8 +183,31 @@ commandDecoder =
                         Json.Decode.succeed ToggleAllDiffWaypoints
 
                     "SelectContainerFilter" ->
-                        Json.Decode.field "filter" Json.Decode.string
-                            |> Json.Decode.map SelectContainerFilter
+                        Json.Decode.field "filter" (Json.Decode.nullable Json.Decode.string)
+                            |> Json.Decode.map
+                                (\maybeStr ->
+                                    case maybeStr of
+                                        Just "stash" ->
+                                            SelectContainerFilter (Just Stash)
+
+                                        Just "inventory" ->
+                                            SelectContainerFilter (Just Inventory)
+
+                                        Just "belt" ->
+                                            SelectContainerFilter (Just Belt)
+
+                                        Just "cube" ->
+                                            SelectContainerFilter (Just Cube)
+
+                                        Just "equipment" ->
+                                            SelectContainerFilter (Just Equipment)
+
+                                        Just "temp_inventory" ->
+                                            SelectContainerFilter (Just TempInventory)
+
+                                        _ ->
+                                            SelectContainerFilter Nothing
+                                )
 
                     "ClearTempInventory" ->
                         Json.Decode.succeed ClearTempInventory
@@ -428,7 +452,12 @@ emitSnapshot model =
             , ( "activeView", Json.Encode.string activeViewName )
             , ( "paintMode", paintModeValue )
             , ( "marqueeTargets", marqueeTargetsValue )
-            , ( "containerFilter", Json.Encode.string model.ui.selectedContainerFilter )
+            , ( "containerFilter"
+              , model.ui.selectedContainerFilter
+                    |> Maybe.map State.UiState.containerLabel
+                    |> Maybe.withDefault "all"
+                    |> Json.Encode.string
+              )
             , ( "selectedItemIndex", selectedItemValue )
             , ( "statusBanner", statusBannerValue )
             , ( "resDifficulty", resDifficultyValue )

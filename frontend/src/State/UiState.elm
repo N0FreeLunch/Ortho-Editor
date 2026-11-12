@@ -11,8 +11,10 @@ module State.UiState exposing
     , beginMarquee
     , clearFocusInput
     , clearMarquee
+    , containerLabel
     , extendMarquee
     , init
+    , qualityLabel
     , setContainerFilter
     , setHoverMousePos
     , setHoveredDropTarget
@@ -20,6 +22,9 @@ module State.UiState exposing
     , setPaintMode
     , setProgressionDifficulty
     , setSelectedItem
+    , setShopCategoryFilter
+    , setShopPage
+    , setShopQualityTab
     , setSkillTreeTab
     , setStashTab
     , setStatusBanner
@@ -31,7 +36,7 @@ module State.UiState exposing
     , updateMarquee
     )
 
-import Generated.Protocol exposing (DifficultyMode(..))
+import Generated.Protocol exposing (ContainerKind(..), DifficultyMode(..), ItemQualityKind(..))
 
 {-| Ephemeral UI state owned exclusively by Elm (tabs, theme, stash tab preview,
 progression difficulty, paint mode, marquee coordinates, selected item, filter).
@@ -88,15 +93,18 @@ type alias UiState =
     , progressionDifficulty : DifficultyMode
     , paintMode : Maybe PaintMode
     , marquee : Maybe MarqueeSelection
-    , selectedContainerFilter : String
+    , selectedContainerFilter : Maybe ContainerKind
     , selectedItemIndex : Maybe Int
     , hoveredItemIndex : Maybe Int
     , hoverMousePos : Maybe { x : Int, y : Int, vw : Int, vh : Int }
-    , hoveredDropTarget : Maybe { container : String, x : Int, y : Int }
+    , hoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int }
     , statusBanner : Maybe String
     , focusedInput : Maybe FocusedInput
     , combatLabOpen : Bool
     , skillTreeTab : String
+    , shopQualityTab : ItemQualityKind
+    , shopCategoryFilter : String
+    , shopPage : Int
     }
 
 
@@ -108,7 +116,7 @@ init =
     , progressionDifficulty = Normal
     , paintMode = Nothing
     , marquee = Nothing
-    , selectedContainerFilter = "all"
+    , selectedContainerFilter = Nothing
     , selectedItemIndex = Nothing
     , hoveredItemIndex = Nothing
     , hoverMousePos = Nothing
@@ -117,6 +125,9 @@ init =
     , focusedInput = Nothing
     , combatLabOpen = False
     , skillTreeTab = "tree0"
+    , shopQualityTab = QualityUnique
+    , shopCategoryFilter = "all"
+    , shopPage = 0
     }
 
 
@@ -210,7 +221,7 @@ clearMarquee ui =
     { ui | marquee = Nothing }
 
 
-setContainerFilter : String -> UiState -> UiState
+setContainerFilter : Maybe ContainerKind -> UiState -> UiState
 setContainerFilter filterKey ui =
     { ui | selectedContainerFilter = filterKey }
 
@@ -273,6 +284,21 @@ setSkillTreeTab treeId ui =
     { ui | skillTreeTab = treeId }
 
 
+setShopQualityTab : ItemQualityKind -> UiState -> UiState
+setShopQualityTab tab ui =
+    { ui | shopQualityTab = tab, shopCategoryFilter = "all", shopPage = 0 }
+
+
+setShopCategoryFilter : String -> UiState -> UiState
+setShopCategoryFilter cat ui =
+    { ui | shopCategoryFilter = cat, shopPage = 0 }
+
+
+setShopPage : Int -> UiState -> UiState
+setShopPage page ui =
+    { ui | shopPage = max 0 page }
+
+
 setHoveredItem : Maybe Int -> UiState -> UiState
 setHoveredItem maybeIdx ui =
     { ui
@@ -292,6 +318,74 @@ setHoverMousePos x y vw vh ui =
     { ui | hoverMousePos = Just { x = x, y = y, vw = vw, vh = vh } }
 
 
-setHoveredDropTarget : Maybe { container : String, x : Int, y : Int } -> UiState -> UiState
+setHoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int } -> UiState -> UiState
 setHoveredDropTarget target ui =
     { ui | hoveredDropTarget = target }
+
+
+containerLabel : ContainerKind -> String
+containerLabel kind =
+    case kind of
+        Stash ->
+            "stash"
+
+        Inventory ->
+            "inventory"
+
+        TempInventory ->
+            "temp_inventory"
+
+        Cube ->
+            "cube"
+
+        Belt ->
+            "belt"
+
+        Equipment ->
+            "equipment"
+
+        MercEquipment ->
+            "merc_equipment"
+
+        Cursor ->
+            "cursor"
+
+        Shop ->
+            "shop"
+
+        UnknownContainer ->
+            "unknown"
+
+
+qualityLabel : ItemQualityKind -> String
+qualityLabel quality =
+    case quality of
+        QualityLow ->
+            "Low"
+
+        QualityNormal ->
+            "Normal"
+
+        QualitySuperior ->
+            "Superior"
+
+        QualityMagic ->
+            "Magic"
+
+        QualitySet ->
+            "Set"
+
+        QualityRare ->
+            "Rare"
+
+        QualityUnique ->
+            "Unique"
+
+        QualityCrafted ->
+            "Crafted"
+
+        QualityRuneword ->
+            "Runeword"
+
+        QualityUnknown ->
+            "Unknown"
