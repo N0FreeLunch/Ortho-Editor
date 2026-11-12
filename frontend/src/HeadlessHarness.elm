@@ -151,6 +151,11 @@ commandDecoder =
                             (Json.Decode.field "y" Json.Decode.float)
                             (Json.Decode.field "ids" (Json.Decode.list Json.Decode.string))
 
+                    "ExtendMarquee" ->
+                        Json.Decode.map2 ExtendMarquee
+                            (Json.Decode.field "dragKind" dragKindDecoder)
+                            (Json.Decode.field "id" Json.Decode.string)
+
                     "CommitMarquee" ->
                         Json.Decode.field "difficulty" difficultyModeDecoder
                             |> Json.Decode.map CommitMarquee
@@ -306,6 +311,16 @@ emitSnapshot model =
                 |> Maybe.map (\s -> Json.Encode.int s.merc.actIndex)
                 |> Maybe.withDefault Json.Encode.null
 
+        mercPersistenceSupportedValue =
+            model.session
+                |> Maybe.map (\s -> Json.Encode.bool s.merc.persistenceSupported)
+                |> Maybe.withDefault Json.Encode.null
+
+        exportSupportedValue =
+            model.session
+                |> Maybe.map (\s -> Json.Encode.bool s.exportSupported)
+                |> Maybe.withDefault Json.Encode.null
+
         decodeErrorValue =
             model.lastDecodeError
                 |> Maybe.map Json.Encode.string
@@ -429,6 +444,8 @@ emitSnapshot model =
             , ( "hellWaypointCount", hellWpCountValue )
             , ( "mercLevel", mercLevelValue )
             , ( "mercAct", mercActValue )
+            , ( "mercPersistenceSupported", mercPersistenceSupportedValue )
+            , ( "exportSupported", exportSupportedValue )
             , ( "rejectionCode", rejectionCodeValue )
             , ( "decodeError", decodeErrorValue )
             ]

@@ -21,7 +21,7 @@ import Generated.Protocol as Protocol
         , sessionEnvelopeDecoder
         )
 import Json.Decode
-import State.UiState as UiState exposing (DragKind(..), PaintMode(..), UiState, ViewTab)
+import State.UiState as UiState exposing (DragKind(..), PaintMode(..), StashTab, UiState, ViewTab)
 
 
 type alias Model =
@@ -46,6 +46,7 @@ type Msg
     | ClickWaypointTile DifficultyMode Int
     | BeginMarquee DragKind Float Float (List String)
     | MoveMarquee Float Float (List String)
+    | ExtendMarquee DragKind String
     | CommitMarquee DifficultyMode
     | CancelMarquee
     | SetQuestsBatch DifficultyMode (List String) Bool
@@ -55,11 +56,17 @@ type Msg
     | SelectContainerFilter String
     | ClearTempInventory
     | SelectItem (Maybe Int)
+    | HoverItem (Maybe Int)
+    | MoveTooltipHover Int Int Int Int
     | FocusField String String
     | EditFocusedInput String
     | CommitFocusedInput
     | CancelFocusedInput
     | ClearBanner
+    | ToggleTheme
+    | SelectStashTab StashTab
+    | ToggleCombatLab
+    | SelectSkillTreeTab String
 
 
 type OutMsg
@@ -204,6 +211,9 @@ update msg model =
         MoveMarquee x y ids ->
             ( { model | ui = UiState.updateMarquee x y ids model.ui }, NoOut )
 
+        ExtendMarquee kind tileId ->
+            ( { model | ui = UiState.extendMarquee kind tileId model.ui }, NoOut )
+
         CommitMarquee difficulty ->
             case model.ui.marquee of
                 Nothing ->
@@ -318,6 +328,24 @@ update msg model =
 
         ClearBanner ->
             ( { model | lastRejection = Nothing, ui = UiState.setStatusBanner Nothing model.ui }, NoOut )
+
+        ToggleTheme ->
+            ( { model | ui = UiState.toggleTheme model.ui }, NoOut )
+
+        SelectStashTab tab ->
+            ( { model | ui = UiState.setStashTab tab model.ui }, NoOut )
+
+        ToggleCombatLab ->
+            ( { model | ui = UiState.toggleCombatLab model.ui }, NoOut )
+
+        SelectSkillTreeTab treeId ->
+            ( { model | ui = UiState.setSkillTreeTab treeId model.ui }, NoOut )
+
+        HoverItem maybeIdx ->
+            ( { model | ui = UiState.setHoveredItem maybeIdx model.ui }, NoOut )
+
+        MoveTooltipHover x y vw vh ->
+            ( { model | ui = UiState.setHoverMousePos x y vw vh model.ui }, NoOut )
 
 
 characterFieldFromKey : String -> Maybe CharacterField

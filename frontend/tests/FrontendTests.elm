@@ -27,6 +27,8 @@ sampleSessionJson =
       "session": {
         "fixture_label": "TESTDRUID_Quest3_AnyaRescued.d2s",
         "save_version": 105,
+        "export_supported": true,
+        "export_unsupported_reason": null,
         "item_dialect": "d2r-v3",
         "char_name": "TESTDRUID",
         "char_class": "Druid",
@@ -89,7 +91,9 @@ sampleSessionJson =
             "innate_aura": "Paladin Aura (Act 2)",
             "equipment_auras": ["Aura #120 Lv.15"]
           },
-          "equipped_count": 3
+          "equipped_count": 3,
+          "persistence_supported": false,
+          "preview_only_reason": "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
         },
         "progression": {
           "is_expansion": true,
@@ -115,21 +119,39 @@ sampleSessionJson =
           {
             "index": 0, "code": "rin", "name_en": "Nagelring", "name_ko": "나겔링",
             "quality": "Unique", "container": "equipment", "slot_label": "Left Finger",
-            "x": 0, "y": 0, "width": 1, "height": 1, "properties": ["+30% Better Chance of Getting Magic Items"]
+            "x": 0, "y": 0, "width": 1, "height": 1,
+            "item_level": 49,
+            "base_attributes": ["Required Level: 7"],
+            "properties": ["+30% Better Chance of Getting Magic Items"],
+            "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
+            "socketed_names": [],
+            "image_url": "/item-vectors/misc/ring/ring.svg"
           }
         ],
         "merc_items": [
           {
             "index": 0, "code": "vou", "name_en": "Insight", "name_ko": "통찰",
             "quality": "Runeword", "container": "mercenary", "slot_label": "Right Hand",
-            "x": 0, "y": 0, "width": 2, "height": 4, "properties": ["Level 15 Meditation Aura When Equipped"]
+            "x": 0, "y": 0, "width": 2, "height": 4,
+            "item_level": 45,
+            "base_attributes": ["Two-Hand Damage: 24 to 105", "Durability: 25 of 50"],
+            "properties": ["Level 15 Meditation Aura When Equipped"],
+            "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
+            "socketed_names": ["Ral Rune", "Tir Rune", "Tal Rune", "Sol Rune"],
+            "image_url": null
           }
         ],
         "temp_items": [
           {
             "index": 0, "code": "r01", "name_en": "El Rune", "name_ko": "엘 룬",
             "quality": "Normal", "container": "temp_inventory", "slot_label": null,
-            "x": 0, "y": 0, "width": 1, "height": 1, "properties": []
+            "x": 0, "y": 0, "width": 1, "height": 1,
+            "item_level": 1,
+            "base_attributes": [],
+            "properties": [],
+            "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
+            "socketed_names": [],
+            "image_url": null
           }
         ]
       },
@@ -173,6 +195,41 @@ withMercLevel lvl model =
                     { merc | stats = nextStats }
             in
             { model | session = Just { s | merc = nextMerc } }
+
+
+withMercEditable : Bool -> Model -> Model
+withMercEditable editable model =
+    case model.session of
+        Nothing ->
+            model
+
+        Just s ->
+            let
+                merc =
+                    s.merc
+
+                nextMerc =
+                    { merc | persistenceSupported = editable }
+            in
+            { model | session = Just { s | merc = nextMerc } }
+
+
+withUnsupportedSaveVersion : Int -> String -> Model -> Model
+withUnsupportedSaveVersion ver reason model =
+    case model.session of
+        Nothing ->
+            model
+
+        Just s ->
+            { model
+                | session =
+                    Just
+                        { s
+                            | saveVersion = ver
+                            , exportSupported = False
+                            , exportUnsupportedReason = Just reason
+                        }
+            }
 
 
 withView : ViewTab -> Model -> Model
@@ -222,7 +279,7 @@ suite =
                             >> Event.simulate Event.click
                             >> Event.expect (SelectResDifficulty Hell)
                         ]
-        , test "Mercenary Card renders 1x4 res grid, auras, act selector, and 1..98 bounds" <|
+        , test "Mercenary Card guards unpersisted controls as read-only and honors 1..98 bounds when enabled" <|
             \_ ->
                 Expect.all
                     [ \_ ->
@@ -235,6 +292,23 @@ suite =
                                     >> Query.hasNot [ Selector.class "is-gold-res" ]
                                 , Query.find [ testId "merc-auras" ]
                                     >> Query.has [ Selector.text "Paladin Aura (Act 2)", Selector.text "Aura #120 Lv.15", Selector.text "Insight" ]
+                                , Query.find [ testId "merc-preview-badge" ]
+                                    >> Query.has [ Selector.text "Read-only · Not saved to .d2s" ]
+                                , Query.find [ testId "merc-preview-note" ]
+                                    >> Query.has [ Selector.text "Read-only: mercenary edits are disabled" ]
+                                , Query.find [ testId "merc-act-5" ]
+                                    >> Query.has [ Selector.disabled True ]
+                                , Query.find [ testId "merc-lvl-plus5" ]
+                                    >> Query.has [ Selector.disabled True ]
+                                , Query.find [ testId "merc-level-input" ]
+                                    >> Query.has [ Selector.disabled True ]
+                                ]
+                    , \_ ->
+                        Workspace.view (withMercEditable True loadedModel)
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.findAll [ testId "merc-preview-badge" ]
+                                    >> Query.count (Expect.equal 0)
                                 , Query.find [ testId "merc-act-5" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect (SelectMercAct 5)
@@ -243,12 +317,12 @@ suite =
                                     >> Event.expect (AdjustMercLevel 5)
                                 ]
                     , \_ ->
-                        Workspace.view (withMercLevel 1 loadedModel)
+                        Workspace.view (loadedModel |> withMercEditable True |> withMercLevel 1)
                             |> Query.fromHtml
                             |> Query.find [ testId "merc-lvl-minus" ]
                             >> Query.has [ Selector.disabled True ]
                     , \_ ->
-                        Workspace.view (withMercLevel 98 loadedModel)
+                        Workspace.view (loadedModel |> withMercEditable True |> withMercLevel 98)
                             |> Query.fromHtml
                             |> Query.find [ testId "merc-lvl-plus" ]
                             >> Query.has [ Selector.disabled True ]
@@ -384,6 +458,33 @@ suite =
                             |> Query.has [ Selector.text "Unsaved changes" ]
                     ]
                     ()
+        , test "Workspace surfaces v105 export readiness badge and non-v105 warning notice" <|
+            \_ ->
+                let
+                    unsupportedModel =
+                        withUnsupportedSaveVersion 96 "Binary .d2s export supports v105 saves only (loaded v96)." loadedModel
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "export-support-badge" ]
+                                    >> Query.has [ Selector.text "v105 · .d2s Export Ready" ]
+                                , Query.findAll [ testId "export-unsupported-notice" ]
+                                    >> Query.count (Expect.equal 0)
+                                ]
+                    , \_ ->
+                        Workspace.view unsupportedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "export-support-badge" ]
+                                    >> Query.has [ Selector.text "Read-only v96 · Export requires v105" ]
+                                , Query.find [ testId "export-unsupported-notice" ]
+                                    >> Query.has [ Selector.text "Binary .d2s export supports v105 saves only (loaded v96)." ]
+                                ]
+                    ]
+                    ()
         , test "View B focusedInput isolates keystroke drafts as NoOut and commits typed UiIntent" <|
             \_ ->
                 let
@@ -440,6 +541,437 @@ suite =
                             |> Query.find [ testId "input-char-level" ]
                             |> Event.simulate (Event.input "65")
                             |> Event.expect (EditFocusedInput "65")
+                    ]
+                    ()
+        , test "ProgressionPanel wires real DOM click and mousedown->mouseenter->mouseup pointer drag parity" <|
+            \_ ->
+                let
+                    ( progModel, _ ) =
+                        Update.update (SwitchView ViewB) loadedModel
+
+                    ( paintModel, _ ) =
+                        Update.update (TogglePaintMode Activate) progModel
+
+                    questDownMsg =
+                        BeginMarquee DragQuests 0 0 [ "a1q1" ]
+
+                    questEnterMsg =
+                        ExtendMarquee DragQuests "a1q2"
+
+                    questUpMsg =
+                        CommitMarquee Normal
+
+                    ( draggingQuest1, _ ) =
+                        Update.update questDownMsg paintModel
+
+                    ( draggingQuest2, _ ) =
+                        Update.update questEnterMsg draggingQuest1
+
+                    ( committedQuestModel, committedQuestOut ) =
+                        Update.update questUpMsg draggingQuest2
+
+                    wpDownMsg =
+                        BeginMarquee DragWaypoints 0 0 [ "0" ]
+
+                    wpEnterMsg =
+                        ExtendMarquee DragWaypoints "1"
+
+                    wpUpMsg =
+                        CommitMarquee Normal
+
+                    ( draggingWp1, _ ) =
+                        Update.update wpDownMsg paintModel
+
+                    ( draggingWp2, _ ) =
+                        Update.update wpEnterMsg draggingWp1
+
+                    ( committedWpModel, committedWpOut ) =
+                        Update.update wpUpMsg draggingWp2
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view progModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "quest-tile-a1q1" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (ClickQuestTile Normal "a1q1")
+                    , \_ ->
+                        Workspace.view progModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "wp-tile-0" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (ClickWaypointTile Normal 0)
+                    , \_ ->
+                        Workspace.view paintModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "quest-tile-a1q1" ]
+                            |> Event.simulate (Event.custom "mousedown" (Json.Encode.object []))
+                            |> Event.expect questDownMsg
+                    , \_ ->
+                        Workspace.view draggingQuest1
+                            |> Query.fromHtml
+                            |> Query.find [ testId "quest-tile-a1q2" ]
+                            |> Event.simulate (Event.custom "mouseenter" (Json.Encode.object []))
+                            |> Event.expect questEnterMsg
+                    , \_ ->
+                        Workspace.view draggingQuest2
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "quest-tile-a1q1" ]
+                                    >> Query.has [ Selector.class "is-marquee-target" ]
+                                , Query.find [ testId "quest-tile-a1q2" ]
+                                    >> Query.has [ Selector.class "is-marquee-target" ]
+                                , Query.find [ testId "quest-tile-a1q2" ]
+                                    >> Event.simulate (Event.custom "mouseup" (Json.Encode.object []))
+                                    >> Event.expect questUpMsg
+                                , Query.find [ testId "progression-panel" ]
+                                    >> Event.simulate (Event.custom "mouseup" (Json.Encode.object []))
+                                    >> Event.expect questUpMsg
+                                , Query.find [ testId "progression-panel" ]
+                                    >> Event.simulate (Event.custom "mouseleave" (Json.Encode.object []))
+                                    >> Event.expect CancelMarquee
+                                , Query.find [ testId "cancel-marquee-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect CancelMarquee
+                                ]
+                    , \_ -> Expect.equal Nothing committedQuestModel.ui.marquee
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetQuestsBatch { difficulty = Normal, keys = [ "a1q1", "a1q2" ], completed = True }))
+                            committedQuestOut
+                    , \_ ->
+                        Workspace.view paintModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "wp-tile-0" ]
+                            |> Event.simulate (Event.custom "mousedown" (Json.Encode.object []))
+                            |> Event.expect wpDownMsg
+                    , \_ ->
+                        Workspace.view draggingWp1
+                            |> Query.fromHtml
+                            |> Query.find [ testId "wp-tile-1" ]
+                            |> Event.simulate (Event.custom "mouseenter" (Json.Encode.object []))
+                            |> Event.expect wpEnterMsg
+                    , \_ ->
+                        Workspace.view draggingWp2
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "wp-tile-0" ]
+                                    >> Query.has [ Selector.class "is-marquee-target" ]
+                                , Query.find [ testId "wp-tile-1" ]
+                                    >> Query.has [ Selector.class "is-marquee-target" ]
+                                , Query.find [ testId "wp-tile-1" ]
+                                    >> Event.simulate (Event.custom "mouseup" (Json.Encode.object []))
+                                    >> Event.expect wpUpMsg
+                                ]
+                    , \_ -> Expect.equal Nothing committedWpModel.ui.marquee
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetWaypointsBatch { difficulty = Normal, bits = [ 0, 1 ], active = True }))
+                            committedWpOut
+                    ]
+                    ()
+        , test "Exhaustive DOM parity across all 9 CharacterPanel inputs, controls, and ContainersPanel" <|
+            \_ ->
+                let
+                    charInputs =
+                        [ { tid = "input-char-name", fieldKey = "char_name", rawVal = "TESTDRUID", nextRaw = "OrthoDruid", expectedOut = EmitIntent (Protocol.SetCharacterName { name = "OrthoDruid" }) }
+                        , { tid = "input-char-level", fieldKey = "level", rawVal = "31", nextRaw = "65", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Level, value = 65 }) }
+                        , { tid = "input-stat-strength", fieldKey = "strength", rawVal = "60", nextRaw = "95", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Strength, value = 95 }) }
+                        , { tid = "input-stat-dexterity", fieldKey = "dexterity", rawVal = "20", nextRaw = "45", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Dexterity, value = 45 }) }
+                        , { tid = "input-stat-vitality", fieldKey = "vitality", rawVal = "60", nextRaw = "85", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Vitality, value = 85 }) }
+                        , { tid = "input-stat-energy", fieldKey = "energy", rawVal = "20", nextRaw = "35", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Energy, value = 35 }) }
+                        , { tid = "input-gold-inventory", fieldKey = "gold_character", rawVal = "229492", nextRaw = "150000", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.GoldCharacter, value = 150000 }) }
+                        , { tid = "input-gold-stash", fieldKey = "gold_stash", rawVal = "281974", nextRaw = "500000", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.GoldStash, value = 500000 }) }
+                        , { tid = "input-stat-points", fieldKey = "stat_points", rawVal = "75", nextRaw = "10", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.StatPoints, value = 10 }) }
+                        ]
+
+                    checkCharInput { tid, fieldKey, rawVal, nextRaw, expectedOut } _ =
+                        let
+                            ( focused, _ ) =
+                                Update.update (FocusField fieldKey rawVal) loadedModel
+
+                            ( edited, _ ) =
+                                Update.update (EditFocusedInput nextRaw) focused
+
+                            ( _, commitOut ) =
+                                Update.update CommitFocusedInput edited
+
+                            ( cancelled, _ ) =
+                                Update.update CancelFocusedInput edited
+                        in
+                        Expect.all
+                            [ \_ ->
+                                Workspace.view loadedModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId tid ]
+                                    |> Event.simulate Event.focus
+                                    |> Event.expect (FocusField fieldKey rawVal)
+                            , \_ ->
+                                Workspace.view focused
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId tid ]
+                                    |> Event.simulate (Event.input nextRaw)
+                                    |> Event.expect (EditFocusedInput nextRaw)
+                            , \_ ->
+                                Workspace.view edited
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId tid ]
+                                    |> Event.simulate (Event.custom "keydown" (Json.Encode.object [ ( "key", Json.Encode.string "Enter" ) ]))
+                                    |> Event.expect CommitFocusedInput
+                            , \_ ->
+                                Workspace.view edited
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId tid ]
+                                    |> Event.simulate Event.blur
+                                    |> Event.expect CommitFocusedInput
+                            , \_ ->
+                                Workspace.view edited
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId tid ]
+                                    |> Event.simulate (Event.custom "keydown" (Json.Encode.object [ ( "key", Json.Encode.string "Escape" ) ]))
+                                    |> Event.expect CancelFocusedInput
+                            , \_ -> Expect.equal expectedOut commitOut
+                            , \_ -> Expect.equal Nothing cancelled.ui.focusedInput
+                            ]
+                            ()
+
+                    ( viewAModel, _ ) =
+                        Update.update (SwitchView ViewA) loadedModel
+                in
+                Expect.all
+                    (List.map checkCharInput charInputs
+                        ++ [ \_ ->
+                                Workspace.view loadedModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "res-diff-nightmare" ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect (SelectResDifficulty Nightmare)
+                           , \_ ->
+                                Workspace.view loadedModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "res-diff-hell" ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect (SelectResDifficulty Hell)
+                           , \_ ->
+                                Workspace.view loadedModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "skill-mode-free" ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect (SelectSkillMode Free)
+                           , \_ ->
+                                Workspace.view viewAModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "container-filter-equipment" ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect (SelectContainerFilter "equipment")
+                           , \_ ->
+                                Workspace.view viewAModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "clear-temp-btn" ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect ClearTempInventory
+                           , \_ ->
+                                Workspace.view viewAModel
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "theme-toggle-btn" ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect ToggleTheme
+                           ]
+                    )
+                    ()
+        , test "Cycle 9 Top-Down Header theme toggle and View A 3-Zone Bento honor preview locks" <|
+            \_ ->
+                let
+                    ( lightViewAModel, _ ) =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update ToggleTheme
+                            |> Tuple.first
+                            |> Update.update (SelectItem (Just 0))
+                in
+                Workspace.view lightViewAModel
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.has [ Selector.class "ortho-shell", Selector.class "theme-light" ]
+                        , Query.find [ testId "undo-preview-btn" ]
+                            >> Query.has [ Selector.attribute (Html.Attributes.disabled True) ]
+                        , Query.find [ testId "weapon-swap-preview-btn" ]
+                            >> Query.has [ Selector.attribute (Html.Attributes.disabled True) ]
+                        , Query.find [ testId "item-shop-preview" ]
+                            >> Query.has [ Selector.text "Preview only" ]
+                        , Query.find [ testId "paperdoll-panel" ]
+                            >> Query.has [ Selector.text "Equipped Gear (Zone 2)" ]
+                        , Query.find [ testId "gear-breakpoint-bar" ]
+                            >> Query.has [ Selector.text "Equip" ]
+                        , Query.find [ testId "view-a-merc-panel" ]
+                            >> Query.has [ Selector.text "Mercenary Station (Zone 4)" ]
+                        , Query.find [ testId "temp-inventory-panel" ]
+                            >> Query.has [ Selector.text "El Rune" ]
+                        , Query.find [ testId "selected-item-inspector" ]
+                            >> Query.has [ Selector.text "Nagelring", Selector.text "Better Chance" ]
+                        ]
+        , test "Cycle 10 View B 4-Col .spec-grid renders vitals gauges, preview skill frame, 3-diff compact quest dots, 5-act waypoints, and combat lab accordion" <|
+            \_ ->
+                let
+                    ( labOpened, _ ) =
+                        loadedModel
+                            |> Update.update (SelectSkillTreeTab "tree1")
+                            |> Tuple.first
+                            |> Update.update ToggleCombatLab
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view labOpened
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "view-b-workspace" ]
+                                    >> Query.has [ Selector.class "spec-grid" ]
+                                , Query.find [ testId "vitals-gauges" ]
+                                    >> Query.has [ Selector.text "Life", Selector.text "Mana", Selector.text "Stamina" ]
+                                , Query.find [ testId "skill-tree-preview" ]
+                                    >> Query.has [ Selector.text "Preview only" ]
+                                , Query.find [ testId "skill-tree-tab-tree1" ]
+                                    >> Query.has [ Selector.class "active" ]
+                                , Query.find [ testId "quests-panel" ]
+                                    >> Query.has [ Selector.text "Normal", Selector.text "Nightmare", Selector.text "Hell" ]
+                                , Query.find [ testId "quest-tile-hell-a1q1" ]
+                                    >> Query.has [ Selector.class "quest-cell-dot" ]
+                                , Query.find [ testId "waypoint-matrix" ]
+                                    >> Query.has [ Selector.text "Act 1", Selector.text "Act 5" ]
+                                , Query.find [ testId "combat-lab-content" ]
+                                    >> Query.has [ Selector.text "Preview only" ]
+                                ]
+                    , \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "combat-lab-toggle" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect ToggleCombatLab
+                    , \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "skill-tree-tab-tree2" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (SelectSkillTreeTab "tree2")
+                    , \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "quest-tile-nightmare-a1q1" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (ClickQuestTile Nightmare "a1q1")
+                    ]
+                    ()
+        , test "Cycle 11 View A renders item images, bottom-up belt coordinates (y=0 -> top 122px), and hover item tooltip" <|
+            \_ ->
+                let
+                    beltPotion =
+                        { index = 900
+                        , code = "hp1"
+                        , nameEn = "Lesser Healing Potion"
+                        , nameKo = "하급 치유 물약"
+                        , quality = "Normal"
+                        , container = "belt"
+                        , slotLabel = Nothing
+                        , x = 0
+                        , y = 0
+                        , width = 1
+                        , height = 1
+                        , itemLevel = 12
+                        , baseAttributes = [ "Defense: 185", "Chance to Block: 42%", "Durability: 20 of 20" ]
+                        , properties = [ "Restores 45 Life" ]
+                        , setName = Just "Sigon's Complete Steel"
+                        , setPieces = [ "Sigon's Guard" ]
+                        , pieceSetBonuses = [ { active = True, requiredCount = 2, lines = [ "+20% Increased Chance of Blocking" ] } ]
+                        , setBonuses = [ { active = False, requiredCount = 2, lines = [ "10% Life stolen per hit" ] } ]
+                        , socketedNames = [ "Perfect Diamond" ]
+                        , imageUrl = Just "/item-vectors/misc/potion/lesser_healing_potion.svg"
+                        }
+
+                    viewAModel =
+                        let
+                            base =
+                                loadedModel
+                                    |> Update.update (SwitchView ViewA)
+                                    |> Tuple.first
+                        in
+                        { base
+                            | session =
+                                Maybe.map (\s -> { s | items = beltPotion :: s.items }) base.session
+                        }
+
+                    hoveredModel =
+                        viewAModel
+                            |> Update.update (HoverItem (Just 900))
+                            |> Tuple.first
+                            |> Update.update (MoveTooltipHover 320 240 1440 900)
+                            |> Tuple.first
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view viewAModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "grid-item-900" ]
+                                    >> Query.has
+                                        [ Selector.style "top" "122px"
+                                        , Selector.tag "img"
+                                        , Selector.attribute (Html.Attributes.src "/item-vectors/misc/potion/lesser_healing_potion.svg")
+                                        ]
+                                , Query.find [ testId "grid-item-900" ]
+                                    >> Event.simulate Event.mouseEnter
+                                    >> Event.expect (HoverItem (Just 900))
+                                , Query.find [ testId "grid-item-900" ]
+                                    >> Event.simulate Event.mouseLeave
+                                    >> Event.expect (HoverItem Nothing)
+                                ]
+                    , \_ ->
+                        Workspace.view hoveredModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "view-a-containers" ]
+                                    >> Event.simulate
+                                        (Event.custom "mousemove"
+                                            (Json.Encode.object
+                                                [ ( "clientX", Json.Encode.float 320 )
+                                                , ( "clientY", Json.Encode.float 240 )
+                                                ]
+                                            )
+                                        )
+                                    >> Event.expect (MoveTooltipHover 320 240 1440 900)
+                                , Query.find [ testId "item-hover-tooltip" ]
+                                    >> Query.has
+                                        [ Selector.style "left" "336px"
+                                        , Selector.style "top" "256px"
+                                        , Selector.text "Lesser Healing Potion"
+                                        , Selector.text "Defense: 185"
+                                        , Selector.text "Chance to Block: 42%"
+                                        , Selector.text "Durability: 20 of 20"
+                                        , Selector.text "Restores 45 Life"
+                                        , Selector.text "Sigon's Complete Steel"
+                                        , Selector.text "2 ITEMS"
+                                        , Selector.text "Active"
+                                        , Selector.text "+20% Increased Chance of Blocking"
+                                        , Selector.text "2 SET"
+                                        , Selector.text "Inactive"
+                                        , Selector.text "10% Life stolen per hit"
+                                        , Selector.text "Sigon's Guard"
+                                        , Selector.text "Socketed: Perfect Diamond"
+                                        ]
+                                , \_ ->
+                                    viewAModel
+                                        |> Update.update (HoverItem (Just 900))
+                                        |> Tuple.first
+                                        |> Update.update (MoveTooltipHover 1380 860 1440 900)
+                                        |> Tuple.first
+                                        |> Workspace.view
+                                        |> Query.fromHtml
+                                        |> Query.find [ testId "item-hover-tooltip" ]
+                                        |> Query.has
+                                            [ Selector.style "right" "76px"
+                                            , Selector.style "bottom" "54px"
+                                            ]
+                                ]
                     ]
                     ()
         ]

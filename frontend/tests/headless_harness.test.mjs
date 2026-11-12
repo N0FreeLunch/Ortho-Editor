@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +64,8 @@ test("HeadlessHarness loads TESTDRUID fixture and emits Cycle 1 marquee/merc/tem
   assert.equal(loadedSnap.activeView, "ViewB");
   assert.equal(loadedSnap.mercLevel, 28);
   assert.equal(loadedSnap.mercAct, 2);
+  assert.equal(loadedSnap.mercPersistenceSupported, false);
+  assert.equal(loadedSnap.exportSupported, true);
 
   app.ports.receiveHarnessCommand.send({ kind: "SwitchView", view: "ViewA" });
   await flush();
@@ -104,7 +106,15 @@ test("HeadlessHarness loads TESTDRUID fixture and emits Cycle 1 marquee/merc/tem
     kind: "MoveMarquee",
     x: 140,
     y: 90,
-    ids: ["a1q1", "a1q2", "a1q3"],
+    ids: ["a1q1", "a1q2"],
+  });
+  await flush();
+  assert.deepEqual(snapshots.at(-1).marqueeTargets, ["a1q1", "a1q2"]);
+
+  app.ports.receiveHarnessCommand.send({
+    kind: "ExtendMarquee",
+    dragKind: "DragQuests",
+    id: "a1q3",
   });
   await flush();
   assert.deepEqual(snapshots.at(-1).marqueeTargets, ["a1q1", "a1q2", "a1q3"]);
@@ -150,18 +160,40 @@ test("HeadlessHarness also decodes amazon_10_scrolls fixture cleanly", async () 
   assert.equal(snap.decodeError, null);
 });
 
-function spawnRustHostClient() {
+function latestProjectionSrcMtimeMs() {
+  const projDir = path.join(repoRoot, "src", "projection");
+  let latest = 0;
+  for (const name of ["mod.rs", "host.rs"]) {
+    const filePath = path.join(projDir, name);
+    if (fs.existsSync(filePath)) {
+      latest = Math.max(latest, fs.statSync(filePath).mtimeMs);
+    }
+  }
+  return latest;
+}
+
+function resolveFreshHostBinary() {
   const binName = process.platform === "win32" ? "ortho_host_bridge.exe" : "ortho_host_bridge";
   const releaseBin = path.join(repoRoot, "target", "release", binName);
   const debugBin = path.join(repoRoot, "target", "debug", binName);
-  const resolvedBin = fs.existsSync(releaseBin) ? releaseBin : debugBin;
-  const usePrebuilt = fs.existsSync(resolvedBin);
-  const child = usePrebuilt
-    ? spawn(resolvedBin, [], { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"] })
-    : spawn("cargo", ["run", "--quiet", "--bin", "ortho_host_bridge"], {
-        cwd: repoRoot,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+  const candidate = fs.existsSync(releaseBin) ? releaseBin : fs.existsSync(debugBin) ? debugBin : null;
+  const srcMtime = latestProjectionSrcMtimeMs();
+
+  if (candidate && fs.statSync(candidate).mtimeMs >= srcMtime) {
+    return candidate;
+  }
+
+  execFileSync("cargo", ["build", "--release", "--bin", "ortho_host_bridge"], {
+    cwd: repoRoot,
+    env: { ...process.env, CARGO_INCREMENTAL: "0" },
+    stdio: "inherit",
+  });
+  return releaseBin;
+}
+
+function spawnRustHostClient() {
+  const resolvedBin = resolveFreshHostBinary();
+  const child = spawn(resolvedBin, [], { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"] });
 
   const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
   const waiters = [];
@@ -300,7 +332,15 @@ test("Closed-loop scenario 1: full multi-step browser journey across Elm Headles
         y: 0,
         width: 1,
         height: 1,
+        item_level: 1,
+        base_attributes: ["Defense: 15"],
         properties: ["+15 Defense"],
+        set_name: null,
+        set_pieces: [],
+        piece_set_bonuses: [],
+        set_bonuses: [],
+        socketed_names: [],
+        image_url: null,
       },
     });
     assert.equal(seeded.snap.tempCount, 1);
@@ -342,11 +382,22 @@ test("Closed-loop scenario 1: full multi-step browser journey across Elm Headles
     assert.equal(clearedBanner.snap.statusBanner, null);
     assert.equal(clearedBanner.snap.rejectionCode, null);
 
-    // 5. Merc Act + Step +5 through live Rust host
-    await driver.stepCommand({ kind: "SelectMercAct", actIndex: 5 });
-    const mercStep = await driver.stepCommand({ kind: "AdjustMercLevel", delta: 5 });
-    assert.equal(mercStep.snap.mercAct, 5);
-    assert.equal(mercStep.snap.mercLevel, 33);
+    // 5. Locked Merc Act + Step +5 are honestly rejected by Rust (`merc_persistence_not_supported`) without dirtying save
+    assert.equal(loadRes.snap.mercPersistenceSupported, false);
+    assert.equal(loadRes.snap.exportSupported, true);
+    const actLocked = await driver.stepCommand({ kind: "SelectMercAct", actIndex: 5 });
+    assert.equal(actLocked.resp.ok, false);
+    assert.equal(actLocked.snap.rejectionCode, "merc_persistence_not_supported");
+    assert.equal(actLocked.snap.dirty, false);
+    assert.equal(actLocked.snap.mercAct, loadRes.snap.mercAct);
+    await driver.stepCommand({ kind: "ClearBanner" });
+
+    const mercStepLocked = await driver.stepCommand({ kind: "AdjustMercLevel", delta: 5 });
+    assert.equal(mercStepLocked.resp.ok, false);
+    assert.equal(mercStepLocked.snap.rejectionCode, "merc_persistence_not_supported");
+    assert.equal(mercStepLocked.snap.dirty, false);
+    assert.equal(mercStepLocked.snap.mercLevel, loadRes.snap.mercLevel);
+    await driver.stepCommand({ kind: "ClearBanner" });
 
     // 6. Green Marquee quest activation in Hell -> dirty=true
     await driver.stepCommand({ kind: "TogglePaintMode", mode: "Activate" });

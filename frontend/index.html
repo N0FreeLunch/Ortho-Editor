@@ -44,9 +44,18 @@
       function deliverEnvelope(envelope) {
         if (envelope && app.ports && app.ports.receiveSessionEnvelope) {
           app.ports.receiveSessionEnvelope.send(envelope);
-          const name = envelope.session && envelope.session.fixture_label;
-          if (name && activeFileEl) {
-            activeFileEl.textContent = name;
+          const session = envelope.session;
+          if (session && activeFileEl && session.fixture_label) {
+            activeFileEl.textContent = session.fixture_label;
+          }
+          if (exportBtn) {
+            if (session) {
+              exportBtn.disabled = session.export_supported === false;
+              exportBtn.title = session.export_unsupported_reason || "Export modified .d2s save";
+            } else {
+              exportBtn.disabled = true;
+              exportBtn.title = "Load a save file first";
+            }
           }
         }
       }

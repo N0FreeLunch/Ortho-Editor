@@ -3,28 +3,37 @@ module State.UiState exposing
     , FocusedInput
     , MarqueeSelection
     , PaintMode(..)
+    , StashTab(..)
+    , ThemeMode(..)
     , UiState
     , ViewTab(..)
     , beginFocusInput
     , beginMarquee
     , clearFocusInput
     , clearMarquee
+    , extendMarquee
     , init
     , setContainerFilter
+    , setHoverMousePos
+    , setHoveredItem
     , setPaintMode
     , setProgressionDifficulty
     , setSelectedItem
+    , setSkillTreeTab
+    , setStashTab
     , setStatusBanner
     , setView
+    , toggleCombatLab
     , togglePaintMode
+    , toggleTheme
     , updateFocusInput
     , updateMarquee
     )
 
 import Generated.Protocol exposing (DifficultyMode(..))
 
-{-| Ephemeral UI state owned exclusively by Elm (tabs, progression inspection tab,
-paint mode, marquee box coordinates, selected item highlight, container filter).
+{-| Ephemeral UI state owned exclusively by Elm (tabs, theme, stash tab preview,
+progression difficulty, paint mode, marquee coordinates, selected item, filter).
 Domain state and game rules never live here.
 -}
 
@@ -32,6 +41,16 @@ Domain state and game rules never live here.
 type ViewTab
     = ViewA
     | ViewB
+
+
+type ThemeMode
+    = Dark
+    | Light
+
+
+type StashTab
+    = PersonalStash
+    | SharedStash Int
 
 
 type PaintMode
@@ -63,32 +82,44 @@ type alias FocusedInput =
 
 type alias UiState =
     { activeView : ViewTab
+    , theme : ThemeMode
+    , activeStashTab : StashTab
     , progressionDifficulty : DifficultyMode
     , paintMode : Maybe PaintMode
     , marquee : Maybe MarqueeSelection
     , selectedContainerFilter : String
     , selectedItemIndex : Maybe Int
+    , hoveredItemIndex : Maybe Int
+    , hoverMousePos : Maybe { x : Int, y : Int, vw : Int, vh : Int }
     , statusBanner : Maybe String
     , focusedInput : Maybe FocusedInput
+    , combatLabOpen : Bool
+    , skillTreeTab : String
     }
 
 
 init : UiState
 init =
     { activeView = ViewB
+    , theme = Dark
+    , activeStashTab = PersonalStash
     , progressionDifficulty = Normal
     , paintMode = Nothing
     , marquee = Nothing
     , selectedContainerFilter = "all"
     , selectedItemIndex = Nothing
+    , hoveredItemIndex = Nothing
+    , hoverMousePos = Nothing
     , statusBanner = Nothing
     , focusedInput = Nothing
+    , combatLabOpen = False
+    , skillTreeTab = "tree0"
     }
 
 
 setView : ViewTab -> UiState -> UiState
 setView tab ui =
-    { ui | activeView = tab }
+    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing }
 
 
 setProgressionDifficulty : DifficultyMode -> UiState -> UiState
@@ -149,6 +180,28 @@ updateMarquee x y ids ui =
             }
 
 
+extendMarquee : DragKind -> String -> UiState -> UiState
+extendMarquee kind candidateId ui =
+    case ui.marquee of
+        Nothing ->
+            ui
+
+        Just box ->
+            if box.kind /= kind then
+                ui
+
+            else
+                let
+                    nextIds =
+                        if List.member candidateId box.candidateIds then
+                            box.candidateIds
+
+                        else
+                            box.candidateIds ++ [ candidateId ]
+                in
+                { ui | marquee = Just { box | candidateIds = nextIds } }
+
+
 clearMarquee : UiState -> UiState
 clearMarquee ui =
     { ui | marquee = Nothing }
@@ -187,3 +240,50 @@ updateFocusInput raw ui =
 clearFocusInput : UiState -> UiState
 clearFocusInput ui =
     { ui | focusedInput = Nothing }
+
+
+toggleTheme : UiState -> UiState
+toggleTheme ui =
+    { ui
+        | theme =
+            case ui.theme of
+                Dark ->
+                    Light
+
+                Light ->
+                    Dark
+    }
+
+
+setStashTab : StashTab -> UiState -> UiState
+setStashTab tab ui =
+    { ui | activeStashTab = tab }
+
+
+toggleCombatLab : UiState -> UiState
+toggleCombatLab ui =
+    { ui | combatLabOpen = not ui.combatLabOpen }
+
+
+setSkillTreeTab : String -> UiState -> UiState
+setSkillTreeTab treeId ui =
+    { ui | skillTreeTab = treeId }
+
+
+setHoveredItem : Maybe Int -> UiState -> UiState
+setHoveredItem maybeIdx ui =
+    { ui
+        | hoveredItemIndex = maybeIdx
+        , hoverMousePos =
+            case maybeIdx of
+                Nothing ->
+                    Nothing
+
+                Just _ ->
+                    ui.hoverMousePos
+    }
+
+
+setHoverMousePos : Int -> Int -> Int -> Int -> UiState -> UiState
+setHoverMousePos x y vw vh ui =
+    { ui | hoverMousePos = Just { x = x, y = y, vw = vw, vh = vh } }
