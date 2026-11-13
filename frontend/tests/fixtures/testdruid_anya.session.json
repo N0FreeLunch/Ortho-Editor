@@ -501,7 +501,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_medium3.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 1,
@@ -529,7 +535,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_medium1.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 2,
@@ -556,7 +568,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/amulet/amulet3.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 3,
@@ -629,7 +647,13 @@
       ],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring5.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 4,
@@ -654,7 +678,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/gem/perfect_diamond4.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 5,
@@ -682,7 +712,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/gem/perfect_diamond5.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 6,
@@ -709,7 +745,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_small2.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 7,
@@ -736,7 +778,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_small1.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 8,
@@ -761,7 +809,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 9,
@@ -786,7 +840,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 10,
@@ -813,7 +873,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring5.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 11,
@@ -840,7 +906,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_small1.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 12,
@@ -876,7 +948,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/helmet/mask.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 13,
@@ -904,7 +982,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/amulet/amulet1.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 14,
@@ -934,7 +1018,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 15,
@@ -962,7 +1052,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 16,
@@ -998,7 +1094,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/boot/heavy_boots.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 17,
@@ -1032,7 +1134,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/glove/heavy_gloves.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 18,
@@ -1066,7 +1174,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/belt/girdle_h.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 19,
@@ -1091,7 +1205,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 20,
@@ -1116,7 +1236,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 21,
@@ -1141,7 +1267,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 22,
@@ -1166,7 +1298,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 23,
@@ -1191,7 +1329,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 24,
@@ -1228,7 +1372,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/spear/razortine.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 25,
@@ -1266,7 +1416,13 @@
         "Perfect Sapphire"
       ],
       "image_url": "/item-vectors/armor/armor/breast_plate.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 26,
@@ -1291,7 +1447,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 27,
@@ -1314,7 +1476,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/stamina_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 28,
@@ -1339,7 +1507,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/book/identify_book.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 29,
@@ -1365,7 +1539,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 30,
@@ -1390,7 +1570,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 31,
@@ -1415,7 +1601,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/light_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 32,
@@ -1440,7 +1632,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 33,
@@ -1465,7 +1663,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 34,
@@ -1490,7 +1694,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 35,
@@ -1513,7 +1723,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/quest/horadric_cube.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 36,
@@ -1538,7 +1754,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 37,
@@ -1563,7 +1785,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 38,
@@ -1588,7 +1816,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 39,
@@ -1613,7 +1847,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_mana_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 40,
@@ -1638,7 +1878,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/book/town_portal_book.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 41,
@@ -1674,7 +1920,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/mace/mace.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 42,
@@ -1711,7 +1963,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/shield/tower_shield.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     }
   ],
   "merc_items": [
@@ -1743,7 +2001,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/armor/chain_mail.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 1,
@@ -1771,7 +2035,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/helmet/helm.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 2,
@@ -1805,7 +2075,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/spear/trident.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     }
   ],
   "temp_items": [],

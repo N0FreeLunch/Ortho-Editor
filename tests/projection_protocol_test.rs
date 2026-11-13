@@ -209,6 +209,12 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         socketed_names: vec![],
         image_url: None,
         is_belt_consumable: false,
+        detailed_properties: vec![],
+        defense: None,
+        current_durability: None,
+        max_durability: None,
+        quantity: None,
+        is_ethereal: false,
     });
     let projected = session.project();
     assert!(

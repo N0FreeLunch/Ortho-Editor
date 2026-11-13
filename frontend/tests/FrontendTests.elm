@@ -135,7 +135,13 @@ sampleSessionJson =
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
             "socketed_names": [],
             "image_url": "/item-vectors/misc/ring/ring.svg",
-            "is_belt_consumable": false
+            "is_belt_consumable": false,
+            "detailed_properties": [],
+            "defense": null,
+            "current_durability": null,
+            "max_durability": null,
+            "quantity": null,
+            "is_ethereal": false
           }
         ],
         "merc_items": [
@@ -149,7 +155,13 @@ sampleSessionJson =
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
             "socketed_names": ["Ral Rune", "Tir Rune", "Tal Rune", "Sol Rune"],
             "image_url": null,
-            "is_belt_consumable": false
+            "is_belt_consumable": false,
+            "detailed_properties": [],
+            "defense": null,
+            "current_durability": null,
+            "max_durability": null,
+            "quantity": null,
+            "is_ethereal": false
           }
         ],
         "temp_items": [
@@ -163,7 +175,13 @@ sampleSessionJson =
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
             "socketed_names": [],
             "image_url": null,
-            "is_belt_consumable": false
+            "is_belt_consumable": false,
+            "detailed_properties": [],
+            "defense": null,
+            "current_durability": null,
+            "max_durability": null,
+            "quantity": null,
+            "is_ethereal": false
           }
         ],
         "selected_move_item_index": null,
@@ -969,6 +987,12 @@ suite =
                         , socketedNames = [ "Perfect Diamond" ]
                         , imageUrl = Just "/item-vectors/misc/potion/lesser_healing_potion.svg"
                         , isBeltConsumable = True
+                        , detailedProperties = []
+                        , defense = Nothing
+                        , currentDurability = Nothing
+                        , maxDurability = Nothing
+                        , quantity = Nothing
+                        , isEthereal = False
                         }
 
                     viewAModel =
@@ -1111,6 +1135,12 @@ suite =
                                 , socketedNames = []
                                 , imageUrl = Nothing
                                 , isBeltConsumable = True
+                                , detailedProperties = []
+                                , defense = Nothing
+                                , currentDurability = Nothing
+                                , maxDurability = Nothing
+                                , quantity = Nothing
+                                , isEthereal = False
                                 }
                         in
                         { base
@@ -1296,6 +1326,12 @@ suite =
                         , socketedNames = []
                         , imageUrl = Nothing
                         , isBeltConsumable = False
+                        , detailedProperties = []
+                        , defense = Nothing
+                        , currentDurability = Nothing
+                        , maxDurability = Nothing
+                        , quantity = Nothing
+                        , isEthereal = False
                         }
 
                     baseViewA =

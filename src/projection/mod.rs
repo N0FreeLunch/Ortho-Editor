@@ -368,6 +368,17 @@ pub enum ShopSpawnTarget {
     SpawnTempInventory,
 }
 
+/// Structured property detail projected for the Item Studio Inspector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct ItemPropertyView {
+    pub stat_id: i32,
+    pub name: String,
+    pub value: i32,
+    pub param: i32,
+    pub min_value: i32,
+    pub max_value: i32,
+}
+
 /// Projected item summary for View A container grids and View B mercenary slots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct ItemCardView {
@@ -387,6 +398,18 @@ pub struct ItemCardView {
     #[serde(default)]
     pub base_attributes: Vec<String>,
     pub properties: Vec<String>,
+    #[serde(default)]
+    pub detailed_properties: Vec<ItemPropertyView>,
+    #[serde(default)]
+    pub defense: Option<i32>,
+    #[serde(default)]
+    pub current_durability: Option<i32>,
+    #[serde(default)]
+    pub max_durability: Option<i32>,
+    #[serde(default)]
+    pub quantity: Option<i32>,
+    #[serde(default)]
+    pub is_ethereal: bool,
     #[serde(default)]
     pub set_name: Option<String>,
     #[serde(default)]
@@ -539,6 +562,19 @@ pub enum UiIntent {
     SpawnShopItem {
         catalog_id: String,
         target_container: ShopSpawnTarget,
+    },
+    MutateItemBase {
+        item_index: i32,
+        defense: Option<i32>,
+        current_durability: Option<i32>,
+        max_durability: Option<i32>,
+        quantity: Option<i32>,
+        is_ethereal: Option<bool>,
+    },
+    MutateItemProperty {
+        item_index: i32,
+        stat_id: i32,
+        delta: i32,
     },
 }
 
@@ -1142,6 +1178,8 @@ impl EditorSession {
                 | UiIntent::AdjustSkillRank { .. }
                 | UiIntent::ResetSkills
                 | UiIntent::SpawnShopItem { .. }
+                | UiIntent::MutateItemBase { .. }
+                | UiIntent::MutateItemProperty { .. }
         );
         let pre_snapshot = if mutates_history {
             Some(self.capture_snapshot())
@@ -1507,6 +1545,26 @@ impl EditorSession {
                 catalog_id,
                 target_container,
             } => self.apply_spawn_shop_item(&catalog_id, target_container),
+            UiIntent::MutateItemBase {
+                item_index,
+                defense,
+                current_durability,
+                max_durability,
+                quantity,
+                is_ethereal,
+            } => self.apply_mutate_item_base(
+                item_index,
+                defense,
+                current_durability,
+                max_durability,
+                quantity,
+                is_ethereal,
+            ),
+            UiIntent::MutateItemProperty {
+                item_index,
+                stat_id,
+                delta,
+            } => self.apply_mutate_item_property(item_index, stat_id, delta),
         }
     }
 
@@ -1574,6 +1632,192 @@ impl EditorSession {
             card.index = new_i as i32;
         }
         self.selected_move_item_index = None;
+        self.has_item_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn apply_mutate_item_base(
+        &mut self,
+        item_index: i32,
+        defense: Option<i32>,
+        current_durability: Option<i32>,
+        max_durability: Option<i32>,
+        quantity: Option<i32>,
+        is_ethereal: Option<bool>,
+    ) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
+            })?;
+
+        let (item, container) = &mut self.player_items_with_container[idx];
+        let container_kind = ContainerKind::from_item_container(*container);
+        item.bits.clear();
+
+        if let Some(def) = defense {
+            if def < 0 {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "defense_out_of_range",
+                    format!("Defense must be non-negative (got {def})."),
+                )
+                .with_target("item_defense")
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+            }
+            item.defense = Some(def as u32);
+            item.body.defense = Some(def as u32);
+        }
+
+        if let Some(max_dur) = max_durability {
+            if max_dur < 1 {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "max_durability_out_of_range",
+                    format!("Max durability must be at least 1 (got {max_dur})."),
+                )
+                .with_target("item_max_durability")
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+            }
+            item.max_durability = Some(max_dur as u32);
+            item.body.max_durability = Some(max_dur as u32);
+            if let Some(cur) = item.current_durability {
+                if cur > max_dur as u32 {
+                    item.current_durability = Some(max_dur as u32);
+                    item.body.current_durability = Some(max_dur as u32);
+                }
+            }
+        }
+
+        if let Some(cur_dur) = current_durability {
+            if cur_dur < 0 {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "durability_out_of_range",
+                    format!("Durability cannot be negative (got {cur_dur})."),
+                )
+                .with_target("item_durability")
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+            }
+            let max_bound = item.max_durability.unwrap_or(255);
+            let clamped = (cur_dur as u32).min(max_bound);
+            item.current_durability = Some(clamped);
+            item.body.current_durability = Some(clamped);
+        }
+
+        if let Some(qty) = quantity {
+            if qty < 1 {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "quantity_out_of_range",
+                    format!("Quantity must be at least 1 (got {qty})."),
+                )
+                .with_target("item_quantity")
+                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+            }
+            item.quantity = Some(qty as u32);
+        }
+
+        if let Some(eth) = is_ethereal {
+            item.header.is_ethereal = eth;
+            if eth {
+                item.header.flags |= 1 << 22; // ETHEREAL_FLAG_BIT
+            } else {
+                item.header.flags &= !(1 << 22);
+            }
+        }
+
+        let new_card = build_item_card(
+            item_index,
+            item,
+            self.char_level,
+            0,
+            container_kind,
+            self.item_cards.get(idx).and_then(|c| c.slot_label.clone()),
+            self.item_cards.get(idx).map_or(0, |c| c.x),
+            self.item_cards.get(idx).map_or(0, |c| c.y),
+        );
+        self.item_cards[idx] = new_card;
+
+        self.has_item_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn apply_mutate_item_property(
+        &mut self,
+        item_index: i32,
+        stat_id: i32,
+        delta: i32,
+    ) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
+            })?;
+
+        let (item, container) = &mut self.player_items_with_container[idx];
+        let container_kind = ContainerKind::from_item_container(*container);
+        item.bits.clear();
+
+        let stat_u32 = stat_id as u32;
+        let mut matched = false;
+
+        for prop in &mut item.properties {
+            if prop.stat_id == stat_u32 {
+                let new_val = prop.value + delta;
+                prop.value = new_val;
+                prop.raw_value = new_val;
+                matched = true;
+                break;
+            }
+        }
+
+        // Also synchronize item.stats.properties so that both alias vectors remain identical
+        for prop in &mut item.stats.properties {
+            if prop.stat_id == stat_u32 {
+                let new_val = prop.value + delta;
+                prop.value = new_val;
+                prop.raw_value = new_val;
+                matched = true;
+                break;
+            }
+        }
+
+        if !matched {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_not_found_on_item",
+                format!("Stat ID {stat_id} does not exist on item index {item_index}."),
+            )
+            .with_target(format!("stat_{stat_id}")));
+        }
+
+        let new_card = build_item_card(
+            item_index,
+            item,
+            self.char_level,
+            0,
+            container_kind,
+            self.item_cards.get(idx).and_then(|c| c.slot_label.clone()),
+            self.item_cards.get(idx).map_or(0, |c| c.x),
+            self.item_cards.get(idx).map_or(0, |c| c.y),
+        );
+        self.item_cards[idx] = new_card;
+
         self.has_item_edits = true;
         self.dirty = true;
         Ok(())
@@ -2453,6 +2697,20 @@ fn build_item_card(
             })
             .collect()
     };
+    let detailed_properties = item
+        .properties
+        .iter()
+        .chain(item.stats.properties.iter())
+        .map(|p| ItemPropertyView {
+            stat_id: p.stat_id as i32,
+            name: p.name.clone(),
+            value: p.value,
+            param: p.param as i32,
+            min_value: -10000,
+            max_value: 10000,
+        })
+        .collect();
+
     ItemCardView {
         index,
         code: item.code.trim().to_string(),
@@ -2468,6 +2726,12 @@ fn build_item_card(
         item_level: i32::from(en.level),
         base_attributes: en.base_attributes,
         properties: en.properties,
+        detailed_properties,
+        defense: item.defense.map(|d| d as i32),
+        current_durability: item.current_durability.map(|d| d as i32),
+        max_durability: item.max_durability.map(|d| d as i32),
+        quantity: item.quantity.map(|q| q as i32),
+        is_ethereal: item.header.is_ethereal,
         set_name: en.set_name,
         set_pieces: en.set_pieces,
         piece_set_bonuses: map_bonuses(en.piece_set_bonuses),
@@ -3011,6 +3275,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             WaypointCatalogEntryView,
             ProgressionSummaryView,
             SetBonusView,
+            ItemPropertyView,
             ItemCardView,
             AllowedMoveTargetView,
             SkillNodeView,

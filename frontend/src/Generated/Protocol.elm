@@ -201,6 +201,8 @@ type UiIntent
     | AdjustSkillRank { skillId : Int, delta : Int }
     | ResetSkills
     | SpawnShopItem { catalogId : String, targetContainer : ShopSpawnTarget }
+    | MutateItemBase { itemIndex : Int, defense : Maybe (Int), currentDurability : Maybe (Int), maxDurability : Maybe (Int), quantity : Maybe (Int), isEthereal : Maybe (Bool) }
+    | MutateItemProperty { itemIndex : Int, statId : Int, delta : Int }
 
 
 uiIntentEncoder : UiIntent -> Json.Encode.Value
@@ -250,6 +252,10 @@ uiIntentEncoder enum =
             Json.Encode.string "ResetSkills"
         SpawnShopItem { catalogId, targetContainer } ->
             Json.Encode.object [ ( "SpawnShopItem", Json.Encode.object [ ( "catalog_id", (Json.Encode.string) catalogId ), ( "target_container", (shopSpawnTargetEncoder) targetContainer ) ] ) ]
+        MutateItemBase { itemIndex, defense, currentDurability, maxDurability, quantity, isEthereal } ->
+            Json.Encode.object [ ( "MutateItemBase", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "defense", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) defense ), ( "current_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) currentDurability ), ( "max_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) maxDurability ), ( "quantity", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) quantity ), ( "is_ethereal", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.bool)) isEthereal ) ] ) ]
+        MutateItemProperty { itemIndex, statId, delta } ->
+            Json.Encode.object [ ( "MutateItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "delta", (Json.Encode.int) delta ) ] ) ]
 
 difficultyModeDecoder : Json.Decode.Decoder DifficultyMode
 difficultyModeDecoder = 
@@ -818,6 +824,27 @@ setBonusViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "lines" (Json.Decode.list (Json.Decode.string))))
 
 
+type alias ItemPropertyView =
+    { statId : Int
+    , name : String
+    , value : Int
+    , param : Int
+    , minValue : Int
+    , maxValue : Int
+    }
+
+
+itemPropertyViewDecoder : Json.Decode.Decoder ItemPropertyView
+itemPropertyViewDecoder =
+    Json.Decode.succeed ItemPropertyView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_id" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "value" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "min_value" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "max_value" (Json.Decode.int)))
+
+
 type alias ItemCardView =
     { index : Int
     , code : String
@@ -833,6 +860,12 @@ type alias ItemCardView =
     , itemLevel : Int
     , baseAttributes : List (String)
     , properties : List (String)
+    , detailedProperties : List (ItemPropertyView)
+    , defense : Maybe (Int)
+    , currentDurability : Maybe (Int)
+    , maxDurability : Maybe (Int)
+    , quantity : Maybe (Int)
+    , isEthereal : Bool
     , setName : Maybe (String)
     , setPieces : List (String)
     , pieceSetBonuses : List (SetBonusView)
@@ -860,6 +893,12 @@ itemCardViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "item_level" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "base_attributes" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "properties" (Json.Decode.list (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "detailed_properties" (Json.Decode.list (itemPropertyViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "defense" (Json.Decode.nullable (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "current_durability" (Json.Decode.nullable (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "max_durability" (Json.Decode.nullable (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "quantity" (Json.Decode.nullable (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "is_ethereal" (Json.Decode.bool)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_name" (Json.Decode.nullable (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_pieces" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "piece_set_bonuses" (Json.Decode.list (setBonusViewDecoder))))

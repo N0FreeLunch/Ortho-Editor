@@ -1161,6 +1161,7 @@ viewSelectedItemInspectorAndBrowser ui session =
                                     ++ String.fromInt item.height
                                 )
                             ]
+                        , viewItemMutationControls item
                         , if List.isEmpty item.baseAttributes then
                             text ""
 
@@ -1191,6 +1192,84 @@ viewSelectedItemInspectorAndBrowser ui session =
                 ]
             ]
         ]
+
+
+viewItemMutationControls : ItemCardView -> Html Msg
+viewItemMutationControls item =
+    let
+        baseControls =
+            [ case item.defense of
+                Just def ->
+                    div [ class "stat-chip", attribute "data-testid" "inspector-defense-control" ]
+                        [ span [ class "stat-label" ] [ text "Def" ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-def-dec", onClick (MutateItemBase item.index (Just (max 0 (def - 10))) Nothing Nothing Nothing Nothing) ] [ text "-" ]
+                        , span [ class "stat-val" ] [ text (String.fromInt def) ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-def-inc", onClick (MutateItemBase item.index (Just (def + 10)) Nothing Nothing Nothing Nothing) ] [ text "+" ]
+                        ]
+
+                Nothing ->
+                    text ""
+            , case ( item.currentDurability, item.maxDurability ) of
+                ( Just cur, Just maxD ) ->
+                    div [ class "stat-chip", attribute "data-testid" "inspector-durability-control" ]
+                        [ span [ class "stat-label" ] [ text "Dur" ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-dur-dec", onClick (MutateItemBase item.index Nothing (Just (max 0 (cur - 5))) Nothing Nothing Nothing) ] [ text "-" ]
+                        , span [ class "stat-val" ] [ text (String.fromInt cur ++ "/" ++ String.fromInt maxD) ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-dur-inc", onClick (MutateItemBase item.index Nothing (Just (min maxD (cur + 5))) Nothing Nothing Nothing) ] [ text "+" ]
+                        ]
+
+                _ ->
+                    text ""
+            , case item.quantity of
+                Just qty ->
+                    div [ class "stat-chip", attribute "data-testid" "inspector-quantity-control" ]
+                        [ span [ class "stat-label" ] [ text "Qty" ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-qty-dec", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (max 1 (qty - 10))) Nothing) ] [ text "-" ]
+                        , span [ class "stat-val" ] [ text (String.fromInt qty) ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-qty-inc", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 10)) Nothing) ] [ text "+" ]
+                        ]
+
+                Nothing ->
+                    text ""
+            , button
+                [ classList [ ( "seg-btn", True ), ( "is-active", item.isEthereal ) ]
+                , attribute "data-testid" "btn-toggle-ethereal"
+                , onClick (MutateItemBase item.index Nothing Nothing Nothing Nothing (Just (not item.isEthereal)))
+                ]
+                [ text
+                    (if item.isEthereal then
+                        "Ethereal (Yes)"
+
+                     else
+                        "Ethereal (No)"
+                    )
+                ]
+            ]
+
+        propertyControls =
+            if List.isEmpty item.detailedProperties then
+                []
+
+            else
+                [ div [ class "inspector-stat-section", attribute "data-testid" "inspector-detailed-properties" ]
+                    [ div [ class "meta-line" ] [ text "Tune item properties:" ]
+                    , div [ class "prop-stepper-grid" ]
+                        (List.map
+                            (\p ->
+                                div [ class "prop-stepper-row", attribute "data-testid" ("prop-row-" ++ String.fromInt p.statId) ]
+                                    [ span [ class "prop-name" ] [ text p.name ]
+                                    , button [ class "btn-inline-step", attribute "data-testid" ("btn-prop-dec-" ++ String.fromInt p.statId), onClick (MutateItemProperty item.index p.statId -1) ] [ text "-1" ]
+                                    , span [ class "prop-val" ] [ text (String.fromInt p.value) ]
+                                    , button [ class "btn-inline-step", attribute "data-testid" ("btn-prop-inc-" ++ String.fromInt p.statId), onClick (MutateItemProperty item.index p.statId 1) ] [ text "+1" ]
+                                    ]
+                            )
+                            item.detailedProperties
+                        )
+                    ]
+                ]
+    in
+    div [ class "inspector-controls-wrapper", attribute "data-testid" "inspector-controls" ]
+        (div [ class "stat-summary-bar", style "margin" "8px 0" ] baseControls :: propertyControls)
 
 
 countBadge : String -> Int -> Html Msg

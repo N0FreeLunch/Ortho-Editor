@@ -449,7 +449,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 1,
@@ -474,7 +480,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 2,
@@ -499,7 +511,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 3,
@@ -524,7 +542,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/lesser_healing_potion.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 4,
@@ -547,7 +571,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 5,
@@ -570,7 +600,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 6,
@@ -593,7 +629,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 7,
@@ -616,7 +658,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 8,
@@ -639,7 +687,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 9,
@@ -662,7 +716,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 10,
@@ -685,7 +745,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 11,
@@ -708,7 +774,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 12,
@@ -731,7 +803,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 13,
@@ -754,7 +832,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/scroll/town_portal_scroll.svg",
-      "is_belt_consumable": true
+      "is_belt_consumable": true,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 14,
@@ -782,7 +866,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/javelin/javelin.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     },
     {
       "index": 15,
@@ -811,7 +901,13 @@
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/shield/buckler.svg",
-      "is_belt_consumable": false
+      "is_belt_consumable": false,
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false
     }
   ],
   "merc_items": [],

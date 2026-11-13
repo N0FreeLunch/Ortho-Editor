@@ -285,7 +285,7 @@ function createClosedLoopDriver() {
     },
     async exportAndReload(label) {
       const exported = await host.send({ cmd: "export_save_hex" });
-      assert.equal(exported.ok, true);
+      assert.equal(exported.ok, true, `Export failed: ${exported.error?.message || JSON.stringify(exported)}`);
       assert.ok(exported.export_hex && exported.export_byte_len > 100);
       const reloaded = await host.send({
         cmd: "load_save_hex",
@@ -541,6 +541,86 @@ test("Closed-loop scenario 3: focusedInput draft isolation, Rust boundary reject
     assert.equal(reloadedSnap.goldStash, 1234567);
     assert.equal(reloadedSnap.charName, "OrthoDruid");
     assert.equal(reloadedSnap.itemCount, initialItems);
+  } finally {
+    await driver.close();
+  }
+});
+
+test("Closed-loop scenario 4: Item Studio property inspector & stat mutation engine", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    assert.equal(loadRes.snap.hasSession, true);
+
+    // Switch to View A (Items workbench)
+    await driver.stepCommand({ kind: "SwitchView", view: "ViewA" });
+
+    // 1. Select an item (Index 0: cm2 charm)
+    const sel = await driver.stepCommand({ kind: "SelectItem", index: 0 });
+    assert.equal(sel.snap.selectedItemIndex, 0);
+
+    // 2. Mutate Base Stat (Ethereal flag toggle: false -> true)
+    const ethMutate = await driver.stepCommand({
+      kind: "MutateItemBase",
+      itemIndex: 0,
+      defense: null,
+      currentDurability: null,
+      maxDurability: null,
+      quantity: null,
+      isEthereal: true,
+    });
+    assert.equal(ethMutate.resp.ok, true);
+    assert.equal(ethMutate.snap.dirty, true);
+    assert.equal(ethMutate.snap.canUndo, true);
+
+    // 3. Mutate Item Property (+2 to Dexterity, stat_id = 2, delta = +3 -> 5)
+    const propMutate = await driver.stepCommand({
+      kind: "MutateItemProperty",
+      itemIndex: 0,
+      statId: 2,
+      delta: 3,
+    });
+    assert.equal(propMutate.resp.ok, true);
+    assert.equal(propMutate.snap.dirty, true);
+
+    // 4. Test Undo functionality: Undo property mutation, then undo ethereal mutation
+    const undoProp = await driver.stepCommand({ kind: "Undo" });
+    assert.equal(undoProp.resp.ok, true);
+    assert.equal(undoProp.snap.canRedo, true);
+
+    const undoEth = await driver.stepCommand({ kind: "Undo" });
+    assert.equal(undoEth.resp.ok, true);
+
+    // 5. Redo back both mutations
+    const redoEth = await driver.stepCommand({ kind: "Redo" });
+    assert.equal(redoEth.resp.ok, true);
+
+    const redoProp = await driver.stepCommand({ kind: "Redo" });
+    assert.equal(redoProp.resp.ok, true);
+
+    // 6. Attempt mutating a non-existent stat to verify ActionRejection
+    const rejectMutate = await driver.stepCommand({
+      kind: "MutateItemProperty",
+      itemIndex: 0,
+      statId: 9999,
+      delta: 1,
+    });
+    assert.equal(rejectMutate.resp.ok, false);
+    assert.equal(rejectMutate.snap.rejectionCode, "stat_not_found_on_item");
+    assert.equal(rejectMutate.snap.hasToast, true);
+
+    // 7. Dismiss rejection toast
+    const dismissed = await driver.stepCommand({ kind: "DismissToast" });
+    assert.equal(dismissed.snap.hasToast, false);
+
+    // 8. Export checksum-valid .d2s and reload into fresh session to verify roundtrip
+    const { snap: reloadedSnap } = await driver.exportAndReload("scenario4-item-mutation-loopback.d2s");
+    assert.equal(reloadedSnap.dirty, false);
+    assert.equal(reloadedSnap.charName, "TESTDRUID");
   } finally {
     await driver.close();
   }

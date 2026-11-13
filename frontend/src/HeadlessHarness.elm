@@ -242,6 +242,27 @@ commandDecoder =
                     "TriggerToastUndo" ->
                         Json.Decode.succeed TriggerToastUndo
 
+                    "Undo" ->
+                        Json.Decode.succeed ClickUndo
+
+                    "Redo" ->
+                        Json.Decode.succeed ClickRedo
+
+                    "MutateItemBase" ->
+                        Json.Decode.map6 MutateItemBase
+                            (Json.Decode.field "itemIndex" Json.Decode.int)
+                            (Json.Decode.maybe (Json.Decode.field "defense" Json.Decode.int))
+                            (Json.Decode.maybe (Json.Decode.field "currentDurability" Json.Decode.int))
+                            (Json.Decode.maybe (Json.Decode.field "maxDurability" Json.Decode.int))
+                            (Json.Decode.maybe (Json.Decode.field "quantity" Json.Decode.int))
+                            (Json.Decode.maybe (Json.Decode.field "isEthereal" Json.Decode.bool))
+
+                    "MutateItemProperty" ->
+                        Json.Decode.map3 MutateItemProperty
+                            (Json.Decode.field "itemIndex" Json.Decode.int)
+                            (Json.Decode.field "statId" Json.Decode.int)
+                            (Json.Decode.field "delta" Json.Decode.int)
+
                     other ->
                         Json.Decode.fail ("Unknown harness command: " ++ other)
             )
@@ -441,6 +462,16 @@ emitSnapshot model =
                 |> Maybe.map (.items >> List.length >> Json.Encode.int)
                 |> Maybe.withDefault Json.Encode.null
 
+        canUndoValue =
+            model.session
+                |> Maybe.map (.canUndo >> Json.Encode.bool)
+                |> Maybe.withDefault (Json.Encode.bool False)
+
+        canRedoValue =
+            model.session
+                |> Maybe.map (.canRedo >> Json.Encode.bool)
+                |> Maybe.withDefault (Json.Encode.bool False)
+
         focusedKeyValue =
             model.ui.focusedInput
                 |> Maybe.map (.key >> Json.Encode.string)
@@ -457,6 +488,8 @@ emitSnapshot model =
             , ( "charName", charNameValue )
             , ( "charLevel", charLevelValue )
             , ( "dirty", dirtyValue )
+            , ( "canUndo", canUndoValue )
+            , ( "canRedo", canRedoValue )
             , ( "activeView", Json.Encode.string activeViewName )
             , ( "paintMode", paintModeValue )
             , ( "marqueeTargets", marqueeTargetsValue )

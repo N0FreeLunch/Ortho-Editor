@@ -84,6 +84,8 @@ type Msg
     | ClickSpawnShopItem String
     | DismissToast
     | TriggerToastUndo
+    | MutateItemBase Int (Maybe Int) (Maybe Int) (Maybe Int) (Maybe Int) (Maybe Bool)
+    | MutateItemProperty Int Int Int
 
 
 type OutMsg
@@ -435,6 +437,31 @@ update msg model =
 
         TriggerToastUndo ->
             ( { model | ui = UiState.clearToast model.ui }, EmitIntent Protocol.Undo )
+
+        MutateItemBase itemIndex defense currentDurability maxDurability quantity isEthereal ->
+            ( model
+            , EmitIntent
+                (Protocol.MutateItemBase
+                    { itemIndex = itemIndex
+                    , defense = defense
+                    , currentDurability = currentDurability
+                    , maxDurability = maxDurability
+                    , quantity = quantity
+                    , isEthereal = isEthereal
+                    }
+                )
+            )
+
+        MutateItemProperty itemIndex statId delta ->
+            ( model
+            , EmitIntent
+                (Protocol.MutateItemProperty
+                    { itemIndex = itemIndex
+                    , statId = statId
+                    , delta = delta
+                    }
+                )
+            )
 
 
 characterFieldFromKey : String -> Maybe CharacterField
