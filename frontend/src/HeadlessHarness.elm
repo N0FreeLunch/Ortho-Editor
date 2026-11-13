@@ -270,6 +270,37 @@ commandDecoder =
                             (Json.Decode.field "statId" Json.Decode.int)
                             (Json.Decode.field "delta" Json.Decode.int)
 
+                    "HoverItem" ->
+                        Json.Decode.field "index" (Json.Decode.nullable Json.Decode.int)
+                            |> Json.Decode.map HoverItem
+
+                    "KeyShortcut" ->
+                        Json.Decode.map6
+                            (\k c ctrl alt meta isIn ->
+                                HandleKeyShortcut
+                                    { key = k
+                                    , code = c
+                                    , ctrlKey = ctrl
+                                    , altKey = alt
+                                    , metaKey = meta
+                                    , isInput = isIn
+                                    }
+                            )
+                            (Json.Decode.field "key" Json.Decode.string)
+                            (Json.Decode.field "code" Json.Decode.string)
+                            (Json.Decode.field "ctrlKey" Json.Decode.bool)
+                            (Json.Decode.field "altKey" Json.Decode.bool)
+                            (Json.Decode.field "metaKey" Json.Decode.bool)
+                            (Json.Decode.field "isInput" Json.Decode.bool)
+
+                    "ContextDuplicateItem" ->
+                        Json.Decode.field "itemIndex" Json.Decode.int
+                            |> Json.Decode.map ContextDuplicateItem
+
+                    "ContextDeleteItem" ->
+                        Json.Decode.field "itemIndex" Json.Decode.int
+                            |> Json.Decode.map ContextDeleteItem
+
                     other ->
                         Json.Decode.fail ("Unknown harness command: " ++ other)
             )

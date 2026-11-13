@@ -27,6 +27,16 @@ import Json.Decode
 import State.UiState as UiState exposing (DragKind(..), PaintMode(..), StashTab, UiState, ViewTab)
 
 
+type alias KeyShortcutPayload =
+    { key : String
+    , code : String
+    , ctrlKey : Bool
+    , altKey : Bool
+    , metaKey : Bool
+    , isInput : Bool
+    }
+
+
 type alias Model =
     { session : Maybe SessionView
     , ui : UiState
@@ -88,6 +98,14 @@ type Msg
     | TriggerToastUndo
     | MutateItemBase Int (Maybe Int) (Maybe Int) (Maybe Int) (Maybe Int) (Maybe Bool)
     | MutateItemProperty Int Int Int
+    | OpenActionPalette Int Int Int
+    | OpenContextMenu Int Int Int
+    | CloseItemMenu
+    | QuickMoveItem Int ContainerKind
+    | ContextEditItem Int
+    | ContextDuplicateItem Int
+    | ContextDeleteItem Int
+    | HandleKeyShortcut KeyShortcutPayload
 
 
 type OutMsg
@@ -470,6 +488,227 @@ update msg model =
                     }
                 )
             )
+
+        OpenActionPalette itemIndex x y ->
+            ( { model | ui = UiState.openActionPalette itemIndex x y model.ui }, NoOut )
+
+        OpenContextMenu itemIndex x y ->
+            ( { model | ui = UiState.openContextMenu itemIndex x y model.ui }, NoOut )
+
+        CloseItemMenu ->
+            ( { model | ui = UiState.closeItemMenu model.ui }, NoOut )
+
+        QuickMoveItem itemIndex targetContainer ->
+            ( { model | ui = UiState.closeItemMenu model.ui }
+            , EmitIntent
+                (Protocol.QuickMoveItem
+                    { itemIndex = itemIndex
+                    , targetContainer = targetContainer
+                    }
+                )
+            )
+
+        ContextEditItem itemIndex ->
+            ( { model | ui = model.ui |> UiState.setSelectedItem (Just itemIndex) |> UiState.closeItemMenu }
+            , NoOut
+            )
+
+        ContextDuplicateItem itemIndex ->
+            ( { model | ui = UiState.closeItemMenu model.ui }
+            , EmitIntent (Protocol.DuplicateItem { itemIndex = itemIndex })
+            )
+
+        ContextDeleteItem itemIndex ->
+            ( { model | ui = UiState.closeItemMenu model.ui }
+            , EmitIntent (Protocol.DeleteItem { itemIndex = itemIndex })
+            )
+
+        HandleKeyShortcut payload ->
+            handleKeyShortcut payload model
+
+
+handleKeyShortcut : KeyShortcutPayload -> Model -> ( Model, OutMsg )
+handleKeyShortcut payload model =
+    let
+        lowerKey =
+            String.toLower payload.key
+
+        isSpace =
+            payload.key == " " || payload.code == "Space"
+
+        heldIdx =
+            Maybe.andThen .selectedMoveItemIndex model.session
+    in
+    if payload.isInput then
+        ( model, NoOut )
+
+    else if payload.key == "Escape" then
+        if model.ui.itemMenu /= UiState.NoItemMenu then
+            ( { model | ui = UiState.closeItemMenu model.ui }, NoOut )
+
+        else if heldIdx /= Nothing then
+            ( { model | ui = UiState.setSelectedItem Nothing model.ui }
+            , EmitIntent (Protocol.SelectItemForMove { itemIndex = Nothing })
+            )
+
+        else
+            ( model, NoOut )
+
+    else if payload.ctrlKey && not payload.altKey && not payload.metaKey then
+        if lowerKey == "z" then
+            ( { model | ui = UiState.closeItemMenu model.ui }, EmitIntent Protocol.Undo )
+
+        else if lowerKey == "y" then
+            ( { model | ui = UiState.closeItemMenu model.ui }, EmitIntent Protocol.Redo )
+
+        else
+            ( model, NoOut )
+
+    else if not payload.ctrlKey && not payload.altKey && not payload.metaKey then
+        if isSpace then
+            case ( heldIdx, model.ui.hoveredDropTarget, model.ui.hoveredItemIndex ) of
+                ( Just idx, Just tgt, _ ) ->
+                    ( { model | ui = UiState.closeItemMenu model.ui }
+                    , EmitIntent
+                        (Protocol.MoveItem
+                            { itemIndex = idx
+                            , targetContainer = tgt.container
+                            , x = tgt.x
+                            , y = tgt.y
+                            }
+                        )
+                    )
+
+                ( Nothing, _, Just hovIdx ) ->
+                    ( { model | ui = model.ui |> UiState.setSelectedItem (Just hovIdx) |> UiState.closeItemMenu }
+                    , EmitIntent (Protocol.SelectItemForMove { itemIndex = Just hovIdx })
+                    )
+
+                _ ->
+                    ( model, NoOut )
+
+        else if lowerKey == "w" then
+            ( model, EmitIntent Protocol.ToggleWeaponSwap )
+
+        else if heldIdx == Nothing then
+            case ( model.session, model.ui.hoveredItemIndex ) of
+                ( Just session, Just hovIdx ) ->
+                    let
+                        currentContainer =
+                            (session.items ++ session.mercItems ++ session.mercReplacedItems)
+                                |> List.filter (\it -> it.index == hovIdx)
+                                |> List.head
+                                |> Maybe.map .container
+                                |> Maybe.withDefault Inventory
+
+                        maybeTarget =
+                            case lowerKey of
+                                "s" ->
+                                    Just
+                                        (if currentContainer == Stash then
+                                            Inventory
+
+                                         else
+                                            Stash
+                                        )
+
+                                "a" ->
+                                    if currentContainer == Inventory then
+                                        Nothing
+
+                                    else
+                                        Just Inventory
+
+                                "i" ->
+                                    if currentContainer == Inventory then
+                                        Nothing
+
+                                    else
+                                        Just Inventory
+
+                                "t" ->
+                                    Just
+                                        (if currentContainer == TempInventory then
+                                            Inventory
+
+                                         else
+                                            TempInventory
+                                        )
+
+                                "e" ->
+                                    Just
+                                        (if currentContainer == Equipment then
+                                            Inventory
+
+                                         else
+                                            Equipment
+                                        )
+
+                                "d" ->
+                                    Just
+                                        (if currentContainer == Equipment then
+                                            Inventory
+
+                                         else
+                                            Equipment
+                                        )
+
+                                "r" ->
+                                    Just
+                                        (if currentContainer == MercEquipment || currentContainer == MercReplaced then
+                                            Inventory
+
+                                         else
+                                            MercEquipment
+                                        )
+
+                                "m" ->
+                                    Just
+                                        (if currentContainer == MercEquipment || currentContainer == MercReplaced then
+                                            Inventory
+
+                                         else
+                                            MercEquipment
+                                        )
+
+                                "q" ->
+                                    Just
+                                        (if currentContainer == Cube then
+                                            Inventory
+
+                                         else
+                                            Cube
+                                        )
+
+                                "c" ->
+                                    Just
+                                        (if currentContainer == Cube then
+                                            Inventory
+
+                                         else
+                                            Cube
+                                        )
+
+                                _ ->
+                                    Nothing
+                    in
+                    case maybeTarget of
+                        Just dest ->
+                            ( { model | ui = UiState.closeItemMenu model.ui }
+                            , EmitIntent (Protocol.QuickMoveItem { itemIndex = hovIdx, targetContainer = dest })
+                            )
+
+                        Nothing ->
+                            ( model, NoOut )
+
+                _ ->
+                    ( model, NoOut )
+
+        else
+            ( model, NoOut )
+
+    else
+        ( model, NoOut )
 
 
 characterFieldFromKey : String -> Maybe CharacterField

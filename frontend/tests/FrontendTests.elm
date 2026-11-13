@@ -1380,7 +1380,7 @@ suite =
                                     >> Query.has [ Selector.class "is-idle" ]
                                 , Query.find [ testId "equip-slot-6" ]
                                     >> Event.simulate Event.click
-                                    >> Event.expect (SelectItem (Just 0))
+                                    >> Event.expect (OpenActionPalette 0 240 180)
                                 ]
                     , \_ ->
                         let
@@ -1584,7 +1584,7 @@ suite =
                                     >> Event.expect (SelectMercAct 1)
                                 , Query.find [ testId "merc-slot-4" ]
                                     >> Event.simulate Event.click
-                                    >> Event.expect (SelectItem (Just 0))
+                                    >> Event.expect (OpenActionPalette 0 240 180)
                                 , Query.find [ testId "btn-restore-merc" ]
                                     >> Query.has [ Selector.disabled True ]
                                 ]
@@ -1613,6 +1613,131 @@ suite =
                                     >> Event.simulate Event.click
                                     >> Event.expect (SelectItem Nothing)
                                 ]
+                    ]
+                    ()
+        , test "Cycle 19 Action Palette, Edit/Duplicate/Delete Context Menu, and Hover Keyboard Shortcuts" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView State.UiState.ViewA)
+                            |> Tuple.first
+
+                    withInvItem =
+                        { viewAModel
+                            | session =
+                                viewAModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            let
+                                                invItem =
+                                                    { index = 0
+                                                    , code = "cm1"
+                                                    , nameEn = "Small Charm"
+                                                    , nameKo = "작은 부적"
+                                                    , quality = QualityMagic
+                                                    , container = Inventory
+                                                    , slotLabel = Nothing
+                                                    , x = 0
+                                                    , y = 0
+                                                    , width = 1
+                                                    , height = 1
+                                                    , itemLevel = 10
+                                                    , baseAttributes = []
+                                                    , properties = []
+                                                    , setName = Nothing
+                                                    , setPieces = []
+                                                    , pieceSetBonuses = []
+                                                    , setBonuses = []
+                                                    , socketedNames = []
+                                                    , imageUrl = Nothing
+                                                    , isBeltConsumable = False
+                                                    , defense = Nothing
+                                                    , currentDurability = Nothing
+                                                    , maxDurability = Nothing
+                                                    , quantity = Nothing
+                                                    , isEthereal = False
+                                                    , detailedProperties = []
+                                                    }
+                                            in
+                                            { s | items = [ invItem ] }
+                                        )
+                        }
+
+                    paletteOpened =
+                        withInvItem
+                            |> Update.update (OpenActionPalette 0 120 140)
+                            |> Tuple.first
+
+                    contextOpened =
+                        withInvItem
+                            |> Update.update (OpenContextMenu 0 160 180)
+                            |> Tuple.first
+
+                    hoveredModel =
+                        withInvItem
+                            |> Update.update (HoverItem (Just 0))
+                            |> Tuple.first
+
+                    ( _, spaceOut ) =
+                        Update.update
+                            (HandleKeyShortcut { key = " ", code = "Space", ctrlKey = False, altKey = False, metaKey = False, isInput = False })
+                            hoveredModel
+
+                    ( _, quickStashOut ) =
+                        Update.update
+                            (HandleKeyShortcut { key = "s", code = "KeyS", ctrlKey = False, altKey = False, metaKey = False, isInput = False })
+                            hoveredModel
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view withInvItem
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "grid-item-0" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (OpenActionPalette 0 240 180)
+                                , Query.find [ testId "grid-item-0" ]
+                                    >> Event.simulate (Event.custom "contextmenu" (Json.Encode.object []))
+                                    >> Event.expect (OpenContextMenu 0 240 180)
+                                ]
+                    , \_ ->
+                        Workspace.view paletteOpened
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "item-action-palette" ]
+                                    >> Query.has [ Selector.text "Quick Actions" ]
+                                , Query.find [ testId "palette-action-pick" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (SelectItem (Just 0))
+                                , Query.find [ testId "palette-action-stash" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (QuickMoveItem 0 Stash)
+                                ]
+                    , \_ ->
+                        Workspace.view contextOpened
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "item-context-menu" ]
+                                    >> Query.has [ Selector.text "Edit Item" ]
+                                , Query.find [ testId "context-action-edit" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ContextEditItem 0)
+                                , Query.find [ testId "context-action-duplicate" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ContextDuplicateItem 0)
+                                , Query.find [ testId "context-action-delete" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ContextDeleteItem 0)
+                                ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SelectItemForMove { itemIndex = Just 0 }))
+                            spaceOut
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.QuickMoveItem { itemIndex = 0, targetContainer = Stash }))
+                            quickStashOut
                     ]
                     ()
         ]

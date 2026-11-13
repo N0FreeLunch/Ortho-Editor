@@ -614,6 +614,16 @@ pub enum UiIntent {
         stat_id: i32,
         delta: i32,
     },
+    QuickMoveItem {
+        item_index: i32,
+        target_container: ContainerKind,
+    },
+    DuplicateItem {
+        item_index: i32,
+    },
+    DeleteItem {
+        item_index: i32,
+    },
 }
 
 /// Domain taxonomy of rejection codes returned when Rust rejects a `UiIntent`.
@@ -1278,6 +1288,9 @@ impl EditorSession {
                 | UiIntent::SpawnShopItem { .. }
                 | UiIntent::MutateItemBase { .. }
                 | UiIntent::MutateItemProperty { .. }
+                | UiIntent::QuickMoveItem { .. }
+                | UiIntent::DuplicateItem { .. }
+                | UiIntent::DeleteItem { .. }
         );
         let pre_snapshot = if mutates_history {
             Some(self.capture_snapshot())
@@ -1789,6 +1802,12 @@ impl EditorSession {
                 stat_id,
                 delta,
             } => self.apply_mutate_item_property(item_index, stat_id, delta),
+            UiIntent::QuickMoveItem {
+                item_index,
+                target_container,
+            } => self.apply_quick_move_item(item_index, target_container),
+            UiIntent::DuplicateItem { item_index } => self.apply_duplicate_item(item_index),
+            UiIntent::DeleteItem { item_index } => self.dispose_item_by_index(item_index),
         }
     }
 
@@ -2589,25 +2608,7 @@ impl EditorSession {
             };
 
         let (item, container_slot) = &mut self.player_items_with_container[idx];
-        item.x = raw_x;
-        item.y = raw_y;
-        item.page = page;
-        item.location = location;
-        item.mode = mode;
-        item.header.x = raw_x;
-        item.header.y = raw_y;
-        item.header.page = page;
-        item.header.location = location;
-        item.header.mode = mode;
-        item.body.x = raw_x;
-        item.body.y = raw_y;
-        item.body.page = page;
-        item.body.location = location;
-        item.body.mode = mode;
-        if let Some(aux) = item.body.d2r_v3_auxiliary.as_mut() {
-            aux.stored_in = stored_in;
-        }
-        item.bits.clear();
+        set_item_placement(item, raw_x, raw_y, page, location, mode, stored_in);
         *container_slot = target;
 
         let card = &mut self.item_cards[idx];
@@ -2625,6 +2626,195 @@ impl EditorSession {
         } else {
             self.selected_move_item_index = None;
         }
+        Ok(())
+    }
+
+    fn container_grid_dims(container_kind: ContainerKind) -> Option<(i32, i32)> {
+        match container_kind {
+            ContainerKind::Inventory => Some((10, 4)),
+            ContainerKind::Stash => Some((10, 10)),
+            ContainerKind::Cube => Some((3, 4)),
+            ContainerKind::TempInventory => Some((9, 4)),
+            ContainerKind::Belt => Some((4, 4)),
+            _ => None,
+        }
+    }
+
+    fn find_compatible_slot(
+        &self,
+        item_index: i32,
+        container: ContainerKind,
+        slots: &[i32],
+        fallback_code: &str,
+        fallback_message: &str,
+    ) -> Result<(i32, i32), ActionRejection> {
+        let mut first_empty = None;
+        let mut first_swap = None;
+        let mut last_err = None;
+        for &slot_loc in slots {
+            match self.validate_move_target(item_index, container, slot_loc, 0) {
+                Ok((_, _, None)) => {
+                    first_empty = Some((slot_loc, 0));
+                    break;
+                }
+                Ok((_, _, Some(_))) if first_swap.is_none() => {
+                    first_swap = Some((slot_loc, 0));
+                }
+                Err(e) => {
+                    if last_err.is_none() {
+                        last_err = Some(e);
+                    }
+                }
+                _ => {}
+            }
+        }
+        first_empty.or(first_swap).ok_or_else(|| {
+            last_err.unwrap_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    fallback_code,
+                    fallback_message,
+                )
+            })
+        })
+    }
+
+    fn apply_quick_move_item(
+        &mut self,
+        item_index: i32,
+        target_container: ContainerKind,
+    ) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
+            })?;
+        let (width, height) = {
+            let card = &self.item_cards[idx];
+            (card.width.max(1), card.height.max(1))
+        };
+
+        let (x, y) = match target_container {
+            ContainerKind::Equipment => {
+                const EQUIP_SLOTS: [i32; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+                self.find_compatible_slot(
+                    item_index,
+                    ContainerKind::Equipment,
+                    &EQUIP_SLOTS,
+                    "invalid_equipment_slot",
+                    "No compatible equipment slot found for this item.",
+                )?
+            }
+            ContainerKind::MercEquipment => {
+                const MERC_SLOTS: [i32; 4] = [1, 3, 4, 5];
+                self.find_compatible_slot(
+                    item_index,
+                    ContainerKind::MercEquipment,
+                    &MERC_SLOTS,
+                    "merc_weapon_incompatible_with_act",
+                    "No compatible mercenary slot found for this item.",
+                )?
+            }
+            ContainerKind::Inventory
+            | ContainerKind::Stash
+            | ContainerKind::Cube
+            | ContainerKind::TempInventory
+            | ContainerKind::Belt => {
+                let (max_w, max_h) = Self::container_grid_dims(target_container).unwrap_or((10, 4));
+                let (req_w, req_h) = if target_container == ContainerKind::Belt {
+                    self.validate_move_target(item_index, ContainerKind::Belt, 0, 0)?;
+                    (1, 1)
+                } else {
+                    (width, height)
+                };
+                self.find_free_grid_slot(target_container, max_w, max_h, req_w, req_h)
+                    .ok_or_else(|| {
+                        ActionRejection::new(
+                            RejectionCode::RejectionInventoryFull,
+                            "no_free_slot",
+                            format!(
+                                "{} ({}x{}) has no free space for this item.",
+                                target_container.as_label(),
+                                max_w,
+                                max_h
+                            ),
+                        )
+                        .with_target(target_container.as_label())
+                        .with_recovery(SuggestedRecovery::SuggestClearSlot)
+                    })?
+            }
+            other => {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    "invalid_target_container",
+                    format!("Quick move to '{}' is not supported.", other.as_label()),
+                )
+                .with_target(other.as_label()));
+            }
+        };
+
+        self.apply_move_item(item_index, target_container, x, y)
+    }
+
+    fn apply_duplicate_item(&mut self, item_index: i32) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
+            })?;
+        let (width, height) = {
+            let card = &self.item_cards[idx];
+            (card.width.max(1), card.height.max(1))
+        };
+
+        let candidates = [
+            (ContainerKind::Inventory, ItemContainer::Inventory, 0u8, Some(1u8)),
+            (ContainerKind::Stash, ItemContainer::Stash, 4u8, Some(5u8)),
+            (ContainerKind::TempInventory, ItemContainer::Unknown, 0u8, None),
+        ];
+        let placement = candidates.into_iter().find_map(|(kind, enum_val, page, stored_in)| {
+            let (mw, mh) = Self::container_grid_dims(kind)?;
+            self.find_free_grid_slot(kind, mw, mh, width, height)
+                .map(|(x, y)| (kind, enum_val, page, stored_in, x, y))
+        });
+
+        let Some((dest_kind, dest_enum, page, stored_in, x, y)) = placement else {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionInventoryFull,
+                "no_free_slot",
+                "No free space in Inventory, Stash, or Temp Inventory to duplicate this item.",
+            )
+            .with_target("inventory")
+            .with_recovery(SuggestedRecovery::SuggestClearSlot));
+        };
+
+        let (mut cloned_item, _) = self.player_items_with_container[idx].clone();
+        set_item_placement(&mut cloned_item, x as u8, y as u8, page, 0, 0, stored_in);
+
+        let mut cloned_card = self.item_cards[idx].clone();
+        cloned_card.index = self.item_cards.len() as i32;
+        cloned_card.container = dest_kind;
+        cloned_card.slot_label = None;
+        cloned_card.x = x;
+        cloned_card.y = y;
+
+        self.player_items_with_container.push((cloned_item, dest_enum));
+        self.item_cards.push(cloned_card);
+        self.has_item_edits = true;
+        self.dirty = true;
+        self.selected_move_item_index = None;
         Ok(())
     }
 
@@ -3720,6 +3910,36 @@ fn cached_shop_catalog() -> &'static [ShopCatalogItemView] {
 
         out
     })
+}
+
+fn set_item_placement(
+    item: &mut crate::item::Item,
+    x: u8,
+    y: u8,
+    page: u8,
+    location: u8,
+    mode: u8,
+    stored_in: Option<u8>,
+) {
+    item.x = x;
+    item.y = y;
+    item.page = page;
+    item.location = location;
+    item.mode = mode;
+    item.header.x = x;
+    item.header.y = y;
+    item.header.page = page;
+    item.header.location = location;
+    item.header.mode = mode;
+    item.body.x = x;
+    item.body.y = y;
+    item.body.page = page;
+    item.body.location = location;
+    item.body.mode = mode;
+    if let Some(aux) = item.body.d2r_v3_auxiliary.as_mut() {
+        aux.stored_in = stored_in;
+    }
+    item.bits.clear();
 }
 
 /// Exports the Elm `Generated.Protocol` module source string via `elm_rs::export!`.

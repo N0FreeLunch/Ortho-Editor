@@ -697,3 +697,84 @@ test("Closed-loop scenario 5: Mercenary Zone 4 item move, Act switch, Replaced S
     await driver.close();
   }
 });
+
+test("Closed-loop scenario 6: Cycle 19 Hover keyboard shortcuts (Space/S/Escape), Duplicate, Delete, Undo, and .d2s roundtrip", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    const initialCount = loadRes.snap.itemCount;
+    const invItem = loadRes.resp.envelope.session.items.find(
+      (it) => it.container === "Inventory" && it.width === 1 && it.height === 1,
+    );
+    assert.ok(invItem, "Expected 1x1 inventory item");
+
+    await driver.stepCommand({ kind: "SwitchView", view: "ViewA" });
+
+    // 1. Hover item and press Space to pick up, then Escape to cancel
+    await driver.stepCommand({ kind: "HoverItem", index: invItem.index });
+    const picked = await driver.stepCommand({
+      kind: "KeyShortcut",
+      key: " ",
+      code: "Space",
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      isInput: false,
+    });
+    assert.equal(picked.resp.ok, true);
+    assert.equal(picked.resp.envelope.session.selected_move_item_index, invItem.index);
+
+    const cancelled = await driver.stepCommand({
+      kind: "KeyShortcut",
+      key: "Escape",
+      code: "Escape",
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      isInput: false,
+    });
+    assert.equal(cancelled.resp.ok, true);
+    assert.equal(cancelled.resp.envelope.session.selected_move_item_index, null);
+
+    // 2. Press 's' while hovering to quick-move to Stash
+    const quickStash = await driver.stepCommand({
+      kind: "KeyShortcut",
+      key: "s",
+      code: "KeyS",
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      isInput: false,
+    });
+    assert.equal(quickStash.resp.ok, true);
+    assert.equal(quickStash.snap.dirty, true);
+    const movedCard = quickStash.resp.envelope.session.items.find((it) => it.index === invItem.index);
+    assert.equal(movedCard.container, "Stash");
+
+    // 3. Duplicate item -> itemCount + 1
+    const dup = await driver.stepCommand({ kind: "ContextDuplicateItem", itemIndex: invItem.index });
+    assert.equal(dup.resp.ok, true);
+    assert.equal(dup.snap.itemCount, initialCount + 1);
+    const clonedIdx = dup.resp.envelope.session.items.at(-1).index;
+
+    // 4. Delete cloned item -> itemCount back to initial, then Undo restores it
+    const del = await driver.stepCommand({ kind: "ContextDeleteItem", itemIndex: clonedIdx });
+    assert.equal(del.resp.ok, true);
+    assert.equal(del.snap.itemCount, initialCount);
+
+    const undone = await driver.stepCommand({ kind: "Undo" });
+    assert.equal(undone.resp.ok, true);
+    assert.equal(undone.snap.itemCount, initialCount + 1);
+
+    // 5. Export .d2s and reload
+    const { snap: reloadedSnap } = await driver.exportAndReload("scenario6-cycle19-roundtrip.d2s");
+    assert.equal(reloadedSnap.dirty, false);
+    assert.equal(reloadedSnap.itemCount, initialCount + 1);
+  } finally {
+    await driver.close();
+  }
+});

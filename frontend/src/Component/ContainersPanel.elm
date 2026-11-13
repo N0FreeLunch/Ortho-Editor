@@ -5,7 +5,7 @@ import Html exposing (Html, button, div, h2, h3, img, li, option, section, selec
 import Html.Attributes exposing (alt, attribute, class, classList, disabled, id, selected, src, style, title, type_, value)
 import Html.Events exposing (custom, on, onClick, onInput, onMouseEnter, onMouseLeave)
 import Json.Decode as Decode
-import State.UiState as UiState exposing (StashTab(..), UiState)
+import State.UiState as UiState exposing (ItemMenuState(..), StashTab(..), UiState)
 import Update exposing (Msg(..))
 
 
@@ -91,6 +91,12 @@ view ui session =
                 else
                     []
                )
+            ++ (if ui.itemMenu /= NoItemMenu then
+                    [ onClick CloseItemMenu ]
+
+                else
+                    []
+               )
         )
         [ viewMoveModeBar selectedMoveItem session.beltMoveRestrictedReason
         , div [ class "studio-grid" ]
@@ -100,12 +106,210 @@ view ui session =
             ]
         , viewSelectedItemInspectorAndBrowser ui session
         , viewHeldItemGhost selectedMoveItem ui.hoverMousePos
-        , if isHolding then
+        , if isHolding || ui.itemMenu /= NoItemMenu then
             text ""
 
           else
             viewHoverTooltip ui.hoveredItemIndex ui.hoverMousePos (session.items ++ session.tempItems ++ session.mercItems ++ session.mercReplacedItems)
+        , viewItemMenuOverlay ui session
         ]
+
+
+itemMenuTriggerAttrs : Int -> List (Html.Attribute Msg)
+itemMenuTriggerAttrs itemIndex =
+    let
+        coordDecoder toMsg =
+            Decode.map2
+                (\maybeX maybeY ->
+                    { message =
+                        toMsg
+                            itemIndex
+                            (round (Maybe.withDefault 240 maybeX))
+                            (round (Maybe.withDefault 180 maybeY))
+                    , stopPropagation = True
+                    , preventDefault = False
+                    }
+                )
+                (Decode.maybe (Decode.field "clientX" Decode.float))
+                (Decode.maybe (Decode.field "clientY" Decode.float))
+
+        contextDecoder =
+            Decode.map2
+                (\maybeX maybeY ->
+                    { message =
+                        OpenContextMenu
+                            itemIndex
+                            (round (Maybe.withDefault 240 maybeX))
+                            (round (Maybe.withDefault 180 maybeY))
+                    , stopPropagation = True
+                    , preventDefault = True
+                    }
+                )
+                (Decode.maybe (Decode.field "clientX" Decode.float))
+                (Decode.maybe (Decode.field "clientY" Decode.float))
+    in
+    [ custom "click" (coordDecoder OpenActionPalette)
+    , custom "contextmenu" contextDecoder
+    ]
+
+
+viewItemMenuOverlay : UiState -> SessionView -> Html Msg
+viewItemMenuOverlay ui session =
+    let
+        allItems =
+            session.items ++ session.tempItems ++ session.mercItems ++ session.mercReplacedItems
+
+        findItem idx =
+            allItems |> List.filter (\it -> it.index == idx) |> List.head
+
+        stopClick =
+            custom "click" (Decode.succeed { message = CloseItemMenu, stopPropagation = True, preventDefault = False })
+    in
+    case ui.itemMenu of
+        NoItemMenu ->
+            text ""
+
+        ActionPaletteMenu { itemIndex, x, y } ->
+            case findItem itemIndex of
+                Nothing ->
+                    text ""
+
+                Just item ->
+                    let
+                        posLeft =
+                            String.fromInt (max 10 (min x (Maybe.map (\m -> m.vw - 235) ui.hoverMousePos |> Maybe.withDefault 1100))) ++ "px"
+
+                        posTop =
+                            String.fromInt (max 10 (min y (Maybe.map (\m -> m.vh - 280) ui.hoverMousePos |> Maybe.withDefault 620))) ++ "px"
+
+                        actionRow testSlug icon labelText kbdText clickMsg =
+                            div
+                                [ class "action-palette-item"
+                                , attribute "data-testid" ("palette-action-" ++ testSlug)
+                                , onClick clickMsg
+                                ]
+                                [ div [ class "action-palette-left" ]
+                                    [ span [] [ text icon ]
+                                    , span [] [ text labelText ]
+                                    ]
+                                , span [ class "action-kbd" ] [ text kbdText ]
+                                ]
+
+                        destActions =
+                            case item.container of
+                                Inventory ->
+                                    [ actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    , actionRow "equip" "🥋" "Equip to Character" "E" (QuickMoveItem item.index Equipment)
+                                    , actionRow "merc" "🛡️" "Equip to Mercenary" "R" (QuickMoveItem item.index MercEquipment)
+                                    , actionRow "cube" "🔮" "Move to Cube" "Q" (QuickMoveItem item.index Cube)
+                                    ]
+
+                                Stash ->
+                                    [ actionRow "inventory" "🎒" "Move to Inventory" "A / S" (QuickMoveItem item.index Inventory)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    , actionRow "equip" "🥋" "Equip to Character" "E" (QuickMoveItem item.index Equipment)
+                                    , actionRow "merc" "🛡️" "Equip to Mercenary" "R" (QuickMoveItem item.index MercEquipment)
+                                    , actionRow "cube" "🔮" "Move to Cube" "Q" (QuickMoveItem item.index Cube)
+                                    ]
+
+                                Equipment ->
+                                    [ actionRow "inventory" "🎒" "Unequip to Inventory" "A / E" (QuickMoveItem item.index Inventory)
+                                    , actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    , actionRow "merc" "🛡️" "Give to Mercenary" "R" (QuickMoveItem item.index MercEquipment)
+                                    ]
+
+                                MercEquipment ->
+                                    [ actionRow "inventory" "🎒" "Reclaim to Inventory" "A / R" (QuickMoveItem item.index Inventory)
+                                    , actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    , actionRow "equip" "🥋" "Equip to Character" "E" (QuickMoveItem item.index Equipment)
+                                    ]
+
+                                MercReplaced ->
+                                    [ actionRow "inventory" "🎒" "Reclaim to Inventory" "A / R" (QuickMoveItem item.index Inventory)
+                                    , actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    , actionRow "equip" "🥋" "Equip to Character" "E" (QuickMoveItem item.index Equipment)
+                                    ]
+
+                                Cube ->
+                                    [ actionRow "inventory" "🎒" "Take to Inventory" "A / Q" (QuickMoveItem item.index Inventory)
+                                    , actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    ]
+
+                                Belt ->
+                                    [ actionRow "inventory" "🎒" "Move to Inventory" "A" (QuickMoveItem item.index Inventory)
+                                    , actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "temp" "📥" "Move to Temp Inv" "T" (QuickMoveItem item.index TempInventory)
+                                    ]
+
+                                TempInventory ->
+                                    [ actionRow "stash" "📦" "Move to Stash" "S" (QuickMoveItem item.index Stash)
+                                    , actionRow "inventory" "🎒" "Move to Inventory" "A / T" (QuickMoveItem item.index Inventory)
+                                    , actionRow "equip" "🥋" "Equip to Character" "E" (QuickMoveItem item.index Equipment)
+                                    , actionRow "merc" "🛡️" "Equip to Mercenary" "R" (QuickMoveItem item.index MercEquipment)
+                                    , actionRow "cube" "🔮" "Move to Cube" "Q" (QuickMoveItem item.index Cube)
+                                    ]
+
+                                _ ->
+                                    [ actionRow "inventory" "🎒" "Move to Inventory" "A" (QuickMoveItem item.index Inventory) ]
+                    in
+                    div
+                        [ class "action-palette"
+                        , attribute "data-testid" "item-action-palette"
+                        , style "left" posLeft
+                        , style "top" posTop
+                        , custom "click" (Decode.succeed { message = CloseItemMenu, stopPropagation = True, preventDefault = False })
+                        ]
+                        (div [ class "action-palette-header" ]
+                            [ span [] [ text "🎯 Quick Actions" ]
+                            , span [ style "font-size" "10px", style "color" "var(--text-muted)", style "font-family" "monospace" ]
+                                [ text (String.toUpper (UiState.containerLabel item.container)) ]
+                            ]
+                            :: actionRow "pick" "🖐️" "Pick Up Item" "Space" (SelectItem (Just item.index))
+                            :: destActions
+                        )
+
+        ContextItemMenu { itemIndex, x, y } ->
+            let
+                posLeft =
+                    String.fromInt (max 10 (min x (Maybe.map (\m -> m.vw - 175) ui.hoverMousePos |> Maybe.withDefault 1200))) ++ "px"
+
+                posTop =
+                    String.fromInt (max 10 (min y (Maybe.map (\m -> m.vh - 140) ui.hoverMousePos |> Maybe.withDefault 720))) ++ "px"
+
+                _ =
+                    stopClick
+            in
+            div
+                [ class "context-menu"
+                , attribute "data-testid" "item-context-menu"
+                , style "left" posLeft
+                , style "top" posTop
+                , custom "click" (Decode.succeed { message = CloseItemMenu, stopPropagation = True, preventDefault = False })
+                ]
+                [ div
+                    [ class "context-menu-item"
+                    , attribute "data-testid" "context-action-edit"
+                    , onClick (ContextEditItem itemIndex)
+                    ]
+                    [ text "✏️ Edit Item" ]
+                , div
+                    [ class "context-menu-item"
+                    , attribute "data-testid" "context-action-duplicate"
+                    , onClick (ContextDuplicateItem itemIndex)
+                    ]
+                    [ text "📋 Duplicate Item" ]
+                , div
+                    [ class "context-menu-item danger"
+                    , attribute "data-testid" "context-action-delete"
+                    , onClick (ContextDeleteItem itemIndex)
+                    ]
+                    [ text "🗑️ Delete Item" ]
+                ]
 
 
 viewMoveModeBar : Maybe ItemCardView -> Maybe String -> Html Msg
@@ -629,17 +833,17 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
                 isHeldSource =
                     session.selectedMoveItemIndex == Just item.index
 
-                slotClickMsg =
+                slotActionAttrs =
                     case session.selectedMoveItemIndex of
                         Just heldIdx ->
                             if heldIdx == item.index then
-                                SelectItem Nothing
+                                [ onClick (SelectItem Nothing) ]
 
                             else
-                                MoveSelectedItemTo Equipment bodyLoc 0
+                                [ onClick (MoveSelectedItemTo Equipment bodyLoc 0) ]
 
                         Nothing ->
-                            SelectItem (Just item.index)
+                            itemMenuTriggerAttrs item.index
             in
             div
                 ([ classList
@@ -654,8 +858,8 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
                  , attribute "data-testid" ("equip-slot-" ++ String.fromInt bodyLoc)
                  , style "grid-column" colSpec
                  , style "grid-row" rowSpec
-                 , onClick slotClickMsg
                  ]
+                    ++ slotActionAttrs
                     ++ (if moveActive then
                             equipHoverAttrs
 
@@ -934,16 +1138,16 @@ viewMercGridProportional ui session isReplaced items =
                         isSelected =
                             session.selectedMoveItemIndex == Just item.index
 
-                        filledClickMsg =
+                        filledActionAttrs =
                             if isHolding then
                                 if isSelected then
-                                    SelectItem Nothing
+                                    [ onClick (SelectItem Nothing) ]
 
                                 else
-                                    MoveSelectedItemTo targetContainer bodyLoc 0
+                                    [ onClick (MoveSelectedItemTo targetContainer bodyLoc 0) ]
 
                             else
-                                SelectItem (Just item.index)
+                                itemMenuTriggerAttrs item.index
 
                         filledHoverAttrs =
                             if isHolding && not isReplaced then
@@ -968,8 +1172,8 @@ viewMercGridProportional ui session isReplaced items =
                          , style "grid-column" colSpec
                          , style "grid-row" rowSpec
                          , attribute "data-testid" ((if isReplaced then "merc-replaced-slot-" else "merc-slot-") ++ String.fromInt bodyLoc)
-                         , onClick filledClickMsg
                          ]
+                            ++ filledActionAttrs
                             ++ filledHoverAttrs
                         )
                         (viewItemTileGraphic item)
@@ -1218,34 +1422,35 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                 isHeldSource =
                     session.selectedMoveItemIndex == Just item.index
 
-                itemClickMsg =
+                itemActionAttrs =
                     case session.selectedMoveItemIndex of
                         Just heldIdx ->
                             if heldIdx == item.index then
-                                SelectItem Nothing
+                                [ onClick (SelectItem Nothing) ]
 
                             else
-                                MoveSelectedItemTo containerTag item.x item.y
+                                [ onClick (MoveSelectedItemTo containerTag item.x item.y) ]
 
                         Nothing ->
-                            SelectItem (Just item.index)
+                            itemMenuTriggerAttrs item.index
             in
             div
-                [ classList
+                ([ classList
                     [ ( "placed-item", True )
                     , ( "is-selected", isSelected )
                     , ( "is-held-source", isHeldSource )
                     , ( qualityClass item.quality, True )
                     ]
-                , style "left" (String.fromInt (gx * 40 + 2) ++ "px")
-                , style "top" (String.fromInt (visualY * 40 + 2) ++ "px")
-                , style "width" (String.fromInt (wCells * 40 - 4) ++ "px")
-                , style "height" (String.fromInt (hCells * 40 - 4) ++ "px")
-                , attribute "data-testid" ("grid-item-" ++ String.fromInt item.index)
-                , onClick itemClickMsg
-                , onMouseEnter (HoverItem (Just item.index))
-                , onMouseLeave (HoverItem Nothing)
-                ]
+                 , style "left" (String.fromInt (gx * 40 + 2) ++ "px")
+                 , style "top" (String.fromInt (visualY * 40 + 2) ++ "px")
+                 , style "width" (String.fromInt (wCells * 40 - 4) ++ "px")
+                 , style "height" (String.fromInt (hCells * 40 - 4) ++ "px")
+                 , attribute "data-testid" ("grid-item-" ++ String.fromInt item.index)
+                 , onMouseEnter (HoverItem (Just item.index))
+                 , onMouseLeave (HoverItem Nothing)
+                 ]
+                    ++ itemActionAttrs
+                )
                 (viewItemTileGraphic item)
     in
     div [ class "d2-grid-wrap" ]

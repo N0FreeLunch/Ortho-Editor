@@ -122,6 +122,31 @@
         });
       }
 
+      if (app.ports && app.ports.receiveKeyShortcut) {
+        window.addEventListener("keydown", (e) => {
+          const activeTag = document.activeElement ? document.activeElement.tagName : "";
+          const isInput = ["INPUT", "SELECT", "TEXTAREA"].includes(activeTag);
+          const lower = (e.key || "").toLowerCase();
+          const isActionKey =
+            e.key === " " ||
+            e.code === "Space" ||
+            e.key === "Escape" ||
+            (!isInput && !e.ctrlKey && !e.altKey && !e.metaKey && ["s", "a", "i", "t", "e", "d", "r", "m", "q", "c"].includes(lower)) ||
+            (e.ctrlKey && (lower === "z" || lower === "y"));
+          if (isActionKey && !isInput) {
+            e.preventDefault();
+          }
+          app.ports.receiveKeyShortcut.send({
+            key: e.key || "",
+            code: e.code || "",
+            ctrlKey: Boolean(e.ctrlKey),
+            altKey: Boolean(e.altKey),
+            metaKey: Boolean(e.metaKey),
+            isInput,
+          });
+        });
+      }
+
       if (reloadBtn && fixtureSelect) {
         reloadBtn.addEventListener("click", () => {
           const fixture = fixtureSelect.value;

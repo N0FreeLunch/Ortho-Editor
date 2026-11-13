@@ -208,6 +208,9 @@ type UiIntent
     | SpawnShopItem { catalogId : String, targetContainer : ShopSpawnTarget }
     | MutateItemBase { itemIndex : Int, defense : Maybe (Int), currentDurability : Maybe (Int), maxDurability : Maybe (Int), quantity : Maybe (Int), isEthereal : Maybe (Bool) }
     | MutateItemProperty { itemIndex : Int, statId : Int, delta : Int }
+    | QuickMoveItem { itemIndex : Int, targetContainer : ContainerKind }
+    | DuplicateItem { itemIndex : Int }
+    | DeleteItem { itemIndex : Int }
 
 
 uiIntentEncoder : UiIntent -> Json.Encode.Value
@@ -265,6 +268,12 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "MutateItemBase", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "defense", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) defense ), ( "current_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) currentDurability ), ( "max_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) maxDurability ), ( "quantity", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) quantity ), ( "is_ethereal", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.bool)) isEthereal ) ] ) ]
         MutateItemProperty { itemIndex, statId, delta } ->
             Json.Encode.object [ ( "MutateItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "delta", (Json.Encode.int) delta ) ] ) ]
+        QuickMoveItem { itemIndex, targetContainer } ->
+            Json.Encode.object [ ( "QuickMoveItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "target_container", (containerKindEncoder) targetContainer ) ] ) ]
+        DuplicateItem { itemIndex } ->
+            Json.Encode.object [ ( "DuplicateItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ) ] ) ]
+        DeleteItem { itemIndex } ->
+            Json.Encode.object [ ( "DeleteItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ) ] ) ]
 
 difficultyModeDecoder : Json.Decode.Decoder DifficultyMode
 difficultyModeDecoder = 

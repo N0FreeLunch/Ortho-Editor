@@ -15,7 +15,12 @@ main =
         { init = init
         , view = view
         , update = updateWithPorts
-        , subscriptions = \_ -> Ports.receiveSessionEnvelope ReceiveSessionEnvelope
+        , subscriptions =
+            \_ ->
+                Sub.batch
+                    [ Ports.receiveSessionEnvelope ReceiveSessionEnvelope
+                    , Ports.receiveKeyShortcut HandleKeyShortcut
+                    ]
         }
 
 

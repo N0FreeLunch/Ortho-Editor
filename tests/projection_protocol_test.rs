@@ -1021,3 +1021,58 @@ fn cycle_18_merc_item_move_act_swap_replaced_staging_and_d2s_roundtrip() {
     assert_eq!(reloaded_view.merc.act_index, 1);
     assert_eq!(reloaded_view.merc.stats.level, 55);
 }
+
+#[test]
+fn cycle_19_quick_move_duplicate_delete_and_d2s_roundtrip() {
+    let bytes =
+        fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session =
+        EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s").expect("parse");
+
+    let initial = session.project();
+    let initial_count = initial.items.len();
+    let charm = initial
+        .items
+        .iter()
+        .find(|it| it.container == ContainerKind::Inventory && it.width == 1 && it.height == 1)
+        .expect("1x1 inventory charm");
+
+    // 1. QuickMoveItem to Stash finds first free slot and moves item cleanly.
+    let qm = session.apply_intent(UiIntent::QuickMoveItem {
+        item_index: charm.index,
+        target_container: ContainerKind::Stash,
+    });
+    assert!(qm.ok, "{:?}", qm.rejection);
+    let qm_view = qm.session.unwrap();
+    let moved_card = qm_view
+        .items
+        .iter()
+        .find(|it| it.index == charm.index)
+        .expect("moved card");
+    assert_eq!(moved_card.container, ContainerKind::Stash);
+
+    // 2. DuplicateItem clones item into free Inventory/Stash/TempInventory slot.
+    let dup = session.apply_intent(UiIntent::DuplicateItem {
+        item_index: charm.index,
+    });
+    assert!(dup.ok, "{:?}", dup.rejection);
+    let dup_view = dup.session.unwrap();
+    assert_eq!(dup_view.items.len(), initial_count + 1);
+
+    // 3. DeleteItem removes the cloned item and Undo restores it.
+    let cloned_idx = dup_view.items.last().expect("cloned item").index;
+    let del = session.apply_intent(UiIntent::DeleteItem {
+        item_index: cloned_idx,
+    });
+    assert!(del.ok, "{:?}", del.rejection);
+    assert_eq!(del.session.unwrap().items.len(), initial_count);
+
+    let undone = session.apply_intent(UiIntent::Undo);
+    assert!(undone.ok);
+    assert_eq!(undone.session.unwrap().items.len(), initial_count + 1);
+
+    // 4. Export .d2s and reload to verify duplicated item + quick-moved item persist.
+    let exported = session.to_save_bytes().expect("export cycle 19 .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "cycle19.d2s").expect("reload .d2s");
+    assert_eq!(reloaded.project().items.len(), initial_count + 1);
+}

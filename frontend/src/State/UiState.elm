@@ -1,6 +1,7 @@
 module State.UiState exposing
     ( DragKind(..)
     , FocusedInput
+    , ItemMenuState(..)
     , MarqueeSelection
     , PaintMode(..)
     , StashTab(..)
@@ -13,9 +14,12 @@ module State.UiState exposing
     , clearFocusInput
     , clearMarquee
     , clearToast
+    , closeItemMenu
     , containerLabel
     , extendMarquee
     , init
+    , openActionPalette
+    , openContextMenu
     , qualityLabel
     , setContainerFilter
     , setHoverMousePos
@@ -89,6 +93,12 @@ type alias FocusedInput =
     }
 
 
+type ItemMenuState
+    = NoItemMenu
+    | ActionPaletteMenu { itemIndex : Int, x : Int, y : Int }
+    | ContextItemMenu { itemIndex : Int, x : Int, y : Int }
+
+
 type alias Toast =
     { code : RejectionCode
     , rawCode : String
@@ -118,6 +128,7 @@ type alias UiState =
     , shopQualityTab : ItemQualityKind
     , shopCategoryFilter : String
     , shopPage : Int
+    , itemMenu : ItemMenuState
     }
 
 
@@ -142,12 +153,28 @@ init =
     , shopQualityTab = QualityUnique
     , shopCategoryFilter = "all"
     , shopPage = 0
+    , itemMenu = NoItemMenu
     }
 
 
 setView : ViewTab -> UiState -> UiState
 setView tab ui =
-    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing }
+    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing, itemMenu = NoItemMenu }
+
+
+openActionPalette : Int -> Int -> Int -> UiState -> UiState
+openActionPalette idx x y ui =
+    { ui | selectedItemIndex = Just idx, itemMenu = ActionPaletteMenu { itemIndex = idx, x = x, y = y } }
+
+
+openContextMenu : Int -> Int -> Int -> UiState -> UiState
+openContextMenu idx x y ui =
+    { ui | selectedItemIndex = Just idx, itemMenu = ContextItemMenu { itemIndex = idx, x = x, y = y } }
+
+
+closeItemMenu : UiState -> UiState
+closeItemMenu ui =
+    { ui | itemMenu = NoItemMenu }
 
 
 setProgressionDifficulty : DifficultyMode -> UiState -> UiState
