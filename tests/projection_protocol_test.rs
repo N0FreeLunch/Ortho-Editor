@@ -5,7 +5,8 @@ use std::path::Path;
 
 use d2r_core::projection::{
     ContainerKind, DifficultyMode, EditMode, EditorSession, ItemCardView, ItemQualityKind,
-    SessionEnvelope, ShopSpawnTarget, UiIntent, generate_elm_protocol_module,
+    RejectionCode, SessionEnvelope, ShopSpawnTarget, SuggestedRecovery, UiIntent,
+    generate_elm_protocol_module,
 };
 
 fn fixture_bytes(rel: &str) -> Vec<u8> {
@@ -811,4 +812,123 @@ fn cycle_15_revision_increments_and_intent_omits_static_shop_catalog() {
         "Failed intent must preserve current revision"
     );
     assert_eq!(session.project().revision, 2);
+}
+
+#[test]
+fn cycle_17_item_mutation_enforces_bit_width_and_roundtrip_bounds() {
+    let bytes =
+        fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("parse fixture");
+
+    let view = session.project();
+
+    // 1. Property bounds must come from STAT_COSTS (never hardcoded -10000..=10000) and exclude 511.
+    let prop_item = view
+        .items
+        .iter()
+        .find(|it| !it.detailed_properties.is_empty())
+        .expect("at least one item with detailed_properties");
+    assert!(
+        prop_item.detailed_properties.iter().all(|p| p.stat_id != 511),
+        "terminator stat 511 must not be exposed"
+    );
+    let target_prop = &prop_item.detailed_properties[0];
+    let overflow_delta = (target_prop.max_value - target_prop.value).saturating_add(1);
+    let prop_oob = session.apply_intent(UiIntent::MutateItemProperty {
+        item_index: prop_item.index,
+        stat_id: target_prop.stat_id,
+        delta: overflow_delta,
+    });
+    assert!(!prop_oob.ok, "out-of-range property delta must be rejected");
+    let prop_rej = prop_oob.rejection.expect("rejection details");
+    assert_eq!(prop_rej.code, RejectionCode::RejectionStatOutOfRange);
+    assert_eq!(
+        prop_rej.suggested_action,
+        Some(SuggestedRecovery::SuggestAdjustValue)
+    );
+
+    // 2. Base fields: defense bit-width, current_durability > max_durability, and missing quantity.
+    if let Some(armor) = view
+        .items
+        .iter()
+        .find(|it| it.defense.is_some() && it.max_durability.is_some() && it.quantity.is_none())
+    {
+        let def_oob = session.apply_intent(UiIntent::MutateItemBase {
+            item_index: armor.index,
+            defense: Some(99_999),
+            max_durability: None,
+            current_durability: None,
+            quantity: None,
+            is_ethereal: None,
+        });
+        assert!(!def_oob.ok, "defense above bit-width must be rejected");
+        assert_eq!(
+            def_oob.rejection.unwrap().code,
+            RejectionCode::RejectionStatOutOfRange
+        );
+
+        let max_dur = armor.max_durability.unwrap();
+        let dur_oob = session.apply_intent(UiIntent::MutateItemBase {
+            item_index: armor.index,
+            defense: None,
+            max_durability: None,
+            current_durability: Some(max_dur + 1),
+            quantity: None,
+            is_ethereal: None,
+        });
+        assert!(!dur_oob.ok, "current_durability > max_durability must be rejected");
+        assert_eq!(
+            dur_oob.rejection.unwrap().code,
+            RejectionCode::RejectionStatOutOfRange
+        );
+
+        let qty_na = session.apply_intent(UiIntent::MutateItemBase {
+            item_index: armor.index,
+            defense: None,
+            max_durability: None,
+            current_durability: None,
+            quantity: Some(5),
+            is_ethereal: None,
+        });
+        assert!(!qty_na.ok, "mutating quantity on non-stackable item must be rejected");
+    }
+
+    // 3. Stackable item quantity bounds + .d2s roundtrip sync (item.body.quantity).
+    if let Some(stack) = view.items.iter().find(|it| it.quantity.is_some()) {
+        let qty_oob = session.apply_intent(UiIntent::MutateItemBase {
+            item_index: stack.index,
+            defense: None,
+            max_durability: None,
+            current_durability: None,
+            quantity: Some(999),
+            is_ethereal: None,
+        });
+        assert!(!qty_oob.ok, "quantity above 9-bit limit must be rejected");
+        assert_eq!(
+            qty_oob.rejection.unwrap().code,
+            RejectionCode::RejectionStatOutOfRange
+        );
+
+        let qty_ok = session.apply_intent(UiIntent::MutateItemBase {
+            item_index: stack.index,
+            defense: None,
+            max_durability: None,
+            current_durability: None,
+            quantity: Some(42),
+            is_ethereal: None,
+        });
+        assert!(qty_ok.ok, "valid quantity mutation should succeed");
+
+        let exported = session.to_save_bytes().expect("export .d2s");
+        let reloaded =
+            EditorSession::from_bytes(&exported, "qty_roundtrip.d2s").expect("reload .d2s");
+        let reloaded_stack = reloaded
+            .project()
+            .items
+            .into_iter()
+            .find(|it| it.index == stack.index)
+            .expect("reloaded stack item");
+        assert_eq!(reloaded_stack.quantity, Some(42));
+    }
 }

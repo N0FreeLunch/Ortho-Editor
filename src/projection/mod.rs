@@ -47,6 +47,23 @@ use crate::save::{
     try_apply_character_mutation, try_apply_skill_mutation,
 };
 
+/// Compute `(min_logical, max_logical, save_add)` for a stat ID from `STAT_COSTS`.
+/// Returns `None` for unknown stats, `save_bits == 0`, or the `511` terminator.
+fn stat_value_bounds(stat_id: u32) -> Option<(i32, i32, i32)> {
+    if stat_id == 511 {
+        return None;
+    }
+    let save_bits = crate::domain::stats::stat_save_bits(stat_id)?;
+    if save_bits == 0 {
+        return None;
+    }
+    let save_add = crate::domain::stats::stat_save_add(stat_id).unwrap_or(0);
+    let raw_max: i64 = (1i64 << save_bits.min(31)) - 1;
+    let min_val = (-i64::from(save_add)).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    let max_val = (raw_max - i64::from(save_add)).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    Some((min_val, max_val, save_add))
+}
+
 /// Active difficulty tab for resistance projection and progression editing.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Elm, ElmEncode, ElmDecode,
@@ -1658,16 +1675,26 @@ impl EditorSession {
                 .with_target(format!("item_{item_index}"))
             })?;
 
+        let is_alpha_dialect = self.item_dialect == "alpha";
         let (item, container) = &mut self.player_items_with_container[idx];
         let container_kind = ContainerKind::from_item_container(*container);
         item.bits.clear();
 
         if let Some(def) = defense {
-            if def < 0 {
+            if item.defense.is_none() {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "defense_not_applicable",
+                    format!("Item index {item_index} does not have a defense field."),
+                )
+                .with_target("item_defense"));
+            }
+            let (_, max_def, _) = stat_value_bounds(31).unwrap_or((0, 2037, 10));
+            if def < 0 || def > max_def {
                 return Err(ActionRejection::new(
                     RejectionCode::RejectionStatOutOfRange,
                     "defense_out_of_range",
-                    format!("Defense must be non-negative (got {def})."),
+                    format!("Defense must be between 0 and {max_def} (got {def})."),
                 )
                 .with_target("item_defense")
                 .with_recovery(SuggestedRecovery::SuggestAdjustValue));
@@ -1677,60 +1704,99 @@ impl EditorSession {
         }
 
         if let Some(max_dur) = max_durability {
-            if max_dur < 1 {
+            if item.max_durability.is_none() {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "max_durability_not_applicable",
+                    format!("Item index {item_index} does not have a max durability field."),
+                )
+                .with_target("item_max_durability"));
+            }
+            let max_bits = crate::domain::stats::stat_save_bits(73).unwrap_or(8).min(31);
+            let max_dur_limit = ((1i64 << max_bits) - 1) as i32;
+            if max_dur < 1 || max_dur > max_dur_limit {
                 return Err(ActionRejection::new(
                     RejectionCode::RejectionStatOutOfRange,
                     "max_durability_out_of_range",
-                    format!("Max durability must be at least 1 (got {max_dur})."),
+                    format!("Max durability must be between 1 and {max_dur_limit} (got {max_dur})."),
                 )
                 .with_target("item_max_durability")
                 .with_recovery(SuggestedRecovery::SuggestAdjustValue));
             }
             item.max_durability = Some(max_dur as u32);
             item.body.max_durability = Some(max_dur as u32);
-            if let Some(cur) = item.current_durability {
-                if cur > max_dur as u32 {
-                    item.current_durability = Some(max_dur as u32);
-                    item.body.current_durability = Some(max_dur as u32);
+            if current_durability.is_none() {
+                if let Some(cur) = item.current_durability {
+                    if cur > max_dur as u32 {
+                        item.current_durability = Some(max_dur as u32);
+                        item.body.current_durability = Some(max_dur as u32);
+                    }
                 }
             }
         }
 
         if let Some(cur_dur) = current_durability {
-            if cur_dur < 0 {
+            if item.current_durability.is_none() {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "durability_not_applicable",
+                    format!("Item index {item_index} does not have a durability field."),
+                )
+                .with_target("item_durability"));
+            }
+            let cur_bits = crate::domain::stats::stat_save_bits(72).unwrap_or(8).min(31);
+            let cur_bit_limit = ((1i64 << cur_bits) - 1) as i32;
+            let max_bound = (item.max_durability.unwrap_or(cur_bit_limit as u32) as i64)
+                .min(i64::from(cur_bit_limit)) as i32;
+            if cur_dur < 0 || cur_dur > max_bound {
                 return Err(ActionRejection::new(
                     RejectionCode::RejectionStatOutOfRange,
                     "durability_out_of_range",
-                    format!("Durability cannot be negative (got {cur_dur})."),
+                    format!("Durability must be between 0 and {max_bound} (got {cur_dur})."),
                 )
                 .with_target("item_durability")
                 .with_recovery(SuggestedRecovery::SuggestAdjustValue));
             }
-            let max_bound = item.max_durability.unwrap_or(255);
-            let clamped = (cur_dur as u32).min(max_bound);
-            item.current_durability = Some(clamped);
-            item.body.current_durability = Some(clamped);
+            item.current_durability = Some(cur_dur as u32);
+            item.body.current_durability = Some(cur_dur as u32);
         }
 
         if let Some(qty) = quantity {
-            if qty < 1 {
+            if item.quantity.is_none() {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "quantity_not_applicable",
+                    format!("Item index {item_index} does not have a quantity field."),
+                )
+                .with_target("item_quantity"));
+            }
+            let qty_bits = crate::data::generated::layout_policy::D2rV3ExtendedPayloadWidths::QUANTITY.min(31);
+            let max_qty = ((1i64 << qty_bits) - 1) as i32;
+            if qty < 1 || qty > max_qty {
                 return Err(ActionRejection::new(
                     RejectionCode::RejectionStatOutOfRange,
                     "quantity_out_of_range",
-                    format!("Quantity must be at least 1 (got {qty})."),
+                    format!("Quantity must be between 1 and {max_qty} (got {qty})."),
                 )
                 .with_target("item_quantity")
                 .with_recovery(SuggestedRecovery::SuggestAdjustValue));
             }
             item.quantity = Some(qty as u32);
+            item.body.quantity = Some(qty as u32);
         }
 
         if let Some(eth) = is_ethereal {
+            let eth_mask: u32 = if is_alpha_dialect || item.header.save_is_alpha {
+                1 << 24
+            } else {
+                1 << 22
+            };
+            item.is_ethereal = eth;
             item.header.is_ethereal = eth;
             if eth {
-                item.header.flags |= 1 << 22; // ETHEREAL_FLAG_BIT
+                item.header.flags |= eth_mask;
             } else {
-                item.header.flags &= !(1 << 22);
+                item.header.flags &= !eth_mask;
             }
         }
 
@@ -1774,24 +1840,92 @@ impl EditorSession {
         item.bits.clear();
 
         let stat_u32 = stat_id as u32;
+        let exists_on_item = item.properties.iter().any(|p| p.stat_id == stat_u32)
+            || item.stats.properties.iter().any(|p| p.stat_id == stat_u32);
+        if !exists_on_item {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_not_found_on_item",
+                format!("Stat ID {stat_id} does not exist on item index {item_index}."),
+            )
+            .with_target(format!("stat_{stat_id}")));
+        }
+
+        let (min_val, max_val, save_add) = stat_value_bounds(stat_u32).ok_or_else(|| {
+            ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_not_writable",
+                format!("Stat ID {stat_id} is not writable or has no bit-width definition."),
+            )
+            .with_target(format!("stat_{stat_id}"))
+        })?;
+
         let mut matched = false;
+        let mut out_of_range_val: Option<i32> = None;
 
         for prop in &mut item.properties {
             if prop.stat_id == stat_u32 {
-                let new_val = prop.value + delta;
+                let new_val = prop.value.checked_add(delta).ok_or_else(|| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "stat_value_out_of_range",
+                        format!(
+                            "Stat ID {stat_id} value overflowed when adding delta {delta} (allowed {min_val}..={max_val})."
+                        ),
+                    )
+                    .with_target(format!("stat_{stat_id}"))
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue)
+                })?;
+                if new_val < min_val || new_val > max_val {
+                    out_of_range_val = Some(new_val);
+                    break;
+                }
                 prop.value = new_val;
-                prop.raw_value = new_val;
+                prop.raw_value = new_val + save_add;
                 matched = true;
                 break;
             }
         }
 
+        if let Some(bad_val) = out_of_range_val {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_value_out_of_range",
+                format!(
+                    "Stat ID {stat_id} value {bad_val} is outside allowed bounds {min_val}..={max_val}."
+                ),
+            )
+            .with_target(format!("stat_{stat_id}"))
+            .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+        }
+
         // Also synchronize item.stats.properties so that both alias vectors remain identical
         for prop in &mut item.stats.properties {
             if prop.stat_id == stat_u32 {
-                let new_val = prop.value + delta;
+                let new_val = prop.value.checked_add(delta).ok_or_else(|| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "stat_value_out_of_range",
+                        format!(
+                            "Stat ID {stat_id} value overflowed when adding delta {delta} (allowed {min_val}..={max_val})."
+                        ),
+                    )
+                    .with_target(format!("stat_{stat_id}"))
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue)
+                })?;
+                if new_val < min_val || new_val > max_val {
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "stat_value_out_of_range",
+                        format!(
+                            "Stat ID {stat_id} value {new_val} is outside allowed bounds {min_val}..={max_val}."
+                        ),
+                    )
+                    .with_target(format!("stat_{stat_id}"))
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+                }
                 prop.value = new_val;
-                prop.raw_value = new_val;
+                prop.raw_value = new_val + save_add;
                 matched = true;
                 break;
             }
@@ -2697,17 +2831,24 @@ fn build_item_card(
             })
             .collect()
     };
-    let detailed_properties = item
-        .properties
+    let prop_source = if !item.properties.is_empty() {
+        &item.properties
+    } else {
+        &item.stats.properties
+    };
+    let detailed_properties = prop_source
         .iter()
-        .chain(item.stats.properties.iter())
-        .map(|p| ItemPropertyView {
-            stat_id: p.stat_id as i32,
-            name: p.name.clone(),
-            value: p.value,
-            param: p.param as i32,
-            min_value: -10000,
-            max_value: 10000,
+        .filter(|p| p.stat_id != 511)
+        .map(|p| {
+            let (min_value, max_value, _) = stat_value_bounds(p.stat_id).unwrap_or((0, 0, 0));
+            ItemPropertyView {
+                stat_id: p.stat_id as i32,
+                name: p.name.clone(),
+                value: p.value,
+                param: p.param as i32,
+                min_value,
+                max_value,
+            }
         })
         .collect();
 
