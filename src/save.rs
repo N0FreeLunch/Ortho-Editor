@@ -1251,7 +1251,7 @@ pub fn rebuild_item_section(
         jm1 + jm_axiom.header_len()
     };
 
-    let mut serialized_section = Item::serialize_section(items, huffman, alpha_mode)?;
+    let serialized_section = Item::serialize_section(items, huffman, alpha_mode)?;
 
     let section_start = jm1 + jm_axiom.header_len();
     let original_section_len = section_end - section_start;
@@ -1306,6 +1306,68 @@ pub fn rebuild_item_section(
     rebuilt.extend_from_slice(&item_header_emitter.into_bytes());
     rebuilt.extend_from_slice(&bytes[section_end..]);
 
+    finalize_save_bytes(&mut rebuilt, false)?;
+    Ok(rebuilt)
+}
+
+/// Rebuilds the mercenary header/`w4` identity fields and the `jf .. kf` mercenary item section.
+pub fn rebuild_mercenary_section(
+    bytes: &[u8],
+    merc_state: &crate::domain::forensic::v105::mercenary::MercenaryState,
+    merc_items: &[Item],
+    hired: bool,
+    huffman: &HuffmanTree,
+    alpha_mode: bool,
+) -> io::Result<Vec<u8>> {
+    let mut working = bytes.to_vec();
+    if working.len() >= 175 {
+        if hired {
+            if working[164..168] == [0, 0, 0, 0] {
+                working[164..168].copy_from_slice(&[0x09, 0x19, 0x01, 0x04]);
+            }
+            working[169] = merc_state.subtype_id;
+            working[171..175].copy_from_slice(&merc_state.experience.to_le_bytes());
+        } else {
+            working[164..175].fill(0);
+        }
+    }
+
+    let map = map_core_sections(&working)?;
+    if let Some(w4_pos) = map.w4_pos {
+        if w4_pos + 7 <= working.len() && &working[w4_pos..w4_pos + 2] == b"w4" {
+            if hired {
+                working[w4_pos + 5] = (merc_state.name_id & 0xFF) as u8;
+                working[w4_pos + 6] = merc_state.class_id;
+            } else {
+                working[w4_pos + 5] = 0;
+                working[w4_pos + 6] = 0;
+            }
+        }
+    }
+
+    let jf = map
+        .jf_pos
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing jf mercenary marker"))?;
+    let kf = map
+        .kf_pos
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing kf mercenary footer marker"))?;
+    if kf < jf + 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid jf..kf mercenary section boundaries",
+        ));
+    }
+
+    let mut rebuilt = Vec::with_capacity(working.len() + 128);
+    rebuilt.extend_from_slice(&working[..jf + 2]);
+    if hired || !merc_items.is_empty() {
+        let serialized = Item::serialize_section(merc_items, huffman, alpha_mode)?;
+        let count = merc_items.iter().filter(|it| !it.is_residue()).count() as u16;
+        rebuilt.extend_from_slice(b"JM");
+        rebuilt.extend_from_slice(&count.to_le_bytes());
+        rebuilt.extend_from_slice(&serialized);
+    }
+    rebuilt.extend_from_slice(&working[kf..]);
     finalize_save_bytes(&mut rebuilt, false)?;
     Ok(rebuilt)
 }

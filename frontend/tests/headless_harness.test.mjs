@@ -64,7 +64,7 @@ test("HeadlessHarness loads TESTDRUID fixture and emits Cycle 1 marquee/merc/tem
   assert.equal(loadedSnap.activeView, "ViewB");
   assert.equal(loadedSnap.mercLevel, 28);
   assert.equal(loadedSnap.mercAct, 2);
-  assert.equal(loadedSnap.mercPersistenceSupported, false);
+  assert.equal(loadedSnap.mercPersistenceSupported, true);
   assert.equal(loadedSnap.exportSupported, true);
 
   app.ports.receiveHarnessCommand.send({ kind: "SwitchView", view: "ViewA" });
@@ -387,22 +387,17 @@ test("Closed-loop scenario 1: full multi-step browser journey across Elm Headles
     assert.equal(clearedBanner.snap.statusBanner, null);
     assert.equal(clearedBanner.snap.rejectionCode, null);
 
-    // 5. Locked Merc Act + Step +5 are honestly rejected by Rust (`merc_persistence_not_supported`) without dirtying save
-    assert.equal(loadRes.snap.mercPersistenceSupported, false);
+    // 5. Cycle 18: Mercenary persistence is enabled; AdjustMercLevel +5 mutates and Undo restores
+    assert.equal(loadRes.snap.mercPersistenceSupported, true);
     assert.equal(loadRes.snap.exportSupported, true);
-    const actLocked = await driver.stepCommand({ kind: "SelectMercAct", actIndex: 5 });
-    assert.equal(actLocked.resp.ok, false);
-    assert.equal(actLocked.snap.rejectionCode, "merc_persistence_not_supported");
-    assert.equal(actLocked.snap.dirty, false);
-    assert.equal(actLocked.snap.mercAct, loadRes.snap.mercAct);
-    await driver.stepCommand({ kind: "ClearBanner" });
-
-    const mercStepLocked = await driver.stepCommand({ kind: "AdjustMercLevel", delta: 5 });
-    assert.equal(mercStepLocked.resp.ok, false);
-    assert.equal(mercStepLocked.snap.rejectionCode, "merc_persistence_not_supported");
-    assert.equal(mercStepLocked.snap.dirty, false);
-    assert.equal(mercStepLocked.snap.mercLevel, loadRes.snap.mercLevel);
-    await driver.stepCommand({ kind: "ClearBanner" });
+    const mercStep = await driver.stepCommand({ kind: "AdjustMercLevel", delta: 5 });
+    assert.equal(mercStep.resp.ok, true);
+    assert.equal(mercStep.snap.mercLevel, loadRes.snap.mercLevel + 5);
+    assert.equal(mercStep.snap.dirty, true);
+    const mercUndo = await driver.stepCommand({ kind: "Undo" });
+    assert.equal(mercUndo.resp.ok, true);
+    assert.equal(mercUndo.snap.mercLevel, loadRes.snap.mercLevel);
+    assert.equal(mercUndo.snap.dirty, false);
 
     // 6. Green Marquee quest activation in Hell -> dirty=true
     await driver.stepCommand({ kind: "TogglePaintMode", mode: "Activate" });
@@ -621,6 +616,83 @@ test("Closed-loop scenario 4: Item Studio property inspector & stat mutation eng
     const { snap: reloadedSnap } = await driver.exportAndReload("scenario4-item-mutation-loopback.d2s");
     assert.equal(reloadedSnap.dirty, false);
     assert.equal(reloadedSnap.charName, "TESTDRUID");
+  } finally {
+    await driver.close();
+  }
+});
+
+test("Closed-loop scenario 5: Mercenary Zone 4 item move, Act switch, Replaced Staging, and .d2s roundtrip", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    assert.equal(loadRes.snap.mercAct, 3);
+    assert.equal(loadRes.snap.mercPersistenceSupported, true);
+    const helm = loadRes.resp.envelope.session.merc_items.find((it) => it.x === 1);
+    assert.ok(helm, "Expected mercenary helm in slot 1");
+
+    await driver.stepCommand({ kind: "SwitchView", view: "ViewA" });
+
+    // 1. Move merc helm to Stash (7, 7) and back to MercEquipment slot 1
+    const moveOut = await driver.requestHost({
+      cmd: "dispatch_intent",
+      intent: {
+        MoveItem: {
+          item_index: helm.index,
+          target_container: "Stash",
+          x: 7,
+          y: 7,
+        },
+      },
+    });
+    assert.equal(moveOut.resp.ok, true);
+    assert.equal(moveOut.resp.envelope.session.merc_items.length, 1);
+
+    const moveBack = await driver.requestHost({
+      cmd: "dispatch_intent",
+      intent: {
+        MoveItem: {
+          item_index: helm.index,
+          target_container: "MercEquipment",
+          x: 1,
+          y: 0,
+        },
+      },
+    });
+    assert.equal(moveBack.resp.ok, true);
+    assert.equal(moveBack.resp.envelope.session.merc_items.length, 2);
+
+    // 2. Switch Act 3 -> Act 2 via Elm HeadlessHarness command; replaced staging guards export
+    const switchAct2 = await driver.stepCommand({ kind: "SelectMercAct", actIndex: 2 });
+    assert.equal(switchAct2.resp.ok, true);
+    assert.equal(switchAct2.snap.mercAct, 2);
+    assert.equal(switchAct2.snap.exportSupported, false);
+    assert.equal(switchAct2.resp.envelope.session.merc_replaced_items.length, 2);
+
+    // 3. Restore Replaced Mercenary swaps Act 3 and its 2 items back
+    const restored = await driver.stepCommand({ kind: "RestoreReplacedMerc" });
+    assert.equal(restored.resp.ok, true);
+    assert.equal(restored.snap.mercAct, 3);
+    assert.equal(restored.snap.exportSupported, true);
+    assert.equal(restored.resp.envelope.session.merc_items.length, 2);
+
+    // 4. Switch Act 3 -> Act 1, then Reclaim & Clear replaced staging
+    const switchAct1 = await driver.stepCommand({ kind: "SelectMercAct", actIndex: 1 });
+    assert.equal(switchAct1.resp.ok, true);
+    assert.equal(switchAct1.snap.exportSupported, false);
+
+    const cleared = await driver.stepCommand({ kind: "ClearReplacedMerc", reclaimToStorage: true });
+    assert.equal(cleared.resp.ok, true);
+    assert.equal(cleared.snap.exportSupported, true);
+    assert.equal(cleared.snap.mercAct, 1);
+
+    // 5. Export .d2s and reload into fresh session
+    const { snap: reloadedSnap } = await driver.exportAndReload("scenario5-merc-roundtrip.d2s");
+    assert.equal(reloadedSnap.dirty, false);
+    assert.equal(reloadedSnap.mercAct, 1);
   } finally {
     await driver.close();
   }

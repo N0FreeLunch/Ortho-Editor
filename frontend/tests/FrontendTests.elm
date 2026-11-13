@@ -101,8 +101,9 @@ sampleSessionJson =
             "equipment_auras": ["Aura #120 Lv.15"]
           },
           "equipped_count": 3,
-          "persistence_supported": false,
-          "preview_only_reason": "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
+          "persistence_supported": true,
+          "preview_only_reason": null,
+          "dismissed": null
         },
         "progression": {
           "is_expansion": true,
@@ -164,6 +165,7 @@ sampleSessionJson =
             "is_ethereal": false
           }
         ],
+        "merc_replaced_items": [],
         "temp_items": [
           {
             "index": 0, "code": "r01", "name_en": "El Rune", "name_ko": "엘 룬",
@@ -383,7 +385,7 @@ suite =
             \_ ->
                 Expect.all
                     [ \_ ->
-                        Workspace.view loadedModel
+                        Workspace.view (withMercEditable False loadedModel)
                             |> Query.fromHtml
                             |> Expect.all
                                 [ Query.find [ testId "merc-res-fire" ]
@@ -395,7 +397,7 @@ suite =
                                 , Query.find [ testId "merc-preview-badge" ]
                                     >> Query.has [ Selector.text "Read-only · Not saved to .d2s" ]
                                 , Query.find [ testId "merc-preview-note" ]
-                                    >> Query.has [ Selector.text "Read-only: mercenary edits are disabled" ]
+                                    >> Query.has [ Selector.text "Read-only: mercenary changes are not saved to .d2s yet." ]
                                 , Query.find [ testId "merc-act-5" ]
                                     >> Query.has [ Selector.disabled True ]
                                 , Query.find [ testId "merc-lvl-plus5" ]
@@ -547,7 +549,7 @@ suite =
                 in
                 Expect.all
                     [ \_ ->
-                        Workspace.view loadedModel
+                        Workspace.view (withMercEditable False loadedModel)
                             |> Query.fromHtml
                             |> Query.findAll [ testId "unsaved-badge" ]
                             |> Query.count (Expect.equal 0)
@@ -566,7 +568,7 @@ suite =
                 in
                 Expect.all
                     [ \_ ->
-                        Workspace.view loadedModel
+                        Workspace.view (withMercEditable False loadedModel)
                             |> Query.fromHtml
                             |> Expect.all
                                 [ Query.find [ testId "export-support-badge" ]
@@ -1510,6 +1512,107 @@ suite =
                         afterStale.session
                             |> Maybe.map .charLevel
                             |> Expect.equal (Just 99)
+                    ]
+                    ()
+        , test "Cycle 18 View A Zone 4 Mercenary Dual Stage emits SelectMercAct, item pickup, and Replaced Staging actions" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView State.UiState.ViewA)
+                            |> Tuple.first
+
+                    withDismissedModel =
+                        { viewAModel
+                            | session =
+                                viewAModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            let
+                                                oldMerc =
+                                                    s.merc
+                                            in
+                                            { s
+                                                | merc =
+                                                    { oldMerc
+                                                        | dismissed =
+                                                            Just
+                                                                { actIndex = 2
+                                                                , className = "Desert Mercenary (Act 2)"
+                                                                , subtypeName = "N/A"
+                                                                , level = 28
+                                                                , remainingItems = 0
+                                                                }
+                                                    }
+                                            }
+                                        )
+                        }
+
+                    withHoldingMercModel =
+                        { viewAModel
+                            | session =
+                                viewAModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            let
+                                                mercItem =
+                                                    List.head s.mercItems
+                                                        |> Maybe.map (\it -> { it | index = 50 })
+                                            in
+                                            { s
+                                                | items = []
+                                                , mercItems =
+                                                    case mercItem of
+                                                        Just it ->
+                                                            [ it ]
+
+                                                        Nothing ->
+                                                            []
+                                                , selectedMoveItemIndex = Just 50
+                                                , allowedMoveTargets = [ { container = Stash, x = 0, y = 0 } ]
+                                            }
+                                        )
+                        }
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view viewAModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "merc-act-select" ]
+                                    >> Event.simulate (Event.input "1")
+                                    >> Event.expect (SelectMercAct 1)
+                                , Query.find [ testId "merc-slot-4" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (SelectItem (Just 0))
+                                , Query.find [ testId "btn-restore-merc" ]
+                                    >> Query.has [ Selector.disabled True ]
+                                ]
+                    , \_ ->
+                        Workspace.view withDismissedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "btn-restore-merc" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect RestoreReplacedMerc
+                                , Query.find [ testId "btn-reclaim-merc" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ClearReplacedMerc True)
+                                , Query.find [ testId "btn-delete-merc" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ClearReplacedMerc False)
+                                ]
+                    , \_ ->
+                        Workspace.view withHoldingMercModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "grid-cell-stash-0-0" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (MoveSelectedItemTo Stash 0 0)
+                                , Query.find [ testId "merc-slot-4" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (SelectItem Nothing)
+                                ]
                     ]
                     ()
         ]

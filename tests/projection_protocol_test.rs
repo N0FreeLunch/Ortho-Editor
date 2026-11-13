@@ -98,18 +98,14 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
     assert_eq!(mode_env.session.unwrap().skill_mode, EditMode::Free);
 
     let merc_before = session.project().merc;
-    assert!(!merc_before.persistence_supported);
-    assert!(merc_before.preview_only_reason.is_some());
+    assert!(merc_before.persistence_supported);
+    assert!(merc_before.preview_only_reason.is_none());
 
-    let lvl_locked = session.apply_intent(UiIntent::SetMercLevel { level: 85 });
-    assert!(!lvl_locked.ok);
-    assert_eq!(
-        lvl_locked.rejection.as_ref().map(|r| r.raw_code.as_str()),
-        Some("merc_persistence_not_supported")
-    );
-    let after_lvl_view = lvl_locked.session.expect("session retained");
-    assert!(!after_lvl_view.dirty);
-    assert_eq!(after_lvl_view.merc.stats.level, merc_before.stats.level);
+    let lvl_ok = session.apply_intent(UiIntent::SetMercLevel { level: 85 });
+    assert!(lvl_ok.ok);
+    let after_lvl_view = lvl_ok.session.expect("session retained");
+    assert!(after_lvl_view.dirty);
+    assert_eq!(after_lvl_view.merc.stats.level, 85);
 
     let lvl_bad_low = session.apply_intent(UiIntent::SetMercLevel { level: 0 });
     assert!(!lvl_bad_low.ok);
@@ -117,10 +113,7 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         lvl_bad_low.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("merc_level_out_of_range")
     );
-    assert_eq!(
-        lvl_bad_low.session.unwrap().merc.stats.level,
-        merc_before.stats.level
-    );
+    assert_eq!(lvl_bad_low.session.unwrap().merc.stats.level, 85);
 
     let lvl_bad_high = session.apply_intent(UiIntent::SetMercLevel { level: 99 });
     assert!(!lvl_bad_high.ok);
@@ -129,15 +122,11 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         Some("merc_level_out_of_range")
     );
 
-    let act5_locked = session.apply_intent(UiIntent::SelectMercAct { act_index: 5 });
-    assert!(!act5_locked.ok);
-    assert_eq!(
-        act5_locked.rejection.as_ref().map(|r| r.raw_code.as_str()),
-        Some("merc_persistence_not_supported")
-    );
-    let act5_view = act5_locked.session.expect("session retained");
-    assert!(!act5_view.dirty);
-    assert_eq!(act5_view.merc.act_index, merc_before.act_index);
+    let act5_ok = session.apply_intent(UiIntent::SelectMercAct { act_index: 5 });
+    assert!(act5_ok.ok);
+    let act5_view = act5_ok.session.expect("session retained");
+    assert!(act5_view.dirty);
+    assert_eq!(act5_view.merc.act_index, 5);
 
     let act4_bad = session.apply_intent(UiIntent::SelectMercAct { act_index: 4 });
     assert!(!act4_bad.ok);
@@ -145,6 +134,10 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         act4_bad.rejection.as_ref().map(|r| r.raw_code.as_str()),
         Some("invalid_merc_act")
     );
+
+    // Undo back to clean state before progression assertions
+    assert!(session.apply_intent(UiIntent::Undo).ok);
+    assert!(session.apply_intent(UiIntent::Undo).ok);
 
     let all_quests_on = session.apply_intent(UiIntent::SetAllDiffQuests { completed: true });
     assert!(all_quests_on.ok);
@@ -931,4 +924,100 @@ fn cycle_17_item_mutation_enforces_bit_width_and_roundtrip_bounds() {
             .expect("reloaded stack item");
         assert_eq!(reloaded_stack.quantity, Some(42));
     }
+}
+
+#[test]
+fn cycle_18_merc_item_move_act_swap_replaced_staging_and_d2s_roundtrip() {
+    let bytes = fixture_bytes(
+        "tests/fixtures/savegames/gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s",
+    );
+    let mut session =
+        EditorSession::from_bytes(&bytes, "TESTASSASSIN_Act3_ColdMercLvl21.d2s").expect("parse");
+
+    let initial = session.project();
+    assert!(initial.merc.hired);
+    assert_eq!(initial.merc.act_index, 3);
+    assert_eq!(initial.merc_items.len(), 2);
+
+    // 1. Move one mercenary item (helm) to stash (free 10x10 space) and back to merc slot 1.
+    let helm_idx = initial
+        .merc_items
+        .iter()
+        .find(|it| it.x == 1)
+        .expect("merc helm")
+        .index;
+    assert!(
+        session
+            .apply_intent(UiIntent::SelectItemForMove {
+                item_index: Some(helm_idx),
+            })
+            .ok
+    );
+    let moved_to_stash = session.apply_intent(UiIntent::MoveItem {
+        item_index: helm_idx,
+        target_container: ContainerKind::Stash,
+        x: 7,
+        y: 7,
+    });
+    assert!(
+        moved_to_stash.ok,
+        "{}",
+        moved_to_stash.rejection.map(|r| r.message).unwrap_or_default()
+    );
+    assert_eq!(moved_to_stash.session.unwrap().merc_items.len(), 1);
+
+    let moved_back = session.apply_intent(UiIntent::MoveItem {
+        item_index: helm_idx,
+        target_container: ContainerKind::MercEquipment,
+        x: 1,
+        y: 0,
+    });
+    assert!(moved_back.ok);
+    assert_eq!(moved_back.session.unwrap().merc_items.len(), 2);
+
+    // 2. Switch Act 3 -> Act 2: old merc & 2 items move to Replaced Staging, export guarded.
+    let switch_act2 = session.apply_intent(UiIntent::SelectMercAct { act_index: 2 });
+    assert!(switch_act2.ok);
+    let act2_view = switch_act2.session.unwrap();
+    assert_eq!(act2_view.merc.act_index, 2);
+    assert_eq!(act2_view.merc_items.len(), 0);
+    assert_eq!(act2_view.merc_replaced_items.len(), 2);
+    assert_eq!(act2_view.merc.dismissed.as_ref().map(|d| d.act_index), Some(3));
+    assert!(!act2_view.export_supported);
+
+    // Dropping into MercReplaced must be rejected.
+    let drop_replaced = session.apply_intent(UiIntent::MoveItem {
+        item_index: helm_idx,
+        target_container: ContainerKind::MercReplaced,
+        x: 1,
+        y: 0,
+    });
+    assert!(!drop_replaced.ok);
+
+    // 3. Restore Replaced Mercenary -> swaps Act 3 and its 2 items back.
+    let restored = session.apply_intent(UiIntent::RestoreReplacedMerc);
+    assert!(restored.ok);
+    let restored_view = restored.session.unwrap();
+    assert_eq!(restored_view.merc.act_index, 3);
+    assert_eq!(restored_view.merc_items.len(), 2);
+    assert_eq!(restored_view.merc_replaced_items.len(), 0);
+
+    // 4. Switch Act 3 -> Act 1, then Reclaim & Clear replaced staging, change level, and roundtrip .d2s!
+    assert!(session.apply_intent(UiIntent::SelectMercAct { act_index: 1 }).ok);
+    let cleared = session.apply_intent(UiIntent::ClearReplacedMerc {
+        reclaim_to_storage: true,
+    });
+    assert!(cleared.ok);
+    let cleared_view = cleared.session.unwrap();
+    assert!(cleared_view.export_supported);
+    assert!(cleared_view.merc.dismissed.is_none());
+    assert!(cleared_view.merc_replaced_items.is_empty());
+
+    assert!(session.apply_intent(UiIntent::SetMercLevel { level: 55 }).ok);
+
+    let exported = session.to_save_bytes().expect("export merc changes .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "merc_roundtrip.d2s").expect("reload .d2s");
+    let reloaded_view = reloaded.project();
+    assert_eq!(reloaded_view.merc.act_index, 1);
+    assert_eq!(reloaded_view.merc.stats.level, 55);
 }

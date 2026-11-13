@@ -380,6 +380,9 @@ containerLabel kind =
         MercEquipment ->
             "merc_equipment"
 
+        MercReplaced ->
+            "merc_replaced"
+
         Cursor ->
             "cursor"
 

@@ -99,8 +99,9 @@
       "equipment_auras": []
     },
     "equipped_count": 3,
-    "persistence_supported": false,
-    "preview_only_reason": "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
+    "persistence_supported": true,
+    "preview_only_reason": null,
+    "dismissed": null
   },
   "progression": {
     "is_expansion": false,
@@ -495,19 +496,36 @@
         "+2 to Dexterity",
         "+22 Maximum Stamina"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 2,
+          "name": "dexterity",
+          "value": 2,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 95
+        },
+        {
+          "stat_id": 11,
+          "name": "maxstamina",
+          "value": 22,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 223
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_medium3.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 1,
@@ -529,19 +547,44 @@
         "Fire Resist +4%",
         "Adds 1-3 lightning damage"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 4,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 50,
+          "name": "lightmindam",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        },
+        {
+          "stat_id": 51,
+          "name": "lightmaxdam",
+          "value": 3,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 1023
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_medium1.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 2,
@@ -562,19 +605,28 @@
       "properties": [
         "+10% Faster Cast Rate"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 105,
+          "name": "item_fastercastrate",
+          "value": 10,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 107
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/amulet/amulet3.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 3,
@@ -596,6 +648,29 @@
         "Damage Reduced by 2",
         "6% Life stolen per hit"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 34,
+          "name": "normal_damage_reduction",
+          "value": 2,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        },
+        {
+          "stat_id": 60,
+          "name": "lifedrainmindam",
+          "value": 6,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": "Cathan's Traps",
       "set_pieces": [
         "Cathan's Mesh",
@@ -647,13 +722,7 @@
       ],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring5.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 4,
@@ -672,19 +741,28 @@
       "properties": [
         "21% Extra Gold from Monsters"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 79,
+          "name": "item_goldbonus",
+          "value": 21,
+          "param": 0,
+          "min_value": -100,
+          "max_value": 411
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/gem/perfect_diamond4.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 5,
@@ -706,19 +784,68 @@
         "+20 poison damage over 2 seconds",
         "Requirements -15%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 7,
+          "name": "maxhp",
+          "value": 7,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 479
+        },
+        {
+          "stat_id": 31,
+          "name": "armorclass",
+          "value": 6,
+          "param": 0,
+          "min_value": -10,
+          "max_value": 2037
+        },
+        {
+          "stat_id": 57,
+          "name": "poisonmindam",
+          "value": 103,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 1023
+        },
+        {
+          "stat_id": 58,
+          "name": "poisonmaxdam",
+          "value": 103,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 1023
+        },
+        {
+          "stat_id": 59,
+          "name": "poisonlength",
+          "value": 50,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 91,
+          "name": "item_req_percent",
+          "value": -15,
+          "param": 0,
+          "min_value": -100,
+          "max_value": 155
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/gem/perfect_diamond5.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 6,
@@ -739,19 +866,28 @@
       "properties": [
         "Fire Resist +7%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 7,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_small2.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 7,
@@ -772,19 +908,28 @@
       "properties": [
         "Fire Resist +6%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 6,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_small1.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 8,
@@ -803,19 +948,19 @@
         "Points: 180"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 9,
@@ -834,19 +979,19 @@
         "Points: 100"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 10,
@@ -867,19 +1012,28 @@
       "properties": [
         "+10% Faster Cast Rate"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 105,
+          "name": "item_fastercastrate",
+          "value": 10,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 107
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring5.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 11,
@@ -900,19 +1054,28 @@
       "properties": [
         "Fire Resist +7%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 7,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/charm/charm_small1.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 12,
@@ -942,19 +1105,68 @@
         "Poison Length Reduced by 25%",
         "Repairs 1 durability in 33 seconds"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 1,
+          "name": "energy",
+          "value": 7,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 95
+        },
+        {
+          "stat_id": 16,
+          "name": "item_armor_percent",
+          "value": 29,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 20,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 89,
+          "name": "item_lightradius",
+          "value": 2,
+          "param": 0,
+          "min_value": -4,
+          "max_value": 11
+        },
+        {
+          "stat_id": 110,
+          "name": "item_poisonlengthresist",
+          "value": 25,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 235
+        },
+        {
+          "stat_id": 252,
+          "name": "item_replenish_durability",
+          "value": 3,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        }
+      ],
+      "defense": 42,
+      "current_durability": 11,
+      "max_durability": 11,
+      "quantity": null,
+      "is_ethereal": true,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/helmet/mask.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 13,
@@ -976,19 +1188,36 @@
         "+7 to Energy",
         "Lightning Resist +25%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 1,
+          "name": "energy",
+          "value": 7,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 95
+        },
+        {
+          "stat_id": 41,
+          "name": "lightresist",
+          "value": 25,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/amulet/amulet1.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 14,
@@ -1012,19 +1241,52 @@
         "Lightning Resist +6%",
         "+1 Half Freeze Duration"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 0,
+          "name": "strength",
+          "value": 3,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 223
+        },
+        {
+          "stat_id": 1,
+          "name": "energy",
+          "value": 4,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 95
+        },
+        {
+          "stat_id": 41,
+          "name": "lightresist",
+          "value": 6,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 118,
+          "name": "item_halffreezeduration",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 1
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 15,
@@ -1046,19 +1308,36 @@
         "Lightning Resist +17%",
         "39% Extra Gold from Monsters"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 41,
+          "name": "lightresist",
+          "value": 17,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 79,
+          "name": "item_goldbonus",
+          "value": 39,
+          "param": 0,
+          "min_value": -100,
+          "max_value": 411
+        }
+      ],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 16,
@@ -1088,19 +1367,68 @@
         "5% Chance to cast level 3 Frost Nova when struck",
         "Repairs 1 durability in 33 seconds"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 11,
+          "name": "maxstamina",
+          "value": 19,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 223
+        },
+        {
+          "stat_id": 16,
+          "name": "item_armor_percent",
+          "value": 17,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 43,
+          "name": "coldresist",
+          "value": 14,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 118,
+          "name": "item_halffreezeduration",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 1
+        },
+        {
+          "stat_id": 201,
+          "name": "item_skillongethit",
+          "value": 5,
+          "param": 2819,
+          "min_value": 0,
+          "max_value": 127
+        },
+        {
+          "stat_id": 252,
+          "name": "item_replenish_durability",
+          "value": 3,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        }
+      ],
+      "defense": 7,
+      "current_durability": 14,
+      "max_durability": 14,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/boot/heavy_boots.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 17,
@@ -1128,19 +1456,84 @@
         "+10% Increased Attack Speed",
         "+30% Faster Hit Recovery"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 7,
+          "name": "maxhp",
+          "value": 40,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 479
+        },
+        {
+          "stat_id": 16,
+          "name": "item_armor_percent",
+          "value": 14,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 21,
+          "name": "mindamage",
+          "value": 5,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        },
+        {
+          "stat_id": 23,
+          "name": "secondary_mindamage",
+          "value": 5,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        },
+        {
+          "stat_id": 31,
+          "name": "armorclass",
+          "value": 10,
+          "param": 0,
+          "min_value": -10,
+          "max_value": 2037
+        },
+        {
+          "stat_id": 93,
+          "name": "item_fasterattackrate",
+          "value": 10,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 107
+        },
+        {
+          "stat_id": 99,
+          "name": "item_fastergethitrate",
+          "value": 30,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 107
+        },
+        {
+          "stat_id": 159,
+          "name": "item_throw_mindamage",
+          "value": 5,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        }
+      ],
+      "defense": 7,
+      "current_durability": 14,
+      "max_durability": 14,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/glove/heavy_gloves.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 18,
@@ -1168,19 +1561,60 @@
         "+17% Faster Hit Recovery",
         "Poison Length Reduced by 25%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 43,
+          "name": "coldresist",
+          "value": 28,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 45,
+          "name": "poisonresist",
+          "value": 20,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 78,
+          "name": "item_attackertakesdamage",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        },
+        {
+          "stat_id": 99,
+          "name": "item_fastergethitrate",
+          "value": 17,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 107
+        },
+        {
+          "stat_id": 110,
+          "name": "item_poisonlengthresist",
+          "value": 25,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 235
+        }
+      ],
+      "defense": 9,
+      "current_durability": 24,
+      "max_durability": 24,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/belt/girdle_h.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 19,
@@ -1199,19 +1633,19 @@
         "Points: 320"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 20,
@@ -1230,19 +1664,19 @@
         "Points: 100"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 21,
@@ -1261,19 +1695,19 @@
         "Points: 180"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 22,
@@ -1292,19 +1726,19 @@
         "Points: 320"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 23,
@@ -1323,19 +1757,19 @@
         "Heals 35% Life and Mana"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 24,
@@ -1366,19 +1800,76 @@
         "-50% Target Defense",
         "Slows Target by 25%"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 0,
+          "name": "strength",
+          "value": 15,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 223
+        },
+        {
+          "stat_id": 2,
+          "name": "dexterity",
+          "value": 8,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 95
+        },
+        {
+          "stat_id": 17,
+          "name": "item_maxdamage_percent",
+          "value": 31,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 18,
+          "name": "item_mindamage_percent",
+          "value": 31,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 93,
+          "name": "item_fasterattackrate",
+          "value": 30,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 107
+        },
+        {
+          "stat_id": 116,
+          "name": "item_fractionaltargetac",
+          "value": 50,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        },
+        {
+          "stat_id": 150,
+          "name": "item_slow",
+          "value": 25,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        }
+      ],
+      "defense": null,
+      "current_durability": 30,
+      "max_durability": 35,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/spear/razortine.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 25,
@@ -1408,6 +1899,53 @@
         "Poison Length Reduced by 50%",
         "+38 to Mana"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 16,
+          "name": "item_armor_percent",
+          "value": 99,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 45,
+          "name": "poisonresist",
+          "value": 90,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 46,
+          "name": "maxpoisonresist",
+          "value": 15,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 31
+        },
+        {
+          "stat_id": 89,
+          "name": "item_lightradius",
+          "value": 2,
+          "param": 0,
+          "min_value": -4,
+          "max_value": 11
+        },
+        {
+          "stat_id": 110,
+          "name": "item_poisonlengthresist",
+          "value": 50,
+          "param": 0,
+          "min_value": -20,
+          "max_value": 235
+        }
+      ],
+      "defense": 69,
+      "current_durability": 49,
+      "max_durability": 50,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
@@ -1416,13 +1954,7 @@
         "Perfect Sapphire"
       ],
       "image_url": "/item-vectors/armor/armor/breast_plate.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 26,
@@ -1441,19 +1973,19 @@
         "Heals 35% Life and Mana"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 27,
@@ -1470,19 +2002,19 @@
       "item_level": 0,
       "base_attributes": [],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/stamina_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 28,
@@ -1501,19 +2033,19 @@
         "Quantity: 13 of 20"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": 13,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/book/identify_book.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 29,
@@ -1533,19 +2065,19 @@
         "Required Level: 12"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 30,
@@ -1564,19 +2096,19 @@
         "Points: 320"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 31,
@@ -1595,19 +2127,19 @@
         "Points: 60"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/light_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 32,
@@ -1626,19 +2158,19 @@
         "Points: 180"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 33,
@@ -1657,19 +2189,19 @@
         "Points: 320"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 34,
@@ -1688,19 +2220,19 @@
         "Points: 180"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 35,
@@ -1717,19 +2249,19 @@
       "item_level": 13,
       "base_attributes": [],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/quest/horadric_cube.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 36,
@@ -1748,19 +2280,19 @@
         "Heals 35% Life and Mana"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 37,
@@ -1779,19 +2311,19 @@
         "Heals 35% Life and Mana"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 38,
@@ -1810,19 +2342,19 @@
         "Heals 35% Life and Mana"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 39,
@@ -1841,19 +2373,19 @@
         "Points: 250"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/potion/greater_mana_potion.svg",
-      "is_belt_consumable": true,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": true
     },
     {
       "index": 40,
@@ -1872,19 +2404,19 @@
         "Quantity: 16 of 20"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": null,
+      "current_durability": null,
+      "max_durability": null,
+      "quantity": 16,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/misc/book/town_portal_book.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 41,
@@ -1914,19 +2446,76 @@
         "+2 to Light Radius",
         "+33% Chance of Crushing Blow"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 0,
+          "name": "strength",
+          "value": 15,
+          "param": 0,
+          "min_value": -32,
+          "max_value": 223
+        },
+        {
+          "stat_id": 17,
+          "name": "item_maxdamage_percent",
+          "value": 55,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 18,
+          "name": "item_mindamage_percent",
+          "value": 55,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 50,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 81,
+          "name": "item_knockback",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        },
+        {
+          "stat_id": 89,
+          "name": "item_lightradius",
+          "value": 2,
+          "param": 0,
+          "min_value": -4,
+          "max_value": 11
+        },
+        {
+          "stat_id": 136,
+          "name": "item_crushingblow",
+          "value": 33,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        }
+      ],
+      "defense": null,
+      "current_durability": 60,
+      "max_durability": 60,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/mace/mace.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
       "index": 42,
@@ -1957,24 +2546,73 @@
         "Lightning Resist +17%",
         "Attacker Takes Damage of 1"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 16,
+          "name": "item_armor_percent",
+          "value": 55,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 34,
+          "name": "normal_damage_reduction",
+          "value": 2,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        },
+        {
+          "stat_id": 35,
+          "name": "magic_damage_reduction",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 63
+        },
+        {
+          "stat_id": 39,
+          "name": "fireresist",
+          "value": 19,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 41,
+          "name": "lightresist",
+          "value": 17,
+          "param": 0,
+          "min_value": -200,
+          "max_value": 311
+        },
+        {
+          "stat_id": 78,
+          "name": "item_attackertakesdamage",
+          "value": 1,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 127
+        }
+      ],
+      "defense": 26,
+      "current_durability": 60,
+      "max_durability": 60,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/shield/tower_shield.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     }
   ],
   "merc_items": [
     {
-      "index": 0,
+      "index": 43,
       "code": "chn",
       "name_en": "Strong Chain Mail",
       "name_ko": "스트롱 체인메일",
@@ -1995,28 +2633,37 @@
       "properties": [
         "+31% Enhanced Defense"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 16,
+          "name": "item_armor_percent",
+          "value": 31,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        }
+      ],
+      "defense": 76,
+      "current_durability": 45,
+      "max_durability": 45,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/armor/chain_mail.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
-      "index": 1,
+      "index": 44,
       "code": "hlm",
       "name_en": "Helm",
       "name_ko": "헬름",
       "quality": "QualityNormal",
       "container": "MercEquipment",
-      "slot_label": "Helm",
+      "slot_label": "Head",
       "x": 1,
       "y": 0,
       "width": 2,
@@ -2029,22 +2676,22 @@
         "Socketed (2)"
       ],
       "properties": [],
+      "detailed_properties": [],
+      "defense": 17,
+      "current_durability": 24,
+      "max_durability": 24,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/armor/helmet/helm.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     },
     {
-      "index": 2,
+      "index": 45,
       "code": "9tr",
       "name_en": "Brimstone Mar",
       "name_ko": "브림스톤마어",
@@ -2069,21 +2716,55 @@
         "+36 to Attack Rating",
         "5% Chance to cast level 1 Amplify Damage on striking"
       ],
+      "detailed_properties": [
+        {
+          "stat_id": 17,
+          "name": "item_maxdamage_percent",
+          "value": 59,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 18,
+          "name": "item_mindamage_percent",
+          "value": 59,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 511
+        },
+        {
+          "stat_id": 19,
+          "name": "tohit",
+          "value": 36,
+          "param": 0,
+          "min_value": 0,
+          "max_value": 1023
+        },
+        {
+          "stat_id": 198,
+          "name": "item_skillonhit",
+          "value": 5,
+          "param": 4225,
+          "min_value": 0,
+          "max_value": 127
+        }
+      ],
+      "defense": null,
+      "current_durability": 22,
+      "max_durability": 35,
+      "quantity": null,
+      "is_ethereal": false,
       "set_name": null,
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
       "socketed_names": [],
       "image_url": "/item-vectors/weapon/spear/trident.svg",
-      "is_belt_consumable": false,
-      "detailed_properties": [],
-      "defense": null,
-      "current_durability": null,
-      "max_durability": null,
-      "quantity": null,
-      "is_ethereal": false
+      "is_belt_consumable": false
     }
   ],
+  "merc_replaced_items": [],
   "temp_items": [],
   "selected_move_item_index": null,
   "allowed_move_targets": [],

@@ -43,6 +43,8 @@ type Msg
     | AdjustMercLevel Int
     | SetMercLevelExact Int
     | SelectMercAct Int
+    | RestoreReplacedMerc
+    | ClearReplacedMerc Bool
     | SelectProgressionDifficulty DifficultyMode
     | TogglePaintMode PaintMode
     | ClickQuestTile DifficultyMode String
@@ -329,6 +331,12 @@ update msg model =
 
         ClearTempInventory ->
             ( model, EmitIntent Protocol.ClearTempInventory )
+
+        RestoreReplacedMerc ->
+            ( model, EmitIntent Protocol.RestoreReplacedMerc )
+
+        ClearReplacedMerc reclaim ->
+            ( model, EmitIntent (Protocol.ClearReplacedMerc { reclaimToStorage = reclaim }) )
 
         SelectItem maybeIdx ->
             ( { model | ui = UiState.setSelectedItem maybeIdx model.ui }

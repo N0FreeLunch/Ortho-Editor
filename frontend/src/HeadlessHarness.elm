@@ -214,6 +214,13 @@ commandDecoder =
                     "ClearTempInventory" ->
                         Json.Decode.succeed ClearTempInventory
 
+                    "RestoreReplacedMerc" ->
+                        Json.Decode.succeed RestoreReplacedMerc
+
+                    "ClearReplacedMerc" ->
+                        Json.Decode.field "reclaimToStorage" Json.Decode.bool
+                            |> Json.Decode.map ClearReplacedMerc
+
                     "SelectItem" ->
                         Json.Decode.field "index" (Json.Decode.nullable Json.Decode.int)
                             |> Json.Decode.map SelectItem

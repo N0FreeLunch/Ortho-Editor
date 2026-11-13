@@ -1,12 +1,23 @@
 module Component.ContainersPanel exposing (view)
 
 import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ContainerKind(..), ItemCardView, ItemQualityKind(..), MercSummaryView, SessionView, SetBonusView, ShopCatalogItemView)
-import Html exposing (Html, button, div, h2, h3, img, li, section, span, text, ul)
-import Html.Attributes exposing (alt, attribute, class, classList, disabled, src, style, title)
-import Html.Events exposing (custom, on, onClick, onMouseEnter, onMouseLeave)
+import Html exposing (Html, button, div, h2, h3, img, li, option, section, select, span, text, ul)
+import Html.Attributes exposing (alt, attribute, class, classList, disabled, id, selected, src, style, title, type_, value)
+import Html.Events exposing (custom, on, onClick, onInput, onMouseEnter, onMouseLeave)
 import Json.Decode as Decode
 import State.UiState as UiState exposing (StashTab(..), UiState)
 import Update exposing (Msg(..))
+
+
+findHeldItem : SessionView -> Maybe ItemCardView
+findHeldItem session =
+    session.selectedMoveItemIndex
+        |> Maybe.andThen
+            (\idx ->
+                (session.items ++ session.mercItems ++ session.mercReplacedItems)
+                    |> List.filter (\it -> it.index == idx)
+                    |> List.head
+            )
 
 
 view : UiState -> SessionView -> Html Msg
@@ -31,13 +42,7 @@ view ui session =
             List.filter (\it -> it.container == TempInventory) session.items
 
         selectedMoveItem =
-            session.selectedMoveItemIndex
-                |> Maybe.andThen
-                    (\idx ->
-                        session.items
-                            |> List.filter (\it -> it.index == idx)
-                            |> List.head
-                    )
+            findHeldItem session
     in
     let
         isHolding =
@@ -99,7 +104,7 @@ view ui session =
             text ""
 
           else
-            viewHoverTooltip ui.hoveredItemIndex ui.hoverMousePos (session.items ++ session.tempItems ++ session.mercItems)
+            viewHoverTooltip ui.hoveredItemIndex ui.hoverMousePos (session.items ++ session.tempItems ++ session.mercItems ++ session.mercReplacedItems)
         ]
 
 
@@ -729,16 +734,33 @@ viewZone3RightStack ui session inventoryItems cubeItems beltItems =
                     ]
                 ]
             ]
-        , viewZone4MercenaryDualStage session.merc session.mercItems
+        , viewZone4MercenaryDualStage ui session
         ]
 
 
-viewZone4MercenaryDualStage : MercSummaryView -> List ItemCardView -> Html Msg
-viewZone4MercenaryDualStage merc mercItems =
+viewZone4MercenaryDualStage : UiState -> SessionView -> Html Msg
+viewZone4MercenaryDualStage ui session =
+    let
+        merc =
+            session.merc
+
+        hasReplaced =
+            merc.dismissed /= Nothing || not (List.isEmpty session.mercReplacedItems)
+
+        hasReplacedItems =
+            not (List.isEmpty session.mercReplacedItems)
+
+        actOption actVal labelText =
+            option
+                [ value (String.fromInt actVal)
+                , selected (merc.actIndex == actVal)
+                ]
+                [ text labelText ]
+    in
     section [ class "glass-panel merc-dual-column", attribute "data-testid" "view-a-merc-panel" ]
         [ div [ class "panel-header" ]
             [ div [ class "panel-title" ] [ text "Mercenary Station (Zone 4)" ]
-            , span [ class "readonly-badge" ] [ text "Read-only" ]
+            , span [ class "merc-stage-badge badge-active-target" ] [ text "Interactive" ]
             ]
         , div [ class "merc-stages-horizontal" ]
             [ div [ class "merc-stage-card stage-active" ]
@@ -746,68 +768,217 @@ viewZone4MercenaryDualStage merc mercItems =
                     [ span [ class "merc-stage-title" ] [ text "Active Mercenary" ]
                     , span [ class "merc-stage-badge badge-active-target" ] [ text "Active" ]
                     ]
-                , div [ class "merc-stage-desc" ]
-                    [ text
-                        (if merc.hired then
-                            "Lv " ++ String.fromInt merc.stats.level ++ " " ++ merc.className ++ " · " ++ merc.stats.innateAura
+                , div [ style "display" "flex", style "flex-direction" "column", style "gap" "4px" ]
+                    [ select
+                        [ id "merc-type-select"
+                        , attribute "data-testid" "merc-act-select"
+                        , onInput (\raw -> SelectMercAct (Maybe.withDefault 2 (String.toInt raw)))
+                        ]
+                        ([ if not merc.hired then
+                            option [ value "0", selected True, disabled True ] [ text "-- Select Mercenary Act --" ]
 
-                         else
-                            "No mercenary hired"
+                           else
+                            text ""
+                         , actOption 1 "Act 1 Rogue Scout (Bow)"
+                         , actOption 2 "Act 2 Desert Mercenary (Spear/Polearm)"
+                         , actOption 3 "Act 3 Iron Wolf (Sword/Shield)"
+                         , actOption 5 "Act 5 Barbarian (Sword)"
+                         ]
                         )
+                    , div [ class "merc-stage-desc" ]
+                        [ text
+                            (if merc.hired then
+                                "Lv " ++ String.fromInt merc.stats.level ++ " " ++ merc.className ++ " · " ++ merc.stats.innateAura
+
+                             else
+                                "No mercenary hired — choose an Act above to hire"
+                            )
+                        ]
                     ]
-                , viewMercGridProportional mercItems
+                , viewMercGridProportional ui session False session.mercItems
                 ]
-            , div [ class "merc-stage-card stage-dismissed" ]
+            , div
+                [ classList
+                    [ ( "merc-stage-card", True )
+                    , ( "stage-dismissed", True )
+                    , ( "has-items", hasReplacedItems )
+                    ]
+                , attribute "data-testid" "merc-replaced-stage"
+                ]
                 [ div [ class "merc-stage-header" ]
                     [ span [ class "merc-stage-title" ] [ text "Replaced Staging" ]
-                    , span [ class "merc-stage-badge badge-discard-target" ] [ text "Preview" ]
+                    , div [ class "merc-stage-actions" ]
+                        [ button
+                            [ type_ "button"
+                            , class "btn-restore-merc"
+                            , attribute "data-testid" "btn-restore-merc"
+                            , disabled (not hasReplaced)
+                            , onClick RestoreReplacedMerc
+                            ]
+                            [ text "↩️ Restore" ]
+                        , button
+                            [ type_ "button"
+                            , class "btn-restore-merc"
+                            , attribute "data-testid" "btn-reclaim-merc"
+                            , disabled (not hasReplaced)
+                            , onClick (ClearReplacedMerc True)
+                            ]
+                            [ text "📦 Reclaim" ]
+                        , button
+                            [ type_ "button"
+                            , class "btn-delete-merc"
+                            , attribute "data-testid" "btn-delete-merc"
+                            , disabled (not hasReplaced)
+                            , onClick (ClearReplacedMerc False)
+                            ]
+                            [ text "🗑️ Discard" ]
+                        ]
                     ]
                 , div [ class "merc-stage-desc" ]
-                    [ text "Mercenary replacement staging requires a dedicated Rust merc-swap slice." ]
-                , viewMercGridProportional []
+                    [ text
+                        (case merc.dismissed of
+                            Just oldMerc ->
+                                "Prev: Lv "
+                                    ++ String.fromInt oldMerc.level
+                                    ++ " "
+                                    ++ oldMerc.className
+                                    ++ " · Remaining gear: "
+                                    ++ String.fromInt (List.length session.mercReplacedItems)
+
+                            Nothing ->
+                                "When switching mercenary Acts, previous gear moves here for recovery."
+                        )
+                    ]
+                , if hasReplacedItems then
+                    div [ class "merc-discard-warning" ]
+                        [ text "⚠️ Unreclaimed gear in Replaced Staging! Move to storage, restore, or clear before .d2s export." ]
+
+                  else
+                    text ""
+                , viewMercGridProportional ui session True session.mercReplacedItems
                 ]
             ]
         ]
 
 
-viewMercGridProportional : List ItemCardView -> Html Msg
-viewMercGridProportional items =
+viewMercGridProportional : UiState -> SessionView -> Bool -> List ItemCardView -> Html Msg
+viewMercGridProportional ui session isReplaced items =
     let
-        mercSlot colSpec rowSpec emptyLabel acceptedLabels =
+        isHolding =
+            session.selectedMoveItemIndex /= Nothing
+
+        targetContainer =
+            if isReplaced then
+                MercReplaced
+
+            else
+                MercEquipment
+
+        mercSlot bodyLoc colSpec rowSpec emptyLabel acceptedLabels =
             let
                 matched =
                     items
                         |> List.filter
                             (\it ->
-                                case it.slotLabel of
-                                    Just lbl ->
-                                        List.member lbl acceptedLabels
+                                it.x == bodyLoc
+                                    || (case it.slotLabel of
+                                            Just lbl ->
+                                                List.member lbl acceptedLabels
 
-                                    Nothing ->
-                                        False
+                                            Nothing ->
+                                                False
+                                       )
                             )
                         |> List.head
+
+                isAllowedTarget =
+                    not isReplaced
+                        && List.any
+                            (\t -> t.container == MercEquipment && t.x == bodyLoc && t.y == 0)
+                            session.allowedMoveTargets
+
+                isHovered =
+                    case ui.hoveredDropTarget of
+                        Just tgt ->
+                            tgt.container == targetContainer && tgt.x == bodyLoc && tgt.y == 0
+
+                        Nothing ->
+                            False
             in
             case matched of
                 Nothing ->
-                    div [ class "merc-slot", style "grid-column" colSpec, style "grid-row" rowSpec ]
+                    div
+                        ([ classList
+                            [ ( "merc-slot", True )
+                            , ( "footprint-valid", isHolding && isAllowedTarget )
+                            , ( "footprint-invalid", isHolding && not isAllowedTarget && isHovered )
+                            ]
+                         , style "grid-column" colSpec
+                         , style "grid-row" rowSpec
+                         , attribute "data-testid" ((if isReplaced then "merc-replaced-slot-" else "merc-slot-") ++ String.fromInt bodyLoc)
+                         ]
+                            ++ (if isHolding then
+                                    [ onClick (MoveSelectedItemTo targetContainer bodyLoc 0)
+                                    , onMouseEnter (HoverDropTarget (Just { container = targetContainer, x = bodyLoc, y = 0 }))
+                                    , onMouseLeave (HoverDropTarget Nothing)
+                                    ]
+
+                                else
+                                    []
+                               )
+                        )
                         [ span [ class "doll-slot-tag" ] [ text emptyLabel ] ]
 
                 Just item ->
+                    let
+                        isSelected =
+                            session.selectedMoveItemIndex == Just item.index
+
+                        filledClickMsg =
+                            if isHolding then
+                                if isSelected then
+                                    SelectItem Nothing
+
+                                else
+                                    MoveSelectedItemTo targetContainer bodyLoc 0
+
+                            else
+                                SelectItem (Just item.index)
+
+                        filledHoverAttrs =
+                            if isHolding && not isReplaced then
+                                [ onMouseEnter (HoverDropTarget (Just { container = targetContainer, x = bodyLoc, y = 0 }))
+                                , onMouseLeave (HoverDropTarget Nothing)
+                                ]
+
+                            else
+                                [ onMouseEnter (HoverItem (Just item.index))
+                                , onMouseLeave (HoverItem Nothing)
+                                ]
+                    in
                     div
-                        [ classList [ ( "merc-slot", True ), ( "filled", True ), ( qualityClass item.quality, True ) ]
-                        , style "grid-column" colSpec
-                        , style "grid-row" rowSpec
-                        , onMouseEnter (HoverItem (Just item.index))
-                        , onMouseLeave (HoverItem Nothing)
-                        ]
+                        ([ classList
+                            [ ( "merc-slot", True )
+                            , ( "filled", True )
+                            , ( qualityClass item.quality, True )
+                            , ( "is-selected-move", isSelected )
+                            , ( "footprint-valid", isHolding && not isSelected && isAllowedTarget )
+                            , ( "footprint-invalid", isHolding && not isSelected && not isAllowedTarget && isHovered )
+                            ]
+                         , style "grid-column" colSpec
+                         , style "grid-row" rowSpec
+                         , attribute "data-testid" ((if isReplaced then "merc-replaced-slot-" else "merc-slot-") ++ String.fromInt bodyLoc)
+                         , onClick filledClickMsg
+                         ]
+                            ++ filledHoverAttrs
+                        )
                         (viewItemTileGraphic item)
     in
     div [ class "merc-grid-proportional" ]
-        [ mercSlot "1 / span 2" "1 / span 2" "Helm" [ "Helm", "Head" ]
-        , mercSlot "1 / span 2" "3 / span 4" "Weapon" [ "Weapon1", "Right Hand" ]
-        , mercSlot "3 / span 2" "1 / span 4" "Armor" [ "Armor", "Torso", "Body" ]
-        , mercSlot "3 / span 2" "5 / span 4" "Off-Hand" [ "Weapon2", "Left Hand", "Shield" ]
+        [ mercSlot 1 "1 / span 2" "1 / span 2" "Helm" [ "Helm", "Head" ]
+        , mercSlot 4 "1 / span 2" "3 / span 4" "Weapon" [ "Weapon1", "Right Hand" ]
+        , mercSlot 3 "3 / span 2" "1 / span 4" "Armor" [ "Armor", "Torso", "Body" ]
+        , mercSlot 5 "3 / span 2" "5 / span 4" "Off-Hand" [ "Weapon2", "Left Hand", "Shield" ]
         ]
 
 
@@ -881,13 +1052,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
             ui.selectedItemIndex
 
         heldItem =
-            session.selectedMoveItemIndex
-                |> Maybe.andThen
-                    (\idx ->
-                        session.items
-                            |> List.filter (\it -> it.index == idx)
-                            |> List.head
-                    )
+            findHeldItem session
 
         moveActive =
             heldItem /= Nothing

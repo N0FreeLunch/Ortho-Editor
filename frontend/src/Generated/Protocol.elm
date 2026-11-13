@@ -96,6 +96,7 @@ type ContainerKind
     | Belt
     | Equipment
     | MercEquipment
+    | MercReplaced
     | Cursor
     | Shop
     | UnknownContainer
@@ -118,6 +119,8 @@ containerKindEncoder enum =
             Json.Encode.string "Equipment"
         MercEquipment ->
             Json.Encode.string "MercEquipment"
+        MercReplaced ->
+            Json.Encode.string "MercReplaced"
         Cursor ->
             Json.Encode.string "Cursor"
         Shop ->
@@ -183,6 +186,8 @@ type UiIntent
     | SelectSkillMode { mode : EditMode }
     | SetMercLevel { level : Int }
     | SelectMercAct { actIndex : Int }
+    | RestoreReplacedMerc
+    | ClearReplacedMerc { reclaimToStorage : Bool }
     | SetCharacterField { field : CharacterField, value : Int }
     | SetCharacterName { name : String }
     | ToggleQuest { difficulty : DifficultyMode, key : String }
@@ -216,6 +221,10 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "SetMercLevel", Json.Encode.object [ ( "level", (Json.Encode.int) level ) ] ) ]
         SelectMercAct { actIndex } ->
             Json.Encode.object [ ( "SelectMercAct", Json.Encode.object [ ( "act_index", (Json.Encode.int) actIndex ) ] ) ]
+        RestoreReplacedMerc ->
+            Json.Encode.string "RestoreReplacedMerc"
+        ClearReplacedMerc { reclaimToStorage } ->
+            Json.Encode.object [ ( "ClearReplacedMerc", Json.Encode.object [ ( "reclaim_to_storage", (Json.Encode.bool) reclaimToStorage ) ] ) ]
         SetCharacterField { field, value } ->
             Json.Encode.object [ ( "SetCharacterField", Json.Encode.object [ ( "field", (characterFieldEncoder) field ), ( "value", (Json.Encode.int) value ) ] ) ]
         SetCharacterName { name } ->
@@ -375,6 +384,15 @@ containerKindDecoder =
                     case x of
                         "MercEquipment" ->
                             Json.Decode.succeed MercEquipment
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "MercReplaced" ->
+                            Json.Decode.succeed MercReplaced
                         unexpected ->
                             Json.Decode.fail <| "Unexpected variant " ++ unexpected
                 )
@@ -717,6 +735,25 @@ mercStatsViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "equipment_auras" (Json.Decode.list (Json.Decode.string))))
 
 
+type alias DismissedMercView =
+    { actIndex : Int
+    , className : String
+    , subtypeName : String
+    , level : Int
+    , remainingItems : Int
+    }
+
+
+dismissedMercViewDecoder : Json.Decode.Decoder DismissedMercView
+dismissedMercViewDecoder =
+    Json.Decode.succeed DismissedMercView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "act_index" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "class_name" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "subtype_name" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "level" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "remaining_items" (Json.Decode.int)))
+
+
 type alias MercSummaryView =
     { hired : Bool
     , actIndex : Int
@@ -727,6 +764,7 @@ type alias MercSummaryView =
     , equippedCount : Int
     , persistenceSupported : Bool
     , previewOnlyReason : Maybe (String)
+    , dismissed : Maybe (DismissedMercView)
     }
 
 
@@ -742,6 +780,7 @@ mercSummaryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "equipped_count" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "persistence_supported" (Json.Decode.bool)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "preview_only_reason" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "dismissed" (Json.Decode.nullable (dismissedMercViewDecoder))))
 
 
 type alias QuestCatalogEntryView =
@@ -1004,6 +1043,7 @@ type alias SessionView =
     , progression : ProgressionSummaryView
     , items : List (ItemCardView)
     , mercItems : List (ItemCardView)
+    , mercReplacedItems : List (ItemCardView)
     , tempItems : List (ItemCardView)
     , selectedMoveItemIndex : Maybe (Int)
     , allowedMoveTargets : List (AllowedMoveTargetView)
@@ -1041,6 +1081,7 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "progression" (progressionSummaryViewDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "items" (Json.Decode.list (itemCardViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "merc_items" (Json.Decode.list (itemCardViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "merc_replaced_items" (Json.Decode.list (itemCardViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "temp_items" (Json.Decode.list (itemCardViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "selected_move_item_index" (Json.Decode.nullable (Json.Decode.int))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "allowed_move_targets" (Json.Decode.list (allowedMoveTargetViewDecoder))))

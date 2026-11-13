@@ -5,6 +5,7 @@
 //! single-source-of-truth Elm `Generated.Protocol` module via `elm_rs`.
 
 pub mod host;
+pub mod merc;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -229,6 +230,16 @@ pub struct MercStatsView {
     pub equipment_auras: Vec<String>,
 }
 
+/// Replaced (dismissed) mercenary metadata retained in Zone 4 staging until restored or cleared.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct DismissedMercView {
+    pub act_index: i32,
+    pub class_name: String,
+    pub subtype_name: String,
+    pub level: i32,
+    pub remaining_items: i32,
+}
+
 /// Mercenary header identity and equipped item count.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct MercSummaryView {
@@ -241,6 +252,8 @@ pub struct MercSummaryView {
     pub equipped_count: i32,
     pub persistence_supported: bool,
     pub preview_only_reason: Option<String>,
+    #[serde(default)]
+    pub dismissed: Option<DismissedMercView>,
 }
 
 /// Canonical quest definition projected from `d2r-data` (`V105_QUESTS`).
@@ -295,6 +308,7 @@ pub enum ContainerKind {
     Belt,
     Equipment,
     MercEquipment,
+    MercReplaced,
     Cursor,
     Shop,
     UnknownContainer,
@@ -321,6 +335,7 @@ impl ContainerKind {
             ContainerKind::Belt => "belt",
             ContainerKind::Equipment => "equipment",
             ContainerKind::MercEquipment => "merc_equipment",
+            ContainerKind::MercReplaced => "merc_replaced",
             ContainerKind::Cursor => "cursor",
             ContainerKind::Shop => "shop",
             ContainerKind::UnknownContainer => "unknown",
@@ -492,6 +507,8 @@ pub struct SessionView {
     pub progression: ProgressionSummaryView,
     pub items: Vec<ItemCardView>,
     pub merc_items: Vec<ItemCardView>,
+    #[serde(default)]
+    pub merc_replaced_items: Vec<ItemCardView>,
     pub temp_items: Vec<ItemCardView>,
     #[serde(default)]
     pub selected_move_item_index: Option<i32>,
@@ -525,6 +542,10 @@ pub enum UiIntent {
     },
     SelectMercAct {
         act_index: i32,
+    },
+    RestoreReplacedMerc,
+    ClearReplacedMerc {
+        reclaim_to_storage: bool,
     },
     SetCharacterField {
         field: CharacterField,
@@ -700,12 +721,13 @@ pub struct EditorSession {
     waypoints_by_diff: [WaypointSet; 3],
     player_items_with_container: Vec<(Item, ItemContainer)>,
     item_cards: Vec<ItemCardView>,
-    merc_items: Vec<Item>,
-    merc_cards: Vec<ItemCardView>,
     temp_items: Vec<ItemCardView>,
     merc_state: MercenaryState,
+    merc_hired: bool,
     merc_level: i32,
     merc_act_override: Option<i32>,
+    has_merc_edits: bool,
+    dismissed_merc: Option<(MercenaryState, i32, i32)>,
     skill_section: SkillSection,
     has_skill_edits: bool,
     active_skill_count: i32,
@@ -731,8 +753,11 @@ struct SessionSnapshot {
     item_cards: Vec<ItemCardView>,
     temp_items: Vec<ItemCardView>,
     merc_state: MercenaryState,
+    merc_hired: bool,
     merc_level: i32,
     merc_act_override: Option<i32>,
+    has_merc_edits: bool,
+    dismissed_merc: Option<(MercenaryState, i32, i32)>,
     skill_section: SkillSection,
     has_skill_edits: bool,
     active_skill_count: i32,
@@ -846,27 +871,36 @@ impl EditorSession {
         let merc_state = MercenaryState::from_hybrid(header, w4_bytes);
         let collected_merc = collect_mercenary_items(bytes, &map, &huffman, &stream);
         let merc_level = i32::from(merc_state.expected_level().clamp(1, 98));
-        let mut merc_items = Vec::new();
-        let mut merc_cards = Vec::new();
-        for (idx, item) in collected_merc.items.into_iter().enumerate() {
+        let mut merc_item_count = 0usize;
+        for item in collected_merc.items.into_iter() {
             if collected_merc.evidence.dialect == crate::domain::item::stream::ItemStreamDialect::Legacy
                 && item.code.trim().is_empty()
             {
                 continue;
             }
             let (slot, _source, _kind) = mercenary_item_slot(&item, collected_merc.evidence.dialect);
-            merc_cards.push(build_item_card(
-                idx as i32,
+            let body_loc = match slot.as_str() {
+                "Helm" | "Head" => 1,
+                "Armor" => 3,
+                "Weapon1" | "Right Hand" => 4,
+                "Weapon2" | "Left Hand" | "Shield" => 5,
+                _ => i32::from(item.x),
+            };
+            let global_idx = item_cards.len() as i32;
+            item_cards.push(build_item_card(
+                global_idx,
                 &item,
                 merc_level.clamp(1, 98) as u8,
                 0,
                 ContainerKind::MercEquipment,
-                Some(slot.to_string()),
-                i32::from(item.x),
-                i32::from(item.y),
+                merc::merc_slot_label(body_loc).map(str::to_string).or(Some(slot)),
+                body_loc,
+                0,
             ));
-            merc_items.push(item);
+            player_items_with_container.push((item, ItemContainer::Equipment));
+            merc_item_count += 1;
         }
+        let merc_hired = merc::inferred_merc_act(&merc_state, merc_item_count > 0) != 0;
 
         Ok(Self {
             revision: 1,
@@ -888,12 +922,13 @@ impl EditorSession {
             waypoints_by_diff,
             player_items_with_container,
             item_cards,
-            merc_items,
-            merc_cards,
             temp_items: Vec::new(),
             merc_state,
+            merc_hired,
             merc_level,
             merc_act_override: None,
+            has_merc_edits: false,
+            dismissed_merc: None,
             skill_section,
             has_skill_edits: false,
             active_skill_count,
@@ -1023,7 +1058,7 @@ impl EditorSession {
             cube: 0,
             temp_inventory: self.temp_items.len() as i32,
             unknown: 0,
-            mercenary: self.merc_cards.len() as i32,
+            mercenary: 0,
         };
         for card in &self.item_cards {
             match card.container {
@@ -1033,7 +1068,8 @@ impl EditorSession {
                 ContainerKind::Stash => counts.stash += 1,
                 ContainerKind::Cube => counts.cube += 1,
                 ContainerKind::TempInventory => counts.temp_inventory += 1,
-                ContainerKind::Cursor => {}
+                ContainerKind::MercEquipment => counts.mercenary += 1,
+                ContainerKind::MercReplaced | ContainerKind::Cursor => {}
                 _ => counts.unknown += 1,
             }
         }
@@ -1072,6 +1108,8 @@ impl EditorSession {
                 Some("Cannot export .d2s while a swapped item is held on the cursor. Place it in a slot or click Undo.".to_string())
             } else if self.item_cards.iter().any(|c| c.container == ContainerKind::TempInventory) {
                 Some("Cannot export .d2s while items remain in Temp Inventory (9x4). Move them to a permanent container or clear Temp Inventory.".to_string())
+            } else if self.item_cards.iter().any(|c| c.container == ContainerKind::MercReplaced) {
+                Some("Cannot export .d2s while items remain in Replaced Mercenary Staging. Reclaim, restore, or clear them first.".to_string())
             } else {
                 None
             }
@@ -1080,6 +1118,37 @@ impl EditorSession {
 
         let (allowed_move_targets, belt_move_restricted_reason) =
             self.project_allowed_move_targets();
+
+        let player_items: Vec<ItemCardView> = self
+            .item_cards
+            .iter()
+            .filter(|c| {
+                !matches!(
+                    c.container,
+                    ContainerKind::MercEquipment | ContainerKind::MercReplaced
+                )
+            })
+            .cloned()
+            .collect();
+        let merc_cards: Vec<ItemCardView> = self
+            .item_cards
+            .iter()
+            .filter(|c| c.container == ContainerKind::MercEquipment)
+            .cloned()
+            .collect();
+        let merc_replaced_cards: Vec<ItemCardView> = self
+            .item_cards
+            .iter()
+            .filter(|c| c.container == ContainerKind::MercReplaced)
+            .cloned()
+            .collect();
+        let merc_item_refs: Vec<&Item> = self
+            .player_items_with_container
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.item_cards[*i].container == ContainerKind::MercEquipment)
+            .map(|(_, (it, _))| it)
+            .collect();
 
         SessionView {
             revision: self.revision,
@@ -1104,13 +1173,17 @@ impl EditorSession {
                 &self.merc_state,
                 self.merc_level,
                 self.merc_act_override,
-                &self.merc_items,
-                &self.merc_cards,
+                self.merc_hired,
+                &merc_item_refs,
+                &merc_cards,
+                &self.dismissed_merc,
+                &merc_replaced_cards,
                 self.res_difficulty,
             ),
             progression,
-            items: self.item_cards.clone(),
-            merc_items: self.merc_cards.clone(),
+            items: player_items,
+            merc_items: merc_cards,
+            merc_replaced_items: merc_replaced_cards,
             temp_items: self.temp_items.clone(),
             selected_move_item_index: self.selected_move_item_index,
             allowed_move_targets,
@@ -1139,8 +1212,11 @@ impl EditorSession {
             item_cards: self.item_cards.clone(),
             temp_items: self.temp_items.clone(),
             merc_state: self.merc_state.clone(),
+            merc_hired: self.merc_hired,
             merc_level: self.merc_level,
             merc_act_override: self.merc_act_override,
+            has_merc_edits: self.has_merc_edits,
+            dismissed_merc: self.dismissed_merc.clone(),
             skill_section: self.skill_section.clone(),
             has_skill_edits: self.has_skill_edits,
             active_skill_count: self.active_skill_count,
@@ -1163,8 +1239,11 @@ impl EditorSession {
         self.item_cards = snap.item_cards;
         self.temp_items = snap.temp_items;
         self.merc_state = snap.merc_state;
+        self.merc_hired = snap.merc_hired;
         self.merc_level = snap.merc_level;
         self.merc_act_override = snap.merc_act_override;
+        self.has_merc_edits = snap.has_merc_edits;
+        self.dismissed_merc = snap.dismissed_merc;
         self.skill_section = snap.skill_section;
         self.has_skill_edits = snap.has_skill_edits;
         self.active_skill_count = snap.active_skill_count;
@@ -1181,6 +1260,8 @@ impl EditorSession {
             intent,
             UiIntent::SetMercLevel { .. }
                 | UiIntent::SelectMercAct { .. }
+                | UiIntent::RestoreReplacedMerc
+                | UiIntent::ClearReplacedMerc { .. }
                 | UiIntent::ToggleQuest { .. }
                 | UiIntent::SetQuestsBatch { .. }
                 | UiIntent::SetAllDiffQuests { .. }
@@ -1244,13 +1325,11 @@ impl EditorSession {
                     .with_target("merc_level")
                     .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
-                Err(ActionRejection::new(
-                    RejectionCode::RejectionMercPersistenceNotSupported,
-                    "merc_persistence_not_supported",
-                    "Mercenary edits are read-only until .d2s mercenary writeback is implemented.",
-                )
-                .with_target("merc_persistence")
-                .with_recovery(SuggestedRecovery::SuggestNone))
+                self.merc_level = level;
+                self.merc_state.experience = merc::exp_for_merc_level(level);
+                self.has_merc_edits = true;
+                self.dirty = true;
+                Ok(())
             }
             UiIntent::SelectMercAct { act_index } => {
                 if !matches!(act_index, 1 | 2 | 3 | 5) {
@@ -1262,13 +1341,141 @@ impl EditorSession {
                     .with_target("merc_act")
                     .with_recovery(SuggestedRecovery::SuggestAdjustValue));
                 }
-                Err(ActionRejection::new(
-                    RejectionCode::RejectionMercPersistenceNotSupported,
-                    "merc_persistence_not_supported",
-                    "Mercenary edits are read-only until .d2s mercenary writeback is implemented.",
-                )
-                .with_target("merc_persistence")
-                .with_recovery(SuggestedRecovery::SuggestNone))
+                let has_merc_items = self
+                    .item_cards
+                    .iter()
+                    .any(|c| c.container == ContainerKind::MercEquipment);
+                let current_act = self
+                    .merc_act_override
+                    .unwrap_or_else(|| merc::inferred_merc_act(&self.merc_state, has_merc_items));
+                if self.merc_hired && current_act == act_index {
+                    return Ok(());
+                }
+                if self.merc_hired {
+                    self.dismissed_merc =
+                        Some((self.merc_state.clone(), self.merc_level, current_act));
+                    for card in &mut self.item_cards {
+                        if card.container == ContainerKind::MercEquipment {
+                            card.container = ContainerKind::MercReplaced;
+                        }
+                    }
+                }
+                self.merc_hired = true;
+                self.merc_act_override = Some(act_index);
+                merc::apply_merc_act_preset(&mut self.merc_state, act_index);
+                if self.merc_level <= 1 {
+                    let target_lvl = (i32::from(self.char_level) - 1).clamp(1, 98);
+                    self.merc_level = target_lvl;
+                    self.merc_state.experience = merc::exp_for_merc_level(target_lvl);
+                }
+                self.has_merc_edits = true;
+                self.dirty = true;
+                Ok(())
+            }
+            UiIntent::RestoreReplacedMerc => {
+                let has_replaced_items = self
+                    .item_cards
+                    .iter()
+                    .any(|c| c.container == ContainerKind::MercReplaced);
+                if self.dismissed_merc.is_none() && !has_replaced_items {
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionInvalidPlacement,
+                        "no_replaced_merc",
+                        "No replaced mercenary is staged for restoration.",
+                    )
+                    .with_target("merc_replaced"));
+                }
+                let has_active_items = self
+                    .item_cards
+                    .iter()
+                    .any(|c| c.container == ContainerKind::MercEquipment);
+                let current_act = self
+                    .merc_act_override
+                    .unwrap_or_else(|| merc::inferred_merc_act(&self.merc_state, has_active_items));
+                let prev_active = if self.merc_hired {
+                    Some((self.merc_state.clone(), self.merc_level, current_act))
+                } else {
+                    None
+                };
+                if let Some((old_state, old_lvl, old_act)) = self.dismissed_merc.take() {
+                    self.merc_state = old_state;
+                    self.merc_level = old_lvl;
+                    self.merc_act_override = Some(old_act);
+                }
+                self.dismissed_merc = prev_active;
+                for card in &mut self.item_cards {
+                    if card.container == ContainerKind::MercEquipment {
+                        card.container = ContainerKind::MercReplaced;
+                    } else if card.container == ContainerKind::MercReplaced {
+                        card.container = ContainerKind::MercEquipment;
+                    }
+                }
+                self.merc_hired = true;
+                self.has_merc_edits = true;
+                self.dirty = true;
+                Ok(())
+            }
+            UiIntent::ClearReplacedMerc { reclaim_to_storage } => {
+                let has_replaced_items = self
+                    .item_cards
+                    .iter()
+                    .any(|c| c.container == ContainerKind::MercReplaced);
+                if self.dismissed_merc.is_none() && !has_replaced_items {
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionInvalidPlacement,
+                        "no_replaced_merc",
+                        "No replaced mercenary staging to clear.",
+                    )
+                    .with_target("merc_replaced"));
+                }
+                if reclaim_to_storage {
+                    let replaced_indices: Vec<i32> = self
+                        .item_cards
+                        .iter()
+                        .filter(|c| c.container == ContainerKind::MercReplaced)
+                        .map(|c| c.index)
+                        .collect();
+                    for idx_val in replaced_indices {
+                        let (w, h) = self
+                            .item_cards
+                            .get(idx_val as usize)
+                            .map(|c| (c.width.max(1), c.height.max(1)))
+                            .unwrap_or((1, 1));
+                        if let Some((fx, fy)) =
+                            self.find_free_grid_slot(ContainerKind::Inventory, 10, 4, w, h)
+                        {
+                            let _ = self.apply_move_item(idx_val, ContainerKind::Inventory, fx, fy);
+                        } else if let Some((fx, fy)) =
+                            self.find_free_grid_slot(ContainerKind::Stash, 10, 10, w, h)
+                        {
+                            let _ = self.apply_move_item(idx_val, ContainerKind::Stash, fx, fy);
+                        } else if let Some((fx, fy)) =
+                            self.find_free_grid_slot(ContainerKind::TempInventory, 9, 4, w, h)
+                        {
+                            let _ =
+                                self.apply_move_item(idx_val, ContainerKind::TempInventory, fx, fy);
+                        }
+                    }
+                }
+                let mut kept_items = Vec::with_capacity(self.player_items_with_container.len());
+                let mut kept_cards = Vec::with_capacity(self.item_cards.len());
+                for (item_pair, mut card) in self
+                    .player_items_with_container
+                    .drain(..)
+                    .zip(self.item_cards.drain(..))
+                {
+                    if card.container != ContainerKind::MercReplaced {
+                        card.index = kept_cards.len() as i32;
+                        kept_items.push(item_pair);
+                        kept_cards.push(card);
+                    }
+                }
+                self.player_items_with_container = kept_items;
+                self.item_cards = kept_cards;
+                self.dismissed_merc = None;
+                self.has_merc_edits = true;
+                self.dirty = true;
+                Ok(())
             }
             UiIntent::ToggleQuest { difficulty, key } => {
                 let diff = difficulty.as_index();
@@ -2134,6 +2341,70 @@ impl EditorSession {
             };
         }
 
+        if target_container == ContainerKind::MercEquipment {
+            if !self.merc_hired {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    "merc_not_hired",
+                    "Hire or select a mercenary Act before equipping mercenary items.",
+                )
+                .with_target("merc_equipment")
+                .with_recovery(SuggestedRecovery::SuggestUndo));
+            }
+            let Some(slot_name) = merc::merc_slot_label(x) else {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    "invalid_merc_slot",
+                    format!("Unknown mercenary slot body_loc={x}."),
+                )
+                .with_target("merc_equipment")
+                .with_recovery(SuggestedRecovery::SuggestUndo));
+            };
+            let has_merc_items = self
+                .item_cards
+                .iter()
+                .any(|c| c.container == ContainerKind::MercEquipment);
+            let current_act = self
+                .merc_act_override
+                .unwrap_or_else(|| merc::inferred_merc_act(&self.merc_state, has_merc_items));
+            if let Err(err_code) = merc::item_fits_merc_slot(&item_code, x, current_act) {
+                return Err(ActionRejection::new(
+                    RejectionCode::RejectionInvalidPlacement,
+                    err_code,
+                    format!(
+                        "Item '{}' cannot be equipped in mercenary {} slot (Act {}).",
+                        item_code.trim(),
+                        slot_name,
+                        current_act
+                    ),
+                )
+                .with_target(slot_name)
+                .with_recovery(SuggestedRecovery::SuggestUndo));
+            }
+            let occupied: Vec<usize> = self
+                .item_cards
+                .iter()
+                .enumerate()
+                .filter(|&(other_idx, other)| {
+                    other_idx != idx
+                        && other.container == ContainerKind::MercEquipment
+                        && other.x == x
+                })
+                .map(|(other_idx, _)| other_idx)
+                .collect();
+            return match occupied.as_slice() {
+                [] => Ok((idx, ItemContainer::Equipment, None)),
+                [disp] => Ok((idx, ItemContainer::Equipment, Some(*disp))),
+                _ => Err(ActionRejection::new(
+                    RejectionCode::RejectionSlotOccupied,
+                    "container_slot_occupied",
+                    format!("Mercenary slot {slot_name} has multiple overlapping items."),
+                )
+                .with_target(slot_name)
+                .with_recovery(SuggestedRecovery::SuggestUndo)),
+            };
+        }
+
         let (target, max_w, max_h, target_kind) = match target_container {
             ContainerKind::Inventory => (ItemContainer::Inventory, 10i32, 4i32, ContainerKind::Inventory),
             ContainerKind::Stash => (ItemContainer::Stash, 10i32, 10i32, ContainerKind::Stash),
@@ -2243,6 +2514,18 @@ impl EditorSession {
                 });
             }
         }
+        for merc_loc in [1, 3, 4, 5] {
+            if self
+                .validate_move_target(item_index, ContainerKind::MercEquipment, merc_loc, 0)
+                .is_ok()
+            {
+                targets.push(AllowedMoveTargetView {
+                    container: ContainerKind::MercEquipment,
+                    x: merc_loc,
+                    y: 0,
+                });
+            }
+        }
         let belt_restricted_reason =
             match self.validate_move_target(item_index, ContainerKind::Belt, 0, 0) {
                 Err(rej) if rej.raw_code == "belt_consumable_only" => Some(rej.message),
@@ -2265,28 +2548,44 @@ impl EditorSession {
             self.validate_move_target(item_index, target_container, x, y)?;
         let target_kind = if target_container == ContainerKind::TempInventory {
             ContainerKind::TempInventory
+        } else if target_container == ContainerKind::MercEquipment {
+            ContainerKind::MercEquipment
         } else {
             ContainerKind::from_item_container(target)
         };
 
         let (raw_x, raw_y, page, location, mode, stored_in, new_slot_label, card_x, card_y) =
-            match target {
-                ItemContainer::Inventory => (x as u8, y as u8, 0u8, 0u8, 0u8, Some(1u8), None, x, y),
-                ItemContainer::Cube => (x as u8, y as u8, 3u8, 0u8, 0u8, Some(4u8), None, x, y),
-                ItemContainer::Stash => (x as u8, y as u8, 4u8, 0u8, 0u8, Some(5u8), None, x, y),
-                ItemContainer::Belt => ((y * 4 + x) as u8, 0u8, 0u8, 0u8, 2u8, None, None, x, y),
-                ItemContainer::Equipment => (
-                    0u8,
-                    0u8,
-                    0u8,
+            if target_container == ContainerKind::MercEquipment {
+                (
                     x as u8,
+                    0u8,
+                    0u8,
+                    1u8,
                     1u8,
                     None,
-                    equipment_slot_label(x).map(str::to_string),
+                    merc::merc_slot_label(x).map(str::to_string),
+                    x,
                     0,
-                    0,
-                ),
-                ItemContainer::Unknown => (x as u8, y as u8, 0u8, 0u8, 0u8, None, None, x, y),
+                )
+            } else {
+                match target {
+                    ItemContainer::Inventory => (x as u8, y as u8, 0u8, 0u8, 0u8, Some(1u8), None, x, y),
+                    ItemContainer::Cube => (x as u8, y as u8, 3u8, 0u8, 0u8, Some(4u8), None, x, y),
+                    ItemContainer::Stash => (x as u8, y as u8, 4u8, 0u8, 0u8, Some(5u8), None, x, y),
+                    ItemContainer::Belt => ((y * 4 + x) as u8, 0u8, 0u8, 0u8, 2u8, None, None, x, y),
+                    ItemContainer::Equipment => (
+                        0u8,
+                        0u8,
+                        0u8,
+                        x as u8,
+                        1u8,
+                        None,
+                        equipment_slot_label(x).map(str::to_string),
+                        0,
+                        0,
+                    ),
+                    ItemContainer::Unknown => (x as u8, y as u8, 0u8, 0u8, 0u8, None, None, x, y),
+                }
             };
 
         let (item, container_slot) = &mut self.player_items_with_container[idx];
@@ -2618,6 +2917,9 @@ impl EditorSession {
         if self.item_cards.iter().any(|c| c.container == ContainerKind::TempInventory) {
             return Err("Cannot export .d2s while items remain in Temp Inventory (9x4). Move them to a permanent container or clear Temp Inventory.".to_string());
         }
+        if self.item_cards.iter().any(|c| c.container == ContainerKind::MercReplaced) {
+            return Err("Cannot export .d2s while items remain in Replaced Mercenary Staging. Reclaim, restore, or clear them first.".to_string());
+        }
         if let Some(reason) = export_unsupported_reason(self.save_version) {
             return Err(reason);
         }
@@ -2666,11 +2968,41 @@ impl EditorSession {
             let items: Vec<Item> = self
                 .player_items_with_container
                 .iter()
-                .map(|(item, _)| item.clone())
+                .enumerate()
+                .filter(|(i, _)| {
+                    !matches!(
+                        self.item_cards[*i].container,
+                        ContainerKind::MercEquipment
+                            | ContainerKind::MercReplaced
+                            | ContainerKind::TempInventory
+                            | ContainerKind::Cursor
+                    )
+                })
+                .map(|(_, (item, _))| item.clone())
                 .collect();
             let alpha = self.item_dialect == "alpha";
             working = crate::save::rebuild_item_section(&working, &items, &huffman, alpha)
                 .map_err(|e| format!("Failed to write item mutations: {e}"))?;
+        }
+        if self.has_merc_edits || self.has_item_edits {
+            let huffman = HuffmanTree::new();
+            let merc_items: Vec<Item> = self
+                .player_items_with_container
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| self.item_cards[*i].container == ContainerKind::MercEquipment)
+                .map(|(_, (item, _))| item.clone())
+                .collect();
+            let alpha = self.item_dialect == "alpha";
+            working = crate::save::rebuild_mercenary_section(
+                &working,
+                &self.merc_state,
+                &merc_items,
+                self.merc_hired,
+                &huffman,
+                alpha,
+            )
+            .map_err(|e| format!("Failed to write mercenary mutations: {e}"))?;
         }
         crate::save::finalize_save_bytes(&mut working, false)
             .map_err(|e| format!("Failed to finalize exported save checksum: {e}"))?;
@@ -2937,26 +3269,14 @@ fn project_mercenary(
     state: &MercenaryState,
     level: i32,
     act_override: Option<i32>,
-    merc_items: &[Item],
+    hired: bool,
+    merc_items: &[&Item],
     merc_cards: &[ItemCardView],
+    dismissed: &Option<(MercenaryState, i32, i32)>,
+    merc_replaced_cards: &[ItemCardView],
     difficulty: DifficultyMode,
 ) -> MercSummaryView {
-    let hired = act_override.is_some()
-        || state.hireling_id != 0
-        || state.class_id != 0
-        || state.experience > 0
-        || !merc_cards.is_empty();
-    let inferred_act = if !hired {
-        0
-    } else if state.class_id == 9 {
-        5
-    } else if state.class_id == 1 {
-        3
-    } else if state.hireling_id >= 8 {
-        2
-    } else {
-        1
-    };
+    let inferred_act = merc::inferred_merc_act(state, !merc_cards.is_empty());
     let act_index = act_override.unwrap_or(inferred_act);
     let resolved_class_name = match act_index {
         1 => "Rogue Scout (Act 1)".to_string(),
@@ -3012,7 +3332,7 @@ fn project_mercenary(
     let mut bonus_poison = 0;
     let mut equipment_auras = Vec::new();
 
-    for item in merc_items {
+    for item in merc_items.iter().copied() {
         bonus_def += item.defense.unwrap_or(0) as i32;
         for prop in item
             .properties
@@ -3042,6 +3362,23 @@ fn project_mercenary(
     let penalty = difficulty.to_sheet_difficulty().penalty();
     let calc_res = |bonus: i32| (base_res + bonus - penalty).clamp(-100, 75);
 
+    let dismissed_view = dismissed.as_ref().map(|(d_state, d_lvl, d_act)| {
+        let d_class = match *d_act {
+            1 => "Rogue Scout (Act 1)".to_string(),
+            2 => "Desert Mercenary (Act 2)".to_string(),
+            3 => "Iron Wolf (Act 3)".to_string(),
+            5 => "Barbarian (Act 5)".to_string(),
+            _ => d_state.class_name(),
+        };
+        DismissedMercView {
+            act_index: *d_act,
+            class_name: d_class,
+            subtype_name: d_state.subtype_name(),
+            level: *d_lvl,
+            remaining_items: merc_replaced_cards.len() as i32,
+        }
+    });
+
     MercSummaryView {
         hired,
         act_index,
@@ -3066,11 +3403,9 @@ fn project_mercenary(
             equipment_auras,
         },
         equipped_count: merc_cards.len() as i32,
-        persistence_supported: false,
-        preview_only_reason: Some(
-            "Read-only: mercenary edits are disabled until .d2s mercenary writeback is implemented."
-                .to_string(),
-        ),
+        persistence_supported: true,
+        preview_only_reason: None,
+        dismissed: dismissed_view,
     }
 }
 
@@ -3411,6 +3746,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             CharacterStatsView,
             ContainerCountsView,
             MercStatsView,
+            DismissedMercView,
             MercSummaryView,
             QuestCatalogEntryView,
             WaypointCatalogEntryView,
