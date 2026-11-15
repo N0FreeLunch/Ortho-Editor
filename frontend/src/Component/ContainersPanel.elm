@@ -972,7 +972,15 @@ viewPaperdollGrid ui session equippedItems =
         slotCard =
             paperdollSlot ui session equippedItems
     in
-    div [ class "paperdoll-layout" ]
+    div
+        ([ class "paperdoll-layout" ]
+            ++ (if session.selectedMoveItemIndex /= Nothing then
+                    [ onMouseLeave (HoverDropTarget Nothing) ]
+
+                else
+                    []
+               )
+        )
         [ div
             [ class "doll-slot"
             , style "grid-column" "1 / span 2"
@@ -1067,9 +1075,7 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
 
         equipHoverAttrs =
             if moveActive then
-                [ onMouseEnter (HoverDropTarget (Just { container = Equipment, x = bodyLoc, y = 0 }))
-                , onMouseLeave (HoverDropTarget Nothing)
-                ]
+                [ onMouseEnter (HoverDropTarget (Just { container = Equipment, x = bodyLoc, y = 0 })) ]
 
             else
                 []
@@ -1139,7 +1145,7 @@ paperdollSlot ui session items bodyLoc colSpec rowSpec emptyLabel acceptedLabels
                             ]
                        )
                 )
-                (span [ class "doll-slot-tag" ] [ text emptyLabel ] :: viewItemTileGraphic item)
+                (span [ class "doll-slot-tag" ] [ text emptyLabel ] :: [ viewSizedEquipGraphic 40 40 item ])
 
 
 viewGearSummaryBar : CharacterStatsView -> ContainerCountsView -> Html Msg
@@ -1394,7 +1400,6 @@ viewMercGridProportional ui session isReplaced items =
                             ++ (if isHolding then
                                     [ onClick (MoveSelectedItemTo targetContainer bodyLoc 0)
                                     , onMouseEnter (HoverDropTarget (Just { container = targetContainer, x = bodyLoc, y = 0 }))
-                                    , onMouseLeave (HoverDropTarget Nothing)
                                     ]
 
                                 else
@@ -1421,9 +1426,7 @@ viewMercGridProportional ui session isReplaced items =
 
                         filledHoverAttrs =
                             if isHolding && not isReplaced then
-                                [ onMouseEnter (HoverDropTarget (Just { container = targetContainer, x = bodyLoc, y = 0 }))
-                                , onMouseLeave (HoverDropTarget Nothing)
-                                ]
+                                [ onMouseEnter (HoverDropTarget (Just { container = targetContainer, x = bodyLoc, y = 0 })) ]
 
                             else
                                 [ onMouseEnter (HoverItem (Just item.index))
@@ -1435,7 +1438,7 @@ viewMercGridProportional ui session isReplaced items =
                             [ ( "merc-slot", True )
                             , ( "filled", True )
                             , ( qualityClass item.quality, True )
-                            , ( "is-selected-move", isSelected )
+                            , ( "is-held-source", isSelected )
                             , ( "footprint-valid", isHolding && not isSelected && isAllowedTarget )
                             , ( "footprint-invalid", isHolding && not isSelected && not isAllowedTarget && isHovered )
                             ]
@@ -1446,9 +1449,17 @@ viewMercGridProportional ui session isReplaced items =
                             ++ filledActionAttrs
                             ++ filledHoverAttrs
                         )
-                        (viewItemTileGraphic item)
+                        [ viewSizedEquipGraphic 36 28 item ]
     in
-    div [ class "merc-grid-proportional" ]
+    div
+        ([ class "merc-grid-proportional" ]
+            ++ (if isHolding && not isReplaced then
+                    [ onMouseLeave (HoverDropTarget Nothing) ]
+
+                else
+                    []
+               )
+        )
         [ mercSlot 1 "1 / span 2" "1 / span 2" "Helm" [ "Helm", "Head" ]
         , mercSlot 4 "1 / span 2" "3 / span 4" "Weapon" [ "Weapon1", "Right Hand" ]
         , mercSlot 3 "3 / span 2" "1 / span 4" "Armor" [ "Armor", "Torso", "Body" ]
@@ -1551,7 +1562,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                                 max 1 item.height
 
                             ( gx, gy ) =
-                                UiState.clampDropAnchor containerTag w h target.x target.y
+                                UiState.resolveGridDropAnchor session.allowedMoveTargets containerTag w h target.x target.y
 
                             fitsBounds =
                                 gx + w <= cols && gy + h <= rows
@@ -2001,6 +2012,23 @@ qualityClass quality =
 
         _ ->
             "q-normal"
+
+
+viewSizedEquipGraphic : Int -> Int -> ItemCardView -> Html Msg
+viewSizedEquipGraphic cellW cellH item =
+    let
+        wPx =
+            max 1 item.width * cellW - 4
+
+        hPx =
+            max 1 item.height * cellH - 4
+    in
+    div
+        [ class "equip-item-box"
+        , style "width" (String.fromInt wPx ++ "px")
+        , style "height" (String.fromInt hPx ++ "px")
+        ]
+        (viewItemTileGraphic item)
 
 
 viewItemTileGraphic : ItemCardView -> List (Html Msg)
