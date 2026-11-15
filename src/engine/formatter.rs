@@ -12,6 +12,7 @@ use crate::engine::durability::{DurabilityDisplay, displayed_durability};
 use crate::engine::is_explicit_v105;
 use crate::engine::quantity::qualified_quantity_capacity;
 use crate::engine::requirements::displayed_requirements;
+use crate::engine::set_bonuses::{PieceBonusMode, displayed_set_bonuses};
 use crate::engine::shield::displayed_shield;
 use crate::domain::item::runeword::{resolve_runeword, runeword_display_name};
 use crate::engine::validation::validate_item;
@@ -370,102 +371,39 @@ pub fn format_item_with_mode(
     let mut set_name = None;
     let mut set_pieces = Vec::new();
 
-    if item.quality == Some(ItemQuality::Set) && item.is_identified {
-        if let Some(id) = item.unique_id {
-            if let Some(set_item) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
-                // Localized Set Name
-                set_name = Some(get_loc(set_item.set_id, language).to_string());
-
-                // Set pieces list
-                set_pieces = crate::data::sets::get_set_items(set_item.set_id)
-                    .map(|s| get_loc(s.index, language).to_string())
-                    .collect();
-
-                // 1. Piece-specific Set Attributes (item.set_attributes - Green)
-                let flags = item
-                    .body
-                    .d2r_v3_auxiliary
-                    .as_ref()
-                    .and_then(|a| a.set_property_flags);
-
-                if let Some(flags) = flags {
-                    let mut packed = 0;
-                    for (ordinal, present) in flags.into_iter().enumerate() {
-                        if present {
-                            if packed < item.set_attributes.len() {
-                                let list = &item.set_attributes[packed];
-                                let lines = format_properties_list_with_mode(list, char_level, language, mode);
-                                let required_count = (ordinal + 2) as u8;
-                                piece_set_bonuses.push(FormattedSetBonus {
-                                    active: active_set_count >= required_count as usize,
-                                    required_count,
-                                    lines,
-                                });
-                            }
-                            packed += 1;
-                        }
-                    }
-                } else {
-                    for (idx, list) in item.set_attributes.iter().enumerate() {
-                        let lines = format_properties_list(list, char_level, language);
-                        let required_count = (idx + 2) as u8;
-                        piece_set_bonuses.push(FormattedSetBonus {
-                            active: active_set_count >= required_count as usize,
-                            required_count,
-                            lines,
-                        });
-                    }
-                }
-
-                // 2. Set Group Bonuses (Gold)
-                if let Some(group) = crate::data::sets::get_set_group(set_item.set_id) {
-                    let mut counts: Vec<u8> =
-                        group.partial.iter().map(|p| p.required_count).collect();
-                    counts.sort();
-                    counts.dedup();
-
-                    for count in counts {
-                        let mut lines = Vec::new();
-                        for bonus in group.partial.iter().filter(|p| p.required_count == count) {
-                            let prop = ItemProperty::new(
-                                bonus.stat.stat_id,
-                                String::new(),
-                                bonus.stat.param,
-                                bonus.stat.min,
-                                bonus.stat.min,
-                                ItemBitRange::default(),
-                            );
-                            lines.push(format_property(&prop, char_level, language));
-                        }
-                        set_bonuses.push(FormattedSetBonus {
-                            active: active_set_count >= count as usize,
-                            required_count: count,
-                            lines,
-                        });
-                    }
-
-                    if !group.full.is_empty() {
-                        let total_pieces = crate::data::sets::get_set_total_pieces(set_item.set_id);
-                        let mut lines = Vec::new();
-                        for stat in group.full {
-                            let prop = ItemProperty::new(
-                                stat.stat_id,
-                                String::new(),
-                                stat.param,
-                                stat.min,
-                                stat.min,
-                                ItemBitRange::default(),
-                            );
-                            lines.push(format_property(&prop, char_level, language));
-                        }
-                        set_bonuses.push(FormattedSetBonus {
-                            active: active_set_count >= total_pieces,
-                            required_count: total_pieces as u8,
-                            lines,
-                        });
-                    }
-                }
-            }
+    if let Some(set) = displayed_set_bonuses(item, active_set_count) {
+        set_name = Some(get_loc(set.name_key, language).to_string());
+        set_pieces = set
+            .member_keys
+            .into_iter()
+            .map(|key| get_loc(key, language).to_string())
+            .collect();
+        for piece in set.pieces {
+            let piece_mode = match piece.mode {
+                PieceBonusMode::Requested => mode,
+                PieceBonusMode::Fused => StatDisplayMode::Fused,
+            };
+            piece_set_bonuses.push(FormattedSetBonus {
+                active: piece.active,
+                required_count: piece.required_count,
+                lines: format_properties_list_with_mode(
+                    piece.properties,
+                    char_level,
+                    language,
+                    piece_mode,
+                ),
+            });
+        }
+        for group in set.groups {
+            set_bonuses.push(FormattedSetBonus {
+                active: group.active,
+                required_count: group.required_count,
+                lines: group
+                    .properties
+                    .iter()
+                    .map(|prop| format_property(prop, char_level, language))
+                    .collect(),
+            });
         }
     }
 
@@ -2178,6 +2116,158 @@ mod poison_display_tests {
             ]
         );
         assert_eq!(props, original);
+    }
+}
+
+#[cfg(test)]
+mod set_bonus_projection_tests {
+    use super::*;
+    use crate::domain::item::entity::D2rV3AuxiliaryData;
+    use d2r_macros::hypothesis_test;
+
+    fn property(id: u32, value: i32) -> ItemProperty {
+        ItemProperty::new(id, String::new(), 0, value, value, ItemBitRange::default())
+    }
+
+    fn item() -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = "crn ".into();
+        item.quality = Some(ItemQuality::Set);
+        item.unique_id = Some(11);
+        item.is_identified = true;
+        item.properties_complete = false;
+        item.set_attributes = [10, 20, 30]
+            .into_iter()
+            .map(|value| vec![property(17, value), property(18, value)])
+            .collect();
+        item
+    }
+
+    fn rows(bonuses: &[FormattedSetBonus]) -> Vec<(bool, u8, Vec<String>)> {
+        bonuses
+            .iter()
+            .map(|bonus| (bonus.active, bonus.required_count, bonus.lines.clone()))
+            .collect()
+    }
+
+    #[hypothesis_test]
+    fn current_set_selection_preserves_packed_modes_groups_gates_and_source() {
+        let mut item = item();
+        item.body.d2r_v3_auxiliary = Some(D2rV3AuxiliaryData {
+            set_property_flags: Some([false, true, false, true, false]),
+            ..Default::default()
+        });
+        let before = item.clone();
+        let fused = format_item_with_mode(&item, "en", 4, 99, StatDisplayMode::Fused);
+        assert_eq!(
+            rows(&fused.piece_set_bonuses),
+            vec![
+                (true, 3, vec!["+10% Enhanced Damage".into()]),
+                (false, 5, vec!["+20% Enhanced Damage".into()]),
+            ]
+        );
+        let discrete = format_item_with_mode(&item, "en", 4, 99, StatDisplayMode::Discrete);
+        assert_eq!(discrete.piece_set_bonuses.len(), 2);
+        assert_eq!(
+            discrete.piece_set_bonuses[0].lines,
+            vec![
+                format_property(&property(17, 10), 99, "en"),
+                format_property(&property(18, 10), 99, "en")
+            ]
+        );
+        assert_eq!(item, before);
+
+        item.set_attributes.truncate(1);
+        assert_eq!(format_item(&item, "en", 4, 99).piece_set_bonuses.len(), 1);
+        item.body
+            .d2r_v3_auxiliary
+            .as_mut()
+            .unwrap()
+            .set_property_flags = Some([false; 5]);
+        let empty_mask = format_item(&item, "en", 4, 99);
+        assert!(empty_mask.piece_set_bonuses.is_empty());
+        assert!(empty_mask.set_name.is_some());
+        assert_eq!(empty_mask.set_bonuses.len(), 3);
+
+        item = before;
+        item.body.d2r_v3_auxiliary = None;
+        let before = item.clone();
+        for mode in [StatDisplayMode::Fused, StatDisplayMode::Discrete] {
+            let formatted = format_item_with_mode(&item, "en", 3, 99, mode);
+            assert_eq!(
+                rows(&formatted.piece_set_bonuses),
+                vec![
+                    (true, 2, vec!["+10% Enhanced Damage".into()]),
+                    (true, 3, vec!["+20% Enhanced Damage".into()]),
+                    (false, 4, vec!["+30% Enhanced Damage".into()]),
+                ]
+            );
+            assert_eq!(formatted.set_name.as_deref(), Some("Iratha's Finery"));
+            assert_eq!(
+                formatted.set_pieces,
+                [
+                    "Iratha's Coil",
+                    "Iratha's Collar",
+                    "Iratha's Cord",
+                    "Iratha's Cuff"
+                ]
+            );
+            let groups = &formatted.set_bonuses;
+            assert_eq!(
+                groups
+                    .iter()
+                    .map(|b| (b.active, b.required_count, b.lines.len()))
+                    .collect::<Vec<_>>(),
+                [(true, 2, 1), (true, 3, 2), (false, 4, 9)]
+            );
+            assert_eq!(
+                groups[0].lines,
+                [format_property(&property(16, 50), 99, "en")]
+            );
+            assert_eq!(
+                groups[1].lines,
+                [
+                    format_property(&property(96, 20), 99, "en"),
+                    format_property(&property(156, 24), 99, "en")
+                ]
+            );
+            assert_eq!(
+                groups[2].lines[0],
+                format_property(&property(39, 20), 99, "en")
+            );
+            assert_eq!(
+                groups[2].lines[8],
+                format_property(&property(2, 15), 99, "en")
+            );
+        }
+        let korean = format_item(&item, "ko", 4, 99);
+        assert_eq!(
+            korean.set_name.as_deref(),
+            Some(get_loc("Iratha's Finery", "ko"))
+        );
+        assert_eq!(korean.set_pieces[0], get_loc("Iratha's Coil", "ko"));
+        assert!(korean.set_bonuses.last().unwrap().active);
+        assert_eq!(item, before);
+
+        let mut unknown_code = item.clone();
+        unknown_code.code = "unknown-code".into();
+        assert!(format_item(&unknown_code, "en", 4, 99).set_name.is_some());
+        for control in 0..4 {
+            let mut hidden = item.clone();
+            match control {
+                0 => hidden.is_identified = false,
+                1 => hidden.quality = Some(ItemQuality::Normal),
+                2 => hidden.unique_id = None,
+                _ => hidden.unique_id = Some(u16::MAX),
+            }
+            let before = hidden.clone();
+            let formatted = format_item(&hidden, "en", 4, 99);
+            assert!(formatted.set_name.is_none());
+            assert!(formatted.set_pieces.is_empty());
+            assert!(formatted.piece_set_bonuses.is_empty());
+            assert!(formatted.set_bonuses.is_empty());
+            assert_eq!(hidden, before);
+        }
     }
 }
 
