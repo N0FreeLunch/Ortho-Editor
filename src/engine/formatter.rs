@@ -12,6 +12,7 @@ use crate::engine::durability::{DurabilityDisplay, displayed_durability};
 use crate::engine::is_explicit_v105;
 use crate::engine::quantity::qualified_quantity_capacity;
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
+use crate::engine::weapon::{AttackSpeedTier, displayed_weapon};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
 use crate::data::char_stats::CHAR_STATS;
@@ -188,94 +189,38 @@ pub fn format_item_with_mode(
     }
 
     // 6. Weapon Damage (One-Hand and Two-Hand)
-    let is_weapon = ITEM_TEMPLATES
-        .iter()
-        .find(|t| t.code == item.code.trim())
-        .map_or(false, |t| t.is_weapon);
-
-    if is_weapon {
-        if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
-            let ed_pct: i32 = item
-                .properties
-                .iter()
-                .filter(|p| p.stat_id == 17)
-                .map(|p| p.value)
-                .sum();
-
-            let add_min: i32 = item
-                .properties
-                .iter()
-                .filter(|p| p.stat_id == 21)
-                .map(|p| p.value)
-                .sum();
-            let add_max: i32 = item
-                .properties
-                .iter()
-                .filter(|p| p.stat_id == 22)
-                .map(|p| p.value)
-                .sum();
-
-            // One-Hand Damage
-            if spec.min_dmg > 0 && spec.max_dmg > 0 {
-                let mut b_min = spec.min_dmg as i32;
-                let mut b_max = spec.max_dmg as i32;
-                if item.is_ethereal {
-                    b_min = (b_min * 150) / 100;
-                    b_max = (b_max * 150) / 100;
-                }
-                let f_min = ((b_min * (100 + ed_pct)) / 100 + add_min).max(1);
-                let f_max = ((b_max * (100 + ed_pct)) / 100 + add_max).max(f_min);
-
-                let label = get_loc("ItemStats1l", language);
+    if let Some(weapon) = displayed_weapon(item) {
+        for (damage, key) in [
+            (weapon.one_hand, "ItemStats1l"),
+            (weapon.two_hand, "ItemStats1m"),
+        ] {
+            if let Some(damage) = damage {
+                let label = get_loc(key, language);
                 if label.contains('%') {
-                    base_attributes.push(format_template(label, &[f_min.to_string(), f_max.to_string()]));
+                    base_attributes.push(format_template(
+                        label,
+                        &[damage.min.to_string(), damage.max.to_string()],
+                    ));
                 } else {
-                    base_attributes.push(format!("{} {} - {}", label.trim(), f_min, f_max));
+                    base_attributes.push(format!(
+                        "{} {} - {}",
+                        label.trim(),
+                        damage.min,
+                        damage.max
+                    ));
                 }
             }
-
-            // Two-Hand Damage
-            if spec.min_dmg2h > 0 && spec.max_dmg2h > 0 {
-                let mut b_min = spec.min_dmg2h as i32;
-                let mut b_max = spec.max_dmg2h as i32;
-                if item.is_ethereal {
-                    b_min = (b_min * 150) / 100;
-                    b_max = (b_max * 150) / 100;
-                }
-                let f_min = ((b_min * (100 + ed_pct)) / 100 + add_min).max(1);
-                let f_max = ((b_max * (100 + ed_pct)) / 100 + add_max).max(f_min);
-
-                let label = get_loc("ItemStats1m", language);
-                if label.contains('%') {
-                    base_attributes.push(format_template(label, &[f_min.to_string(), f_max.to_string()]));
-                } else {
-                    base_attributes.push(format!("{} {} - {}", label.trim(), f_min, f_max));
-                }
-            }
-
-            // Attack Speed
-            if let Some(base_wsm) = crate::data::weapons::get_weapon_base_speed(&item.code) {
-                let ias: i32 = item
-                    .properties
-                    .iter()
-                    .filter(|p| p.stat_id == 93)
-                    .map(|p| p.value)
-                    .sum();
-                let effective_speed = (base_wsm as i32) - ias;
-                let speed_key = if effective_speed <= -20 {
-                    "WeaponAttackVeryFast"
-                } else if effective_speed <= -10 {
-                    "WeaponAttackFast"
-                } else if effective_speed <= 0 {
-                    "WeaponAttackNormal"
-                } else if effective_speed <= 15 {
-                    "WeaponAttackSlow"
-                } else {
-                    "WeaponAttackVerySlow"
-                };
-                let speed_desc = get_loc(speed_key, language);
-                base_attributes.push(format!("{} [{}]", speed_desc.trim(), base_wsm));
-            }
+        }
+        if let Some(speed) = weapon.speed {
+            let key = match speed.tier {
+                AttackSpeedTier::VeryFast => "WeaponAttackVeryFast",
+                AttackSpeedTier::Fast => "WeaponAttackFast",
+                AttackSpeedTier::Normal => "WeaponAttackNormal",
+                AttackSpeedTier::Slow => "WeaponAttackSlow",
+                AttackSpeedTier::VerySlow => "WeaponAttackVerySlow",
+            };
+            let description = get_loc(key, language);
+            base_attributes.push(format!("{} [{}]", description.trim(), speed.base_wsm));
         }
     }
 
@@ -3222,6 +3167,111 @@ mod item_level_and_dynamic_req_level_tests {
         assert_eq!(boots.required_level(), 69);
         let en = format_item(&boots, "en", 0, 10);
         assert!(en.base_attributes.contains(&"Required Level: 69".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod weapon_damage_projection_tests {
+    use super::*;
+    use d2r_macros::hypothesis_test;
+
+    fn item(code: &str) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    fn weapon_lines(item: &Item) -> Vec<String> {
+        format_item(item, "en", 0, 10)
+            .base_attributes
+            .into_iter()
+            .filter(|line| {
+                line.starts_with("One-Hand Damage:")
+                    || line.starts_with("Two-Hand Damage:")
+                    || line.contains("Attack Speed [")
+            })
+            .collect()
+    }
+
+    #[hypothesis_test]
+    fn current_weapon_projection_preserves_numbers_order_and_source() {
+        // Preserve current renderer behavior; this does not establish gameplay formulas.
+        let prop = |id, value| {
+            ItemProperty::new(
+                id,
+                "preservation".into(),
+                0,
+                value,
+                value,
+                ItemBitRange::default(),
+            )
+        };
+        for (case, ethereal, properties, expected) in [
+            (
+                "plain",
+                false,
+                vec![],
+                [
+                    "One-Hand Damage: 25 to 65",
+                    "Two-Hand Damage: 58 to 115",
+                    "Slow Attack Speed [5]",
+                ],
+            ),
+            (
+                "ethereal_modifiers",
+                true,
+                vec![prop(17, 50), prop(21, 2), prop(22, 3)],
+                [
+                    "One-Hand Damage: 57 to 148",
+                    "Two-Hand Damage: 132 to 261",
+                    "Slow Attack Speed [5]",
+                ],
+            ),
+            (
+                "negative_percent",
+                false,
+                vec![prop(17, -200)],
+                [
+                    "One-Hand Damage: 1 to 1",
+                    "Two-Hand Damage: 1 to 1",
+                    "Slow Attack Speed [5]",
+                ],
+            ),
+            (
+                "crossed_flats",
+                false,
+                vec![prop(21, 100), prop(22, -100)],
+                [
+                    "One-Hand Damage: 125 to 125",
+                    "Two-Hand Damage: 158 to 158",
+                    "Slow Attack Speed [5]",
+                ],
+            ),
+        ] {
+            let mut weapon = item("7gd ");
+            weapon.is_ethereal = ethereal;
+            weapon.properties = properties;
+            let before = weapon.clone();
+            assert_eq!(weapon_lines(&weapon), expected, "{case}");
+            assert_eq!(weapon, before, "{case}");
+        }
+        for (ias, speed) in [
+            (10, "Fast Attack Speed [0]"),
+            (-20, "Very Slow Attack Speed [0]"),
+        ] {
+            let mut weapon = item("7wa ");
+            weapon.properties = vec![prop(93, ias)];
+            let before = weapon.clone();
+            assert_eq!(weapon_lines(&weapon), ["One-Hand Damage: 24 to 71", speed]);
+            assert_eq!(weapon, before);
+        }
+        let unknown = item("???");
+        let before = unknown.clone();
+        assert!(weapon_lines(&unknown).is_empty());
+        assert_eq!(unknown, before);
     }
 }
 
