@@ -2,6 +2,7 @@ pub mod defense;
 pub mod character_sheet;
 pub(crate) mod durability;
 pub(crate) mod quantity;
+pub(crate) mod requirements;
 pub(crate) mod weapon;
 pub mod formatter;
 pub mod validation;

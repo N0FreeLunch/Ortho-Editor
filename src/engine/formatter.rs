@@ -11,6 +11,7 @@ use crate::engine::defense::{DefenseDisplay, displayed_defense};
 use crate::engine::durability::{DurabilityDisplay, displayed_durability};
 use crate::engine::is_explicit_v105;
 use crate::engine::quantity::qualified_quantity_capacity;
+use crate::engine::requirements::displayed_requirements;
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::engine::weapon::{AttackSpeedTier, displayed_weapon};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
@@ -253,51 +254,26 @@ pub fn format_item_with_mode(
     }
 
     // 6. Requirements: Strength, Dexterity, Level
-    if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
-        let mut base_str = spec.req_str as i32;
-        let mut base_dex = spec.req_dex as i32;
-
-        if item.is_ethereal {
-            base_str = (base_str - 10).max(0);
-            base_dex = (base_dex - 10).max(0);
-        }
-
-        let req_pct: i32 = item
-            .properties
-            .iter()
-            .filter(|p| p.stat_id == 91)
-            .map(|p| p.value)
-            .sum();
-
-        if spec.req_str > 0 {
-            let final_str = ((base_str * (100 + req_pct)) / 100).max(0);
-            let label = get_loc("ItemStats1e", language);
-            if label.contains('%') {
-                base_attributes.push(format_template(label, &[final_str.to_string()]));
-            } else {
-                base_attributes.push(format!("{} {}", label.trim(), final_str));
+    if let Some(requirements) = displayed_requirements(item) {
+        for (value, key) in [
+            (requirements.strength, "ItemStats1e"),
+            (requirements.dexterity, "ItemStats1f"),
+        ] {
+            if let Some(value) = value {
+                let label = get_loc(key, language);
+                if label.contains('%') {
+                    base_attributes.push(format_template(label, &[value.to_string()]));
+                } else {
+                    base_attributes.push(format!("{} {}", label.trim(), value));
+                }
             }
         }
-
-        if spec.req_dex > 0 {
-            let final_dex = ((base_dex * (100 + req_pct)) / 100).max(0);
-            let label = get_loc("ItemStats1f", language);
-            if label.contains('%') {
-                base_attributes.push(format_template(label, &[final_dex.to_string()]));
-            } else {
-                base_attributes.push(format!("{} {}", label.trim(), final_dex));
-            }
-        }
-
-        // Required Level
-        let req_lvl = item.required_level();
-
-        if req_lvl > 1 {
+        if let Some(level) = requirements.level {
             let label = get_loc("ItemStats1p", language);
             if label.contains('%') {
-                base_attributes.push(format_template(label, &[req_lvl.to_string()]));
+                base_attributes.push(format_template(label, &[level.to_string()]));
             } else {
-                base_attributes.push(format!("{} {}", label.trim(), req_lvl));
+                base_attributes.push(format!("{} {}", label.trim(), level));
             }
         }
     }
@@ -3080,6 +3056,110 @@ mod boot_damage_display_tests {
         let qui = make_boot("qui ");
         let en_qui = format_item(&qui, "en", 0, 10);
         assert!(!en_qui.base_attributes.iter().any(|s| s.contains("Kick Damage")));
+    }
+}
+
+#[cfg(test)]
+mod requirements_projection_tests {
+    use super::*;
+    use d2r_macros::hypothesis_test;
+
+    fn item(code: &str) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    fn requirement_lines(item: &Item) -> Vec<String> {
+        format_item(item, "en", 0, 10)
+            .base_attributes
+            .into_iter()
+            .filter(|line| {
+                line.starts_with("Required Strength:")
+                    || line.starts_with("Required Dexterity:")
+                    || line.starts_with("Required Level:")
+            })
+            .collect()
+    }
+
+    #[hypothesis_test]
+    fn current_requirements_preserve_values_zero_omission_and_source() {
+        // Record display preservation separately from gameplay-rule authority.
+        let prop = |value| {
+            ItemProperty::new(
+                91,
+                "item_req_percent".into(),
+                0,
+                value,
+                value,
+                ItemBitRange::default(),
+            )
+        };
+        for (case, ethereal, properties, expected) in [
+            (
+                "plain",
+                false,
+                vec![],
+                [
+                    "Required Strength: 189",
+                    "Required Dexterity: 110",
+                    "Required Level: 63",
+                ],
+            ),
+            (
+                "ethereal_percent",
+                true,
+                vec![prop(-20)],
+                [
+                    "Required Strength: 143",
+                    "Required Dexterity: 80",
+                    "Required Level: 63",
+                ],
+            ),
+            (
+                "summed_percent",
+                true,
+                vec![prop(-20), prop(-10)],
+                [
+                    "Required Strength: 125",
+                    "Required Dexterity: 70",
+                    "Required Level: 63",
+                ],
+            ),
+            (
+                "zero_result",
+                false,
+                vec![prop(-200)],
+                [
+                    "Required Strength: 0",
+                    "Required Dexterity: 0",
+                    "Required Level: 63",
+                ],
+            ),
+        ] {
+            let mut value = item("7gd ");
+            value.is_ethereal = ethereal;
+            value.properties = properties;
+            let before = value.clone();
+            assert_eq!(requirement_lines(&value), expected, "{case}");
+            assert_eq!(value, before, "{case}");
+        }
+        let mut zero_base = item("lbt ");
+        zero_base.properties = vec![prop(100)];
+        let before = zero_base.clone();
+        assert!(requirement_lines(&zero_base).is_empty());
+        assert_eq!(zero_base, before);
+
+        let mut unknown = item("???");
+        unknown.quality = Some(ItemQuality::Unique);
+        unknown.unique_id = Some(248);
+        assert_eq!(unknown.required_level(), 62);
+        let before = unknown.clone();
+        assert!(requirement_lines(&unknown).is_empty());
+        assert_eq!(unknown, before);
     }
 }
 
