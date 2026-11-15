@@ -1850,4 +1850,141 @@ suite =
                 Expect.equal
                     (EmitIntent (Protocol.MoveItem { itemIndex = 0, targetContainer = Inventory, x = 8, y = 2 }))
                     spaceDropOut
+        , test "Multi-cell 2x2 pocket snaps to valid anchor when hovering middle, right, or bottom cells" <|
+            \_ ->
+                let
+                    pocketModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\baseSession ->
+                                            { baseSession
+                                                | items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it | width = 2, height = 2 }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        baseSession.items
+                                                , selectedMoveItemIndex = Just 0
+                                                , allowedMoveTargets = [ { container = Inventory, x = 0, y = 0 } ]
+                                            }
+                                        )
+                        }
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+
+                    checkPocketCell ( hx, hy ) _ =
+                        let
+                            hovered =
+                                pocketModel
+                                    |> Update.update (HoverDropTarget (Just { container = Inventory, x = hx, y = hy }))
+                                    |> Tuple.first
+
+                            ( _, spaceOut ) =
+                                hovered
+                                    |> Update.update
+                                        (HandleKeyShortcut
+                                            { key = " "
+                                            , code = "Space"
+                                            , ctrlKey = False
+                                            , altKey = False
+                                            , metaKey = False
+                                            , isInput = False
+                                            }
+                                        )
+                        in
+                        Expect.all
+                            [ \_ ->
+                                Workspace.view hovered
+                                    |> Query.fromHtml
+                                    |> Query.find [ testId "grid-footprint-preview-inventory" ]
+                                    |> Query.has [ Selector.class "valid" ]
+                            , \_ ->
+                                Expect.equal
+                                    (EmitIntent (Protocol.MoveItem { itemIndex = 0, targetContainer = Inventory, x = 0, y = 0 }))
+                                    spaceOut
+                            ]
+                            ()
+                in
+                Expect.all
+                    (List.map checkPocketCell [ ( 0, 0 ), ( 1, 0 ), ( 0, 1 ), ( 1, 1 ) ])
+                    ()
+        , test "Centered drop anchor aligns 2x3 held ghost item vertically around cursor" <|
+            \_ ->
+                let
+                    openStashTargets =
+                        List.concatMap
+                            (\y -> List.map (\x -> { container = Stash, x = x, y = y }) (List.range 0 8))
+                            (List.range 0 7)
+                in
+                Expect.equal
+                    ( 4, 4 )
+                    (State.UiState.resolveGridDropAnchor openStashTargets Stash 2 3 4 5)
+        , test "Equipment and MercEquipment body slots keep exact (bodyLoc, 0) without centering y=-1" <|
+            \_ ->
+                Expect.all
+                    [ \_ -> Expect.equal ( 5, 0 ) (State.UiState.resolveGridDropAnchor [] Equipment 2 3 5 0)
+                    , \_ -> Expect.equal ( 3, 0 ) (State.UiState.resolveGridDropAnchor [] MercEquipment 2 3 3 0)
+                    ]
+                    ()
+        , test "Space pickup initializes hoveredDropTarget so immediate second Space drops Equipment item back" <|
+            \_ ->
+                let
+                    hoveredEquip =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\baseSession ->
+                                            { baseSession
+                                                | items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it | container = Equipment, slotLabel = Just "Weapon2", width = 2, height = 3 }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        baseSession.items
+                                            }
+                                        )
+                        }
+                            |> Update.update (HoverItem (Just 0))
+                            |> Tuple.first
+
+                    spaceKey =
+                        HandleKeyShortcut
+                            { key = " "
+                            , code = "Space"
+                            , ctrlKey = False
+                            , altKey = False
+                            , metaKey = False
+                            , isInput = False
+                            }
+
+                    ( pickedModel, pickupOut ) =
+                        Update.update spaceKey hoveredEquip
+
+                    holdingModel =
+                        { pickedModel
+                            | session =
+                                pickedModel.session
+                                    |> Maybe.map (\s -> { s | selectedMoveItemIndex = Just 0 })
+                        }
+
+                    ( _, dropOut ) =
+                        Update.update spaceKey holdingModel
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (EmitIntent (Protocol.SelectItemForMove { itemIndex = Just 0 })) pickupOut
+                    , \_ -> Expect.equal (Just { container = Equipment, x = 5, y = 0 }) pickedModel.ui.hoveredDropTarget
+                    , \_ -> Expect.equal (EmitIntent (Protocol.MoveItem { itemIndex = 0, targetContainer = Equipment, x = 5, y = 0 })) dropOut
+                    ]
+                    ()
         ]

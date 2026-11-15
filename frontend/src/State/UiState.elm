@@ -24,6 +24,7 @@ module State.UiState exposing
     , openContextMenu
     , openItemEditorModal
     , qualityLabel
+    , resolveGridDropAnchor
     , selectItemEditorInjectStat
     , setContainerFilter
     , setHoverMousePos
@@ -49,7 +50,7 @@ module State.UiState exposing
     , updateMarquee
     )
 
-import Generated.Protocol exposing (ActionRejection, ContainerKind(..), DifficultyMode(..), ItemQualityKind(..), RejectionCode(..), SuggestedRecovery(..))
+import Generated.Protocol exposing (ActionRejection, AllowedMoveTargetView, ContainerKind(..), DifficultyMode(..), ItemQualityKind(..), RejectionCode(..), SuggestedRecovery(..))
 
 {-| Ephemeral UI state owned exclusively by Elm (tabs, theme, stash tab preview,
 progression difficulty, paint mode, marquee coordinates, selected item, filter).
@@ -471,6 +472,66 @@ clampDropAnchor kind itemW itemH targetX targetY =
 
         Nothing ->
             ( targetX, targetY )
+
+
+resolveGridDropAnchor : List AllowedMoveTargetView -> ContainerKind -> Int -> Int -> Int -> Int -> ( Int, Int )
+resolveGridDropAnchor allowedTargets kind itemW itemH targetX targetY =
+    case containerGridDims kind of
+        Nothing ->
+            ( targetX, targetY )
+
+        Just _ ->
+            let
+                w =
+                    max 1 itemW
+
+                h =
+                    max 1 itemH
+
+                preferredX =
+                    targetX - ((w - 1) // 2)
+
+                preferredY =
+                    targetY - ((h - 1) // 2)
+
+                ( gx0, gy0 ) =
+                    clampDropAnchor kind w h preferredX preferredY
+
+                isAllowed ax ay =
+                    List.any (\t -> t.container == kind && t.x == ax && t.y == ay) allowedTargets
+            in
+            if isAllowed gx0 gy0 then
+                ( gx0, gy0 )
+
+            else
+                let
+                    coveringCandidates =
+                        allowedTargets
+                            |> List.filter
+                                (\t ->
+                                    t.container
+                                        == kind
+                                        && (t.x <= targetX && targetX < t.x + w)
+                                        && (t.y <= targetY && targetY < t.y + h)
+                                )
+                            |> List.sortBy
+                                (\t ->
+                                    let
+                                        dx =
+                                            targetX - t.x
+
+                                        dy =
+                                            targetY - t.y
+                                    in
+                                    ( dx * dx + dy * dy, t.y, t.x )
+                                )
+                in
+                case List.head coveringCandidates of
+                    Just best ->
+                        ( best.x, best.y )
+
+                    Nothing ->
+                        ( gx0, gy0 )
 
 
 containerLabel : ContainerKind -> String

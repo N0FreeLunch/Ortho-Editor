@@ -16,6 +16,7 @@ import Generated.Protocol as Protocol
         , ContainerKind(..)
         , DifficultyMode(..)
         , EditMode(..)
+        , ItemCardView
         , ItemQualityKind(..)
         , SessionEnvelope
         , SessionView
@@ -364,7 +365,20 @@ update msg model =
             ( model, EmitIntent (Protocol.ClearReplacedMerc { reclaimToStorage = reclaim }) )
 
         SelectItem maybeIdx ->
-            ( { model | ui = UiState.setSelectedItem maybeIdx model.ui }
+            let
+                nextUi =
+                    case maybeIdx of
+                        Just idx ->
+                            model.ui
+                                |> UiState.setSelectedItem (Just idx)
+                                |> applyInitialDropTarget model.session idx
+
+                        Nothing ->
+                            model.ui
+                                |> UiState.setSelectedItem Nothing
+                                |> UiState.setHoveredDropTarget Nothing
+            in
+            ( { model | ui = nextUi }
             , EmitIntent (Protocol.SelectItemForMove { itemIndex = maybeIdx })
             )
 
@@ -628,19 +642,24 @@ handleKeyShortcut payload model =
             case ( heldIdx, model.ui.hoveredDropTarget, model.ui.hoveredItemIndex ) of
                 ( Just idx, Just tgt, _ ) ->
                     let
-                        ( heldW, heldH ) =
-                            model.session
-                                |> Maybe.andThen
-                                    (\s ->
-                                        (s.items ++ s.mercItems ++ s.mercReplacedItems)
-                                            |> List.filter (\it -> it.index == idx)
-                                            |> List.head
-                                    )
-                                |> Maybe.map (\it -> ( it.width, it.height ))
-                                |> Maybe.withDefault ( 1, 1 )
+                        ( heldW, heldH, allowedTargets ) =
+                            case model.session of
+                                Just s ->
+                                    let
+                                        ( w, h ) =
+                                            (s.items ++ s.mercItems ++ s.mercReplacedItems)
+                                                |> List.filter (\it -> it.index == idx)
+                                                |> List.head
+                                                |> Maybe.map (\it -> ( it.width, it.height ))
+                                                |> Maybe.withDefault ( 1, 1 )
+                                    in
+                                    ( w, h, s.allowedMoveTargets )
+
+                                Nothing ->
+                                    ( 1, 1, [] )
 
                         ( dropX, dropY ) =
-                            UiState.clampDropAnchor tgt.container heldW heldH tgt.x tgt.y
+                            UiState.resolveGridDropAnchor allowedTargets tgt.container heldW heldH tgt.x tgt.y
                     in
                     ( { model | ui = UiState.closeItemMenu model.ui }
                     , EmitIntent
@@ -654,7 +673,14 @@ handleKeyShortcut payload model =
                     )
 
                 ( Nothing, _, Just hovIdx ) ->
-                    ( { model | ui = model.ui |> UiState.setSelectedItem (Just hovIdx) |> UiState.closeItemMenu }
+                    let
+                        nextUi =
+                            model.ui
+                                |> UiState.setSelectedItem (Just hovIdx)
+                                |> UiState.closeItemMenu
+                                |> applyInitialDropTarget model.session hovIdx
+                    in
+                    ( { model | ui = nextUi }
                     , EmitIntent (Protocol.SelectItemForMove { itemIndex = Just hovIdx })
                     )
 
@@ -811,6 +837,147 @@ characterFieldFromKey key =
 
         "gold_stash" ->
             Just GoldStash
+
+        _ ->
+            Nothing
+
+
+applyInitialDropTarget : Maybe SessionView -> Int -> UiState -> UiState
+applyInitialDropTarget maybeSession itemIdx ui =
+    let
+        maybeTarget =
+            maybeSession
+                |> Maybe.andThen
+                    (\s ->
+                        (s.items ++ s.mercItems ++ s.mercReplacedItems)
+                            |> List.filter (\it -> it.index == itemIdx)
+                            |> List.head
+                    )
+                |> Maybe.andThen dropTargetFromItem
+    in
+    UiState.setHoveredDropTarget maybeTarget ui
+
+
+dropTargetFromItem : ItemCardView -> Maybe { container : ContainerKind, x : Int, y : Int }
+dropTargetFromItem item =
+    case item.container of
+        Equipment ->
+            item.slotLabel
+                |> Maybe.andThen equipmentBodyLocFromLabel
+                |> Maybe.map (\loc -> { container = Equipment, x = loc, y = 0 })
+
+        MercEquipment ->
+            Just { container = MercEquipment, x = item.x, y = 0 }
+
+        Inventory ->
+            Just
+                { container = Inventory
+                , x = item.x + ((max 1 item.width - 1) // 2)
+                , y = item.y + ((max 1 item.height - 1) // 2)
+                }
+
+        Stash ->
+            Just
+                { container = Stash
+                , x = item.x + ((max 1 item.width - 1) // 2)
+                , y = item.y + ((max 1 item.height - 1) // 2)
+                }
+
+        Cube ->
+            Just
+                { container = Cube
+                , x = item.x + ((max 1 item.width - 1) // 2)
+                , y = item.y + ((max 1 item.height - 1) // 2)
+                }
+
+        Belt ->
+            Just { container = Belt, x = item.x, y = item.y }
+
+        TempInventory ->
+            Just
+                { container = TempInventory
+                , x = item.x + ((max 1 item.width - 1) // 2)
+                , y = item.y + ((max 1 item.height - 1) // 2)
+                }
+
+        _ ->
+            Nothing
+
+
+equipmentBodyLocFromLabel : String -> Maybe Int
+equipmentBodyLocFromLabel lbl =
+    case lbl of
+        "Head" ->
+            Just 1
+
+        "Helm" ->
+            Just 1
+
+        "Amulet" ->
+            Just 2
+
+        "Neck" ->
+            Just 2
+
+        "Armor" ->
+            Just 3
+
+        "Torso" ->
+            Just 3
+
+        "Body" ->
+            Just 3
+
+        "Weapon1" ->
+            Just 4
+
+        "Right Hand" ->
+            Just 4
+
+        "Weapon2" ->
+            Just 5
+
+        "Left Hand" ->
+            Just 5
+
+        "Shield" ->
+            Just 5
+
+        "Ring1" ->
+            Just 6
+
+        "Left Finger" ->
+            Just 6
+
+        "Ring2" ->
+            Just 7
+
+        "Right Finger" ->
+            Just 7
+
+        "Belt" ->
+            Just 8
+
+        "Waist" ->
+            Just 8
+
+        "Boots" ->
+            Just 9
+
+        "Feet" ->
+            Just 9
+
+        "Gloves" ->
+            Just 10
+
+        "Hands" ->
+            Just 10
+
+        "Weapon1Swap" ->
+            Just 11
+
+        "Weapon2Swap" ->
+            Just 12
 
         _ ->
             Nothing
