@@ -12,6 +12,7 @@ use crate::engine::durability::{DurabilityDisplay, displayed_durability};
 use crate::engine::is_explicit_v105;
 use crate::engine::quantity::qualified_quantity_capacity;
 use crate::engine::requirements::displayed_requirements;
+use crate::engine::shield::displayed_shield;
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::engine::weapon::{AttackSpeedTier, displayed_weapon};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
@@ -106,32 +107,32 @@ pub fn format_item_with_mode(
     }
 
     // 2. Shield Chance to Block
-    if let Some(base_block) = crate::data::shields::get_shield_base_block(&item.code) {
-        let bonus_block: i32 = item
-            .properties
-            .iter()
-            .filter(|p| p.stat_id == 20)
-            .map(|p| p.value)
-            .sum();
-        let total_block = (base_block as i32 + bonus_block).max(0);
+    if let Some(shield) = displayed_shield(item) {
         let label = get_loc("ItemStats1r", language);
         if label.contains('%') {
-            base_attributes.push(format_template(label, &[total_block.to_string()]));
+            base_attributes.push(format_template(
+                label,
+                &[shield.chance_to_block.to_string()],
+            ));
         } else {
-            base_attributes.push(format!("{} {}%", label.trim(), total_block));
+            base_attributes.push(format!("{} {}%", label.trim(), shield.chance_to_block));
         }
-    }
 
-    // 3. Shield Smite Damage
-    if crate::data::shields::get_shield_base_block(&item.code).is_some() {
-        if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
-            if spec.min_dmg > 0 && spec.max_dmg > 0 {
-                let label = get_loc("ItemStats1o", language);
-                if label.contains('%') {
-                    base_attributes.push(format_template(label, &[spec.min_dmg.to_string(), spec.max_dmg.to_string()]));
-                } else {
-                    base_attributes.push(format!("{} {} - {}", label.trim(), spec.min_dmg, spec.max_dmg));
-                }
+        // 3. Shield Smite Damage
+        if let Some(smite) = shield.smite {
+            let label = get_loc("ItemStats1o", language);
+            if label.contains('%') {
+                base_attributes.push(format_template(
+                    label,
+                    &[smite.min.to_string(), smite.max.to_string()],
+                ));
+            } else {
+                base_attributes.push(format!(
+                    "{} {} - {}",
+                    label.trim(),
+                    smite.min,
+                    smite.max
+                ));
             }
         }
     }
@@ -3056,6 +3057,96 @@ mod boot_damage_display_tests {
         let qui = make_boot("qui ");
         let en_qui = format_item(&qui, "en", 0, 10);
         assert!(!en_qui.base_attributes.iter().any(|s| s.contains("Kick Damage")));
+    }
+}
+
+#[cfg(test)]
+mod shield_projection_tests {
+    use super::*;
+    use d2r_macros::hypothesis_test;
+
+    fn item(code: &str) -> Item {
+        let mut item = Item::empty_for_tests();
+        item.code = code.into();
+        item.quality = Some(ItemQuality::Normal);
+        item.is_identified = true;
+        item.header.save_is_alpha = false;
+        item
+    }
+
+    fn property(stat_id: u32, value: i32) -> ItemProperty {
+        ItemProperty::new(
+            stat_id,
+            String::new(),
+            0,
+            value,
+            value,
+            ItemBitRange::default(),
+        )
+    }
+
+    fn rows(item: &Item, language: &str) -> Vec<String> {
+        format_item(item, language, 0, 10)
+            .base_attributes
+            .into_iter()
+            .filter(|line| {
+                [
+                    "Chance to Block:",
+                    "Smite Damage:",
+                    "공격저지 성공율:",
+                    "타격 데미지:",
+                ]
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+            })
+            .collect()
+    }
+
+    #[hypothesis_test]
+    fn current_shield_projection_preserves_values_order_and_source() {
+        let mut shield = item("buc ");
+        let before = shield.clone();
+        assert_eq!(
+            rows(&shield, "en"),
+            ["Chance to Block: 20%", "Smite Damage: 1 to 3"]
+        );
+        assert_eq!(
+            rows(&shield, "ko"),
+            ["공격저지 성공율: 20%", "타격 데미지: 1 - 3"]
+        );
+        assert_eq!(shield, before);
+
+        shield.properties = vec![property(20, 7), property(20, 13)];
+        shield.is_ethereal = true;
+        shield
+            .properties
+            .extend([property(17, 200), property(21, 100), property(22, 100)]);
+        let before = shield.clone();
+        assert_eq!(
+            rows(&shield, "en"),
+            ["Chance to Block: 40%", "Smite Damage: 1 to 3"]
+        );
+        assert_eq!(shield, before);
+
+        shield.properties = vec![property(20, -50)];
+        assert_eq!(
+            rows(&shield, "en"),
+            ["Chance to Block: 0%", "Smite Damage: 1 to 3"]
+        );
+        shield.properties = vec![property(20, 200)];
+        assert_eq!(
+            rows(&shield, "en"),
+            ["Chance to Block: 220%", "Smite Damage: 1 to 3"]
+        );
+
+        for code in ["qui ", "unknown-code "] {
+            let mut other = item(code);
+            other.properties = vec![property(20, 50)];
+            let before = other.clone();
+            assert!(rows(&other, "en").is_empty());
+            assert!(rows(&other, "ko").is_empty());
+            assert_eq!(other, before);
+        }
     }
 }
 
