@@ -1,4 +1,4 @@
-use crate::engine::checksum::{ChecksumStrategy, StandardRollingSum};
+use crate::domain::header::checksum::{ChecksumStrategy, StandardRollingSum};
 
 /// Stable D2S Header Constants
 /// 

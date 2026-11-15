@@ -1,4 +1,5 @@
 pub(crate) mod canonical;
+pub(crate) mod checksum;
 pub(crate) mod legacy_flags;
 
 mod legacy;

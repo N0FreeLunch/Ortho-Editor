@@ -1,39 +1,25 @@
 // This software is licensed under the PolyForm Noncommercial License 1.0.0.
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
+//! Save-buffer checksum operations and compatible public strategy paths.
+//!
+//! ```
+//! use d2r_core::domain::header::axiom::HeaderAxiom;
+//! use d2r_core::engine::checksum::{
+//!     ChecksumStrategy, StandardRollingSum, FILE_SIZE_OFFSET, CHECKSUM_OFFSET,
+//! };
+//!
+//! let chosen: Box<dyn ChecksumStrategy> = HeaderAxiom::new(105).checksum_strategy();
+//! let standard: &dyn ChecksumStrategy = &StandardRollingSum;
+//! assert_eq!(chosen.name(), standard.name());
+//! assert_eq!(standard.calculate(&[0, 0]), 0);
+//! assert_eq!((FILE_SIZE_OFFSET, CHECKSUM_OFFSET), (8, 12));
+//! ```
+
 use crate::domain::header::axiom::HeaderAxiom;
+pub use crate::domain::header::axiom::{CHECKSUM_OFFSET, FILE_SIZE_OFFSET};
+pub use crate::domain::header::checksum::{ChecksumStrategy, StandardRollingSum};
 use std::io;
-
-/// Trait for checksum calculation strategies.
-pub trait ChecksumStrategy: Send + Sync {
-    /// Returns the symbolic name of the strategy for tracing.
-    fn name(&self) -> &str;
-    /// Calculates the checksum for the given byte slice.
-    fn calculate(&self, data: &[u8]) -> u32;
-}
-
-/// Standard rolling sum checksum strategy used in D2S v1.10+ and Alpha v105.
-pub struct StandardRollingSum;
-
-impl ChecksumStrategy for StandardRollingSum {
-    fn name(&self) -> &str {
-        "StandardRollingSum"
-    }
-
-    fn calculate(&self, data: &[u8]) -> u32 {
-        let mut checksum: i32 = 0;
-        for &byte in data {
-            let carry = if checksum < 0 { 1 } else { 0 };
-            checksum = (byte as i32)
-                .wrapping_add(checksum.wrapping_mul(2))
-                .wrapping_add(carry);
-        }
-        checksum as u32
-    }
-}
-
-pub const FILE_SIZE_OFFSET: usize = 8;
-pub const CHECKSUM_OFFSET: usize = 12;
 
 fn strategy_for_save(bytes: &[u8]) -> Box<dyn ChecksumStrategy> {
     let version = if bytes.len() >= 8 {
