@@ -1,8 +1,8 @@
 module Component.ContainersPanel exposing (view)
 
-import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ContainerKind(..), ItemCardView, ItemQualityKind(..), MercSummaryView, SessionView, SetBonusView, ShopCatalogItemView)
-import Html exposing (Html, button, div, h2, h3, img, li, option, section, select, span, text, ul)
-import Html.Attributes exposing (alt, attribute, class, classList, disabled, id, selected, src, style, title, type_, value)
+import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ContainerKind(..), ItemCardView, ItemQualityKind(..), MercSummaryView, SessionView, SetBonusView, ShopCatalogItemView, StatCatalogEntryView)
+import Html exposing (Html, button, div, h2, h3, img, input, li, option, section, select, span, text, ul)
+import Html.Attributes exposing (alt, attribute, checked, class, classList, disabled, id, placeholder, readonly, selected, src, style, title, type_, value)
 import Html.Events exposing (custom, on, onClick, onInput, onMouseEnter, onMouseLeave)
 import Json.Decode as Decode
 import State.UiState as UiState exposing (ItemMenuState(..), StashTab(..), UiState)
@@ -112,7 +112,277 @@ view ui session =
           else
             viewHoverTooltip ui.hoveredItemIndex ui.hoverMousePos (session.items ++ session.tempItems ++ session.mercItems ++ session.mercReplacedItems)
         , viewItemMenuOverlay ui session
+        , viewItemEditorModal ui session
         ]
+
+
+viewItemEditorModal : UiState -> SessionView -> Html Msg
+viewItemEditorModal ui session =
+    case ui.itemEditorModalIndex of
+        Nothing ->
+            text ""
+
+        Just targetIdx ->
+            case
+                (session.items ++ session.mercItems ++ session.mercReplacedItems)
+                    |> List.filter (\it -> it.index == targetIdx)
+                    |> List.head
+            of
+                Nothing ->
+                    text ""
+
+                Just item ->
+                    let
+                        queryLower =
+                            String.trim (String.toLower ui.itemEditorSearch)
+
+                        existingStatIds =
+                            List.map .statId item.detailedProperties
+
+                        filteredCatalog : List StatCatalogEntryView
+                        filteredCatalog =
+                            session.statCatalog
+                                |> List.filter
+                                    (\s ->
+                                        not (List.member s.statId existingStatIds)
+                                            && (String.isEmpty queryLower
+                                                    || String.contains queryLower (String.toLower s.name)
+                                                    || String.contains queryLower (String.fromInt s.statId)
+                                                    || String.contains queryLower ("#" ++ String.fromInt s.statId)
+                                               )
+                                    )
+                                |> List.take 40
+
+                        selectedInjectStat : Maybe StatCatalogEntryView
+                        selectedInjectStat =
+                            ui.itemEditorInjectStatId
+                                |> Maybe.andThen
+                                    (\sid ->
+                                        session.statCatalog
+                                            |> List.filter (\s -> s.statId == sid)
+                                            |> List.head
+                                    )
+
+                        stopPropClick =
+                            custom "click" (Decode.succeed { message = CloseItemMenu, stopPropagation = True, preventDefault = False })
+                    in
+                    div
+                        [ class "item-editor-backdrop"
+                        , id "item-editor-modal"
+                        , attribute "data-testid" "item-editor-modal"
+                        , onClick CloseItemEditorModal
+                        ]
+                        [ div [ class "item-editor-dialog", stopPropClick ]
+                            [ div [ class "item-editor-header" ]
+                                [ div [ class "item-editor-title" ]
+                                    [ span [] [ text "✏️" ]
+                                    , span [] [ text ("Item Option Studio · " ++ item.nameEn) ]
+                                    ]
+                                , button
+                                    [ class "item-editor-close-btn"
+                                    , attribute "data-testid" "item-editor-close-btn"
+                                    , title "Close (Esc)"
+                                    , onClick CloseItemEditorModal
+                                    ]
+                                    [ text "✕" ]
+                                ]
+                            , div [ class "item-editor-preview-bar" ]
+                                [ div [ class "item-editor-preview-img-box" ]
+                                    [ case item.imageUrl of
+                                        Just url ->
+                                            img [ src url, alt item.nameEn ] []
+
+                                        Nothing ->
+                                            span [ class "meta-line" ] [ text item.code ]
+                                    ]
+                                , div [ class "item-editor-preview-meta" ]
+                                    [ div [ class "item-editor-preview-row1" ]
+                                        [ span [ class ("item-editor-preview-name " ++ qualityClass item.quality) ] [ text item.nameEn ]
+                                        , span [ class "item-editor-preview-pill" ] [ text (UiState.qualityLabel item.quality) ]
+                                        , span [ class "item-editor-preview-sub" ] [ text ("iLvl: " ++ String.fromInt item.itemLevel) ]
+                                        , span [ class "item-editor-preview-sub" ] [ text (UiState.containerLabel item.container) ]
+                                        ]
+                                    , div [ class "item-editor-preview-summary-line" ]
+                                        [ text (String.join " · " (List.take 4 item.properties)) ]
+                                    ]
+                                ]
+                            , div [ class "item-editor-body" ]
+                                [ div [ class "item-editor-col item-editor-col-1" ]
+                                    [ div [ class "item-editor-col-title" ]
+                                        [ span [] [ text "Base Stats & Flags" ]
+                                        , span [ class "meta-line" ] [ text "COL 1" ]
+                                        ]
+                                    , div [ class "item-editor-field-row" ]
+                                        [ span [ class "item-editor-field-label" ] [ text "Ethereal" ]
+                                        , button
+                                            [ class "mini-btn"
+                                            , attribute "data-testid" "modal-ethereal-toggle"
+                                            , onClick (MutateItemBase item.index Nothing Nothing Nothing Nothing (Just (not item.isEthereal)))
+                                            ]
+                                            [ text
+                                                (if item.isEthereal then
+                                                    "Yes (Toggle)"
+
+                                                 else
+                                                    "No (Toggle)"
+                                                )
+                                            ]
+                                        ]
+                                    , case item.defense of
+                                        Just def ->
+                                            div [ class "item-editor-field-row" ]
+                                                [ span [ class "item-editor-field-label" ] [ text "Defense" ]
+                                                , div [ class "row-actions" ]
+                                                    [ button [ class "mini-btn", onClick (MutateItemBase item.index (Just (max 0 (def - 10))) Nothing Nothing Nothing Nothing) ] [ text "-10" ]
+                                                    , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt def) ]
+                                                    , button [ class "mini-btn", onClick (MutateItemBase item.index (Just (def + 10)) Nothing Nothing Nothing Nothing) ] [ text "+10" ]
+                                                    ]
+                                                ]
+
+                                        Nothing ->
+                                            text ""
+                                    , case ( item.currentDurability, item.maxDurability ) of
+                                        ( Just cur, Just mx ) ->
+                                            div [ class "item-editor-field-row" ]
+                                                [ span [ class "item-editor-field-label" ] [ text "Durability" ]
+                                                , div [ class "row-actions" ]
+                                                    [ button [ class "mini-btn", onClick (MutateItemBase item.index Nothing (Just mx) Nothing Nothing Nothing) ] [ text "Repair" ]
+                                                    , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt cur ++ "/" ++ String.fromInt mx) ]
+                                                    ]
+                                                ]
+
+                                        _ ->
+                                            text ""
+                                    , case item.quantity of
+                                        Just qty ->
+                                            div [ class "item-editor-field-row" ]
+                                                [ span [ class "item-editor-field-label" ] [ text "Quantity" ]
+                                                , div [ class "row-actions" ]
+                                                    [ button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (max 0 (qty - 1))) Nothing) ] [ text "-1" ]
+                                                    , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt qty) ]
+                                                    , button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 1)) Nothing) ] [ text "+1" ]
+                                                    ]
+                                                ]
+
+                                        Nothing ->
+                                            text ""
+                                    , div [ class "item-editor-field-row" ]
+                                        [ span [ class "item-editor-field-label" ] [ text "Item Code" ]
+                                        , input [ class "item-editor-input", value item.code, readonly True, disabled True ] []
+                                        ]
+                                    ]
+                                , div [ class "item-editor-col item-editor-col-2" ]
+                                    [ div [ class "item-editor-col-title" ]
+                                        [ span [] [ text ("Existing Properties (" ++ String.fromInt (List.length item.detailedProperties) ++ ")") ]
+                                        , span [ class "meta-line" ] [ text "COL 2" ]
+                                        ]
+                                    , if List.isEmpty item.detailedProperties then
+                                        div [ class "meta-line" ] [ text "No editable properties on this item." ]
+
+                                      else
+                                        div []
+                                            (List.map
+                                                (\prop ->
+                                                    div [ class "item-editor-prop-row", attribute "data-testid" ("modal-prop-row-" ++ String.fromInt prop.statId) ]
+                                                        [ div [ class "item-editor-prop-header" ]
+                                                            [ div [ class "item-editor-prop-title" ]
+                                                                [ span [ class "item-editor-stat-id-badge" ] [ text ("#" ++ String.fromInt prop.statId) ]
+                                                                , span [] [ text prop.name ]
+                                                                ]
+                                                            , button
+                                                                [ class "item-editor-prop-delete-btn"
+                                                                , attribute "data-testid" ("modal-remove-prop-" ++ String.fromInt prop.statId)
+                                                                , title "Remove property"
+                                                                , onClick (RemoveItemProperty item.index prop.statId)
+                                                                ]
+                                                                [ text "🗑️" ]
+                                                            ]
+                                                        , div [ class "item-editor-prop-controls" ]
+                                                            [ button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId -1) ] [ text "-" ]
+                                                            , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt prop.value) ]
+                                                            , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId 1) ] [ text "+" ]
+                                                            , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId 10) ] [ text "+10" ]
+                                                            , span [ class "meta-line" ] [ text ("(" ++ String.fromInt prop.minValue ++ ".." ++ String.fromInt prop.maxValue ++ ")") ]
+                                                            ]
+                                                        ]
+                                                )
+                                                item.detailedProperties
+                                            )
+                                    ]
+                                , div [ class "item-editor-col item-editor-col-3" ]
+                                    [ div [ class "item-editor-col-title" ]
+                                        [ span [] [ text "Search & Inject Option" ]
+                                        , span [ class "meta-line" ] [ text (String.fromInt (List.length session.statCatalog) ++ " stats") ]
+                                        ]
+                                    , div [ class "item-editor-search-box" ]
+                                        [ input
+                                            [ class "item-editor-input"
+                                            , attribute "data-testid" "item-editor-stat-search"
+                                            , placeholder "Search stat name or #id..."
+                                            , value ui.itemEditorSearch
+                                            , onInput SetItemEditorSearch
+                                            ]
+                                            []
+                                        ]
+                                    , div [ class "item-editor-search-results-list", attribute "data-testid" "item-editor-stat-results" ]
+                                        (List.map
+                                            (\entry ->
+                                                let
+                                                    isSel =
+                                                        ui.itemEditorInjectStatId == Just entry.statId
+
+                                                    defaultVal =
+                                                        clamp entry.minValue entry.maxValue 10
+                                                in
+                                                div
+                                                    [ classList [ ( "item-editor-search-item", True ), ( "selected", isSel ) ]
+                                                    , attribute "data-testid" ("modal-catalog-stat-" ++ String.fromInt entry.statId)
+                                                    , onClick (SelectItemEditorInjectStat entry.statId defaultVal)
+                                                    ]
+                                                    [ span [] [ text ("#" ++ String.fromInt entry.statId ++ " " ++ entry.name) ]
+                                                    , span [ class "meta-line" ] [ text (String.fromInt entry.minValue ++ ".." ++ String.fromInt entry.maxValue) ]
+                                                    ]
+                                            )
+                                            filteredCatalog
+                                        )
+                                    , case selectedInjectStat of
+                                        Nothing ->
+                                            div [ class "meta-line" ] [ text "Select a stat above to inject." ]
+
+                                        Just sel ->
+                                            div [ class "item-editor-injector-panel", attribute "data-testid" "item-editor-injector-panel" ]
+                                                [ div [ class "item-editor-prop-title" ] [ text ("#" ++ String.fromInt sel.statId ++ " " ++ sel.name) ]
+                                                , div [ class "item-editor-prop-controls" ]
+                                                    [ input
+                                                        [ type_ "number"
+                                                        , class "item-editor-input item-editor-prop-num"
+                                                        , attribute "data-testid" "item-editor-inject-value"
+                                                        , Html.Attributes.min (String.fromInt sel.minValue)
+                                                        , Html.Attributes.max (String.fromInt sel.maxValue)
+                                                        , value (String.fromInt ui.itemEditorInjectValue)
+                                                        , onInput SetItemEditorInjectValue
+                                                        ]
+                                                        []
+                                                    , button
+                                                        [ class "mini-btn"
+                                                        , attribute "data-testid" "btn-inject-stat"
+                                                        , onClick (AddItemProperty item.index sel.statId ui.itemEditorInjectValue)
+                                                        ]
+                                                        [ text "➕ Add Option" ]
+                                                    ]
+                                                ]
+                                    ]
+                                ]
+                            , div [ class "item-editor-footer" ]
+                                [ div [ class "item-editor-integrity-badge" ] [ text "✅ Rust SSoT Validated · Undoable" ]
+                                , button
+                                    [ class "mini-btn"
+                                    , onClick CloseItemEditorModal
+                                    ]
+                                    [ text "Close (Esc)" ]
+                                ]
+                            ]
+                        ]
 
 
 itemMenuTriggerAttrs : Int -> List (Html.Attribute Msg)
@@ -1513,7 +1783,15 @@ viewSelectedItemInspectorAndBrowser ui session =
                         ]
 
                     Just item ->
-                        [ h3 [ class ("inspector-title " ++ qualityClass item.quality) ] [ text item.nameEn ]
+                        [ div [ class "inspector-header-row" ]
+                            [ h3 [ class ("inspector-title " ++ qualityClass item.quality) ] [ text item.nameEn ]
+                            , button
+                                [ class "mini-btn"
+                                , attribute "data-testid" "btn-open-item-studio"
+                                , onClick (OpenItemEditorModal item.index)
+                                ]
+                                [ text "✏️ Open Studio" ]
+                            ]
                         , div [ class "meta-line" ]
                             [ text
                                 (UiState.qualityLabel item.quality

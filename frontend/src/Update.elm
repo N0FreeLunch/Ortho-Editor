@@ -105,6 +105,13 @@ type Msg
     | ContextEditItem Int
     | ContextDuplicateItem Int
     | ContextDeleteItem Int
+    | OpenItemEditorModal Int
+    | CloseItemEditorModal
+    | SetItemEditorSearch String
+    | SelectItemEditorInjectStat Int Int
+    | SetItemEditorInjectValue String
+    | AddItemProperty Int Int Int
+    | RemoveItemProperty Int Int
     | HandleKeyShortcut KeyShortcutPayload
 
 
@@ -509,8 +516,57 @@ update msg model =
             )
 
         ContextEditItem itemIndex ->
-            ( { model | ui = model.ui |> UiState.setSelectedItem (Just itemIndex) |> UiState.closeItemMenu }
+            ( { model | ui = UiState.openItemEditorModal itemIndex model.ui }
             , NoOut
+            )
+
+        OpenItemEditorModal itemIndex ->
+            ( { model | ui = UiState.openItemEditorModal itemIndex model.ui }
+            , NoOut
+            )
+
+        CloseItemEditorModal ->
+            ( { model | ui = UiState.closeItemEditorModal model.ui }
+            , NoOut
+            )
+
+        SetItemEditorSearch query ->
+            ( { model | ui = UiState.setItemEditorSearch query model.ui }
+            , NoOut
+            )
+
+        SelectItemEditorInjectStat statId defaultVal ->
+            ( { model | ui = UiState.selectItemEditorInjectStat statId defaultVal model.ui }
+            , NoOut
+            )
+
+        SetItemEditorInjectValue raw ->
+            case String.toInt (String.trim raw) of
+                Just val ->
+                    ( { model | ui = UiState.setItemEditorInjectValue val model.ui }, NoOut )
+
+                Nothing ->
+                    ( model, NoOut )
+
+        AddItemProperty itemIndex statId value ->
+            ( model
+            , EmitIntent
+                (Protocol.AddItemProperty
+                    { itemIndex = itemIndex
+                    , statId = statId
+                    , value = value
+                    }
+                )
+            )
+
+        RemoveItemProperty itemIndex statId ->
+            ( model
+            , EmitIntent
+                (Protocol.RemoveItemProperty
+                    { itemIndex = itemIndex
+                    , statId = statId
+                    }
+                )
             )
 
         ContextDuplicateItem itemIndex ->
@@ -543,7 +599,10 @@ handleKeyShortcut payload model =
         ( model, NoOut )
 
     else if payload.key == "Escape" then
-        if model.ui.itemMenu /= UiState.NoItemMenu then
+        if model.ui.itemEditorModalIndex /= Nothing then
+            ( { model | ui = UiState.closeItemEditorModal model.ui }, NoOut )
+
+        else if model.ui.itemMenu /= UiState.NoItemMenu then
             ( { model | ui = UiState.closeItemMenu model.ui }, NoOut )
 
         else if heldIdx /= Nothing then
@@ -820,7 +879,7 @@ applyEnvelope envelope model =
                                 model.session
 
                             else
-                                -- Merge cached static shopCatalog if incoming session omitted it
+                                -- Merge cached static shopCatalog and statCatalog if incoming session omitted them
                                 let
                                     mergedCatalog =
                                         if List.isEmpty newSession.shopCatalog then
@@ -828,8 +887,15 @@ applyEnvelope envelope model =
 
                                         else
                                             newSession.shopCatalog
+
+                                    mergedStatCatalog =
+                                        if List.isEmpty newSession.statCatalog then
+                                            currentSession.statCatalog
+
+                                        else
+                                            newSession.statCatalog
                                 in
-                                Just { newSession | shopCatalog = mergedCatalog }
+                                Just { newSession | shopCatalog = mergedCatalog, statCatalog = mergedStatCatalog }
 
                         Nothing ->
                             Just newSession

@@ -301,6 +301,24 @@ commandDecoder =
                         Json.Decode.field "itemIndex" Json.Decode.int
                             |> Json.Decode.map ContextDeleteItem
 
+                    "OpenItemEditorModal" ->
+                        Json.Decode.field "itemIndex" Json.Decode.int
+                            |> Json.Decode.map OpenItemEditorModal
+
+                    "CloseItemEditorModal" ->
+                        Json.Decode.succeed CloseItemEditorModal
+
+                    "AddItemProperty" ->
+                        Json.Decode.map3 AddItemProperty
+                            (Json.Decode.field "itemIndex" Json.Decode.int)
+                            (Json.Decode.field "statId" Json.Decode.int)
+                            (Json.Decode.field "value" Json.Decode.int)
+
+                    "RemoveItemProperty" ->
+                        Json.Decode.map2 RemoveItemProperty
+                            (Json.Decode.field "itemIndex" Json.Decode.int)
+                            (Json.Decode.field "statId" Json.Decode.int)
+
                     other ->
                         Json.Decode.fail ("Unknown harness command: " ++ other)
             )

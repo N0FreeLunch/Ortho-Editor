@@ -778,3 +778,55 @@ test("Closed-loop scenario 6: Cycle 19 Hover keyboard shortcuts (Space/S/Escape)
     await driver.close();
   }
 });
+
+test("Closed-loop scenario 7 (Cycle 20): Item Option Editor Modal AddItemProperty / RemoveItemProperty / Undo / .d2s roundtrip", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    const session0 = loadRes.resp.envelope.session;
+    assert.ok(session0.stat_catalog.length > 50, "stat_catalog should be populated from d2r-data");
+
+    const targetItem = session0.items.find((it) => it.detailed_properties.length > 0);
+    assert.ok(targetItem, "need a non-compact item");
+    const chosenStat = session0.stat_catalog.find(
+      (s) => !targetItem.detailed_properties.some((p) => p.stat_id === s.stat_id) && s.max_value >= 15
+    );
+    assert.ok(chosenStat, "need an unused writable stat");
+
+    // 1. AddItemProperty via HeadlessHarness
+    const addRes = await driver.stepCommand({
+      kind: "AddItemProperty",
+      itemIndex: targetItem.index,
+      statId: chosenStat.stat_id,
+      value: 15,
+    });
+    assert.equal(addRes.resp.ok, true);
+    assert.equal(addRes.snap.dirty, true);
+    const updatedItem = addRes.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(updatedItem.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
+
+    // 2. RemoveItemProperty + Undo restores it
+    const remRes = await driver.stepCommand({
+      kind: "RemoveItemProperty",
+      itemIndex: targetItem.index,
+      statId: chosenStat.stat_id,
+    });
+    assert.equal(remRes.resp.ok, true);
+    const removedItem = remRes.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(!removedItem.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id));
+
+    const undoRes = await driver.stepCommand({ kind: "Undo" });
+    assert.equal(undoRes.resp.ok, true);
+
+    // 3. Export .d2s and reload
+    const { reloaded } = await driver.exportAndReload("scenario7-cycle20-roundtrip.d2s");
+    const reloadedItem = reloaded.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(reloadedItem.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
+  } finally {
+    await driver.close();
+  }
+});

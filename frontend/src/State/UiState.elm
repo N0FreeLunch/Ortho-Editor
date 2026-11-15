@@ -15,16 +15,21 @@ module State.UiState exposing
     , clearMarquee
     , clearToast
     , closeItemMenu
+    , closeItemEditorModal
     , containerLabel
     , extendMarquee
     , init
     , openActionPalette
     , openContextMenu
+    , openItemEditorModal
     , qualityLabel
+    , selectItemEditorInjectStat
     , setContainerFilter
     , setHoverMousePos
     , setHoveredDropTarget
     , setHoveredItem
+    , setItemEditorInjectValue
+    , setItemEditorSearch
     , setPaintMode
     , setProgressionDifficulty
     , setSelectedItem
@@ -129,6 +134,10 @@ type alias UiState =
     , shopCategoryFilter : String
     , shopPage : Int
     , itemMenu : ItemMenuState
+    , itemEditorModalIndex : Maybe Int
+    , itemEditorSearch : String
+    , itemEditorInjectStatId : Maybe Int
+    , itemEditorInjectValue : Int
     }
 
 
@@ -154,6 +163,10 @@ init =
     , shopCategoryFilter = "all"
     , shopPage = 0
     , itemMenu = NoItemMenu
+    , itemEditorModalIndex = Nothing
+    , itemEditorSearch = ""
+    , itemEditorInjectStatId = Nothing
+    , itemEditorInjectValue = 10
     }
 
 
@@ -175,6 +188,41 @@ openContextMenu idx x y ui =
 closeItemMenu : UiState -> UiState
 closeItemMenu ui =
     { ui | itemMenu = NoItemMenu }
+
+
+openItemEditorModal : Int -> UiState -> UiState
+openItemEditorModal idx ui =
+    { ui
+        | selectedItemIndex = Just idx
+        , itemMenu = NoItemMenu
+        , itemEditorModalIndex = Just idx
+        , itemEditorSearch = ""
+        , itemEditorInjectStatId = Nothing
+        , itemEditorInjectValue = 10
+    }
+
+
+closeItemEditorModal : UiState -> UiState
+closeItemEditorModal ui =
+    { ui | itemEditorModalIndex = Nothing }
+
+
+setItemEditorSearch : String -> UiState -> UiState
+setItemEditorSearch query ui =
+    { ui | itemEditorSearch = query }
+
+
+selectItemEditorInjectStat : Int -> Int -> UiState -> UiState
+selectItemEditorInjectStat statId defaultVal ui =
+    { ui
+        | itemEditorInjectStatId = Just statId
+        , itemEditorInjectValue = defaultVal
+    }
+
+
+setItemEditorInjectValue : Int -> UiState -> UiState
+setItemEditorInjectValue val ui =
+    { ui | itemEditorInjectValue = val }
 
 
 setProgressionDifficulty : DifficultyMode -> UiState -> UiState

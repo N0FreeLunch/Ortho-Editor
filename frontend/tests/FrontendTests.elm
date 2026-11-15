@@ -255,6 +255,20 @@ sampleSessionJson =
             "image_url": null,
             "summary": "Normal · r33"
           }
+        ],
+        "stat_catalog": [
+          {
+            "stat_id": 0,
+            "name": "strength",
+            "min_value": -32,
+            "max_value": 223
+          },
+          {
+            "stat_id": 105,
+            "name": "item_fastercastrate",
+            "min_value": -20,
+            "max_value": 235
+          }
         ]
       },
       "rejection": null
@@ -1474,7 +1488,7 @@ suite =
                             |> (\s ->
                                     case String.indexes "\"shop_catalog\": [" s of
                                         idx :: _ ->
-                                            String.left idx s ++ "\"shop_catalog\": [] }, \"rejection\": null }"
+                                            String.left idx s ++ "\"shop_catalog\": [], \"stat_catalog\": [] }, \"rejection\": null }"
 
                                         _ ->
                                             s
@@ -1738,6 +1752,59 @@ suite =
                         Expect.equal
                             (EmitIntent (Protocol.QuickMoveItem { itemIndex = 0, targetContainer = Stash }))
                             quickStashOut
+                    ]
+                    ()
+        , test "Cycle 20 3-Column Item Option Editor Modal opens, filters stat_catalog, emits Add/RemoveItemProperty, and closes on Esc" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+
+                    modalOpened =
+                        viewAModel
+                            |> Update.update (ContextEditItem 0)
+                            |> Tuple.first
+                            |> Update.update (SetItemEditorSearch "faster")
+                            |> Tuple.first
+
+                    statSelected =
+                        modalOpened
+                            |> Update.update (SelectItemEditorInjectStat 105 20)
+                            |> Tuple.first
+
+                    ( closedByEsc, _ ) =
+                        statSelected
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = "Escape"
+                                    , code = "Escape"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view statSelected
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "item-editor-modal" ]
+                                    >> Query.has [ Selector.text "Item Option Studio" ]
+                                , Query.find [ testId "modal-catalog-stat-105" ]
+                                    >> Query.has [ Selector.text "item_fastercastrate" ]
+                                , Query.find [ testId "btn-inject-stat" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (AddItemProperty 0 105 20)
+                                , Query.find [ testId "item-editor-close-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect CloseItemEditorModal
+                                ]
+                    , \_ ->
+                        Expect.equal Nothing closedByEsc.ui.itemEditorModalIndex
                     ]
                     ()
         ]
