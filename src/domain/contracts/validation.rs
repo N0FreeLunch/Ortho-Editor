@@ -75,6 +75,34 @@ impl FieldViolation {
     }
 }
 
+impl From<validator::ValidationError> for FieldViolation {
+    fn from(error: validator::ValidationError) -> Self {
+        let message = error
+            .message
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| format!("Invalid field value: {}", error.code));
+        let hint = match error.code.as_ref() {
+            "length" => "Ensure the character length satisfies the minimum and maximum boundaries."
+                .to_string(),
+            "range" => {
+                "Ensure the value falls within the allowed minimum and maximum range.".to_string()
+            }
+            other => format!("Ensure the value satisfies the '{}' rule.", other),
+        };
+
+        let mut violation = Self::new(error.code, message, hint);
+        if let Some(param) = error.params.get("value") {
+            violation.rejected_value = serde_json::to_value(param).ok();
+        }
+        let min = error.params.get("min").and_then(|v| v.as_u64());
+        let max = error.params.get("max").and_then(|v| v.as_u64());
+        if min.is_some() || max.is_some() {
+            violation.constraint = Some(ConstraintRange::new(min, max));
+        }
+        violation
+    }
+}
+
 /// Standardized 422 Unprocessable Entity response payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ValidationErrorResponse {
@@ -119,68 +147,102 @@ impl ValidationErrorResponse {
         resp
     }
 
-    /// Returns true if there are any validation errors.
+    /// Returns true when there are no field violations.
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
+    }
+    fn append_validator_errors(
+        &mut self,
+        errors: validator::ValidationErrors,
+        prefix: Option<&str>,
+    ) {
+        for (field, err_kind) in errors.into_errors() {
+            let path = match prefix {
+                Some(prefix) => format!("{prefix}.{field}"),
+                None => field.to_owned(),
+            };
+            match err_kind {
+                validator::ValidationErrorsKind::Struct(sub_errors) => {
+                    self.append_validator_errors(*sub_errors, Some(&path));
+                }
+                validator::ValidationErrorsKind::List(list_errors) => {
+                    for (idx, item_errors) in list_errors {
+                        let indexed_path = format!("{path}[{idx}]");
+                        self.append_validator_errors(*item_errors, Some(&indexed_path));
+                    }
+                }
+                validator::ValidationErrorsKind::Field(field_errors) => {
+                    if !field_errors.is_empty() {
+                        self.errors
+                            .entry(path)
+                            .or_default()
+                            .extend(field_errors.into_iter().map(FieldViolation::from));
+                    }
+                }
+            }
+        }
     }
 }
 
 impl From<validator::ValidationErrors> for ValidationErrorResponse {
     fn from(errors: validator::ValidationErrors) -> Self {
-        let mut resp = Self::new();
-        for (field, err_kind) in errors.into_errors() {
-            match err_kind {
-                validator::ValidationErrorsKind::Struct(sub_errors) => {
-                    let sub_resp = ValidationErrorResponse::from(*sub_errors);
-                    for (sub_field, sub_violations) in sub_resp.errors {
-                        for v in sub_violations {
-                            resp.add_violation(format!("{}.{}", field, sub_field), v);
-                        }
-                    }
-                }
-                validator::ValidationErrorsKind::List(list_errors) => {
-                    for (idx, item_errors) in list_errors {
-                        let sub_resp = ValidationErrorResponse::from(*item_errors);
-                        for (sub_field, sub_violations) in sub_resp.errors {
-                            for v in sub_violations {
-                                resp.add_violation(format!("{}[{}].{}", field, idx, sub_field), v);
-                            }
-                        }
-                    }
-                }
-                validator::ValidationErrorsKind::Field(field_errors) => {
-                    for fe in field_errors {
-                        let message = fe
-                            .message
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| format!("Invalid field value: {}", fe.code));
-                        let hint = match fe.code.as_ref() {
-                            "length" => "Ensure the character length satisfies the minimum and maximum boundaries.".to_string(),
-                            "range" => "Ensure the value falls within the allowed minimum and maximum range.".to_string(),
-                            other => format!("Ensure the value satisfies the '{}' rule.", other),
-                        };
-
-                        let mut violation = FieldViolation::new(fe.code, message, hint);
-                        if let Some(param) = fe.params.get("value") {
-                            violation.rejected_value = serde_json::to_value(param).ok();
-                        }
-                        let min_val = fe.params.get("min").and_then(|v| v.as_u64());
-                        let max_val = fe.params.get("max").and_then(|v| v.as_u64());
-                        if min_val.is_some() || max_val.is_some() {
-                            violation.constraint = Some(ConstraintRange::new(min_val, max_val));
-                        }
-                        resp.add_violation(field, violation);
-                    }
-                }
-            }
-        }
-        resp
+        let mut response = Self::new();
+        response.append_validator_errors(errors, None);
+        response
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deep_empty_names_and_buckets_preserve_flattening_contract() {
+        use std::collections::BTreeMap;
+        use validator::{ValidationError, ValidationErrors, ValidationErrorsKind};
+
+        let mut leaf = ValidationErrors::new();
+        leaf.add("value", ValidationError::new("range"));
+        let mut unnamed = ValidationErrors::new();
+        unnamed
+            .errors_mut()
+            .insert("", ValidationErrorsKind::Struct(Box::new(leaf)));
+        let mut container = ValidationErrors::new();
+        container.errors_mut().insert(
+            "detail",
+            ValidationErrorsKind::List(BTreeMap::from([
+                (1, Box::new(ValidationErrors::new())),
+                (4, Box::new(unnamed)),
+            ])),
+        );
+        let mut errors = ValidationErrors::new();
+        errors
+            .errors_mut()
+            .insert("", ValidationErrorsKind::Struct(Box::new(container)));
+        errors
+            .errors_mut()
+            .insert("empty_leaf", ValidationErrorsKind::Field(Vec::new()));
+        errors
+            .errors_mut()
+            .insert("empty_list", ValidationErrorsKind::List(BTreeMap::new()));
+        let response = ValidationErrorResponse::from(errors);
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "status": "validation_error",
+                "code": 422,
+                "message": "The given data was invalid.",
+                "errors": {
+                    ".detail[4]..value": [{
+                        "code": "range",
+                        "message": "Invalid field value: range",
+                        "hint": "Ensure the value falls within the allowed minimum and maximum range."
+                    }]
+                }
+            })
+        );
+        assert!(ValidationErrorResponse::from(ValidationErrors::new()).is_empty());
+    }
 
     #[test]
     fn violation_code_owns_runtime_json_and_borrows_static_literals() {
