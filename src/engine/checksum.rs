@@ -1,8 +1,8 @@
 // This software is licensed under the PolyForm Noncommercial License 1.0.0.
 // Required Notice: Copyright 2026 N0FreeLunch (https://github.com/N0FreeLunch/d2r-core)
 
-use std::io;
 use crate::domain::header::axiom::HeaderAxiom;
+use std::io;
 
 /// Trait for checksum calculation strategies.
 pub trait ChecksumStrategy: Send + Sync {
@@ -35,6 +35,15 @@ impl ChecksumStrategy for StandardRollingSum {
 pub const FILE_SIZE_OFFSET: usize = 8;
 pub const CHECKSUM_OFFSET: usize = 12;
 
+fn strategy_for_save(bytes: &[u8]) -> Box<dyn ChecksumStrategy> {
+    let version = if bytes.len() >= 8 {
+        u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
+    } else {
+        0
+    };
+    HeaderAxiom::new(version).checksum_strategy()
+}
+
 pub struct Checksum;
 
 impl Checksum {
@@ -54,7 +63,7 @@ impl Checksum {
         // Zero out the checksum field
         bytes[CHECKSUM_OFFSET..CHECKSUM_OFFSET + 4].fill(0);
         let cs = strategy.calculate(bytes);
-        
+
         if crate::item::item_trace_enabled() {
             eprintln!(
                 "[FTI Checksum] Fixed using strategy '{}' for range 0..{}",
@@ -68,13 +77,7 @@ impl Checksum {
 
     /// Fixes the checksum in-place for a mutable byte slice using the standard strategy.
     pub fn fix(bytes: &mut [u8]) {
-        let version = if bytes.len() >= 8 {
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
-        } else {
-            0
-        };
-        let axiom = HeaderAxiom::new(version);
-        Self::fix_with_strategy(bytes, axiom.checksum_strategy().as_ref());
+        Self::fix_with_strategy(bytes, strategy_for_save(bytes).as_ref());
     }
 }
 
@@ -87,11 +90,10 @@ pub fn recalculate_checksum(bytes: &[u8]) -> io::Result<u32> {
         ));
     }
 
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
-    let axiom = HeaderAxiom::new(version);
+    let strategy = strategy_for_save(bytes);
     let mut calc_bytes = bytes.to_vec();
     calc_bytes[CHECKSUM_OFFSET..CHECKSUM_OFFSET + 4].fill(0);
-    Ok(axiom.checksum_strategy().calculate(&calc_bytes))
+    Ok(strategy.calculate(&calc_bytes))
 }
 
 /// Finalizes the save bytes by updating the file size and fixing the checksum.
@@ -104,7 +106,6 @@ pub fn finalize_save_bytes(bytes: &mut Vec<u8>, _force_fix: bool) -> io::Result<
         ));
     }
 
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
     let len = bytes.len();
     if len > u32::MAX as usize {
         return Err(io::Error::new(
@@ -115,12 +116,7 @@ pub fn finalize_save_bytes(bytes: &mut Vec<u8>, _force_fix: bool) -> io::Result<
 
     // Update file size field (offset 8)
     bytes[FILE_SIZE_OFFSET..FILE_SIZE_OFFSET + 4].copy_from_slice(&(len as u32).to_le_bytes());
-    
-    // Select strategy via HeaderAxiom
-    let axiom = HeaderAxiom::new(version);
-    let strategy = axiom.checksum_strategy();
-    
-    // Fix checksum
-    Checksum::fix_with_strategy(bytes, strategy.as_ref());
+
+    Checksum::fix(bytes);
     Ok(())
 }

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use d2r_core::engine::checksum::{Checksum, finalize_save_bytes};
 use d2r_core::save::{D2S_MAGIC, Save, find_jm_markers, recalculate_checksum};
 
 mod common;
@@ -56,4 +57,49 @@ fn save_header_recalculates_checksum_for_empty_save() {
     let stored = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
     let recalculated = recalculate_checksum(&bytes).expect("checksum should recalculate");
     assert_eq!(stored, recalculated);
+}
+
+#[test]
+fn checksum_operations_preserve_fixture_bytes() {
+    let original = load_fixture("tests/fixtures/savegames/original/amazon_empty.d2s");
+    let mut bytes = original.clone();
+    Checksum::fix(&mut bytes);
+    assert_eq!(bytes, original);
+
+    // Corrupt only metadata; finalization must reproduce the original save.
+    bytes[8..16].fill(0xff);
+    let before_recalculation = bytes.clone();
+    recalculate_checksum(&bytes).expect("corrupt metadata can still be checksummed");
+    assert_eq!(bytes, before_recalculation);
+
+    finalize_save_bytes(&mut bytes, false).expect("finalization should repair metadata");
+    assert_eq!(bytes, original);
+    finalize_save_bytes(&mut bytes, true).expect("repeated finalization should be stable");
+    assert_eq!(bytes, original);
+}
+
+#[test]
+fn checksum_operations_preserve_short_input_contracts() {
+    for len in 0..16 {
+        let original = vec![0xa5; len];
+        let mut bytes = original.clone();
+        Checksum::fix(&mut bytes);
+        assert_eq!(bytes, original, "fix must be a no-op for length {len}");
+
+        let error = recalculate_checksum(&bytes).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "Save file is too small for checksum recalculation."
+        );
+        for force in [false, true] {
+            let error = finalize_save_bytes(&mut bytes, force).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert_eq!(
+                error.to_string(),
+                "Save bytes must be at least 16 bytes to finalize."
+            );
+            assert_eq!(bytes, original);
+        }
+    }
 }
