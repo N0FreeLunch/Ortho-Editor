@@ -469,9 +469,19 @@ mod tests {
             displayed_defense(&item, 0, 26),
             Some(DefenseDisplay::Final(42))
         );
+        let output = format_item(&item, "en", 0, 26);
         assert_eq!(
-            format_item(&item, "en", 0, 26).base_attributes[0],
-            "Defense: 42"
+            output.base_attributes.first().map(String::as_str),
+            Some("Unidentified")
+        );
+        assert_eq!(
+            output
+                .base_attributes
+                .iter()
+                .map(String::as_str)
+                .filter(|line| line.starts_with("Defense:"))
+                .collect::<Vec<_>>(),
+            ["Defense: 42"]
         );
         assert_eq!(item, original);
         item.is_identified = true;

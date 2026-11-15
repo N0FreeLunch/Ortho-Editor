@@ -973,11 +973,28 @@ mod tests {
         let mut plain = i.clone();
         plain.socketed_items.clear();
         plain.body.d2r_v3_auxiliary.as_mut().unwrap().filled_sockets = 0;
+        // Socket contents can raise requirements, but must not alter other base rows.
+        assert_eq!(i.required_level(), 27);
+        assert_eq!(plain.required_level(), 0);
         for lang in ["en", "ko"] {
+            let prefix = if lang == "en" {
+                "Required Level:"
+            } else {
+                "착용 가능한 레벨:"
+            };
+            let mut socketed = format_item(&i, lang, 0, 99).base_attributes;
+            let unsocketed = format_item(&plain, lang, 0, 99).base_attributes;
             assert_eq!(
-                format_item(&i, lang, 0, 99).base_attributes,
-                format_item(&plain, lang, 0, 99).base_attributes
+                socketed
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|line| line.starts_with(prefix))
+                    .collect::<Vec<_>>(),
+                [format!("{prefix} 27")]
             );
+            assert!(!unsocketed.iter().any(|line| line.starts_with(prefix)));
+            socketed.retain(|line| !line.starts_with(prefix));
+            assert_eq!(socketed, unsocketed);
         }
         assert_eq!(i, before);
         let mut inactive = i.clone();

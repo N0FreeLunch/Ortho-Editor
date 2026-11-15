@@ -2696,12 +2696,22 @@ fn qualified_quantity_capacity(item: &Item, quantity: u32, active_set_count: usi
 
 #[cfg(test)]
 mod quantity_display_tests {
-    use super::{format_item, format_properties_list};
+    use super::{FormattedItem, format_item, format_properties_list};
     use crate::domain::item::entity::D2rV3AuxiliaryData;
     use crate::domain::item::stream::PlayerItemStream;
     use crate::domain::stats::{ItemStats, StatMaturityTier};
     use crate::item::{HuffmanTree, Item, ItemBitRange, ItemProperty, ItemQuality};
     use d2r_macros::settled_contract_test;
+
+    // Quantity contracts own these rows; other tooltip fields have separate tests.
+    fn quantity_lines(output: &FormattedItem) -> Vec<&str> {
+        output
+            .base_attributes
+            .iter()
+            .map(String::as_str)
+            .filter(|line| line.starts_with("Quantity:") || line.starts_with("수량:"))
+            .collect()
+    }
 
     fn plain() -> Item {
         let mut item = Item::empty_for_tests();
@@ -2727,11 +2737,9 @@ mod quantity_display_tests {
     fn unknown(item: &Item, active: usize) {
         let snapshot = item.clone();
         let output = format_item(item, "en", active, 10);
-        assert!(
-            output
-                .base_attributes
-                .iter()
-                .any(|line| line.ends_with(" of ?"))
+        assert_eq!(
+            quantity_lines(&output),
+            [format!("Quantity: {} of ?", item.quantity().unwrap())]
         );
         assert_eq!(
             output
@@ -2762,16 +2770,32 @@ mod quantity_display_tests {
                 .find(|item| item.code.trim() == code)
                 .unwrap();
             assert_eq!(item.quantity(), Some(current));
-            let mut expected_en = Vec::new();
-            let mut expected_ko = Vec::new();
+            let en = format_item(item, "en", 0, 7);
+            let ko = format_item(item, "ko", 0, 7);
             if code == "gpl" {
-                expected_en.push("Durability: 1 of 2".to_string());
-                expected_ko.push("내구력: 1 / 2".to_string());
+                for (output, prefix, expected) in [
+                    (&en, "Durability:", "Durability: 1 of 2"),
+                    (&ko, "내구력:", "내구력: 1 / 2"),
+                ] {
+                    assert_eq!(
+                        output
+                            .base_attributes
+                            .iter()
+                            .map(String::as_str)
+                            .filter(|line| line.starts_with(prefix))
+                            .collect::<Vec<_>>(),
+                        [expected]
+                    );
+                }
             }
-            expected_en.push(format!("Quantity: {current} of {maximum}"));
-            expected_ko.push(format!("수량: {current} / {maximum}"));
-            assert_eq!(format_item(item, "en", 0, 7).base_attributes, expected_en);
-            assert_eq!(format_item(item, "ko", 0, 7).base_attributes, expected_ko);
+            assert_eq!(
+                quantity_lines(&en),
+                [format!("Quantity: {current} of {maximum}")]
+            );
+            assert_eq!(
+                quantity_lines(&ko),
+                [format!("수량: {current} / {maximum}")]
+            );
         }
         assert!(stream.items == snapshot);
     }
@@ -2790,12 +2814,12 @@ mod quantity_display_tests {
             item.code = code.into();
             item.body.quantity = Some(0);
             assert_eq!(
-                format_item(&item, "en", 0, 10).base_attributes,
+                quantity_lines(&format_item(&item, "en", 0, 10)),
                 [format!("Quantity: 0 of {maximum}")]
             );
             item.body.quantity = None;
             let output = format_item(&item, "en", 0, 10);
-            assert!(output.base_attributes.is_empty());
+            assert!(quantity_lines(&output).is_empty());
             assert!(
                 !output
                     .detailed_warnings
@@ -2810,24 +2834,24 @@ mod quantity_display_tests {
         let mut item = plain();
         item.properties = vec![extra(60), extra(120)];
         assert_eq!(
-            format_item(&item, "en", 0, 10).base_attributes,
+            quantity_lines(&format_item(&item, "en", 0, 10)),
             ["Quantity: 1 of 270"]
         );
         item.properties = vec![extra(60)];
         item.runeword_attributes = vec![extra(120)];
         item.is_runeword = true;
         assert_eq!(
-            format_item(&item, "en", 0, 10).base_attributes,
+            quantity_lines(&format_item(&item, "en", 0, 10)),
             ["Quantity: 1 of 270"]
         );
         item.properties = vec![extra(255), extra(255)];
         item.runeword_attributes.clear();
         assert_eq!(
-            format_item(&item, "en", 0, 10).base_attributes,
+            quantity_lines(&format_item(&item, "en", 0, 10)),
             ["Quantity: 1 of 511"]
         );
         assert_eq!(
-            format_item(&item, "ko", 0, 10).base_attributes,
+            quantity_lines(&format_item(&item, "ko", 0, 10)),
             ["수량: 1 / 511"]
         );
     }
@@ -2886,7 +2910,11 @@ mod quantity_display_tests {
         });
         let snapshot = item.clone();
         let output = format_item(&item, "en", 0, 10);
-        assert_eq!(output.base_attributes, ["Quantity: 1 of 90"]);
+        assert_eq!(quantity_lines(&output), ["Quantity: 1 of 90"]);
+        assert_eq!(
+            output.base_attributes.first().map(String::as_str),
+            Some("Unidentified")
+        );
         assert!(output.properties.is_empty());
         assert_eq!(item, snapshot);
         item.body
@@ -2906,7 +2934,7 @@ mod quantity_display_tests {
         let mut item = plain();
         item.set_attributes = vec![vec![extra(60)]];
         assert_eq!(
-            format_item(&item, "en", 1, 10).base_attributes,
+            quantity_lines(&format_item(&item, "en", 1, 10)),
             ["Quantity: 1 of 90"]
         );
         unknown(&item, 2);
@@ -2922,7 +2950,7 @@ mod quantity_display_tests {
         item.body.quantity = Some(511);
         let snapshot = item.clone();
         let output = format_item(&item, "en", 0, 10);
-        assert_eq!(output.base_attributes, ["Quantity: 511 of 90"]);
+        assert_eq!(quantity_lines(&output), ["Quantity: 511 of 90"]);
         assert_eq!(
             output.properties,
             format_properties_list(&snapshot.properties, 10, "en")
@@ -2932,7 +2960,7 @@ mod quantity_display_tests {
         item.body.quantity = None;
         item.runeword_attributes = vec![extra(60)];
         let output = format_item(&item, "en", 0, 10);
-        assert!(output.base_attributes.is_empty());
+        assert!(quantity_lines(&output).is_empty());
         assert!(
             !output
                 .detailed_warnings
