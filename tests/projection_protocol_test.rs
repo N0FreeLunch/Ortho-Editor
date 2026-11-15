@@ -1076,3 +1076,120 @@ fn cycle_19_quick_move_duplicate_delete_and_d2s_roundtrip() {
     let reloaded = EditorSession::from_bytes(&exported, "cycle19.d2s").expect("reload .d2s");
     assert_eq!(reloaded.project().items.len(), initial_count + 1);
 }
+
+#[test]
+fn cycle_20_add_remove_item_property_and_d2s_roundtrip() {
+    let bytes = fixture_bytes(
+        "tests/fixtures/savegames/gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s",
+    );
+    let mut session =
+        EditorSession::from_bytes(&bytes, "TESTASSASSIN_Act3_ColdMercLvl21.d2s").expect("parse");
+    let initial = session.project();
+
+    // Verify stat_catalog is populated from d2r-data STAT_COSTS and contains strength (#0).
+    assert!(
+        !initial.stat_catalog.is_empty(),
+        "stat_catalog should be populated on initial project()"
+    );
+    assert!(initial.stat_catalog.iter().any(|s| s.stat_id == 0 && s.name == "strength"));
+
+    // Pick a non-compact item with properties.
+    let target_item = initial
+        .items
+        .iter()
+        .find(|it| !it.detailed_properties.is_empty())
+        .expect("non-compact item with detailed_properties");
+    let chosen_stat = initial
+        .stat_catalog
+        .iter()
+        .find(|s| {
+            !target_item
+                .detailed_properties
+                .iter()
+                .any(|p| p.stat_id == s.stat_id)
+                && s.max_value >= 15
+        })
+        .expect("unused writable stat");
+
+    // 1. AddItemProperty injects the new stat and omits static catalogs in delta projection.
+    let add_env = session.apply_intent(UiIntent::AddItemProperty {
+        item_index: target_item.index,
+        stat_id: chosen_stat.stat_id,
+        value: 15,
+    });
+    assert!(add_env.ok, "{:?}", add_env.rejection);
+    let add_view = add_env.session.unwrap();
+    assert!(
+        add_view.stat_catalog.is_empty(),
+        "project_after_intent should omit static stat_catalog"
+    );
+    let updated = add_view
+        .items
+        .iter()
+        .find(|it| it.index == target_item.index)
+        .expect("updated item");
+    assert!(
+        updated
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 15)
+    );
+
+    // 2. Duplicate stat add is rejected cleanly.
+    let dup_err = session.apply_intent(UiIntent::AddItemProperty {
+        item_index: target_item.index,
+        stat_id: chosen_stat.stat_id,
+        value: 10,
+    });
+    assert!(!dup_err.ok);
+
+    // 3. RemoveItemProperty removes it and Undo restores it.
+    let rem_env = session.apply_intent(UiIntent::RemoveItemProperty {
+        item_index: target_item.index,
+        stat_id: chosen_stat.stat_id,
+    });
+    assert!(rem_env.ok, "{:?}", rem_env.rejection);
+    assert!(
+        !rem_env
+            .session
+            .unwrap()
+            .items
+            .iter()
+            .find(|it| it.index == target_item.index)
+            .unwrap()
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id)
+    );
+
+    let undo_env = session.apply_intent(UiIntent::Undo);
+    assert!(undo_env.ok);
+    assert!(
+        undo_env
+            .session
+            .unwrap()
+            .items
+            .iter()
+            .find(|it| it.index == target_item.index)
+            .unwrap()
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 15)
+    );
+
+    // 4. .d2s export and reload preserves the injected property.
+    let exported = session.to_save_bytes().expect("export cycle 20 .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "cycle20.d2s").expect("reload .d2s");
+    let reloaded_item = reloaded
+        .project()
+        .items
+        .into_iter()
+        .find(|it| it.index == target_item.index)
+        .expect("reloaded item");
+    assert!(
+        reloaded_item
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 15)
+    );
+}

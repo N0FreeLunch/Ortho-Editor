@@ -208,6 +208,8 @@ type UiIntent
     | SpawnShopItem { catalogId : String, targetContainer : ShopSpawnTarget }
     | MutateItemBase { itemIndex : Int, defense : Maybe (Int), currentDurability : Maybe (Int), maxDurability : Maybe (Int), quantity : Maybe (Int), isEthereal : Maybe (Bool) }
     | MutateItemProperty { itemIndex : Int, statId : Int, delta : Int }
+    | AddItemProperty { itemIndex : Int, statId : Int, value : Int }
+    | RemoveItemProperty { itemIndex : Int, statId : Int }
     | QuickMoveItem { itemIndex : Int, targetContainer : ContainerKind }
     | DuplicateItem { itemIndex : Int }
     | DeleteItem { itemIndex : Int }
@@ -268,6 +270,10 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "MutateItemBase", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "defense", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) defense ), ( "current_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) currentDurability ), ( "max_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) maxDurability ), ( "quantity", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) quantity ), ( "is_ethereal", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.bool)) isEthereal ) ] ) ]
         MutateItemProperty { itemIndex, statId, delta } ->
             Json.Encode.object [ ( "MutateItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "delta", (Json.Encode.int) delta ) ] ) ]
+        AddItemProperty { itemIndex, statId, value } ->
+            Json.Encode.object [ ( "AddItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "value", (Json.Encode.int) value ) ] ) ]
+        RemoveItemProperty { itemIndex, statId } ->
+            Json.Encode.object [ ( "RemoveItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ) ] ) ]
         QuickMoveItem { itemIndex, targetContainer } ->
             Json.Encode.object [ ( "QuickMoveItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "target_container", (containerKindEncoder) targetContainer ) ] ) ]
         DuplicateItem { itemIndex } ->
@@ -1029,6 +1035,23 @@ shopCatalogItemViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "summary" (Json.Decode.string)))
 
 
+type alias StatCatalogEntryView =
+    { statId : Int
+    , name : String
+    , minValue : Int
+    , maxValue : Int
+    }
+
+
+statCatalogEntryViewDecoder : Json.Decode.Decoder StatCatalogEntryView
+statCatalogEntryViewDecoder =
+    Json.Decode.succeed StatCatalogEntryView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_id" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "min_value" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "max_value" (Json.Decode.int)))
+
+
 type alias SessionView =
     { revision : Int
     , fixtureLabel : String
@@ -1062,6 +1085,7 @@ type alias SessionView =
     , activeWeaponSet : Int
     , skills : List (SkillNodeView)
     , shopCatalog : List (ShopCatalogItemView)
+    , statCatalog : List (StatCatalogEntryView)
     }
 
 
@@ -1100,6 +1124,7 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "active_weapon_set" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skills" (Json.Decode.list (skillNodeViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "shop_catalog" (Json.Decode.list (shopCatalogItemViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_catalog" (Json.Decode.list (statCatalogEntryViewDecoder))))
 
 
 type RejectionCode

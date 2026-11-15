@@ -483,6 +483,14 @@ pub struct ShopCatalogItemView {
 
 /// Complete Elm-facing read-only save session snapshot projected by Rust.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct StatCatalogEntryView {
+    pub stat_id: i32,
+    pub name: String,
+    pub min_value: i32,
+    pub max_value: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct SessionView {
     #[serde(default)]
     pub revision: i32,
@@ -526,6 +534,8 @@ pub struct SessionView {
     pub skills: Vec<SkillNodeView>,
     #[serde(default)]
     pub shop_catalog: Vec<ShopCatalogItemView>,
+    #[serde(default)]
+    pub stat_catalog: Vec<StatCatalogEntryView>,
 }
 
 /// Typed user intents sent from Elm `Main`/`HeadlessHarness` to the Rust store.
@@ -613,6 +623,15 @@ pub enum UiIntent {
         item_index: i32,
         stat_id: i32,
         delta: i32,
+    },
+    AddItemProperty {
+        item_index: i32,
+        stat_id: i32,
+        value: i32,
+    },
+    RemoveItemProperty {
+        item_index: i32,
+        stat_id: i32,
     },
     QuickMoveItem {
         item_index: i32,
@@ -1207,6 +1226,11 @@ impl EditorSession {
             } else {
                 Vec::new()
             },
+            stat_catalog: if include_catalog {
+                cached_stat_catalog().to_vec()
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -1288,6 +1312,8 @@ impl EditorSession {
                 | UiIntent::SpawnShopItem { .. }
                 | UiIntent::MutateItemBase { .. }
                 | UiIntent::MutateItemProperty { .. }
+                | UiIntent::AddItemProperty { .. }
+                | UiIntent::RemoveItemProperty { .. }
                 | UiIntent::QuickMoveItem { .. }
                 | UiIntent::DuplicateItem { .. }
                 | UiIntent::DeleteItem { .. }
@@ -1802,6 +1828,15 @@ impl EditorSession {
                 stat_id,
                 delta,
             } => self.apply_mutate_item_property(item_index, stat_id, delta),
+            UiIntent::AddItemProperty {
+                item_index,
+                stat_id,
+                value,
+            } => self.apply_add_item_property(item_index, stat_id, value),
+            UiIntent::RemoveItemProperty {
+                item_index,
+                stat_id,
+            } => self.apply_remove_item_property(item_index, stat_id),
             UiIntent::QuickMoveItem {
                 item_index,
                 target_container,
@@ -2166,6 +2201,189 @@ impl EditorSession {
             .with_target(format!("stat_{stat_id}")));
         }
 
+        let new_card = build_item_card(
+            item_index,
+            item,
+            self.char_level,
+            0,
+            container_kind,
+            self.item_cards.get(idx).and_then(|c| c.slot_label.clone()),
+            self.item_cards.get(idx).map_or(0, |c| c.x),
+            self.item_cards.get(idx).map_or(0, |c| c.y),
+        );
+        self.item_cards[idx] = new_card;
+
+        self.has_item_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn apply_add_item_property(
+        &mut self,
+        item_index: i32,
+        stat_id: i32,
+        value: i32,
+    ) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
+            })?;
+
+        let stat_u32 = u32::try_from(stat_id).map_err(|_| {
+            ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_not_writable",
+                format!("Stat ID {stat_id} is invalid."),
+            )
+            .with_target(format!("stat_{stat_id}"))
+        })?;
+
+        let stat_def = crate::data::stat_costs::STAT_COSTS
+            .iter()
+            .find(|s| s.id == stat_u32)
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionStatOutOfRange,
+                    "stat_not_writable",
+                    format!("Stat ID {stat_id} is not defined in STAT_COSTS."),
+                )
+                .with_target(format!("stat_{stat_id}"))
+            })?;
+
+        if stat_def.save_param_bits > 0 {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_requires_param",
+                format!(
+                    "Stat '{}' (#{stat_id}) requires parameter bits ({}) and cannot be added directly.",
+                    stat_def.name, stat_def.save_param_bits
+                ),
+            )
+            .with_target(format!("stat_{stat_id}")));
+        }
+
+        let (min_val, max_val, save_add) = stat_value_bounds(stat_u32).ok_or_else(|| {
+            ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_not_writable",
+                format!("Stat ID {stat_id} is not writable."),
+            )
+            .with_target(format!("stat_{stat_id}"))
+        })?;
+
+        if value < min_val || value > max_val {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_value_out_of_range",
+                format!(
+                    "Stat ID {stat_id} value {value} is outside allowed bounds {min_val}..={max_val}."
+                ),
+            )
+            .with_target(format!("stat_{stat_id}"))
+            .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+        }
+
+        let (item, container) = &mut self.player_items_with_container[idx];
+        if item.is_compact {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionInvalidPlacement,
+                "compact_item_immutable",
+                "Compact items do not carry a property list.",
+            )
+            .with_target(format!("item_{item_index}")));
+        }
+
+        let already_exists = item.properties.iter().any(|p| p.stat_id == stat_u32)
+            || item.stats.properties.iter().any(|p| p.stat_id == stat_u32);
+        if already_exists {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_already_exists",
+                format!("Stat ID {stat_id} already exists on item index {item_index}."),
+            )
+            .with_target(format!("stat_{stat_id}")));
+        }
+
+        item.bits.clear();
+        let new_prop = crate::domain::stats::ItemProperty::new(
+            stat_u32,
+            stat_def.name.to_string(),
+            0,
+            value + save_add,
+            value,
+            crate::domain::item::entity::ItemBitRange::default(),
+        );
+        insert_property_before_terminator(&mut item.properties, new_prop.clone());
+        insert_property_before_terminator(&mut item.stats.properties, new_prop);
+
+        let container_kind = ContainerKind::from_item_container(*container);
+        let new_card = build_item_card(
+            item_index,
+            item,
+            self.char_level,
+            0,
+            container_kind,
+            self.item_cards.get(idx).and_then(|c| c.slot_label.clone()),
+            self.item_cards.get(idx).map_or(0, |c| c.x),
+            self.item_cards.get(idx).map_or(0, |c| c.y),
+        );
+        self.item_cards[idx] = new_card;
+
+        self.has_item_edits = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn apply_remove_item_property(
+        &mut self,
+        item_index: i32,
+        stat_id: i32,
+    ) -> Result<(), ActionRejection> {
+        let idx = usize::try_from(item_index)
+            .ok()
+            .filter(|&i| i < self.player_items_with_container.len())
+            .ok_or_else(|| {
+                ActionRejection::new(
+                    RejectionCode::RejectionUnknown,
+                    "item_not_found",
+                    format!("Item index {item_index} was not found in the player stream."),
+                )
+                .with_target(format!("item_{item_index}"))
+            })?;
+
+        let stat_u32 = stat_id as u32;
+        if stat_u32 == 511 {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "terminator_immutable",
+                "Cannot remove property terminator (stat 511).",
+            )
+            .with_target("stat_511"));
+        }
+        let (item, container) = &mut self.player_items_with_container[idx];
+        let before_props = item.properties.len();
+        let before_stats = item.stats.properties.len();
+        item.properties.retain(|p| p.stat_id != stat_u32);
+        item.stats.properties.retain(|p| p.stat_id != stat_u32);
+
+        if item.properties.len() == before_props && item.stats.properties.len() == before_stats {
+            return Err(ActionRejection::new(
+                RejectionCode::RejectionStatOutOfRange,
+                "stat_not_found_on_item",
+                format!("Stat ID {stat_id} does not exist on item index {item_index}."),
+            )
+            .with_target(format!("stat_{stat_id}")));
+        }
+
+        item.bits.clear();
+        let container_kind = ContainerKind::from_item_container(*container);
         let new_card = build_item_card(
             item_index,
             item,
@@ -3912,6 +4130,41 @@ fn cached_shop_catalog() -> &'static [ShopCatalogItemView] {
     })
 }
 
+fn insert_property_before_terminator(
+    list: &mut Vec<crate::domain::stats::ItemProperty>,
+    prop: crate::domain::stats::ItemProperty,
+) {
+    if let Some(last) = list.last() {
+        if last.stat_id == 511 {
+            let pos = list.len() - 1;
+            list.insert(pos, prop);
+            return;
+        }
+    }
+    list.push(prop);
+}
+
+fn cached_stat_catalog() -> &'static [StatCatalogEntryView] {
+    static STAT_CATALOG: OnceLock<Vec<StatCatalogEntryView>> = OnceLock::new();
+    STAT_CATALOG.get_or_init(|| {
+        let mut entries: Vec<StatCatalogEntryView> = crate::data::stat_costs::STAT_COSTS
+            .iter()
+            .filter(|s| s.id != 511 && s.save_bits > 0 && s.save_param_bits == 0)
+            .filter_map(|s| {
+                let (min_value, max_value, _) = stat_value_bounds(s.id)?;
+                Some(StatCatalogEntryView {
+                    stat_id: s.id as i32,
+                    name: s.name.to_string(),
+                    min_value,
+                    max_value,
+                })
+            })
+            .collect();
+        entries.sort_by_key(|e| e.stat_id);
+        entries
+    })
+}
+
 fn set_item_placement(
     item: &mut crate::item::Item,
     x: u8,
@@ -3977,6 +4230,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             AllowedMoveTargetView,
             SkillNodeView,
             ShopCatalogItemView,
+            StatCatalogEntryView,
             SessionView,
             RejectionCode,
             SuggestedRecovery,
