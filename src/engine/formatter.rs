@@ -13,7 +13,8 @@ use crate::engine::is_explicit_v105;
 use crate::engine::quantity::qualified_quantity_capacity;
 use crate::engine::requirements::displayed_requirements;
 use crate::engine::shield::displayed_shield;
-use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
+use crate::domain::item::runeword::{resolve_runeword, runeword_display_name};
+use crate::engine::validation::validate_item;
 use crate::engine::weapon::{AttackSpeedTier, displayed_weapon};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
