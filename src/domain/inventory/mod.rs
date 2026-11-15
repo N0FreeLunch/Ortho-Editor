@@ -872,7 +872,7 @@ pub fn get_item_category(code: &str) -> &'static str {
         .iter()
         .find(|template| template.code == code)
     {
-        let types = crate::engine::validation::get_all_item_types(code);
+        let types = crate::domain::item::type_hierarchy::get_all_item_types(code);
         if template.is_armor {
             for (item_type, category) in [
                 ("glov", "Gloves"),

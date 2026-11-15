@@ -361,7 +361,7 @@ impl ItemBoundaryValidator {
 
         // 5. Dynamic Sockets Validation based on Item Type and ilvl
         let effective_max_sockets = if let Some(item) = current_item {
-            let types = crate::engine::validation::get_all_item_types(&item.code);
+            let types = crate::domain::item::type_hierarchy::get_all_item_types(&item.code);
             let ilvl = item.header.level.unwrap_or(99);
             let mut max_sock = None;
             for type_code in types {
@@ -411,7 +411,7 @@ impl ItemBoundaryValidator {
         if dto.is_ethereal == Some(true) {
             if let Some(item) = current_item {
                 let non_ethereal_types = ["ring", "amul", "char", "csch", "mcha", "scha", "rune", "scro", "poti"];
-                let types = crate::engine::validation::get_all_item_types(&item.code);
+                let types = crate::domain::item::type_hierarchy::get_all_item_types(&item.code);
                 if types.iter().any(|t| non_ethereal_types.contains(t)) {
                     errors.entry("item.is_ethereal".to_string()).or_default().push(
                         FieldViolation::new(

@@ -1,4 +1,5 @@
 pub mod quality;
+pub(crate) mod type_hierarchy;
 pub mod image;
 pub mod entity;
 pub mod builder;
