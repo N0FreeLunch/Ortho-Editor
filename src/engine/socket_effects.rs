@@ -6,7 +6,7 @@ use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::item_specs::ItemStatRange;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::domain::stats::entity::StatMaturityTier;
-use crate::engine::defense::is_explicit_v105;
+use crate::engine::is_explicit_v105;
 use crate::engine::validation::get_all_item_types;
 use crate::item::{Item, ItemBitRange, ItemProperty};
 use std::collections::{HashMap, HashSet};

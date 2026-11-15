@@ -5,6 +5,7 @@ use crate::data::gems::GEMS;
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::set_items::SET_ITEMS;
 use crate::domain::stats::{stat_save_add, stat_save_bits};
+use crate::engine::is_explicit_v105;
 use crate::engine::validation::{ValidationWarning, WarningConfidenceTier, get_all_item_types};
 use crate::item::{Item, ItemProperty, ItemQuality};
 use std::collections::{HashMap, HashSet};
@@ -51,15 +52,6 @@ pub enum DefenseDisplay {
         value: u32,
         reason: DefenseContextError,
     },
-}
-
-pub(crate) fn is_explicit_v105(item: &Item) -> bool {
-    !item.header.save_is_alpha
-        && item
-            .body
-            .d2r_v3_auxiliary
-            .as_ref()
-            .is_some_and(|a| a.save_version == 105)
 }
 
 pub(crate) fn stored_defense_warnings(item: &Item) -> Vec<ValidationWarning> {

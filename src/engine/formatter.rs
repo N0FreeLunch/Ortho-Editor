@@ -7,8 +7,9 @@ use crate::data::set_items::SET_ITEMS;
 use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
-use crate::engine::defense::{DefenseDisplay, displayed_defense, is_explicit_v105};
+use crate::engine::defense::{DefenseDisplay, displayed_defense};
 use crate::engine::durability::{DurabilityDisplay, displayed_durability};
+use crate::engine::is_explicit_v105;
 use crate::engine::validation::{resolve_runeword, runeword_display_name, validate_item};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 

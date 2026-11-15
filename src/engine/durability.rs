@@ -4,6 +4,7 @@ use crate::data::gems::GEMS;
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::set_items::SET_ITEMS;
 use crate::data::stat_costs::STAT_COSTS;
+use crate::engine::is_explicit_v105;
 use crate::engine::validation::get_all_item_types;
 use crate::item::{Item, ItemProperty, ItemQuality};
 use std::collections::HashSet;
@@ -46,15 +47,6 @@ pub(crate) enum DurabilityDisplay {
         base: u32,
         reason: DurabilityContextError,
     },
-}
-
-fn explicit_v105(item: &Item) -> bool {
-    !item.header.save_is_alpha
-        && item
-            .body
-            .d2r_v3_auxiliary
-            .as_ref()
-            .is_some_and(|a| a.save_version == 105)
 }
 
 fn stored_scalar(id: u32, value: u32) -> bool {
@@ -213,7 +205,7 @@ impl Modifiers {
                     }
                     self.add(p.stat_id, p.param, p.min)?;
                 }
-            } else if child.code.trim() == "jew" && !child.header.is_compact && explicit_v105(child)
+            } else if child.code.trim() == "jew" && !child.header.is_compact && is_explicit_v105(child)
             {
                 self.list(&child.properties)?;
             } else {
@@ -246,7 +238,7 @@ pub(crate) fn displayed_durability(
     if base == 0 {
         return None;
     }
-    if !explicit_v105(item) {
+    if !is_explicit_v105(item) {
         return Some(DurabilityDisplay::Final {
             current,
             maximum: base,
