@@ -7,7 +7,7 @@
 pub mod host;
 pub mod merc;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -765,8 +765,57 @@ pub struct EditorSession {
     has_char_edits: bool,
     has_item_edits: bool,
     selected_move_item_index: Option<i32>,
-    undo_stack: Vec<SessionSnapshot>,
-    redo_stack: Vec<SessionSnapshot>,
+    undo_stack: SnapshotQueue,
+    redo_stack: SnapshotQueue,
+}
+
+/// Default maximum number of snapshots retained in each Undo/Redo history queue.
+const DEFAULT_MAX_HISTORY_SNAPSHOTS: usize = 100;
+
+/// Bounded FIFO-evicting snapshot queue for Rust-owned Undo/Redo history.
+///
+/// Acts as a LIFO stack for Undo/Redo (`push` / `pop`) while garbage-collecting
+/// the oldest snapshot from the front (`pop_front`) once `max_entries` is reached.
+#[derive(Debug, Clone)]
+struct SnapshotQueue {
+    entries: VecDeque<SessionSnapshot>,
+    max_entries: usize,
+}
+
+impl SnapshotQueue {
+    fn new(max_entries: usize) -> Self {
+        Self {
+            entries: VecDeque::with_capacity(max_entries),
+            max_entries,
+        }
+    }
+
+    fn push(&mut self, snapshot: SessionSnapshot) {
+        if self.max_entries == 0 {
+            return;
+        }
+        while self.entries.len() >= self.max_entries {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(snapshot);
+    }
+
+    fn pop(&mut self) -> Option<SessionSnapshot> {
+        self.entries.pop_back()
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
 }
 
 /// In-memory state snapshot for Rust-owned Undo/Redo history.
@@ -966,8 +1015,8 @@ impl EditorSession {
             has_char_edits: false,
             has_item_edits: false,
             selected_move_item_index: None,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: SnapshotQueue::new(DEFAULT_MAX_HISTORY_SNAPSHOTS),
+            redo_stack: SnapshotQueue::new(DEFAULT_MAX_HISTORY_SNAPSHOTS),
         })
     }
 
@@ -4245,4 +4294,77 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load_test_session() -> EditorSession {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/savegames/original/amazon_10_scrolls.d2s");
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("Failed to read fixture {}: {e}", path.display()));
+        EditorSession::from_bytes(&bytes, "amazon_10_scrolls.d2s")
+            .expect("fixture should parse into EditorSession")
+    }
+
+    #[test]
+    fn snapshot_queue_evicts_oldest_fifo_when_capacity_reached() {
+        let session = load_test_session();
+        let base_snap = session.capture_snapshot();
+        let mut queue = SnapshotQueue::new(3);
+
+        for marker in 1..=5 {
+            let mut snap = base_snap.clone();
+            snap.active_weapon_set = marker;
+            queue.push(snap);
+        }
+
+        assert_eq!(queue.len(), 3);
+        assert_eq!(queue.pop().map(|s| s.active_weapon_set), Some(5));
+        assert_eq!(queue.pop().map(|s| s.active_weapon_set), Some(4));
+        assert_eq!(queue.pop().map(|s| s.active_weapon_set), Some(3));
+        assert!(queue.pop().is_none());
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn snapshot_queue_zero_capacity_retains_nothing() {
+        let session = load_test_session();
+        let mut queue = SnapshotQueue::new(0);
+        queue.push(session.capture_snapshot());
+        assert_eq!(queue.len(), 0);
+        assert!(queue.is_empty());
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    fn editor_session_caps_undo_history_with_fifo_gc() {
+        let mut session = load_test_session();
+        let total_edits = DEFAULT_MAX_HISTORY_SNAPSHOTS + 5;
+
+        for step in 0..total_edits {
+            let env = session.apply_intent(UiIntent::SetCharacterField {
+                field: CharacterField::Level,
+                value: ((step % 90) + 1) as i32,
+            });
+            assert!(env.ok, "edit step {step} should succeed: {:?}", env.rejection);
+        }
+
+        assert_eq!(session.undo_stack.len(), DEFAULT_MAX_HISTORY_SNAPSHOTS);
+
+        for _ in 0..DEFAULT_MAX_HISTORY_SNAPSHOTS {
+            let env = session.apply_intent(UiIntent::Undo);
+            assert!(env.ok, "undo within capacity should succeed");
+        }
+
+        assert!(session.undo_stack.is_empty());
+        let overflow_undo = session.apply_intent(UiIntent::Undo);
+        assert!(!overflow_undo.ok);
+        assert_eq!(
+            overflow_undo.rejection.map(|r| r.code),
+            Some(RejectionCode::RejectionNothingToUndo)
+        );
+    }
 }
