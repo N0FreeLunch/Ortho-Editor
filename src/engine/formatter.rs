@@ -605,73 +605,14 @@ pub fn format_properties_list_with_mode(
             }
         }
 
-        // 2. Fire Damage pairing (Stat 48 & 49)
-        if mode == StatDisplayMode::Fused && p.stat_id == 48 {
-            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 49 && !skip_indices.contains(idx)) {
-                skip_indices.insert(max_idx);
-                let min = p.value;
-                let max = max_p.value;
-                let line = if min == max {
-                    if language == "ko" {
-                        format!("+{} 파이어 데미지 추가", min)
-                    } else {
-                        format!("Adds {} fire damage", min)
-                    }
-                } else if language == "ko" {
-                    format!("{} - {} 파이어 데미지 추가", min, max)
-                } else {
-                    format!("Adds {}-{} fire damage", min, max)
-                };
-                out.push(line);
-                i += 1;
-                continue;
-            }
-        }
-
-        // 3. Lightning Damage pairing (Stat 50 & 51)
-        if mode == StatDisplayMode::Fused && p.stat_id == 50 {
-            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 51 && !skip_indices.contains(idx)) {
-                skip_indices.insert(max_idx);
-                let min = p.value;
-                let max = max_p.value;
-                let line = if min == max {
-                    if language == "ko" {
-                        format!("+{} 라이트닝 데미지 추가", min)
-                    } else {
-                        format!("Adds {} lightning damage", min)
-                    }
-                } else if language == "ko" {
-                    format!("{} - {} 라이트닝 데미지 추가", min, max)
-                } else {
-                    format!("Adds {}-{} lightning damage", min, max)
-                };
-                out.push(line);
-                i += 1;
-                continue;
-            }
-        }
-
-        // 4. Magic Damage pairing (Stat 52 & 53)
-        if mode == StatDisplayMode::Fused && p.stat_id == 52 {
-            if let Some((max_idx, max_p)) = props.iter().enumerate().find(|(idx, o)| *idx > i && o.stat_id == 53 && !skip_indices.contains(idx)) {
-                skip_indices.insert(max_idx);
-                let min = p.value;
-                let max = max_p.value;
-                let line = if min == max {
-                    if language == "ko" {
-                        format!("+{} 마법 데미지 추가", min)
-                    } else {
-                        format!("Adds {} magic damage", min)
-                    }
-                } else if language == "ko" {
-                    format!("{} - {} 마법 데미지 추가", min, max)
-                } else {
-                    format!("Adds {}-{} magic damage", min, max)
-                };
-                out.push(line);
-                i += 1;
-                continue;
-            }
+        // Fire, lightning and magic share the same forward-pair consumption rule.
+        if mode == StatDisplayMode::Fused
+            && let Some((max_idx, line)) = format_elemental_pair(props, i, language, &skip_indices)
+        {
+            skip_indices.insert(max_idx);
+            out.push(line);
+            i += 1;
+            continue;
         }
 
         // 5. Cold Damage pairing (Stat 54 & 55 & 56)
@@ -737,6 +678,38 @@ pub fn format_properties_list_with_mode(
     }
 
     out
+}
+
+fn format_elemental_pair(
+    props: &[ItemProperty],
+    primary: usize,
+    language: &str,
+    skip_indices: &std::collections::HashSet<usize>,
+) -> Option<(usize, String)> {
+    let p = &props[primary];
+    let (max_stat_id, english, korean) = match p.stat_id {
+        48 => (49, "fire", "파이어"),
+        50 => (51, "lightning", "라이트닝"),
+        52 => (53, "magic", "마법"),
+        _ => return None,
+    };
+    let (max_idx, max_p) = props.iter().enumerate().find(|(idx, other)| {
+        *idx > primary && other.stat_id == max_stat_id && !skip_indices.contains(idx)
+    })?;
+    let min = p.value;
+    let max = max_p.value;
+    let line = if min == max {
+        if language == "ko" {
+            format!("+{min} {korean} 데미지 추가")
+        } else {
+            format!("Adds {min} {english} damage")
+        }
+    } else if language == "ko" {
+        format!("{min} - {max} {korean} 데미지 추가")
+    } else {
+        format!("Adds {min}-{max} {english} damage")
+    };
+    Some((max_idx, line))
 }
 
 fn apply_composite_rules(
@@ -2204,6 +2177,110 @@ mod poison_display_tests {
             ]
         );
         assert_eq!(props, original);
+    }
+}
+
+#[cfg(test)]
+mod elemental_pair_preservation_tests {
+    use super::*;
+    use d2r_macros::hypothesis_test;
+
+    fn property(id: u32, value: i32) -> ItemProperty {
+        ItemProperty::new(id, String::new(), 0, value, value, ItemBitRange::default())
+    }
+
+    #[hypothesis_test]
+    fn current_elemental_pairs_preserve_matching_modes_wording_and_source() {
+        for (id, range_en, range_ko, equal_en, equal_ko) in [
+            (
+                48,
+                "Adds 2-7 fire damage",
+                "2 - 7 파이어 데미지 추가",
+                "Adds 2 fire damage",
+                "+2 파이어 데미지 추가",
+            ),
+            (
+                50,
+                "Adds 2-7 lightning damage",
+                "2 - 7 라이트닝 데미지 추가",
+                "Adds 2 lightning damage",
+                "+2 라이트닝 데미지 추가",
+            ),
+            (
+                52,
+                "Adds 2-7 magic damage",
+                "2 - 7 마법 데미지 추가",
+                "Adds 2 magic damage",
+                "+2 마법 데미지 추가",
+            ),
+        ] {
+            for (maximum, en, ko) in [(7, range_en, range_ko), (2, equal_en, equal_ko)] {
+                let props = vec![property(id, 2), property(id + 1, maximum)];
+                let before = props.clone();
+                for (language, expected) in [("en", en), ("ko", ko), ("fr", en)] {
+                    assert_eq!(format_properties_list(&props, 7, language), [expected]);
+                    assert_eq!(
+                        format_properties_list_with_mode(
+                            &props,
+                            7,
+                            language,
+                            StatDisplayMode::Discrete,
+                        ),
+                        props
+                            .iter()
+                            .map(|p| format_property(p, 7, language))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                assert_eq!(props, before);
+            }
+        }
+
+        let resistance = property(39, 8);
+        let props = vec![
+            property(49, 99),
+            property(48, 2),
+            resistance.clone(),
+            property(48, 4),
+            property(49, 7),
+            property(49, 10),
+        ];
+        let before = props.clone();
+        assert_eq!(
+            format_properties_list(&props, 7, "en"),
+            vec![
+                "Adds 2-7 fire damage".to_string(),
+                format_property(&resistance, 7, "en"),
+                "Adds 4-10 fire damage".to_string(),
+            ]
+        );
+        assert_eq!(props, before);
+
+        let lone_min = property(48, 2);
+        assert_eq!(
+            format_properties_list(&[property(49, 7), lone_min.clone()], 7, "en"),
+            [format_property(&lone_min, 7, "en")]
+        );
+        assert!(
+            format_properties_list(
+                &[property(49, 7), property(51, 7), property(53, 7)],
+                7,
+                "en"
+            )
+            .is_empty()
+        );
+
+        let mut props = vec![property(48, 2), property(49, 7)];
+        props[0].param = 7;
+        props[1].param = 99;
+        props[0].is_opaque = true;
+        props[1].opaque_bits = Some(vec![true, false]);
+        let before = props.clone();
+        assert_eq!(
+            format_properties_list(&props, 7, "en"),
+            ["Adds 2-7 fire damage"]
+        );
+        assert_eq!(props, before);
     }
 }
 
