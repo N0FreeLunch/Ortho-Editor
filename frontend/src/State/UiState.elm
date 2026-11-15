@@ -13,6 +13,7 @@ module State.UiState exposing
     , beginMarquee
     , clearFocusInput
     , clearMarquee
+    , clampDropAnchor
     , clearToast
     , closeItemMenu
     , closeItemEditorModal
@@ -429,6 +430,47 @@ setHoverMousePos x y vw vh ui =
 setHoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int } -> UiState -> UiState
 setHoveredDropTarget target ui =
     { ui | hoveredDropTarget = target }
+
+
+containerGridDims : ContainerKind -> Maybe ( Int, Int )
+containerGridDims kind =
+    case kind of
+        Inventory ->
+            Just ( 10, 4 )
+
+        Stash ->
+            Just ( 10, 10 )
+
+        Cube ->
+            Just ( 3, 4 )
+
+        Belt ->
+            Just ( 4, 4 )
+
+        TempInventory ->
+            Just ( 9, 4 )
+
+        _ ->
+            Nothing
+
+
+clampDropAnchor : ContainerKind -> Int -> Int -> Int -> Int -> ( Int, Int )
+clampDropAnchor kind itemW itemH targetX targetY =
+    case containerGridDims kind of
+        Just ( cols, rows ) ->
+            let
+                w =
+                    max 1 itemW
+
+                h =
+                    max 1 itemH
+            in
+            ( clamp 0 (max 0 (cols - w)) targetX
+            , clamp 0 (max 0 (rows - h)) targetY
+            )
+
+        Nothing ->
+            ( targetX, targetY )
 
 
 containerLabel : ContainerKind -> String

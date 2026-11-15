@@ -1550,11 +1550,8 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                             h =
                                 max 1 item.height
 
-                            gx =
-                                clamp 0 (max 0 (cols - w)) target.x
-
-                            gy =
-                                clamp 0 (max 0 (rows - h)) target.y
+                            ( gx, gy ) =
+                                UiState.clampDropAnchor containerTag w h target.x target.y
 
                             fitsBounds =
                                 gx + w <= cols && gy + h <= rows

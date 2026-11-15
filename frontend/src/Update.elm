@@ -627,13 +627,28 @@ handleKeyShortcut payload model =
         if isSpace then
             case ( heldIdx, model.ui.hoveredDropTarget, model.ui.hoveredItemIndex ) of
                 ( Just idx, Just tgt, _ ) ->
+                    let
+                        ( heldW, heldH ) =
+                            model.session
+                                |> Maybe.andThen
+                                    (\s ->
+                                        (s.items ++ s.mercItems ++ s.mercReplacedItems)
+                                            |> List.filter (\it -> it.index == idx)
+                                            |> List.head
+                                    )
+                                |> Maybe.map (\it -> ( it.width, it.height ))
+                                |> Maybe.withDefault ( 1, 1 )
+
+                        ( dropX, dropY ) =
+                            UiState.clampDropAnchor tgt.container heldW heldH tgt.x tgt.y
+                    in
                     ( { model | ui = UiState.closeItemMenu model.ui }
                     , EmitIntent
                         (Protocol.MoveItem
                             { itemIndex = idx
                             , targetContainer = tgt.container
-                            , x = tgt.x
-                            , y = tgt.y
+                            , x = dropX
+                            , y = dropY
                             }
                         )
                     )

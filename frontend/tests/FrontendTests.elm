@@ -1807,4 +1807,47 @@ suite =
                         Expect.equal Nothing closedByEsc.ui.itemEditorModalIndex
                     ]
                     ()
+        , test "Space drop clamps multi-cell held item to green footprint anchor at grid edge" <|
+            \_ ->
+                let
+                    holdingModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\baseSession ->
+                                            { baseSession
+                                                | items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it | width = 2, height = 2 }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        baseSession.items
+                                                , selectedMoveItemIndex = Just 0
+                                            }
+                                        )
+                        }
+                            |> Update.update (HoverDropTarget (Just { container = Inventory, x = 9, y = 3 }))
+                            |> Tuple.first
+
+                    ( _, spaceDropOut ) =
+                        holdingModel
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = " "
+                                    , code = "Space"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+                in
+                Expect.equal
+                    (EmitIntent (Protocol.MoveItem { itemIndex = 0, targetContainer = Inventory, x = 8, y = 2 }))
+                    spaceDropOut
         ]
