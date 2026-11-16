@@ -4,7 +4,6 @@ use crate::data::localization::LOCALIZATIONS;
 // use crate::data::monsters::MONSTER_TYPES;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
 use crate::data::set_items::SET_ITEMS;
-use crate::data::skills::SKILLS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::data::unique_items::UNIQUE_ITEMS;
 use crate::engine::defense::{DefenseDisplay, displayed_defense};
@@ -1101,31 +1100,10 @@ pub fn strip_d2_color_codes(s: &str) -> String {
     out
 }
 
-fn skill_tab_name(class_id: usize, tab_index: usize, language: &str) -> Option<&'static str> {
-    CHAR_STATS
-        .get(class_id)
-        .and_then(|stats| stats.skill_tabs.get(tab_index))
-        .map(|&key| get_loc(key, language))
-}
-
-fn skill_name(skill_id: u32, language: &str) -> String {
-    let key = SKILLS.iter().find(|s| s.id == skill_id).map(|s| s.key);
-    if let Some(k) = key {
-        return get_loc(k, language).to_string();
-    }
-
-    if language == "ko" {
-        format!("기술 #{}", skill_id)
-    } else {
-        format!("Skill #{}", skill_id)
-    }
-}
-
-fn monster_type_name(montype_id: u32, language: &str) -> String {
-    crate::domain::stats::semantics::monster_type_name(montype_id, language)
-}
-
-use crate::domain::stats::semantics::{decode_skill_param, decode_skill_tab_param};
+use crate::domain::stats::semantics::{
+    decode_skill_param, decode_skill_tab_param, monster_type_name, skill_name,
+    skill_tab_template as skill_tab_name,
+};
 pub use crate::domain::stats::semantics::{
     SKILL_LEVEL_MAX, SKILL_LEVEL_MIN, SKILL_PARAM_LEVEL_BITS, SKILL_PARAM_STRIDE,
 };
