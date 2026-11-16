@@ -12,6 +12,7 @@ pub(crate) mod boots;
 pub(crate) mod weapon;
 mod item_names;
 pub(crate) mod stat_catalog;
+mod property_display;
 pub mod formatter;
 pub mod validation;
 pub mod checksum;
