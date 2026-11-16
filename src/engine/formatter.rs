@@ -808,39 +808,36 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
     };
     
     // Slice 2: Level Scaling logic utilizing op and op_param
-    let mut display_value = prop.value;
-    if let Some(op) = cost.op {
-        if op != 0 {
-            match op {
-                2 | 4 | 5 => {
-                    let shift = cost.op_param.unwrap_or(0);
-                    display_value = (prop.value * char_level as i32) >> shift;
+    let display =
+        crate::engine::level_scaling::displayed_level_scaling(prop.value, char_level, cost);
+    let display_value = display.value;
+    // Append precise decimal rate per level, e.g. (+1.5 per Character Level) or (+1.5 `캐릭터 레벨에 비례해서`)
+    if let Some(factor) = display.per_level_factor {
+        let factor_str = if factor.fract() == 0.0 {
+            format!("{:+}", factor as i64)
+        } else {
+            // Format up to 3 decimal places without trailing zeros
+            let s = format!("{:+.*}", 3, factor);
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        };
 
-                    // Append precise decimal rate per level, e.g. (+1.5 per Character Level) or (+1.5 `캐릭터 레벨에 비례해서`)
-                    if shift > 0 {
-                        let factor = prop.value as f64 / (1 << shift) as f64;
-                        let factor_str = if factor.fract() == 0.0 {
-                            format!("{:+}", factor as i64)
-                        } else {
-                            // Format up to 3 decimal places without trailing zeros
-                            let s = format!("{:+.*}", 3, factor);
-                            s.trim_end_matches('0').trim_end_matches('.').to_string()
-                        };
-
-                        if let Some(ref orig_phrase) = phrase2 {
-                            if language == "ko" {
-                                phrase2 = Some(format!("({} {})", factor_str, orig_phrase.trim_matches(|c| c == '(' || c == ')')));
-                            } else {
-                                phrase2 = Some(format!("({} {})", factor_str, orig_phrase.trim_matches(|c| c == '(' || c == ')')));
-                            }
-                        }
-                    }
-                }
-                _ => {}
+        if let Some(ref orig_phrase) = phrase2 {
+            if language == "ko" {
+                phrase2 = Some(format!(
+                    "({} {})",
+                    factor_str,
+                    orig_phrase.trim_matches(|c| c == '(' || c == ')')
+                ));
+            } else {
+                phrase2 = Some(format!(
+                    "({} {})",
+                    factor_str,
+                    orig_phrase.trim_matches(|c| c == '(' || c == ')')
+                ));
             }
         }
     }
-    
+
     let signed_value = format!("{:+}", display_value);
 
     let format_with_phrase2 = |base: String| -> String {
