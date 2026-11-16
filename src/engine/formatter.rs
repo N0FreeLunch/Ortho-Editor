@@ -950,9 +950,9 @@ pub fn format_property(prop: &ItemProperty, char_level: u8, language: &str) -> S
         24 => {
             let (skill_id, skill_level) = decode_skill_param(prop.param);
             let skill = skill_name(skill_id, language);
-            let current_charges = prop.value & 0xFF;
-            let max_charges = (prop.value >> 8) & 0xFF;
-            format_skill_charges(skill_level, &skill, current_charges as u32, max_charges as u32, language)
+            let (current_charges, max_charges) =
+                crate::domain::stats::semantics::decode_skill_charges_value(prop.value);
+            format_skill_charges(skill_level, &skill, current_charges, max_charges, language)
         }
         27 => {
             let skill = skill_name(prop.param, language);

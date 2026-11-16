@@ -117,6 +117,13 @@ pub fn decode_skill_param(param: u32) -> (u32, u32) {
     (skill_id, skill_level)
 }
 
+/// Decode current/max charges from the existing logical property value.
+pub(crate) fn decode_skill_charges_value(value: i32) -> (u32, u32) {
+    let current_charges = (value & 0xFF) as u32;
+    let max_charges = ((value >> 8) & 0xFF) as u32;
+    (current_charges, max_charges)
+}
+
 /// Returns clean human-readable title for a skill tab (English, Korean).
 pub fn skill_tab_clean_title(class_id: usize, tab_index: usize) -> Option<(&'static str, &'static str)> {
     crate::data::char_stats::SKILL_TAB_TITLES
@@ -337,8 +344,7 @@ pub fn decode_stat_semantics(stat_id: u32, param: u32, value: i32) -> Option<Pro
             let (skill_id, skill_level) = decode_skill_param(param);
             let skill_name_en = skill_name(skill_id, "en");
             let skill_name_ko = skill_name(skill_id, "ko");
-            let cur_charges = (value & 0xFF) as u32;
-            let max_charges = ((value >> 8) & 0xFF) as u32;
+            let (cur_charges, max_charges) = decode_skill_charges_value(value);
             Some(PropertySemantics::ChargedSkill {
                 skill_id,
                 skill_name_en,
