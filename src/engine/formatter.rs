@@ -567,17 +567,7 @@ pub fn format_properties_list_with_mode(
                 };
                 let min = p.value;
                 let max = max_p.value;
-                let base_range = if min == max {
-                    if language == "ko" {
-                        format!("+{} 콜드 데미지 추가", min)
-                    } else {
-                        format!("Adds {} cold damage", min)
-                    }
-                } else if language == "ko" {
-                    format!("{} - {} 콜드 데미지 추가", min, max)
-                } else {
-                    format!("Adds {}-{} cold damage", min, max)
-                };
+                let base_range = format_elemental_range(min, max, "cold", "콜드", language);
                 let line = if duration_sec > 0 {
                     if language == "ko" {
                         format!("{} ({}초 동안 지속)", base_range, duration_sec)
@@ -637,7 +627,18 @@ fn format_elemental_pair(
     })?;
     let min = p.value;
     let max = max_p.value;
-    let line = if min == max {
+    let line = format_elemental_range(min, max, english, korean, language);
+    Some((max_idx, line))
+}
+
+fn format_elemental_range(
+    min: i32,
+    max: i32,
+    english: &str,
+    korean: &str,
+    language: &str,
+) -> String {
+    if min == max {
         if language == "ko" {
             format!("+{min} {korean} 데미지 추가")
         } else {
@@ -647,8 +648,7 @@ fn format_elemental_pair(
         format!("{min} - {max} {korean} 데미지 추가")
     } else {
         format!("Adds {min}-{max} {english} damage")
-    };
-    Some((max_idx, line))
+    }
 }
 
 fn apply_composite_rules(
@@ -2380,6 +2380,69 @@ mod set_bonus_projection_tests {
             assert!(formatted.piece_set_bonuses.is_empty());
             assert!(formatted.set_bonuses.is_empty());
             assert_eq!(hidden, before);
+        }
+    }
+}
+
+#[cfg(test)]
+mod cold_range_preservation_tests {
+    use super::*;
+
+    fn property(id: u32, value: i32) -> ItemProperty {
+        ItemProperty::new(id, String::new(), 0, value, value, ItemBitRange::default())
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn current_cold_ranges_preserve_wording_duration_modes_order_and_source() {
+        for (min, max, english, korean) in [
+            (2, 7, "Adds 2-7 cold damage", "2 - 7 콜드 데미지 추가"),
+            (3, 3, "Adds 3 cold damage", "+3 콜드 데미지 추가"),
+        ] {
+            for (ticks, seconds) in [
+                (None, None),
+                (Some(-25), None),
+                (Some(0), None),
+                (Some(24), None),
+                (Some(25), Some(1)),
+                (Some(49), Some(1)),
+                (Some(50), Some(2)),
+            ] {
+                let props = {
+                    let mut props = vec![property(54, min), property(39, 8), property(55, max)];
+                    if let Some(ticks) = ticks {
+                        props.push(property(56, ticks));
+                    }
+                    props
+                };
+                let before = props.clone();
+                for language in ["en", "ko", "fr"] {
+                    let base = if language == "ko" { korean } else { english };
+                    let range = match seconds {
+                        Some(seconds) if language == "ko" => {
+                            format!("{base} ({seconds}초 동안 지속)")
+                        }
+                        Some(seconds) => format!("{base} ({seconds} sec duration)"),
+                        None => base.to_string(),
+                    };
+                    assert_eq!(
+                        format_properties_list(&props, 99, language),
+                        [range, format_property(&props[1], 99, language)]
+                    );
+                    assert_eq!(
+                        format_properties_list_with_mode(
+                            &props,
+                            99,
+                            language,
+                            StatDisplayMode::Discrete,
+                        ),
+                        props
+                            .iter()
+                            .map(|prop| format_property(prop, 99, language))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                assert_eq!(props, before);
+            }
         }
     }
 }
