@@ -1,4 +1,3 @@
-use crate::data::item_codes::ITEM_TEMPLATES;
 // use crate::data::monsters::MONSTER_TYPES;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::engine::defense::{DefenseDisplay, displayed_defense};
@@ -144,21 +143,20 @@ pub fn format_item_with_mode(
     }
 
     // 4. Boot Kick Damage
-    let is_boot = ITEM_TEMPLATES
-        .iter()
-        .find(|t| t.code == item.code.trim())
-        .map_or(false, |t| t.item_type == Some("boot"));
-
-    if is_boot {
-        if let Some(spec) = crate::data::item_specs::get_base_item_spec(&item.code) {
-            if spec.min_dmg > 0 && spec.max_dmg > 0 {
-                let label = get_loc("ModStre10k", language);
-                if label.contains('%') {
-                    base_attributes.push(format_template(label, &[spec.min_dmg.to_string(), spec.max_dmg.to_string()]));
-                } else {
-                    base_attributes.push(format!("{} {} - {}", label.trim(), spec.min_dmg, spec.max_dmg));
-                }
-            }
+    if let Some(display) = crate::engine::boots::displayed_boot_kick_damage(item) {
+        let label = get_loc("ModStre10k", language);
+        if label.contains('%') {
+            base_attributes.push(format_template(
+                label,
+                &[display.min.to_string(), display.max.to_string()],
+            ));
+        } else {
+            base_attributes.push(format!(
+                "{} {} - {}",
+                label.trim(),
+                display.min,
+                display.max
+            ));
         }
     }
 

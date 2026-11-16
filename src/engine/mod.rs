@@ -8,6 +8,7 @@ pub(crate) mod property_groups;
 pub(crate) mod requirements;
 pub(crate) mod set_bonuses;
 pub(crate) mod shield;
+pub(crate) mod boots;
 pub(crate) mod weapon;
 mod item_names;
 pub(crate) mod stat_catalog;
