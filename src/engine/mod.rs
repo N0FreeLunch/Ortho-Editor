@@ -6,6 +6,7 @@ pub(crate) mod requirements;
 pub(crate) mod set_bonuses;
 pub(crate) mod shield;
 pub(crate) mod weapon;
+mod item_names;
 pub mod formatter;
 pub mod validation;
 pub mod checksum;
