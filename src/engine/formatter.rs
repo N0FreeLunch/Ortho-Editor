@@ -1125,22 +1125,11 @@ fn monster_type_name(montype_id: u32, language: &str) -> String {
     crate::domain::stats::semantics::monster_type_name(montype_id, language)
 }
 
-use crate::domain::stats::semantics::decode_skill_param;
+use crate::domain::stats::semantics::{decode_skill_param, decode_skill_tab_param};
 pub use crate::domain::stats::semantics::{
     SKILL_LEVEL_MAX, SKILL_LEVEL_MIN, SKILL_PARAM_LEVEL_BITS, SKILL_PARAM_STRIDE,
 };
 pub const STAT_ID_ELEM_SKILL: u32 = 126;
-
-fn decode_skill_tab_param(param: u32) -> (usize, usize) {
-    let packed_class = (param >> 3) as usize;
-    let packed_tab = (param & 0x7) as usize;
-    if packed_class < CHAR_STATS.len() && packed_tab < 3 {
-        return (packed_class, packed_tab);
-    }
-
-    let absolute = (param & 0xFF) as usize;
-    (absolute / 3, absolute % 3)
-}
 
 fn format_skill_charges(level: u32, skill: &str, cur: u32, max: u32, language: &str) -> String {
     let template = get_loc_optional("ModStre10d", language).unwrap_or("Level %d %s (%d/%d Charges)");
