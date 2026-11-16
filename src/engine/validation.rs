@@ -77,6 +77,16 @@ pub struct ValidationResult {
     pub detailed_warnings: Vec<ValidationWarning>,
 }
 
+impl ValidationResult {
+    // Project every legacy message before appending the detailed batch.
+    fn extend_detailed_warnings(&mut self, warnings: Vec<ValidationWarning>) {
+        for w in &warnings {
+            self.warnings.push(w.message.clone());
+        }
+        self.detailed_warnings.extend(warnings);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StatValidation {
     pub stat_id: u32,
@@ -241,30 +251,18 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
         res.warnings.extend(check_socket_legitimacy(item));
 
         let alvl_warnings = check_alvl_legitimacy_detailed(item);
-        for w in &alvl_warnings {
-            res.warnings.push(w.message.clone());
-        }
-        res.detailed_warnings.extend(alvl_warnings);
+        res.extend_detailed_warnings(alvl_warnings);
 
         let staffmod_warnings = check_staffmod_legitimacy_detailed(item);
-        for w in &staffmod_warnings {
-            res.warnings.push(w.message.clone());
-        }
-        res.detailed_warnings.extend(staffmod_warnings);
+        res.extend_detailed_warnings(staffmod_warnings);
 
         res.warnings.extend(check_affix_group_legitimacy(item));
 
         let rw_warnings = check_runeword_legitimacy_detailed(item);
-        for w in &rw_warnings {
-            res.warnings.push(w.message.clone());
-        }
-        res.detailed_warnings.extend(rw_warnings);
+        res.extend_detailed_warnings(rw_warnings);
         
         let base_stat_warnings = check_base_stat_legitimacy_detailed(item);
-        for w in &base_stat_warnings {
-            res.warnings.push(w.message.clone());
-        }
-        res.detailed_warnings.extend(base_stat_warnings);
+        res.extend_detailed_warnings(base_stat_warnings);
 
         res.warnings.extend(check_item_code_legitimacy(item));
     }
