@@ -433,7 +433,7 @@ pub struct ParamOptionView {
     pub label: String,
 }
 
-/// Bit-packing bounds for `ParamPackedSkill` (`skill_id * stride + level`), sourced from `engine::formatter`.
+/// Bit-packing bounds for `ParamPackedSkill` (`skill_id * stride + level`), sourced from `domain::stats::semantics`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct PackedSkillSpecView {
     pub stride: i32,
@@ -444,9 +444,9 @@ pub struct PackedSkillSpecView {
 impl Default for PackedSkillSpecView {
     fn default() -> Self {
         Self {
-            stride: crate::engine::formatter::SKILL_PARAM_STRIDE,
-            min_level: crate::engine::formatter::SKILL_LEVEL_MIN,
-            max_level: crate::engine::formatter::SKILL_LEVEL_MAX,
+            stride: crate::domain::stats::semantics::SKILL_PARAM_STRIDE,
+            min_level: crate::domain::stats::semantics::SKILL_LEVEL_MIN,
+            max_level: crate::domain::stats::semantics::SKILL_LEVEL_MAX,
         }
     }
 }

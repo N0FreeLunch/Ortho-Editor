@@ -1125,18 +1125,11 @@ fn monster_type_name(montype_id: u32, language: &str) -> String {
     crate::domain::stats::semantics::monster_type_name(montype_id, language)
 }
 
-pub const SKILL_PARAM_LEVEL_BITS: u32 = 6;
-pub const SKILL_PARAM_STRIDE: i32 = 1 << SKILL_PARAM_LEVEL_BITS;
-pub const SKILL_LEVEL_MIN: i32 = 1;
-pub const SKILL_LEVEL_MAX: i32 = SKILL_PARAM_STRIDE - 1;
+use crate::domain::stats::semantics::decode_skill_param;
+pub use crate::domain::stats::semantics::{
+    SKILL_LEVEL_MAX, SKILL_LEVEL_MIN, SKILL_PARAM_LEVEL_BITS, SKILL_PARAM_STRIDE,
+};
 pub const STAT_ID_ELEM_SKILL: u32 = 126;
-
-fn decode_skill_param(param: u32) -> (u32, u32) {
-    let mask = (1u32 << SKILL_PARAM_LEVEL_BITS) - 1;
-    let skill_level = param & mask;
-    let skill_id = param >> SKILL_PARAM_LEVEL_BITS;
-    (skill_id, skill_level)
-}
 
 fn decode_skill_tab_param(param: u32) -> (usize, usize) {
     let packed_class = (param >> 3) as usize;

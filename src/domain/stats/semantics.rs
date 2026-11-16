@@ -104,10 +104,16 @@ pub fn decode_skill_tab_param(param: u32) -> (usize, usize) {
     (absolute / 3, absolute % 3)
 }
 
+pub const SKILL_PARAM_LEVEL_BITS: u32 = 6;
+pub const SKILL_PARAM_STRIDE: i32 = 1 << SKILL_PARAM_LEVEL_BITS;
+pub const SKILL_LEVEL_MIN: i32 = 1;
+pub const SKILL_LEVEL_MAX: i32 = SKILL_PARAM_STRIDE - 1;
+
 /// Decodes packed skill parameter into `(skill_id, skill_level)`.
 pub fn decode_skill_param(param: u32) -> (u32, u32) {
-    let skill_level = param & 0x3F;
-    let skill_id = param >> 6;
+    let mask = (1u32 << SKILL_PARAM_LEVEL_BITS) - 1;
+    let skill_level = param & mask;
+    let skill_id = param >> SKILL_PARAM_LEVEL_BITS;
     (skill_id, skill_level)
 }
 
