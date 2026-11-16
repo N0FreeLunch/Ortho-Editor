@@ -672,6 +672,34 @@ test("Closed-loop scenario 5: Mercenary Zone 4 item move, Act switch, Replaced S
     assert.equal(switchAct2.snap.exportSupported, false);
     assert.equal(switchAct2.resp.envelope.session.merc_replaced_items.length, 2);
 
+    // 2b. Pick up an item from MercReplaced and place it back down into MercReplaced
+    const replacedItem = switchAct2.resp.envelope.session.merc_replaced_items[0];
+    const pickReplaced = await driver.requestHost({
+      cmd: "dispatch_intent",
+      intent: { SelectItemForMove: { item_index: replacedItem.index } },
+    });
+    assert.equal(pickReplaced.resp.ok, true);
+    assert.ok(
+      pickReplaced.resp.envelope.session.allowed_move_targets.some(
+        (t) => t.container === "MercReplaced" && t.x === replacedItem.x && t.y === 0
+      ),
+      "MercReplaced slot should be in allowed_move_targets"
+    );
+    const dropReplaced = await driver.requestHost({
+      cmd: "dispatch_intent",
+      intent: {
+        MoveItem: {
+          item_index: replacedItem.index,
+          target_container: "MercReplaced",
+          x: replacedItem.x,
+          y: 0,
+        },
+      },
+    });
+    assert.equal(dropReplaced.resp.ok, true);
+    assert.equal(dropReplaced.resp.envelope.session.merc_replaced_items.length, 2);
+    assert.equal(dropReplaced.resp.envelope.session.selected_move_item_index, null);
+
     // 3. Restore Replaced Mercenary swaps Act 3 and its 2 items back
     const restored = await driver.stepCommand({ kind: "RestoreReplacedMerc" });
     assert.equal(restored.resp.ok, true);
@@ -793,9 +821,13 @@ test("Closed-loop scenario 7 (Cycle 20): Item Option Editor Modal AddItemPropert
     const targetItem = session0.items.find((it) => it.detailed_properties.length > 0);
     assert.ok(targetItem, "need a non-compact item");
     const chosenStat = session0.stat_catalog.find(
-      (s) => !targetItem.detailed_properties.some((p) => p.stat_id === s.stat_id) && s.max_value >= 15
+      (s) => s.param_bits === 0 && !targetItem.detailed_properties.some((p) => p.stat_id === s.stat_id) && s.max_value >= 15
     );
     assert.ok(chosenStat, "need an unused writable stat");
+    const paramStat = session0.stat_catalog.find(
+      (s) => s.param_bits >= 4 && !targetItem.detailed_properties.some((p) => p.stat_id === s.stat_id) && s.max_value >= 2 && s.min_value <= 2
+    );
+    assert.ok(paramStat, "need a parameterized stat in catalog");
 
     // 1. AddItemProperty via HeadlessHarness
     const addRes = await driver.stepCommand({
@@ -822,8 +854,158 @@ test("Closed-loop scenario 7 (Cycle 20): Item Option Editor Modal AddItemPropert
     const undoRes = await driver.stepCommand({ kind: "Undo" });
     assert.equal(undoRes.resp.ok, true);
 
+    // 2b. Cycle 22 parameterized stat injection (param_bits > 0) + SetItemPropertyParam
+    const addParamRes = await driver.stepCommand({
+      kind: "AddItemProperty",
+      itemIndex: targetItem.index,
+      statId: paramStat.stat_id,
+      value: 2,
+      param: 7,
+    });
+    assert.equal(addParamRes.resp.ok, true);
+
+    const setParamRes = await driver.stepCommand({
+      kind: "SetItemPropertyParam",
+      itemIndex: targetItem.index,
+      statId: paramStat.stat_id,
+      param: 12,
+    });
+    assert.equal(setParamRes.resp.ok, true);
+
     // 3. Export .d2s and reload
     const { reloaded } = await driver.exportAndReload("scenario7-cycle20-roundtrip.d2s");
+    const reloadedItem = reloaded.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(reloadedItem.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
+    assert.ok(reloadedItem.detailed_properties.some((p) => p.stat_id === paramStat.stat_id && p.value === 2 && p.param === 12));
+  } finally {
+    await driver.close();
+  }
+});
+
+test("Closed-loop scenario 8 (Cycle 21): View A Gold Stash/Inventory edit, negative gold rejection, and .d2s roundtrip", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    const session0 = loadRes.resp.envelope.session;
+    assert.equal(session0.merc.persistence_supported, true);
+    for (const item of [...session0.items, ...session0.merc_items]) {
+      assert.ok(Array.isArray(item.socketed_items));
+      assert.equal(item.socketed_items.length, item.socketed_names.length);
+      assert.ok(item.socket_count >= item.socketed_items.length);
+    }
+
+    // 1. Negative gold triggers Rust ActionRejection without mutating state
+    await driver.stepCommand({ kind: "FocusField", key: "gold_stash", initial: String(session0.stats.gold_stash) });
+    await driver.stepCommand({ kind: "EditFocusedInput", raw: "-50" });
+    const negRes = await driver.stepCommand({ kind: "CommitFocusedInput" });
+    assert.equal(negRes.resp.ok, false);
+    assert.equal(negRes.snap.rejectionCode, "invalid_character_mutation");
+
+    // 2. Valid gold_stash + gold_character edits persist through .d2s export/reload
+    await driver.stepCommand({ kind: "FocusField", key: "gold_stash", initial: String(session0.stats.gold_stash) });
+    await driver.stepCommand({ kind: "EditFocusedInput", raw: "888888" });
+    const stashRes = await driver.stepCommand({ kind: "CommitFocusedInput" });
+    assert.equal(stashRes.resp.ok, true);
+
+    await driver.stepCommand({ kind: "FocusField", key: "gold_character", initial: String(session0.stats.gold_inventory) });
+    await driver.stepCommand({ kind: "EditFocusedInput", raw: "44444" });
+    const invRes = await driver.stepCommand({ kind: "CommitFocusedInput" });
+    assert.equal(invRes.resp.ok, true);
+
+    const { reloaded } = await driver.exportAndReload("scenario8-cycle21-roundtrip.d2s");
+    assert.equal(reloaded.envelope.session.stats.gold_stash, 888888);
+    assert.equal(reloaded.envelope.session.stats.gold_inventory, 44444);
+  } finally {
+    await driver.close();
+  }
+});
+
+test("Closed-loop scenario 9 (Cycle 23): Item Forge Draft staging, Discard isolation, Apply 1-step Undo/Redo, and .d2s roundtrip", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    const session0 = loadRes.resp.envelope.session;
+    const targetItem = session0.items.find(
+      (it) => !it.is_ear && !it.is_simple && it.detailed_properties.length > 0
+    );
+    assert.ok(targetItem, "Expected an editable non-simple item");
+
+    const existingStatIds = new Set(targetItem.detailed_properties.map((p) => p.stat_id));
+    const chosenStat = session0.stat_catalog.find(
+      (s) => !existingStatIds.has(s.stat_id) && s.param_bits === 0 && s.min_value <= 15 && s.max_value >= 15
+    );
+    assert.ok(chosenStat, "Expected an unused 0-param stat in catalog");
+
+    // 1. Open draft and add property -> staged in draft only, main item & undo_stack untouched
+    const open1 = await driver.stepCommand({ kind: "OpenItemForgeDraft", itemIndex: targetItem.index });
+    assert.equal(open1.resp.ok, true);
+    assert.equal(open1.resp.envelope.session.active_item_draft.dirty, false);
+
+    const add1 = await driver.stepCommand({
+      kind: "AddItemProperty",
+      itemIndex: targetItem.index,
+      statId: chosenStat.stat_id,
+      value: 15,
+      param: 0,
+    });
+    assert.equal(add1.resp.ok, true);
+    assert.equal(add1.resp.envelope.session.active_item_draft.dirty, true);
+    assert.ok(
+      add1.resp.envelope.session.active_item_draft.card.detailed_properties.some(
+        (p) => p.stat_id === chosenStat.stat_id && p.value === 15
+      )
+    );
+    const mainDuringDraft = add1.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(!mainDuringDraft.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id));
+    assert.equal(add1.resp.envelope.session.can_undo, false);
+
+    // 2. Discard draft -> clears draft, main item & undo_stack remain untouched
+    const discardRes = await driver.stepCommand({ kind: "DiscardItemForgeDraft" });
+    assert.equal(discardRes.resp.ok, true);
+    assert.equal(discardRes.resp.envelope.session.active_item_draft, null);
+    assert.equal(discardRes.resp.envelope.session.can_undo, false);
+    const mainAfterDiscard = discardRes.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(!mainAfterDiscard.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id));
+
+    // 3. Re-open draft, add property, Apply -> commits atomically in 1 undo step
+    await driver.stepCommand({ kind: "OpenItemForgeDraft", itemIndex: targetItem.index });
+    await driver.stepCommand({
+      kind: "AddItemProperty",
+      itemIndex: targetItem.index,
+      statId: chosenStat.stat_id,
+      value: 15,
+      param: 0,
+    });
+    const applyRes = await driver.stepCommand({ kind: "ApplyItemForgeDraft" });
+    assert.equal(applyRes.resp.ok, true);
+    assert.equal(applyRes.resp.envelope.session.active_item_draft, null);
+    assert.equal(applyRes.resp.envelope.session.can_undo, true);
+    const mainAfterApply = applyRes.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(mainAfterApply.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
+
+    // 4. Single Undo reverts, single Redo restores
+    const undoRes = await driver.stepCommand({ kind: "Undo" });
+    assert.equal(undoRes.resp.ok, true);
+    assert.equal(undoRes.resp.envelope.session.can_undo, false);
+    assert.equal(undoRes.resp.envelope.session.can_redo, true);
+    const mainAfterUndo = undoRes.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(!mainAfterUndo.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id));
+
+    const redoRes = await driver.stepCommand({ kind: "Redo" });
+    assert.equal(redoRes.resp.ok, true);
+    const mainAfterRedo = redoRes.resp.envelope.session.items.find((it) => it.index === targetItem.index);
+    assert.ok(mainAfterRedo.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
+
+    // 5. Export .d2s and reload
+    const { reloaded } = await driver.exportAndReload("scenario9-cycle23-roundtrip.d2s");
     const reloadedItem = reloaded.envelope.session.items.find((it) => it.index === targetItem.index);
     assert.ok(reloadedItem.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
   } finally {

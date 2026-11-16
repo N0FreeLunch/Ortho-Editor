@@ -1,11 +1,11 @@
 module Component.ContainersPanel exposing (view)
 
-import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ContainerKind(..), ItemCardView, ItemQualityKind(..), MercSummaryView, SessionView, SetBonusView, ShopCatalogItemView, StatCatalogEntryView)
+import Generated.Protocol exposing (CharacterStatsView, ContainerCountsView, ContainerKind(..), ItemCardView, ItemQualityKind(..), MercSummaryView, PackedSkillSpecView, ParamCatalogView, ParamOptionView, SessionView, SetBonusView, ShopCatalogItemView, SocketedItemView, StatCatalogEntryView, StatParamKind(..))
 import Html exposing (Html, button, div, h2, h3, img, input, li, option, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, checked, class, classList, disabled, id, placeholder, readonly, selected, src, style, title, type_, value)
-import Html.Events exposing (custom, on, onClick, onInput, onMouseEnter, onMouseLeave)
+import Html.Events exposing (custom, on, onBlur, onClick, onFocus, onInput, onMouseEnter, onMouseLeave)
 import Json.Decode as Decode
-import State.UiState as UiState exposing (ItemMenuState(..), StashTab(..), UiState)
+import State.UiState as UiState exposing (ItemMenuState(..), ModalNotice(..), StashTab(..), UiState)
 import Update exposing (Msg(..))
 
 
@@ -123,16 +123,39 @@ viewItemEditorModal ui session =
             text ""
 
         Just targetIdx ->
-            case
-                (session.items ++ session.mercItems ++ session.mercReplacedItems)
-                    |> List.filter (\it -> it.index == targetIdx)
-                    |> List.head
-            of
+            let
+                draftItem =
+                    session.activeItemDraft
+                        |> Maybe.andThen
+                            (\d ->
+                                if d.itemIndex == targetIdx then
+                                    Just d.card
+
+                                else
+                                    Nothing
+                            )
+
+                resolvedItem =
+                    case draftItem of
+                        Just dCard ->
+                            Just dCard
+
+                        Nothing ->
+                            (session.items ++ session.mercItems ++ session.mercReplacedItems)
+                                |> List.filter (\it -> it.index == targetIdx)
+                                |> List.head
+            in
+            case resolvedItem of
                 Nothing ->
                     text ""
 
                 Just item ->
                     let
+                        isDraftDirty =
+                            session.activeItemDraft
+                                |> Maybe.map (\d -> d.itemIndex == targetIdx && d.dirty)
+                                |> Maybe.withDefault False
+
                         queryLower =
                             String.trim (String.toLower ui.itemEditorSearch)
 
@@ -151,7 +174,6 @@ viewItemEditorModal ui session =
                                                     || String.contains queryLower ("#" ++ String.fromInt s.statId)
                                                )
                                     )
-                                |> List.take 40
 
                         selectedInjectStat : Maybe StatCatalogEntryView
                         selectedInjectStat =
@@ -175,8 +197,8 @@ viewItemEditorModal ui session =
                         [ div [ class "item-editor-dialog", stopPropClick ]
                             [ div [ class "item-editor-header" ]
                                 [ div [ class "item-editor-title" ]
-                                    [ span [] [ text "✏️" ]
-                                    , span [] [ text ("Item Option Studio · " ++ item.nameEn) ]
+                                    [ span [] [ text "⚒️" ]
+                                    , span [] [ text ("Item Forge Studio · " ++ item.nameEn) ]
                                     ]
                                 , button
                                     [ class "item-editor-close-btn"
@@ -232,10 +254,14 @@ viewItemEditorModal ui session =
                                         Just def ->
                                             div [ class "item-editor-field-row" ]
                                                 [ span [ class "item-editor-field-label" ] [ text "Defense" ]
-                                                , div [ class "row-actions" ]
-                                                    [ button [ class "mini-btn", onClick (MutateItemBase item.index (Just (max 0 (def - 10))) Nothing Nothing Nothing Nothing) ] [ text "-10" ]
-                                                    , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt def) ]
-                                                    , button [ class "mini-btn", onClick (MutateItemBase item.index (Just (def + 10)) Nothing Nothing Nothing Nothing) ] [ text "+10" ]
+                                                , div [ class "stepper-stack" ]
+                                                    [ viewInlineIntInput ui "item-editor-input item-editor-prop-num" ("item_def:" ++ String.fromInt item.index) def "modal-defense-input"
+                                                    , div [ class "stepper-btn-row" ]
+                                                        [ button [ class "mini-btn", onClick (MutateItemBase item.index (Just (def - 1)) Nothing Nothing Nothing Nothing) ] [ text "-1" ]
+                                                        , button [ class "mini-btn", onClick (MutateItemBase item.index (Just (def + 1)) Nothing Nothing Nothing Nothing) ] [ text "+1" ]
+                                                        , button [ class "mini-btn", onClick (MutateItemBase item.index (Just (def - 10)) Nothing Nothing Nothing Nothing) ] [ text "-10" ]
+                                                        , button [ class "mini-btn", onClick (MutateItemBase item.index (Just (def + 10)) Nothing Nothing Nothing Nothing) ] [ text "+10" ]
+                                                        ]
                                                     ]
                                                 ]
 
@@ -247,7 +273,8 @@ viewItemEditorModal ui session =
                                                 [ span [ class "item-editor-field-label" ] [ text "Durability" ]
                                                 , div [ class "row-actions" ]
                                                     [ button [ class "mini-btn", onClick (MutateItemBase item.index Nothing (Just mx) Nothing Nothing Nothing) ] [ text "Repair" ]
-                                                    , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt cur ++ "/" ++ String.fromInt mx) ]
+                                                    , viewInlineIntInput ui "item-editor-input item-editor-prop-num" ("item_dur:" ++ String.fromInt item.index) cur "modal-durability-input"
+                                                    , span [ class "meta-line" ] [ text ("/ " ++ String.fromInt mx) ]
                                                     ]
                                                 ]
 
@@ -257,10 +284,14 @@ viewItemEditorModal ui session =
                                         Just qty ->
                                             div [ class "item-editor-field-row" ]
                                                 [ span [ class "item-editor-field-label" ] [ text "Quantity" ]
-                                                , div [ class "row-actions" ]
-                                                    [ button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (max 0 (qty - 1))) Nothing) ] [ text "-1" ]
-                                                    , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt qty) ]
-                                                    , button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 1)) Nothing) ] [ text "+1" ]
+                                                , div [ class "stepper-stack" ]
+                                                    [ viewInlineIntInput ui "item-editor-input item-editor-prop-num" ("item_qty:" ++ String.fromInt item.index) qty "modal-quantity-input"
+                                                    , div [ class "stepper-btn-row" ]
+                                                        [ button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty - 1)) Nothing) ] [ text "-1" ]
+                                                        , button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 1)) Nothing) ] [ text "+1" ]
+                                                        , button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty - 10)) Nothing) ] [ text "-10" ]
+                                                        , button [ class "mini-btn", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 10)) Nothing) ] [ text "+10" ]
+                                                        ]
                                                     ]
                                                 ]
 
@@ -270,6 +301,7 @@ viewItemEditorModal ui session =
                                         [ span [ class "item-editor-field-label" ] [ text "Item Code" ]
                                         , input [ class "item-editor-input", value item.code, readonly True, disabled True ] []
                                         ]
+                                    , viewSocketedItemsSection item
                                     ]
                                 , div [ class "item-editor-col item-editor-col-2" ]
                                     [ div [ class "item-editor-col-title" ]
@@ -284,10 +316,15 @@ viewItemEditorModal ui session =
                                             (List.map
                                                 (\prop ->
                                                     div [ class "item-editor-prop-row", attribute "data-testid" ("modal-prop-row-" ++ String.fromInt prop.statId) ]
-                                                        [ div [ class "item-editor-prop-header" ]
+                                                        ([ div [ class "item-editor-prop-header" ]
                                                             [ div [ class "item-editor-prop-title" ]
                                                                 [ span [ class "item-editor-stat-id-badge" ] [ text ("#" ++ String.fromInt prop.statId) ]
                                                                 , span [] [ text prop.name ]
+                                                                , if prop.param /= 0 then
+                                                                    span [ class "item-editor-stat-id-badge" ] [ text ("p:" ++ String.fromInt prop.param) ]
+
+                                                                  else
+                                                                    text ""
                                                                 ]
                                                             , button
                                                                 [ class "item-editor-prop-delete-btn"
@@ -298,13 +335,56 @@ viewItemEditorModal ui session =
                                                                 [ text "🗑️" ]
                                                             ]
                                                         , div [ class "item-editor-prop-controls" ]
-                                                            [ button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId -1) ] [ text "-" ]
-                                                            , span [ class "item-editor-stat-id-badge" ] [ text (String.fromInt prop.value) ]
-                                                            , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId 1) ] [ text "+" ]
-                                                            , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId 10) ] [ text "+10" ]
-                                                            , span [ class "meta-line" ] [ text ("(" ++ String.fromInt prop.minValue ++ ".." ++ String.fromInt prop.maxValue ++ ")") ]
+                                                            [ div [ class "stepper-stack" ]
+                                                                [ div [ class "stepper-input-row" ]
+                                                                    [ viewInlineIntInput ui
+                                                                        "item-editor-input item-editor-prop-num"
+                                                                        ("item_prop:" ++ String.fromInt item.index ++ ":" ++ String.fromInt prop.statId)
+                                                                        prop.value
+                                                                        ("modal-prop-input-" ++ String.fromInt prop.statId)
+                                                                    , span [ class "item-editor-param-label" ] [ text (prop.valueLabel ++ " (" ++ String.fromInt prop.minValue ++ ".." ++ String.fromInt prop.maxValue ++ ")") ]
+                                                                    ]
+                                                                , div [ class "stepper-btn-row" ]
+                                                                    [ button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId -1) ] [ text "-1" ]
+                                                                    , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId 1) ] [ text "+1" ]
+                                                                    , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId -10) ] [ text "-10" ]
+                                                                    , button [ class "mini-btn", onClick (MutateItemProperty item.index prop.statId 10) ] [ text "+10" ]
+                                                                    ]
+                                                                ]
                                                             ]
                                                         ]
+                                                            ++ (if prop.paramBits > 0 then
+                                                                    let
+                                                                        maxParam =
+                                                                            (2 ^ min 30 prop.paramBits) - 1
+
+                                                                        rawInput =
+                                                                            viewNumericStepper
+                                                                                ui
+                                                                                ("item_param:" ++ String.fromInt item.index ++ ":" ++ String.fromInt prop.statId)
+                                                                                ("modal-prop-param-input-" ++ String.fromInt prop.statId)
+                                                                                0
+                                                                                maxParam
+                                                                                prop.param
+                                                                                (\newParam -> SetItemPropertyParam item.index prop.statId newParam)
+                                                                    in
+                                                                    viewParamRows
+                                                                        ui
+                                                                        session.paramCatalog
+                                                                        prop.paramKind
+                                                                        prop.paramLabel
+                                                                        maxParam
+                                                                        prop.param
+                                                                        ("item_param_lvl:" ++ String.fromInt item.index ++ ":" ++ String.fromInt prop.statId)
+                                                                        ("modal-prop-param-input-" ++ String.fromInt prop.statId)
+                                                                        (\newParam -> SetItemPropertyParam item.index prop.statId newParam)
+                                                                        rawInput
+                                                                        prop.paramPreview
+
+                                                                else
+                                                                    []
+                                                               )
+                                                        )
                                                 )
                                                 item.detailedProperties
                                             )
@@ -312,7 +392,14 @@ viewItemEditorModal ui session =
                                 , div [ class "item-editor-col item-editor-col-3" ]
                                     [ div [ class "item-editor-col-title" ]
                                         [ span [] [ text "Search & Inject Option" ]
-                                        , span [ class "meta-line" ] [ text (String.fromInt (List.length session.statCatalog) ++ " stats") ]
+                                        , span [ class "meta-line" ]
+                                            [ text
+                                                (String.fromInt (List.length filteredCatalog)
+                                                    ++ " / "
+                                                    ++ String.fromInt (List.length session.statCatalog)
+                                                    ++ " stats"
+                                                )
+                                            ]
                                         ]
                                     , div [ class "item-editor-search-box" ]
                                         [ input
@@ -340,7 +427,19 @@ viewItemEditorModal ui session =
                                                     , onClick (SelectItemEditorInjectStat entry.statId defaultVal)
                                                     ]
                                                     [ span [] [ text ("#" ++ String.fromInt entry.statId ++ " " ++ entry.name) ]
-                                                    , span [ class "meta-line" ] [ text (String.fromInt entry.minValue ++ ".." ++ String.fromInt entry.maxValue) ]
+                                                    , span [ class "meta-line" ]
+                                                        [ text
+                                                            (String.fromInt entry.minValue
+                                                                ++ ".."
+                                                                ++ String.fromInt entry.maxValue
+                                                                ++ (if entry.paramBits > 0 then
+                                                                        " · param"
+
+                                                                    else
+                                                                        ""
+                                                                   )
+                                                            )
+                                                        ]
                                                     ]
                                             )
                                             filteredCatalog
@@ -350,39 +449,383 @@ viewItemEditorModal ui session =
                                             div [ class "meta-line" ] [ text "Select a stat above to inject." ]
 
                                         Just sel ->
+                                            let
+                                                maxParam =
+                                                    (2 ^ min 30 sel.paramBits) - 1
+                                            in
                                             div [ class "item-editor-injector-panel", attribute "data-testid" "item-editor-injector-panel" ]
-                                                [ div [ class "item-editor-prop-title" ] [ text ("#" ++ String.fromInt sel.statId ++ " " ++ sel.name) ]
-                                                , div [ class "item-editor-prop-controls" ]
-                                                    [ input
-                                                        [ type_ "number"
-                                                        , class "item-editor-input item-editor-prop-num"
-                                                        , attribute "data-testid" "item-editor-inject-value"
-                                                        , Html.Attributes.min (String.fromInt sel.minValue)
-                                                        , Html.Attributes.max (String.fromInt sel.maxValue)
-                                                        , value (String.fromInt ui.itemEditorInjectValue)
-                                                        , onInput SetItemEditorInjectValue
+                                                ([ div [ class "item-editor-prop-title" ] [ text ("#" ++ String.fromInt sel.statId ++ " " ++ sel.name) ]
+                                                 , div [ class "item-editor-prop-controls" ]
+                                                    [ viewNumericStepperWithAction
+                                                        ui
+                                                        ("inject_val:" ++ String.fromInt sel.statId)
+                                                        "item-editor-inject-value"
+                                                        ui.itemEditorInjectValue
+                                                        (\v -> SetItemEditorInjectValue (String.fromInt v))
+                                                        [ span [ class "item-editor-param-label" ] [ text (sel.valueLabel ++ " (" ++ String.fromInt sel.minValue ++ ".." ++ String.fromInt sel.maxValue ++ ")") ]
+                                                        , button
+                                                            [ class "mini-btn"
+                                                            , attribute "data-testid" "btn-inject-stat"
+                                                            , onClick (AddItemProperty item.index sel.statId ui.itemEditorInjectValue ui.itemEditorInjectParam)
+                                                            ]
+                                                            [ text "➕ Add" ]
                                                         ]
-                                                        []
-                                                    , button
-                                                        [ class "mini-btn"
-                                                        , attribute "data-testid" "btn-inject-stat"
-                                                        , onClick (AddItemProperty item.index sel.statId ui.itemEditorInjectValue)
-                                                        ]
-                                                        [ text "➕ Add Option" ]
                                                     ]
-                                                ]
+                                                 ]
+                                                    ++ (if sel.paramBits > 0 then
+                                                            let
+                                                                rawParamInput =
+                                                                    viewNumericStepper ui ("inject_param:" ++ String.fromInt sel.statId) "item-editor-inject-param" 0 maxParam ui.itemEditorInjectParam (\p -> SetItemEditorInjectParam (String.fromInt p))
+                                                            in
+                                                            viewParamRows
+                                                                ui
+                                                                session.paramCatalog
+                                                                sel.paramKind
+                                                                sel.paramLabel
+                                                                maxParam
+                                                                ui.itemEditorInjectParam
+                                                                ("inject_param_lvl:" ++ String.fromInt sel.statId)
+                                                                "item-editor-inject-param"
+                                                                (\newParam -> SetItemEditorInjectParam (String.fromInt (clamp 0 maxParam newParam)))
+                                                                rawParamInput
+                                                                Nothing
+
+                                                        else
+                                                            []
+                                                       )
+                                                )
                                     ]
                                 ]
+                            , viewItemEditorNoticeBar ui session.statCatalog session.paramCatalog.packedSkill item
                             , div [ class "item-editor-footer" ]
-                                [ div [ class "item-editor-integrity-badge" ] [ text "✅ Rust SSoT Validated · Undoable" ]
-                                , button
-                                    [ class "mini-btn"
-                                    , onClick CloseItemEditorModal
+                                [ div [ class "item-editor-integrity-badge" ]
+                                    [ text
+                                        (if isDraftDirty then
+                                            "🟡 Unsaved Draft Changes · Save to Commit"
+
+                                         else
+                                            "✅ Rust Draft Ready · Undoable on Save"
+                                        )
                                     ]
-                                    [ text "Close (Esc)" ]
+                                , div [ class "row-actions" ]
+                                    [ button
+                                        [ class "mini-btn"
+                                        , attribute "data-testid" "btn-forge-apply"
+                                        , disabled (not isDraftDirty)
+                                        , onClick ApplyItemForgeDraft
+                                        ]
+                                        [ text "💾 Save" ]
+                                    , button
+                                        [ class "mini-btn"
+                                        , attribute "data-testid" "btn-forge-discard"
+                                        , onClick DiscardItemForgeDraft
+                                        ]
+                                        [ text "↩️ Discard (Esc)" ]
+                                    ]
                                 ]
                             ]
                         ]
+
+
+viewParamRows : UiState -> ParamCatalogView -> StatParamKind -> String -> Int -> Int -> String -> String -> (Int -> Msg) -> Html Msg -> Maybe String -> List (Html Msg)
+viewParamRows ui catalog kind paramLabel maxParam currentParam lvlFieldKey tid onSelect fallbackInput maybePreview =
+    let
+        renderSelect selectTid selectedVal optionsList onPick =
+            if List.isEmpty optionsList then
+                fallbackInput
+
+            else
+                select
+                    [ class "item-editor-input"
+                    , attribute "data-testid" selectTid
+                    , onInput
+                        (\raw ->
+                            String.toInt raw
+                                |> Maybe.withDefault selectedVal
+                                |> onPick
+                        )
+                    ]
+                    (List.map
+                        (\opt ->
+                            option
+                                [ value (String.fromInt opt.value)
+                                , selected (opt.value == selectedVal)
+                                ]
+                                [ text opt.label ]
+                        )
+                        optionsList
+                    )
+
+        previewOrRange =
+            case maybePreview of
+                Just preview ->
+                    span [ class "item-editor-stat-id-badge" ] [ text preview ]
+
+                Nothing ->
+                    span [ class "meta-line" ] [ text ("(0.." ++ String.fromInt maxParam ++ ")") ]
+
+        singleRow controlNode =
+            [ div [ class "item-editor-prop-controls" ]
+                [ controlNode
+                , span [ class "item-editor-param-label" ] [ text paramLabel ]
+                , previewOrRange
+                ]
+            ]
+    in
+    case kind of
+        ParamClass ->
+            singleRow (renderSelect tid currentParam catalog.classes onSelect)
+
+        ParamElement ->
+            singleRow (renderSelect tid currentParam catalog.elements onSelect)
+
+        ParamSkillTab ->
+            singleRow (renderSelect tid currentParam catalog.skillTabs onSelect)
+
+        ParamSkill ->
+            singleRow (renderSelect tid currentParam catalog.skills onSelect)
+
+        ParamPackedSkill ->
+            if List.isEmpty catalog.skills then
+                singleRow fallbackInput
+
+            else
+                let
+                    stride =
+                        max 1 catalog.packedSkill.stride
+
+                    minLvl =
+                        catalog.packedSkill.minLevel
+
+                    maxLvl =
+                        catalog.packedSkill.maxLevel
+
+                    skillId =
+                        currentParam // stride
+
+                    skillLevel =
+                        modBy stride currentParam
+                in
+                [ div [ class "item-editor-prop-controls" ]
+                    [ renderSelect tid skillId catalog.skills (\newSid -> onSelect (newSid * stride + clamp minLvl maxLvl skillLevel))
+                    , span [ class "item-editor-param-label" ] [ text paramLabel ]
+                    ]
+                , div [ class "item-editor-prop-controls" ]
+                    [ viewNumericStepperWithAction ui lvlFieldKey (tid ++ "-level") skillLevel (\lvl -> onSelect (skillId * stride + lvl)) [ span [ class "item-editor-param-label" ] [ text ("Skill Lv (" ++ String.fromInt minLvl ++ ".." ++ String.fromInt maxLvl ++ ")") ] ]
+                    ]
+                ]
+
+        _ ->
+            singleRow fallbackInput
+
+
+viewNumericStepper : UiState -> String -> String -> Int -> Int -> Int -> (Int -> Msg) -> Html Msg
+viewNumericStepper ui fieldKey tid _ _ currentVal onSet =
+    viewNumericStepperWithAction ui fieldKey tid currentVal onSet []
+
+
+viewNumericStepperWithAction : UiState -> String -> String -> Int -> (Int -> Msg) -> List (Html Msg) -> Html Msg
+viewNumericStepperWithAction ui fieldKey tid currentVal onSet trailingNodes =
+    div [ class "stepper-stack" ]
+        [ div [ class "stepper-input-row" ]
+            (viewInlineIntInput ui "item-editor-input item-editor-prop-num" fieldKey currentVal tid :: trailingNodes)
+        , div [ class "stepper-btn-row" ]
+            [ button
+                [ class "mini-btn"
+                , onClick (onSet (currentVal - 1))
+                ]
+                [ text "-1" ]
+            , button
+                [ class "mini-btn"
+                , onClick (onSet (currentVal + 1))
+                ]
+                [ text "+1" ]
+            , button
+                [ class "mini-btn"
+                , onClick (onSet (currentVal - 10))
+                ]
+                [ text "-10" ]
+            , button
+                [ class "mini-btn"
+                , onClick (onSet (currentVal + 10))
+                ]
+                [ text "+10" ]
+            ]
+        ]
+
+
+viewItemEditorNoticeBar : UiState -> List StatCatalogEntryView -> PackedSkillSpecView -> ItemCardView -> Html Msg
+viewItemEditorNoticeBar ui statCatalog packedSkill item =
+    let
+        focusedHint =
+            ui.focusedInput
+                |> Maybe.andThen
+                    (\focused ->
+                        case String.split ":" focused.key of
+                            [ "item_def", _ ] ->
+                                Just "Defense: allowed range 0 .. 2037"
+
+                            [ "item_dur", _ ] ->
+                                let
+                                    maxDur =
+                                        item.maxDurability |> Maybe.withDefault 255
+                                in
+                                Just ("Durability: allowed range 0 .. " ++ String.fromInt maxDur)
+
+                            [ "item_qty", _ ] ->
+                                Just "Quantity: allowed range 1 .. 511"
+
+                            [ "item_prop", _, statIdStr ] ->
+                                String.toInt statIdStr
+                                    |> Maybe.andThen
+                                        (\sid ->
+                                            item.detailedProperties
+                                                |> List.filter (\p -> p.statId == sid)
+                                                |> List.head
+                                        )
+                                    |> Maybe.map
+                                        (\p ->
+                                            "#"
+                                                ++ String.fromInt p.statId
+                                                ++ " "
+                                                ++ p.name
+                                                ++ " ("
+                                                ++ p.valueLabel
+                                                ++ "): allowed range "
+                                                ++ String.fromInt p.minValue
+                                                ++ " .. "
+                                                ++ String.fromInt p.maxValue
+                                        )
+
+                            [ "item_param", _, statIdStr ] ->
+                                String.toInt statIdStr
+                                    |> Maybe.andThen
+                                        (\sid ->
+                                            item.detailedProperties
+                                                |> List.filter (\p -> p.statId == sid)
+                                                |> List.head
+                                        )
+                                    |> Maybe.map
+                                        (\p ->
+                                            let
+                                                maxParam =
+                                                    (2 ^ min 30 p.paramBits) - 1
+
+                                                previewSuffix =
+                                                    p.paramPreview
+                                                        |> Maybe.map (\pv -> " · " ++ pv)
+                                                        |> Maybe.withDefault ""
+                                            in
+                                            "#"
+                                                ++ String.fromInt p.statId
+                                                ++ " "
+                                                ++ p.name
+                                                ++ " ("
+                                                ++ p.paramLabel
+                                                ++ "): allowed range 0 .. "
+                                                ++ String.fromInt maxParam
+                                                ++ previewSuffix
+                                        )
+
+                            [ "item_param_lvl", _, statIdStr ] ->
+                                String.toInt statIdStr
+                                    |> Maybe.andThen
+                                        (\sid ->
+                                            item.detailedProperties
+                                                |> List.filter (\p -> p.statId == sid)
+                                                |> List.head
+                                        )
+                                    |> Maybe.map
+                                        (\p ->
+                                            "#"
+                                                ++ String.fromInt p.statId
+                                                ++ " "
+                                                ++ p.name
+                                                ++ " (Skill Level): allowed range "
+                                                ++ String.fromInt packedSkill.minLevel
+                                                ++ " .. "
+                                                ++ String.fromInt packedSkill.maxLevel
+                                        )
+
+                            [ "inject_val", statIdStr ] ->
+                                String.toInt statIdStr
+                                    |> Maybe.andThen (\sid -> statCatalog |> List.filter (\s -> s.statId == sid) |> List.head)
+                                    |> Maybe.map
+                                        (\s ->
+                                            "Inject #"
+                                                ++ String.fromInt s.statId
+                                                ++ " "
+                                                ++ s.name
+                                                ++ " ("
+                                                ++ s.valueLabel
+                                                ++ "): allowed range "
+                                                ++ String.fromInt s.minValue
+                                                ++ " .. "
+                                                ++ String.fromInt s.maxValue
+                                        )
+
+                            [ "inject_param", statIdStr ] ->
+                                String.toInt statIdStr
+                                    |> Maybe.andThen (\sid -> statCatalog |> List.filter (\s -> s.statId == sid) |> List.head)
+                                    |> Maybe.map
+                                        (\s ->
+                                            let
+                                                maxParam =
+                                                    (2 ^ min 30 s.paramBits) - 1
+                                            in
+                                            "Inject #"
+                                                ++ String.fromInt s.statId
+                                                ++ " "
+                                                ++ s.name
+                                                ++ " ("
+                                                ++ s.paramLabel
+                                                ++ "): allowed range 0 .. "
+                                                ++ String.fromInt maxParam
+                                        )
+
+                            [ "inject_param_lvl", statIdStr ] ->
+                                String.toInt statIdStr
+                                    |> Maybe.andThen (\sid -> statCatalog |> List.filter (\s -> s.statId == sid) |> List.head)
+                                    |> Maybe.map
+                                        (\s ->
+                                            "Inject #"
+                                                ++ String.fromInt s.statId
+                                                ++ " "
+                                                ++ s.name
+                                                ++ " (Skill Level): allowed range "
+                                                ++ String.fromInt packedSkill.minLevel
+                                                ++ " .. "
+                                                ++ String.fromInt packedSkill.maxLevel
+                                        )
+
+                            _ ->
+                                Nothing
+                    )
+
+        ( levelClass, messageText ) =
+            case ui.itemEditorNotice of
+                Just (NoticeError msg) ->
+                    ( "is-error", "❌ " ++ msg )
+
+                Just (NoticeWarning msg) ->
+                    ( "is-warning", "⚠️ " ++ msg )
+
+                Just (NoticeInfo msg) ->
+                    ( "is-info", "💡 " ++ msg )
+
+                Nothing ->
+                    case focusedHint of
+                        Just hint ->
+                            ( "is-info", "💡 " ++ hint )
+
+                        Nothing ->
+                            ( "is-idle", "Tip: Click any number to type directly (Enter to apply, Esc to cancel)." )
+    in
+    div
+        [ class ("item-editor-notice-bar " ++ levelClass)
+        , attribute "data-testid" "item-editor-notice"
+        ]
+        [ text messageText ]
 
 
 itemMenuTriggerAttrs : Int -> List (Html.Attribute Msg)
@@ -566,7 +1009,7 @@ viewItemMenuOverlay ui session =
                     , attribute "data-testid" "context-action-edit"
                     , onClick (ContextEditItem itemIndex)
                     ]
-                    [ text "✏️ Edit Item" ]
+                    [ text "⚒️ Forge Item (F)" ]
                 , div
                     [ class "context-menu-item"
                     , attribute "data-testid" "context-action-duplicate"
@@ -646,7 +1089,7 @@ viewZone1LeftStack ui session stashItems =
                 ]
             , div [ class "stash-meta-bar" ]
                 [ span [] [ text "Personal Stash (10 x 10)" ]
-                , span [ class "stash-gold" ] [ text ("Gold: " ++ String.fromInt session.stats.goldStash) ]
+                , viewGoldInlineEditor ui "gold_stash" "Gold" session.stats.goldStash session.schema.goldStashMax "viewa-input-gold-stash"
                 ]
             , viewSpatialGrid Stash 10 10 "grid-10x10" ui session stashItems
             ]
@@ -1194,7 +1637,10 @@ viewZone3RightStack ui session inventoryItems cubeItems beltItems =
         [ section [ class "glass-panel zone3-inventory-panel" ]
             [ div [ class "panel-header" ]
                 [ div [ class "panel-title" ] [ text "Inventory (10 x 4)" ]
-                , span [ class "meta-line" ] [ text ("Items: " ++ String.fromInt (List.length inventoryItems)) ]
+                , div [ class "inv-header-meta" ]
+                    [ viewGoldInlineEditor ui "gold_character" "Gold" session.stats.goldInventory session.schema.goldCharacterMax "viewa-input-gold-inventory"
+                    , span [ class "meta-line" ] [ text ("Items: " ++ String.fromInt (List.length inventoryItems)) ]
+                    ]
                 ]
             , viewSpatialGrid Inventory 10 4 "grid-10x4" ui session inventoryItems
             ]
@@ -1372,10 +1818,9 @@ viewMercGridProportional ui session isReplaced items =
                         |> List.head
 
                 isAllowedTarget =
-                    not isReplaced
-                        && List.any
-                            (\t -> t.container == MercEquipment && t.x == bodyLoc && t.y == 0)
-                            session.allowedMoveTargets
+                    List.any
+                        (\t -> t.container == targetContainer && t.x == bodyLoc && t.y == 0)
+                        session.allowedMoveTargets
 
                 isHovered =
                     case ui.hoveredDropTarget of
@@ -1425,7 +1870,7 @@ viewMercGridProportional ui session isReplaced items =
                                 itemMenuTriggerAttrs item.index
 
                         filledHoverAttrs =
-                            if isHolding && not isReplaced then
+                            if isHolding then
                                 [ onMouseEnter (HoverDropTarget (Just { container = targetContainer, x = bodyLoc, y = 0 })) ]
 
                             else
@@ -1453,7 +1898,7 @@ viewMercGridProportional ui session isReplaced items =
     in
     div
         ([ class "merc-grid-proportional" ]
-            ++ (if isHolding && not isReplaced then
+            ++ (if isHolding then
                     [ onMouseLeave (HoverDropTarget Nothing) ]
 
                 else
@@ -1798,7 +2243,7 @@ viewSelectedItemInspectorAndBrowser ui session =
                                 , attribute "data-testid" "btn-open-item-studio"
                                 , onClick (OpenItemEditorModal item.index)
                                 ]
-                                [ text "✏️ Open Studio" ]
+                                [ text "⚒️ Forge Studio (F)" ]
                             ]
                         , div [ class "meta-line" ]
                             [ text
@@ -1817,7 +2262,7 @@ viewSelectedItemInspectorAndBrowser ui session =
                                     ++ String.fromInt item.height
                                 )
                             ]
-                        , viewItemMutationControls item
+                        , viewItemMutationControls ui item
                         , if List.isEmpty item.baseAttributes then
                             text ""
 
@@ -1831,7 +2276,8 @@ viewSelectedItemInspectorAndBrowser ui session =
                             ul [ class "item-prop-list" ]
                                 (List.map (\line -> li [] [ text line ]) item.properties)
                         ]
-                            ++ viewSetDetails session.items item
+                            ++ viewSocketedItemsSection item
+                            :: viewSetDetails session.items item
                 )
             , div []
                 [ div [ class "segmented", attribute "data-testid" "container-filters" ]
@@ -1850,17 +2296,17 @@ viewSelectedItemInspectorAndBrowser ui session =
         ]
 
 
-viewItemMutationControls : ItemCardView -> Html Msg
-viewItemMutationControls item =
+viewItemMutationControls : UiState -> ItemCardView -> Html Msg
+viewItemMutationControls ui item =
     let
         baseControls =
             [ case item.defense of
                 Just def ->
                     div [ class "stat-chip", attribute "data-testid" "inspector-defense-control" ]
                         [ span [ class "stat-label" ] [ text "Def" ]
-                        , button [ class "btn-inline-step", attribute "data-testid" "btn-def-dec", onClick (MutateItemBase item.index (Just (max 0 (def - 10))) Nothing Nothing Nothing Nothing) ] [ text "-" ]
-                        , span [ class "stat-val" ] [ text (String.fromInt def) ]
-                        , button [ class "btn-inline-step", attribute "data-testid" "btn-def-inc", onClick (MutateItemBase item.index (Just (def + 10)) Nothing Nothing Nothing Nothing) ] [ text "+" ]
+                        , viewInlineIntInput ui "item-editor-input item-editor-prop-num" ("item_def:" ++ String.fromInt item.index) def "inspector-defense-input"
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-def-dec", onClick (MutateItemBase item.index (Just (max 0 (def - 10))) Nothing Nothing Nothing Nothing) ] [ text "-10" ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-def-inc", onClick (MutateItemBase item.index (Just (def + 10)) Nothing Nothing Nothing Nothing) ] [ text "+10" ]
                         ]
 
                 Nothing ->
@@ -1869,9 +2315,10 @@ viewItemMutationControls item =
                 ( Just cur, Just maxD ) ->
                     div [ class "stat-chip", attribute "data-testid" "inspector-durability-control" ]
                         [ span [ class "stat-label" ] [ text "Dur" ]
-                        , button [ class "btn-inline-step", attribute "data-testid" "btn-dur-dec", onClick (MutateItemBase item.index Nothing (Just (max 0 (cur - 5))) Nothing Nothing Nothing) ] [ text "-" ]
-                        , span [ class "stat-val" ] [ text (String.fromInt cur ++ "/" ++ String.fromInt maxD) ]
-                        , button [ class "btn-inline-step", attribute "data-testid" "btn-dur-inc", onClick (MutateItemBase item.index Nothing (Just (min maxD (cur + 5))) Nothing Nothing Nothing) ] [ text "+" ]
+                        , viewInlineIntInput ui "item-editor-input item-editor-prop-num" ("item_dur:" ++ String.fromInt item.index) cur "inspector-durability-input"
+                        , span [ class "meta-line" ] [ text ("/" ++ String.fromInt maxD) ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-dur-dec", onClick (MutateItemBase item.index Nothing (Just (max 0 (cur - 5))) Nothing Nothing Nothing) ] [ text "-5" ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-dur-inc", onClick (MutateItemBase item.index Nothing (Just (min maxD (cur + 5))) Nothing Nothing Nothing) ] [ text "+5" ]
                         ]
 
                 _ ->
@@ -1880,9 +2327,9 @@ viewItemMutationControls item =
                 Just qty ->
                     div [ class "stat-chip", attribute "data-testid" "inspector-quantity-control" ]
                         [ span [ class "stat-label" ] [ text "Qty" ]
-                        , button [ class "btn-inline-step", attribute "data-testid" "btn-qty-dec", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (max 1 (qty - 10))) Nothing) ] [ text "-" ]
-                        , span [ class "stat-val" ] [ text (String.fromInt qty) ]
-                        , button [ class "btn-inline-step", attribute "data-testid" "btn-qty-inc", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 10)) Nothing) ] [ text "+" ]
+                        , viewInlineIntInput ui "item-editor-input item-editor-prop-num" ("item_qty:" ++ String.fromInt item.index) qty "inspector-quantity-input"
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-qty-dec", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (max 1 (qty - 10))) Nothing) ] [ text "-10" ]
+                        , button [ class "btn-inline-step", attribute "data-testid" "btn-qty-inc", onClick (MutateItemBase item.index Nothing Nothing Nothing (Just (qty + 10)) Nothing) ] [ text "+10" ]
                         ]
 
                 Nothing ->
@@ -1912,11 +2359,21 @@ viewItemMutationControls item =
                     , div [ class "prop-stepper-grid" ]
                         (List.map
                             (\p ->
-                                div [ class "prop-stepper-row", attribute "data-testid" ("prop-row-" ++ String.fromInt p.statId) ]
-                                    [ span [ class "prop-name" ] [ text p.name ]
-                                    , button [ class "btn-inline-step", attribute "data-testid" ("btn-prop-dec-" ++ String.fromInt p.statId), onClick (MutateItemProperty item.index p.statId -1) ] [ text "-1" ]
-                                    , span [ class "prop-val" ] [ text (String.fromInt p.value) ]
-                                    , button [ class "btn-inline-step", attribute "data-testid" ("btn-prop-inc-" ++ String.fromInt p.statId), onClick (MutateItemProperty item.index p.statId 1) ] [ text "+1" ]
+                                div [ class "prop-stepper-row stepper-stack", attribute "data-testid" ("prop-row-" ++ String.fromInt p.statId) ]
+                                    [ div [ class "stepper-input-row" ]
+                                        [ span [ class "prop-name" ] [ text p.name ]
+                                        , viewInlineIntInput ui
+                                            "item-editor-input item-editor-prop-num"
+                                            ("item_prop:" ++ String.fromInt item.index ++ ":" ++ String.fromInt p.statId)
+                                            p.value
+                                            ("inspector-prop-input-" ++ String.fromInt p.statId)
+                                        ]
+                                    , div [ class "stepper-btn-row" ]
+                                        [ button [ class "btn-inline-step", attribute "data-testid" ("btn-prop-dec-" ++ String.fromInt p.statId), onClick (MutateItemProperty item.index p.statId -1) ] [ text "-1" ]
+                                        , button [ class "btn-inline-step", attribute "data-testid" ("btn-prop-inc-" ++ String.fromInt p.statId), onClick (MutateItemProperty item.index p.statId 1) ] [ text "+1" ]
+                                        , button [ class "btn-inline-step", onClick (MutateItemProperty item.index p.statId -10) ] [ text "-10" ]
+                                        , button [ class "btn-inline-step", onClick (MutateItemProperty item.index p.statId 10) ] [ text "+10" ]
+                                        ]
                                     ]
                             )
                             item.detailedProperties
@@ -2293,3 +2750,98 @@ viewSetDetails allItems item =
                     [ div [ class "tooltip-set-group" ] (headerNodes ++ bonusNodes ++ pieceNodes) ]
     in
     pieceBonusNodes ++ setGroupNodes
+
+
+viewInlineIntInput : UiState -> String -> String -> Int -> String -> Html Msg
+viewInlineIntInput ui className fieldKey currentVal tid =
+    let
+        serverVal =
+            String.fromInt currentVal
+
+        onEnterOrEscape =
+            on "keydown"
+                (Decode.field "key" Decode.string
+                    |> Decode.andThen
+                        (\k ->
+                            case k of
+                                "Enter" ->
+                                    Decode.succeed CommitFocusedInput
+
+                                "Escape" ->
+                                    Decode.succeed CancelFocusedInput
+
+                                _ ->
+                                    Decode.fail "ignore key"
+                        )
+                )
+    in
+    input
+        [ class className
+        , type_ "text"
+        , value (UiState.focusedDraftValue ui fieldKey serverVal)
+        , attribute "data-testid" tid
+        , onFocus (FocusField fieldKey serverVal)
+        , onInput EditFocusedInput
+        , onBlur CommitFocusedInput
+        , onEnterOrEscape
+        ]
+        []
+
+
+viewGoldInlineEditor : UiState -> String -> String -> Int -> Int -> String -> Html Msg
+viewGoldInlineEditor ui fieldKey labelText currentVal maxVal tid =
+    div [ class "gold-inline-editor" ]
+        [ span [] [ text (labelText ++ ":") ]
+        , viewInlineIntInput ui "gold-inline-input" fieldKey currentVal tid
+        , span [ class "gold-inline-max" ] [ text ("/ " ++ String.fromInt maxVal) ]
+        ]
+
+
+viewSocketedItemsSection : ItemCardView -> Html Msg
+viewSocketedItemsSection item =
+    let
+        filledCount =
+            List.length item.socketedItems
+
+        totalCount =
+            max item.socketCount filledCount
+
+        emptyCount =
+            max 0 (totalCount - filledCount)
+    in
+    if totalCount <= 0 then
+        text ""
+
+    else
+        div [ class "socketed-viewer", attribute "data-testid" "socketed-items-viewer" ]
+            [ div [ class "socketed-viewer-header" ]
+                [ span [] [ text "Socketed Gems / Runes" ]
+                , span [] [ text (String.fromInt filledCount ++ " / " ++ String.fromInt totalCount) ]
+                ]
+            , div [ class "socketed-slot-list" ]
+                (List.map viewSocketedSlotCard item.socketedItems
+                    ++ List.repeat emptyCount
+                        (div [ class "socketed-empty-slot" ] [ text "Empty Socket" ])
+                )
+            ]
+
+
+viewSocketedSlotCard : SocketedItemView -> Html Msg
+viewSocketedSlotCard child =
+    div [ class "socketed-slot-card" ]
+        [ case child.imageUrl of
+            Just url ->
+                img [ class "socketed-slot-thumb", src url, alt child.nameEn ] []
+
+            Nothing ->
+                span [ class "item-editor-stat-id-badge" ] [ text child.code ]
+        , div [ class "socketed-slot-body" ]
+            [ div [ class ("socketed-slot-name " ++ qualityClass child.quality) ] [ text child.nameEn ]
+            , if List.isEmpty child.properties then
+                text ""
+
+              else
+                ul [ class "socketed-slot-props" ]
+                    (List.map (\line -> li [] [ text line ]) child.properties)
+            ]
+        ]

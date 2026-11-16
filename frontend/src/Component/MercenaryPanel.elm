@@ -15,17 +15,21 @@ view merc mercItems =
             [ div []
                 [ div [ class "brand-title-row" ]
                     [ h2 [] [ text "Mercenary Summary" ]
-                    , if not merc.persistenceSupported then
-                        span [ class "readonly-badge", attribute "data-testid" "merc-preview-badge" ]
-                            [ text "Read-only · Not saved to .d2s" ]
+                    , if merc.persistenceSupported then
+                        span [ class "persisted-badge", attribute "data-testid" "merc-persisted-badge" ]
+                            [ text "Saved to .d2s" ]
 
                       else
-                        text ""
+                        span [ class "readonly-badge", attribute "data-testid" "merc-preview-badge" ]
+                            [ text "Read-only · Not saved to .d2s" ]
                     ]
                 , div [ class "meta-line", attribute "data-testid" "merc-identity" ]
                     [ text
                         (if merc.hired then
                             merc.className ++ " · " ++ String.fromInt merc.equippedCount ++ " equipped"
+
+                         else if merc.persistenceSupported then
+                            "Unhired (Select Act to Hire)"
 
                          else
                             "Unhired (Preview by Act)"
@@ -60,23 +64,10 @@ view merc mercItems =
 viewLevelStepper : Bool -> Int -> Html Msg
 viewLevelStepper editable lvl =
     div [ class "stepper" ]
-        [ button
-            [ class "step-btn"
-            , attribute "data-testid" "merc-lvl-minus5"
-            , disabled (not editable || lvl <= 1)
-            , onClick (AdjustMercLevel -5)
-            ]
-            [ text "-5" ]
-        , button
-            [ class "step-btn"
-            , attribute "data-testid" "merc-lvl-minus"
-            , disabled (not editable || lvl <= 1)
-            , on "click" (stepClickDecoder False -1 -5)
-            ]
-            [ text "-" ]
-        , input
+        [ input
             [ class "merc-lvl-input"
-            , type_ "number"
+            , type_ "text"
+            , attribute "inputmode" "numeric"
             , attribute "data-testid" "merc-level-input"
             , disabled (not editable)
             , value (String.fromInt lvl)
@@ -93,11 +84,25 @@ viewLevelStepper editable lvl =
             [ text ("Lv " ++ String.fromInt lvl) ]
         , button
             [ class "step-btn"
+            , attribute "data-testid" "merc-lvl-minus"
+            , disabled (not editable || lvl <= 1)
+            , on "click" (stepClickDecoder False -1 -5)
+            ]
+            [ text "-1" ]
+        , button
+            [ class "step-btn"
             , attribute "data-testid" "merc-lvl-plus"
             , disabled (not editable || lvl >= 98)
             , on "click" (stepClickDecoder False 1 5)
             ]
-            [ text "+" ]
+            [ text "+1" ]
+        , button
+            [ class "step-btn"
+            , attribute "data-testid" "merc-lvl-minus5"
+            , disabled (not editable || lvl <= 1)
+            , onClick (AdjustMercLevel -5)
+            ]
+            [ text "-5" ]
         , button
             [ class "step-btn"
             , attribute "data-testid" "merc-lvl-plus5"

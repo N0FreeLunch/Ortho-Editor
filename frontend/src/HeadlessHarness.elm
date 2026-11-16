@@ -309,15 +309,36 @@ commandDecoder =
                         Json.Decode.succeed CloseItemEditorModal
 
                     "AddItemProperty" ->
-                        Json.Decode.map3 AddItemProperty
+                        Json.Decode.map4 AddItemProperty
                             (Json.Decode.field "itemIndex" Json.Decode.int)
                             (Json.Decode.field "statId" Json.Decode.int)
                             (Json.Decode.field "value" Json.Decode.int)
+                            (Json.Decode.oneOf
+                                [ Json.Decode.field "param" Json.Decode.int
+                                , Json.Decode.succeed 0
+                                ]
+                            )
 
                     "RemoveItemProperty" ->
                         Json.Decode.map2 RemoveItemProperty
                             (Json.Decode.field "itemIndex" Json.Decode.int)
                             (Json.Decode.field "statId" Json.Decode.int)
+
+                    "SetItemPropertyParam" ->
+                        Json.Decode.map3 SetItemPropertyParam
+                            (Json.Decode.field "itemIndex" Json.Decode.int)
+                            (Json.Decode.field "statId" Json.Decode.int)
+                            (Json.Decode.field "param" Json.Decode.int)
+
+                    "OpenItemForgeDraft" ->
+                        Json.Decode.field "itemIndex" Json.Decode.int
+                            |> Json.Decode.map OpenItemEditorModal
+
+                    "ApplyItemForgeDraft" ->
+                        Json.Decode.succeed ApplyItemForgeDraft
+
+                    "DiscardItemForgeDraft" ->
+                        Json.Decode.succeed DiscardItemForgeDraft
 
                     other ->
                         Json.Decode.fail ("Unknown harness command: " ++ other)

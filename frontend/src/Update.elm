@@ -4,6 +4,7 @@ module Update exposing
     , OutMsg(..)
     , allQuestsCompletedAllDiffs
     , allWaypointsActiveAllDiffs
+    , applyEnvelope
     , init
     , paintModeToBool
     , update
@@ -111,8 +112,12 @@ type Msg
     | SetItemEditorSearch String
     | SelectItemEditorInjectStat Int Int
     | SetItemEditorInjectValue String
-    | AddItemProperty Int Int Int
+    | SetItemEditorInjectParam String
+    | AddItemProperty Int Int Int Int
+    | SetItemPropertyParam Int Int Int
     | RemoveItemProperty Int Int
+    | ApplyItemForgeDraft
+    | DiscardItemForgeDraft
     | HandleKeyShortcut KeyShortcutPayload
 
 
@@ -486,29 +491,126 @@ update msg model =
             ( { model | ui = UiState.clearToast model.ui }, EmitIntent Protocol.Undo )
 
         MutateItemBase itemIndex defense currentDurability maxDurability quantity isEthereal ->
-            ( model
+            let
+                maybeItem =
+                    findSessionItem model.session itemIndex
+
+                clampOpt minVal maxVal maybeVal =
+                    Maybe.map (clamp minVal maxVal) maybeVal
+
+                maxDur =
+                    maybeItem |> Maybe.andThen .maxDurability |> Maybe.withDefault 255
+
+                clampedDef =
+                    clampOpt 0 2037 defense
+
+                clampedCurDur =
+                    clampOpt 0 maxDur currentDurability
+
+                clampedQty =
+                    clampOpt 1 511 quantity
+
+                noticeFromBase =
+                    case ( defense, clampedDef ) of
+                        ( Just rawDef, Just cDef ) ->
+                            Just (rangeNotice "Defense" 0 2037 rawDef cDef (maybeItem |> Maybe.andThen .defense |> Maybe.map ((==) cDef) |> Maybe.withDefault False))
+
+                        _ ->
+                            case ( currentDurability, clampedCurDur ) of
+                                ( Just rawDur, Just cDur ) ->
+                                    Just (rangeNotice "Durability" 0 maxDur rawDur cDur (maybeItem |> Maybe.andThen .currentDurability |> Maybe.map ((==) cDur) |> Maybe.withDefault False))
+
+                                _ ->
+                                    case ( quantity, clampedQty ) of
+                                        ( Just rawQty, Just cQty ) ->
+                                            Just (rangeNotice "Quantity" 1 511 rawQty cQty (maybeItem |> Maybe.andThen .quantity |> Maybe.map ((==) cQty) |> Maybe.withDefault False))
+
+                                        _ ->
+                                            Nothing
+
+                nextUi =
+                    if model.ui.itemEditorModalIndex /= Nothing then
+                        case noticeFromBase of
+                            Just n ->
+                                UiState.setItemEditorNotice (Just n) model.ui
+
+                            Nothing ->
+                                model.ui
+
+                    else
+                        model.ui
+            in
+            ( { model | ui = nextUi }
             , EmitIntent
                 (Protocol.MutateItemBase
                     { itemIndex = itemIndex
-                    , defense = defense
-                    , currentDurability = currentDurability
+                    , defense = clampedDef
+                    , currentDurability = clampedCurDur
                     , maxDurability = maxDurability
-                    , quantity = quantity
+                    , quantity = clampedQty
                     , isEthereal = isEthereal
                     }
                 )
             )
 
         MutateItemProperty itemIndex statId delta ->
-            ( model
-            , EmitIntent
-                (Protocol.MutateItemProperty
-                    { itemIndex = itemIndex
-                    , statId = statId
-                    , delta = delta
-                    }
-                )
-            )
+            let
+                maybeProp =
+                    findSessionItem model.session itemIndex
+                        |> Maybe.andThen (\it -> it.detailedProperties |> List.filter (\p -> p.statId == statId) |> List.head)
+            in
+            case maybeProp of
+                Just prop ->
+                    let
+                        rawNext =
+                            prop.value + delta
+
+                        clampedNext =
+                            clamp prop.minValue prop.maxValue rawNext
+
+                        actualDelta =
+                            clampedNext - prop.value
+
+                        notice =
+                            rangeNotice
+                                ("#" ++ String.fromInt prop.statId ++ " " ++ prop.name)
+                                prop.minValue
+                                prop.maxValue
+                                rawNext
+                                clampedNext
+                                (actualDelta == 0)
+
+                        nextUi =
+                            if model.ui.itemEditorModalIndex /= Nothing then
+                                UiState.setItemEditorNotice (Just notice) model.ui
+
+                            else
+                                model.ui
+                    in
+                    if actualDelta == 0 then
+                        ( { model | ui = nextUi }, NoOut )
+
+                    else
+                        ( { model | ui = nextUi }
+                        , EmitIntent
+                            (Protocol.MutateItemProperty
+                                { itemIndex = itemIndex
+                                , statId = statId
+                                , delta = actualDelta
+                                }
+                            )
+                        )
+
+                Nothing ->
+                    ( model
+                    , EmitIntent
+                        (Protocol.MutateItemProperty
+                            { itemIndex = itemIndex
+                            , statId = statId
+                            , delta = delta
+                            }
+                        )
+                    )
 
         OpenActionPalette itemIndex x y ->
             ( { model | ui = UiState.openActionPalette itemIndex x y model.ui }, NoOut )
@@ -531,17 +633,27 @@ update msg model =
 
         ContextEditItem itemIndex ->
             ( { model | ui = UiState.openItemEditorModal itemIndex model.ui }
-            , NoOut
+            , EmitIntent (Protocol.OpenItemForgeDraft { itemIndex = itemIndex })
             )
 
         OpenItemEditorModal itemIndex ->
             ( { model | ui = UiState.openItemEditorModal itemIndex model.ui }
-            , NoOut
+            , EmitIntent (Protocol.OpenItemForgeDraft { itemIndex = itemIndex })
             )
 
         CloseItemEditorModal ->
             ( { model | ui = UiState.closeItemEditorModal model.ui }
-            , NoOut
+            , EmitIntent Protocol.DiscardItemForgeDraft
+            )
+
+        ApplyItemForgeDraft ->
+            ( { model | ui = UiState.closeItemEditorModal model.ui }
+            , EmitIntent Protocol.ApplyItemForgeDraft
+            )
+
+        DiscardItemForgeDraft ->
+            ( { model | ui = UiState.closeItemEditorModal model.ui }
+            , EmitIntent Protocol.DiscardItemForgeDraft
             )
 
         SetItemEditorSearch query ->
@@ -557,21 +669,168 @@ update msg model =
         SetItemEditorInjectValue raw ->
             case String.toInt (String.trim raw) of
                 Just val ->
-                    ( { model | ui = UiState.setItemEditorInjectValue val model.ui }, NoOut )
+                    let
+                        maybeEntry =
+                            model.ui.itemEditorInjectStatId
+                                |> Maybe.andThen
+                                    (\sid ->
+                                        model.session
+                                            |> Maybe.map .statCatalog
+                                            |> Maybe.withDefault []
+                                            |> List.filter (\s -> s.statId == sid)
+                                            |> List.head
+                                    )
+
+                        ( nextVal, nextUi ) =
+                            case maybeEntry of
+                                Just s ->
+                                    let
+                                        clamped =
+                                            clamp s.minValue s.maxValue val
+
+                                        n =
+                                            rangeNotice
+                                                ("Inject #" ++ String.fromInt s.statId ++ " " ++ s.name ++ " (" ++ s.valueLabel ++ ")")
+                                                s.minValue
+                                                s.maxValue
+                                                val
+                                                clamped
+                                                (val /= clamped || (clamped == model.ui.itemEditorInjectValue && (val < s.minValue || val > s.maxValue)))
+                                    in
+                                    ( clamped
+                                    , model.ui
+                                        |> UiState.clearFocusInput
+                                        |> UiState.setItemEditorNotice (Just n)
+                                    )
+
+                                Nothing ->
+                                    ( val, UiState.clearFocusInput model.ui )
+                    in
+                    ( { model | ui = UiState.setItemEditorInjectValue nextVal nextUi }, NoOut )
 
                 Nothing ->
                     ( model, NoOut )
 
-        AddItemProperty itemIndex statId value ->
+        SetItemEditorInjectParam raw ->
+            case String.toInt (String.trim raw) of
+                Just param ->
+                    let
+                        maybeEntry =
+                            model.ui.itemEditorInjectStatId
+                                |> Maybe.andThen
+                                    (\sid ->
+                                        model.session
+                                            |> Maybe.map .statCatalog
+                                            |> Maybe.withDefault []
+                                            |> List.filter (\s -> s.statId == sid)
+                                            |> List.head
+                                    )
+
+                        ( nextParam, nextUi ) =
+                            case maybeEntry of
+                                Just s ->
+                                    let
+                                        maxParam =
+                                            (2 ^ min 30 s.paramBits) - 1
+
+                                        clamped =
+                                            clamp 0 maxParam param
+
+                                        n =
+                                            rangeNotice
+                                                ("Inject #" ++ String.fromInt s.statId ++ " " ++ s.name ++ " (" ++ s.paramLabel ++ ")")
+                                                0
+                                                maxParam
+                                                param
+                                                clamped
+                                                (param /= clamped)
+                                    in
+                                    ( clamped
+                                    , model.ui
+                                        |> UiState.clearFocusInput
+                                        |> UiState.setItemEditorNotice (Just n)
+                                    )
+
+                                Nothing ->
+                                    ( param, UiState.clearFocusInput model.ui )
+                    in
+                    ( { model | ui = UiState.setItemEditorInjectParam nextParam nextUi }, NoOut )
+
+                Nothing ->
+                    ( model, NoOut )
+
+        AddItemProperty itemIndex statId value param ->
             ( model
             , EmitIntent
                 (Protocol.AddItemProperty
                     { itemIndex = itemIndex
                     , statId = statId
                     , value = value
+                    , param = param
                     }
                 )
             )
+
+        SetItemPropertyParam itemIndex statId param ->
+            let
+                maybeProp =
+                    findSessionItem model.session itemIndex
+                        |> Maybe.andThen (\it -> it.detailedProperties |> List.filter (\p -> p.statId == statId) |> List.head)
+            in
+            case maybeProp of
+                Just prop ->
+                    let
+                        maxParam =
+                            (2 ^ min 30 prop.paramBits) - 1
+
+                        clamped =
+                            clamp 0 maxParam param
+
+                        atBoundary =
+                            clamped == prop.param && param /= prop.param
+
+                        n =
+                            rangeNotice
+                                ("#" ++ String.fromInt prop.statId ++ " " ++ prop.name ++ " (" ++ prop.paramLabel ++ ")")
+                                0
+                                maxParam
+                                param
+                                clamped
+                                atBoundary
+
+                        nextUi =
+                            if model.ui.itemEditorModalIndex /= Nothing then
+                                model.ui
+                                    |> UiState.clearFocusInput
+                                    |> UiState.setItemEditorNotice (Just n)
+
+                            else
+                                model.ui
+                    in
+                    if clamped == prop.param then
+                        ( { model | ui = nextUi }, NoOut )
+
+                    else
+                        ( { model | ui = nextUi }
+                        , EmitIntent
+                            (Protocol.SetItemPropertyParam
+                                { itemIndex = itemIndex
+                                , statId = statId
+                                , param = clamped
+                                }
+                            )
+                        )
+
+                Nothing ->
+                    ( model
+                    , EmitIntent
+                        (Protocol.SetItemPropertyParam
+                            { itemIndex = itemIndex
+                            , statId = statId
+                            , param = param
+                            }
+                        )
+                    )
 
         RemoveItemProperty itemIndex statId ->
             ( model
@@ -614,7 +873,9 @@ handleKeyShortcut payload model =
 
     else if payload.key == "Escape" then
         if model.ui.itemEditorModalIndex /= Nothing then
-            ( { model | ui = UiState.closeItemEditorModal model.ui }, NoOut )
+            ( { model | ui = UiState.closeItemEditorModal model.ui }
+            , EmitIntent Protocol.DiscardItemForgeDraft
+            )
 
         else if model.ui.itemMenu /= UiState.NoItemMenu then
             ( { model | ui = UiState.closeItemMenu model.ui }, NoOut )
@@ -689,6 +950,25 @@ handleKeyShortcut payload model =
 
         else if lowerKey == "w" then
             ( model, EmitIntent Protocol.ToggleWeaponSwap )
+
+        else if lowerKey == "f" && heldIdx == Nothing && model.ui.itemEditorModalIndex == Nothing then
+            let
+                targetIdx =
+                    case model.ui.hoveredItemIndex of
+                        Just hovIdx ->
+                            Just hovIdx
+
+                        Nothing ->
+                            model.ui.selectedItemIndex
+            in
+            case targetIdx of
+                Just idx ->
+                    ( { model | ui = UiState.openItemEditorModal idx model.ui }
+                    , EmitIntent (Protocol.OpenItemForgeDraft { itemIndex = idx })
+                    )
+
+                Nothing ->
+                    ( model, NoOut )
 
         else if heldIdx == Nothing then
             case ( model.session, model.ui.hoveredItemIndex ) of
@@ -809,6 +1089,42 @@ handleKeyShortcut payload model =
 
     else
         ( model, NoOut )
+
+
+findSessionItem : Maybe SessionView -> Int -> Maybe ItemCardView
+findSessionItem maybeSession idx =
+    maybeSession
+        |> Maybe.map (\s -> s.items ++ s.mercItems ++ s.mercReplacedItems)
+        |> Maybe.withDefault []
+        |> List.filter (\it -> it.index == idx)
+        |> List.head
+
+
+rangeNotice : String -> Int -> Int -> Int -> Int -> Bool -> UiState.ModalNotice
+rangeNotice label minVal maxVal rawVal clampedVal atBoundary =
+    if rawVal /= clampedVal || atBoundary then
+        UiState.NoticeWarning
+            (label
+                ++ " at boundary "
+                ++ String.fromInt clampedVal
+                ++ " (allowed "
+                ++ String.fromInt minVal
+                ++ ".."
+                ++ String.fromInt maxVal
+                ++ ")."
+            )
+
+    else
+        UiState.NoticeInfo
+            (label
+                ++ ": "
+                ++ String.fromInt clampedVal
+                ++ " (allowed "
+                ++ String.fromInt minVal
+                ++ ".."
+                ++ String.fromInt maxVal
+                ++ ")"
+            )
 
 
 characterFieldFromKey : String -> Maybe CharacterField
@@ -1002,9 +1318,6 @@ commitFocusedInput model =
 
             else
                 case characterFieldFromKey key of
-                    Nothing ->
-                        ( { model | ui = nextUi }, NoOut )
-
                     Just field ->
                         case String.toInt trimmed of
                             Just intVal ->
@@ -1022,6 +1335,363 @@ commitFocusedInput model =
                                 , NoOut
                                 )
 
+                    Nothing ->
+                        commitItemFocusedInput model key trimmed nextUi
+
+
+commitItemFocusedInput : Model -> String -> String -> UiState -> ( Model, OutMsg )
+commitItemFocusedInput model key trimmed nextUi =
+    let
+        findItem idx =
+            model.session
+                |> Maybe.map (\s -> s.items ++ s.mercItems ++ s.mercReplacedItems)
+                |> Maybe.withDefault []
+                |> List.filter (\it -> it.index == idx)
+                |> List.head
+
+        findCatalogStat sid =
+            model.session
+                |> Maybe.map .statCatalog
+                |> Maybe.withDefault []
+                |> List.filter (\s -> s.statId == sid)
+                |> List.head
+
+        commitClampedUi label minVal maxVal unchangedVal toResult =
+            case String.toInt trimmed of
+                Nothing ->
+                    let
+                        errMsg =
+                            "Invalid integer for "
+                                ++ label
+                                ++ ": \""
+                                ++ trimmed
+                                ++ "\" (allowed "
+                                ++ String.fromInt minVal
+                                ++ ".."
+                                ++ String.fromInt maxVal
+                                ++ ")."
+                    in
+                    ( { model
+                        | ui =
+                            nextUi
+                                |> UiState.setStatusBanner (Just errMsg)
+                                |> UiState.setItemEditorNotice (Just (UiState.NoticeError errMsg))
+                      }
+                    , NoOut
+                    )
+
+                Just rawInt ->
+                    let
+                        clamped =
+                            clamp minVal maxVal rawInt
+
+                        uiAfterClamp =
+                            if clamped /= rawInt then
+                                UiState.setItemEditorNotice
+                                    (Just
+                                        (UiState.NoticeWarning
+                                            (label
+                                                ++ " clamped from "
+                                                ++ String.fromInt rawInt
+                                                ++ " to "
+                                                ++ String.fromInt clamped
+                                                ++ " (allowed "
+                                                ++ String.fromInt minVal
+                                                ++ ".."
+                                                ++ String.fromInt maxVal
+                                                ++ ")."
+                                            )
+                                        )
+                                    )
+                                    nextUi
+
+                            else
+                                nextUi
+
+                        ( finalUi, outMsg ) =
+                            if unchangedVal == Just clamped then
+                                ( uiAfterClamp, NoOut )
+
+                            else
+                                toResult clamped uiAfterClamp
+                    in
+                    ( { model | ui = finalUi }, outMsg )
+
+        commitClampedField label minVal maxVal unchangedVal toOut =
+            commitClampedUi label minVal maxVal unchangedVal (\clamped uiState -> ( uiState, toOut clamped ))
+    in
+    case String.split ":" key of
+        [ "item_prop", itemIdxStr, statIdStr ] ->
+            case ( String.toInt itemIdxStr, String.toInt statIdStr ) of
+                ( Just itemIdx, Just statId ) ->
+                    let
+                        maybeProp =
+                            findItem itemIdx
+                                |> Maybe.andThen
+                                    (\it ->
+                                        it.detailedProperties
+                                            |> List.filter (\p -> p.statId == statId)
+                                            |> List.head
+                                    )
+
+                        ( label, minVal, maxVal ) =
+                            maybeProp
+                                |> Maybe.map (\p -> ( "#" ++ String.fromInt statId ++ " " ++ p.name, p.minValue, p.maxValue ))
+                                |> Maybe.withDefault ( "Property #" ++ String.fromInt statId, -32768, 32767 )
+
+                        currentVal =
+                            maybeProp |> Maybe.map .value
+                    in
+                    commitClampedField
+                        label
+                        minVal
+                        maxVal
+                        currentVal
+                        (\clamped ->
+                            EmitIntent
+                                (Protocol.MutateItemProperty
+                                    { itemIndex = itemIdx
+                                    , statId = statId
+                                    , delta = clamped - Maybe.withDefault clamped currentVal
+                                    }
+                                )
+                        )
+
+                _ ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "item_param", itemIdxStr, statIdStr ] ->
+            case ( String.toInt itemIdxStr, String.toInt statIdStr ) of
+                ( Just itemIdx, Just statId ) ->
+                    let
+                        maybeProp =
+                            findItem itemIdx
+                                |> Maybe.andThen
+                                    (\it ->
+                                        it.detailedProperties
+                                            |> List.filter (\p -> p.statId == statId)
+                                            |> List.head
+                                    )
+
+                        ( label, maxParam, currentParam ) =
+                            case maybeProp of
+                                Just p ->
+                                    ( "#" ++ String.fromInt statId ++ " " ++ p.name ++ " Param"
+                                    , (2 ^ min 30 p.paramBits) - 1
+                                    , Just p.param
+                                    )
+
+                                Nothing ->
+                                    ( "Property #" ++ String.fromInt statId ++ " Param", 65535, Nothing )
+                    in
+                    commitClampedField
+                        label
+                        0
+                        maxParam
+                        currentParam
+                        (\clamped ->
+                            EmitIntent
+                                (Protocol.SetItemPropertyParam
+                                    { itemIndex = itemIdx
+                                    , statId = statId
+                                    , param = clamped
+                                    }
+                                )
+                        )
+
+                _ ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "item_param_lvl", itemIdxStr, statIdStr ] ->
+            case ( String.toInt itemIdxStr, String.toInt statIdStr ) of
+                ( Just itemIdx, Just statId ) ->
+                    let
+                        maybeProp =
+                            findItem itemIdx
+                                |> Maybe.andThen
+                                    (\it ->
+                                        it.detailedProperties
+                                            |> List.filter (\p -> p.statId == statId)
+                                            |> List.head
+                                    )
+
+                        packedSpec =
+                            model.session
+                                |> Maybe.map (.paramCatalog >> .packedSkill)
+                                |> Maybe.withDefault { stride = 64, minLevel = 1, maxLevel = 63 }
+
+                        stride =
+                            max 1 packedSpec.stride
+
+                        currentParam =
+                            maybeProp |> Maybe.map .param |> Maybe.withDefault 0
+
+                        currentLvl =
+                            modBy stride currentParam
+
+                        skillId =
+                            currentParam // stride
+
+                        label =
+                            maybeProp
+                                |> Maybe.map (\p -> "#" ++ String.fromInt statId ++ " " ++ p.name ++ " Skill Level")
+                                |> Maybe.withDefault ("Property #" ++ String.fromInt statId ++ " Skill Level")
+                    in
+                    commitClampedField
+                        label
+                        packedSpec.minLevel
+                        packedSpec.maxLevel
+                        (Just currentLvl)
+                        (\clamped ->
+                            EmitIntent
+                                (Protocol.SetItemPropertyParam
+                                    { itemIndex = itemIdx
+                                    , statId = statId
+                                    , param = skillId * stride + clamped
+                                    }
+                                )
+                        )
+
+                _ ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "inject_val", statIdStr ] ->
+            case String.toInt statIdStr |> Maybe.andThen findCatalogStat of
+                Just entry ->
+                    commitClampedUi
+                        ("#" ++ String.fromInt entry.statId ++ " " ++ entry.name ++ " (" ++ entry.valueLabel ++ ")")
+                        entry.minValue
+                        entry.maxValue
+                        Nothing
+                        (\clamped uiState -> ( UiState.setItemEditorInjectValue clamped uiState, NoOut ))
+
+                Nothing ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "inject_param", statIdStr ] ->
+            case String.toInt statIdStr |> Maybe.andThen findCatalogStat of
+                Just entry ->
+                    let
+                        maxParam =
+                            (2 ^ min 30 entry.paramBits) - 1
+                    in
+                    commitClampedUi
+                        ("#" ++ String.fromInt entry.statId ++ " " ++ entry.name ++ " (" ++ entry.paramLabel ++ ")")
+                        0
+                        maxParam
+                        Nothing
+                        (\clamped uiState -> ( UiState.setItemEditorInjectParam clamped uiState, NoOut ))
+
+                Nothing ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "inject_param_lvl", statIdStr ] ->
+            case String.toInt statIdStr |> Maybe.andThen findCatalogStat of
+                Just entry ->
+                    let
+                        packedSpec =
+                            model.session
+                                |> Maybe.map (.paramCatalog >> .packedSkill)
+                                |> Maybe.withDefault { stride = 64, minLevel = 1, maxLevel = 63 }
+
+                        stride =
+                            max 1 packedSpec.stride
+
+                        skillId =
+                            model.ui.itemEditorInjectParam // stride
+                    in
+                    commitClampedUi
+                        ("#" ++ String.fromInt entry.statId ++ " " ++ entry.name ++ " Skill Level")
+                        packedSpec.minLevel
+                        packedSpec.maxLevel
+                        Nothing
+                        (\clamped uiState -> ( UiState.setItemEditorInjectParam (skillId * stride + clamped) uiState, NoOut ))
+
+                Nothing ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "item_def", itemIdxStr ] ->
+            case String.toInt itemIdxStr of
+                Just itemIdx ->
+                    commitClampedField
+                        "Defense"
+                        0
+                        2037
+                        (findItem itemIdx |> Maybe.andThen .defense)
+                        (\clamped ->
+                            EmitIntent
+                                (Protocol.MutateItemBase
+                                    { itemIndex = itemIdx
+                                    , defense = Just clamped
+                                    , currentDurability = Nothing
+                                    , maxDurability = Nothing
+                                    , quantity = Nothing
+                                    , isEthereal = Nothing
+                                    }
+                                )
+                        )
+
+                Nothing ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "item_dur", itemIdxStr ] ->
+            case String.toInt itemIdxStr of
+                Just itemIdx ->
+                    let
+                        maybeItem =
+                            findItem itemIdx
+
+                        maxDur =
+                            maybeItem |> Maybe.andThen .maxDurability |> Maybe.withDefault 255
+                    in
+                    commitClampedField
+                        "Durability"
+                        0
+                        maxDur
+                        (maybeItem |> Maybe.andThen .currentDurability)
+                        (\clamped ->
+                            EmitIntent
+                                (Protocol.MutateItemBase
+                                    { itemIndex = itemIdx
+                                    , defense = Nothing
+                                    , currentDurability = Just clamped
+                                    , maxDurability = Nothing
+                                    , quantity = Nothing
+                                    , isEthereal = Nothing
+                                    }
+                                )
+                        )
+
+                Nothing ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        [ "item_qty", itemIdxStr ] ->
+            case String.toInt itemIdxStr of
+                Just itemIdx ->
+                    commitClampedField
+                        "Quantity"
+                        1
+                        511
+                        (findItem itemIdx |> Maybe.andThen .quantity)
+                        (\clamped ->
+                            EmitIntent
+                                (Protocol.MutateItemBase
+                                    { itemIndex = itemIdx
+                                    , defense = Nothing
+                                    , currentDurability = Nothing
+                                    , maxDurability = Nothing
+                                    , quantity = Just clamped
+                                    , isEthereal = Nothing
+                                    }
+                                )
+                        )
+
+                Nothing ->
+                    ( { model | ui = nextUi }, NoOut )
+
+        _ ->
+            ( { model | ui = nextUi }, NoOut )
+
 
 applyEnvelope : SessionEnvelope -> Model -> Model
 applyEnvelope envelope model =
@@ -1037,7 +1707,15 @@ applyEnvelope envelope model =
         uiWithToast =
             case envelope.rejection of
                 Just rej ->
-                    UiState.setToast rej model.ui
+                    let
+                        withToast =
+                            UiState.setToast rej model.ui
+                    in
+                    if withToast.itemEditorModalIndex /= Nothing then
+                        UiState.setItemEditorNotice (Just (UiState.NoticeError (rej.rawCode ++ ": " ++ rej.message))) withToast
+
+                    else
+                        withToast
 
                 Nothing ->
                     model.ui
@@ -1076,18 +1754,141 @@ applyEnvelope envelope model =
 
                                         else
                                             newSession.statCatalog
+
+                                    mergedParamCatalog =
+                                        if List.isEmpty newSession.paramCatalog.skills then
+                                            currentSession.paramCatalog
+
+                                        else
+                                            newSession.paramCatalog
                                 in
-                                Just { newSession | shopCatalog = mergedCatalog, statCatalog = mergedStatCatalog }
+                                Just
+                                    { newSession
+                                        | shopCatalog = mergedCatalog
+                                        , statCatalog = mergedStatCatalog
+                                        , paramCatalog = mergedParamCatalog
+                                    }
 
                         Nothing ->
                             Just newSession
 
                 Nothing ->
                     model.session
+
+        wasMoving =
+            Maybe.andThen .selectedMoveItemIndex model.session /= Nothing
+
+        isNowMoving =
+            Maybe.andThen .selectedMoveItemIndex nextSession /= Nothing
+
+        uiAfterMove =
+            if wasMoving && not isNowMoving then
+                case ( nextSession, uiWithToast.hoveredDropTarget ) of
+                    ( Just s, Just tgt ) ->
+                        uiWithToast
+                            |> UiState.setHoveredItem (findItemAtDropTarget s tgt)
+                            |> UiState.setHoveredDropTarget Nothing
+
+                    _ ->
+                        uiWithToast
+
+            else
+                uiWithToast
     in
     { model
         | session = nextSession
         , lastRejection = envelope.rejection
         , lastDecodeError = Nothing
-        , ui = UiState.setStatusBanner nextBanner uiWithToast
+        , ui = UiState.setStatusBanner nextBanner uiAfterMove
     }
+
+
+findItemAtDropTarget : SessionView -> { container : ContainerKind, x : Int, y : Int } -> Maybe Int
+findItemAtDropTarget session tgt =
+    let
+        equipAcceptedLabels bodyLoc =
+            case bodyLoc of
+                1 ->
+                    [ "Head", "Helm" ]
+
+                2 ->
+                    [ "Amulet", "Neck" ]
+
+                3 ->
+                    [ "Armor", "Torso", "Body" ]
+
+                4 ->
+                    [ "Weapon1", "Right Hand" ]
+
+                5 ->
+                    [ "Weapon2", "Left Hand", "Shield" ]
+
+                6 ->
+                    [ "Ring1", "Left Finger" ]
+
+                7 ->
+                    [ "Ring2", "Right Finger" ]
+
+                8 ->
+                    [ "Belt", "Waist" ]
+
+                9 ->
+                    [ "Boots", "Feet" ]
+
+                10 ->
+                    [ "Gloves", "Hands" ]
+
+                11 ->
+                    [ "Weapon1Swap" ]
+
+                12 ->
+                    [ "Weapon2Swap" ]
+
+                _ ->
+                    []
+
+        pool =
+            case tgt.container of
+                MercEquipment ->
+                    session.mercItems
+
+                MercReplaced ->
+                    session.mercReplacedItems
+
+                _ ->
+                    session.items
+
+        matchesTarget it =
+            if it.container /= tgt.container then
+                False
+
+            else
+                case tgt.container of
+                    Equipment ->
+                        case it.slotLabel of
+                            Just lbl ->
+                                List.member lbl (equipAcceptedLabels tgt.x)
+
+                            Nothing ->
+                                False
+
+                    MercEquipment ->
+                        it.x == tgt.x
+
+                    MercReplaced ->
+                        it.x == tgt.x
+
+                    _ ->
+                        let
+                            w =
+                                max 1 it.width
+
+                            h =
+                                max 1 it.height
+                        in
+                        tgt.x >= it.x && tgt.x < it.x + w && tgt.y >= it.y && tgt.y < it.y + h
+    in
+    pool
+        |> List.filter matchesTarget
+        |> List.head
+        |> Maybe.map .index

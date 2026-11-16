@@ -363,20 +363,6 @@ resCard label effective maxCap =
         ]
 
 
-focusedDraftValue : UiState -> String -> String -> String
-focusedDraftValue ui key serverVal =
-    case ui.focusedInput of
-        Just focused ->
-            if focused.key == key then
-                focused.raw
-
-            else
-                serverVal
-
-        Nothing ->
-            serverVal
-
-
 onEnterOrEscape : Html.Attribute Msg
 onEnterOrEscape =
     on "keydown"
@@ -401,7 +387,7 @@ draftInputEl ui key serverVal tid =
     input
         [ class "stat-input"
         , type_ "text"
-        , value (focusedDraftValue ui key serverVal)
+        , value (State.UiState.focusedDraftValue ui key serverVal)
         , attribute "data-testid" tid
         , onFocus (FocusField key serverVal)
         , onInput EditFocusedInput

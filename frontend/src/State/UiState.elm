@@ -3,6 +3,7 @@ module State.UiState exposing
     , FocusedInput
     , ItemMenuState(..)
     , MarqueeSelection
+    , ModalNotice(..)
     , PaintMode(..)
     , StashTab(..)
     , ThemeMode(..)
@@ -19,6 +20,7 @@ module State.UiState exposing
     , closeItemEditorModal
     , containerLabel
     , extendMarquee
+    , focusedDraftValue
     , init
     , openActionPalette
     , openContextMenu
@@ -30,7 +32,9 @@ module State.UiState exposing
     , setHoverMousePos
     , setHoveredDropTarget
     , setHoveredItem
+    , setItemEditorInjectParam
     , setItemEditorInjectValue
+    , setItemEditorNotice
     , setItemEditorSearch
     , setPaintMode
     , setProgressionDifficulty
@@ -106,6 +110,12 @@ type ItemMenuState
     | ContextItemMenu { itemIndex : Int, x : Int, y : Int }
 
 
+type ModalNotice
+    = NoticeInfo String
+    | NoticeWarning String
+    | NoticeError String
+
+
 type alias Toast =
     { code : RejectionCode
     , rawCode : String
@@ -140,6 +150,8 @@ type alias UiState =
     , itemEditorSearch : String
     , itemEditorInjectStatId : Maybe Int
     , itemEditorInjectValue : Int
+    , itemEditorInjectParam : Int
+    , itemEditorNotice : Maybe ModalNotice
     }
 
 
@@ -169,6 +181,8 @@ init =
     , itemEditorSearch = ""
     , itemEditorInjectStatId = Nothing
     , itemEditorInjectValue = 10
+    , itemEditorInjectParam = 0
+    , itemEditorNotice = Nothing
     }
 
 
@@ -201,12 +215,19 @@ openItemEditorModal idx ui =
         , itemEditorSearch = ""
         , itemEditorInjectStatId = Nothing
         , itemEditorInjectValue = 10
+        , itemEditorInjectParam = 0
+        , itemEditorNotice = Nothing
     }
 
 
 closeItemEditorModal : UiState -> UiState
 closeItemEditorModal ui =
-    { ui | itemEditorModalIndex = Nothing }
+    { ui | itemEditorModalIndex = Nothing, itemEditorNotice = Nothing }
+
+
+setItemEditorNotice : Maybe ModalNotice -> UiState -> UiState
+setItemEditorNotice notice ui =
+    { ui | itemEditorNotice = notice }
 
 
 setItemEditorSearch : String -> UiState -> UiState
@@ -219,12 +240,18 @@ selectItemEditorInjectStat statId defaultVal ui =
     { ui
         | itemEditorInjectStatId = Just statId
         , itemEditorInjectValue = defaultVal
+        , itemEditorInjectParam = 0
     }
 
 
 setItemEditorInjectValue : Int -> UiState -> UiState
 setItemEditorInjectValue val ui =
     { ui | itemEditorInjectValue = val }
+
+
+setItemEditorInjectParam : Int -> UiState -> UiState
+setItemEditorInjectParam param ui =
+    { ui | itemEditorInjectParam = param }
 
 
 setProgressionDifficulty : DifficultyMode -> UiState -> UiState
@@ -348,7 +375,7 @@ clearToast ui =
 
 beginFocusInput : String -> String -> UiState -> UiState
 beginFocusInput key raw ui =
-    { ui | focusedInput = Just { key = key, raw = raw } }
+    { ui | focusedInput = Just { key = key, raw = raw }, itemEditorNotice = Nothing }
 
 
 updateFocusInput : String -> UiState -> UiState
@@ -603,3 +630,17 @@ qualityLabel quality =
 
         QualityUnknown ->
             "Unknown"
+
+
+focusedDraftValue : UiState -> String -> String -> String
+focusedDraftValue ui key serverVal =
+    case ui.focusedInput of
+        Just focused ->
+            if focused.key == key then
+                focused.raw
+
+            else
+                serverVal
+
+        Nothing ->
+            serverVal

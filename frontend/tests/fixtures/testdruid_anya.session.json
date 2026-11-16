@@ -502,16 +502,26 @@
           "name": "dexterity",
           "value": 2,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 95
+          "max_value": 95,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 11,
           "name": "maxstamina",
           "value": 22,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 223
+          "max_value": 223,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -523,7 +533,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/charm/charm_medium3.svg",
       "is_belt_consumable": false
     },
@@ -553,24 +565,39 @@
           "name": "fireresist",
           "value": 4,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 50,
           "name": "lightmindam",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 51,
           "name": "lightmaxdam",
           "value": 3,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 1023
+          "max_value": 1023,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -582,7 +609,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/charm/charm_medium1.svg",
       "is_belt_consumable": false
     },
@@ -611,8 +640,13 @@
           "name": "item_fastercastrate",
           "value": 10,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 107
+          "max_value": 107,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -624,7 +658,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/amulet/amulet3.svg",
       "is_belt_consumable": false
     },
@@ -654,16 +690,26 @@
           "name": "normal_damage_reduction",
           "value": 2,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 60,
           "name": "lifedrainmindam",
           "value": 6,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -720,7 +766,9 @@
           ]
         }
       ],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/ring/rring5.svg",
       "is_belt_consumable": false
     },
@@ -747,8 +795,13 @@
           "name": "item_goldbonus",
           "value": 21,
           "param": 0,
+          "param_bits": 0,
           "min_value": -100,
-          "max_value": 411
+          "max_value": 411,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -760,7 +813,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/gem/perfect_diamond4.svg",
       "is_belt_consumable": false
     },
@@ -790,48 +845,78 @@
           "name": "maxhp",
           "value": 7,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 479
+          "max_value": 479,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 31,
           "name": "armorclass",
           "value": 6,
           "param": 0,
+          "param_bits": 0,
           "min_value": -10,
-          "max_value": 2037
+          "max_value": 2037,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 57,
           "name": "poisonmindam",
           "value": 103,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 1023
+          "max_value": 1023,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 58,
           "name": "poisonmaxdam",
           "value": 103,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 1023
+          "max_value": 1023,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 59,
           "name": "poisonlength",
           "value": 50,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 91,
           "name": "item_req_percent",
           "value": -15,
           "param": 0,
+          "param_bits": 0,
           "min_value": -100,
-          "max_value": 155
+          "max_value": 155,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -843,7 +928,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/gem/perfect_diamond5.svg",
       "is_belt_consumable": false
     },
@@ -872,8 +959,13 @@
           "name": "fireresist",
           "value": 7,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -885,7 +977,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/charm/charm_small2.svg",
       "is_belt_consumable": false
     },
@@ -914,8 +1008,13 @@
           "name": "fireresist",
           "value": 6,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -927,7 +1026,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/charm/charm_small1.svg",
       "is_belt_consumable": false
     },
@@ -958,7 +1059,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -989,7 +1092,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
       "is_belt_consumable": true
     },
@@ -1018,8 +1123,13 @@
           "name": "item_fastercastrate",
           "value": 10,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 107
+          "max_value": 107,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -1031,7 +1141,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/ring/rring5.svg",
       "is_belt_consumable": false
     },
@@ -1060,8 +1172,13 @@
           "name": "fireresist",
           "value": 7,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -1073,7 +1190,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/charm/charm_small1.svg",
       "is_belt_consumable": false
     },
@@ -1111,48 +1230,78 @@
           "name": "energy",
           "value": 7,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 95
+          "max_value": 95,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 16,
           "name": "item_armor_percent",
           "value": 29,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 39,
           "name": "fireresist",
           "value": 20,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 89,
           "name": "item_lightradius",
           "value": 2,
           "param": 0,
+          "param_bits": 0,
           "min_value": -4,
-          "max_value": 11
+          "max_value": 11,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 110,
           "name": "item_poisonlengthresist",
           "value": 25,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 235
+          "max_value": 235,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 252,
           "name": "item_replenish_durability",
           "value": 3,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 42,
@@ -1164,7 +1313,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/helmet/mask.svg",
       "is_belt_consumable": false
     },
@@ -1194,16 +1345,26 @@
           "name": "energy",
           "value": 7,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 95
+          "max_value": 95,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 41,
           "name": "lightresist",
           "value": 25,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -1215,7 +1376,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/amulet/amulet1.svg",
       "is_belt_consumable": false
     },
@@ -1247,32 +1410,52 @@
           "name": "strength",
           "value": 3,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 223
+          "max_value": 223,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 1,
           "name": "energy",
           "value": 4,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 95
+          "max_value": 95,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 41,
           "name": "lightresist",
           "value": 6,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 118,
           "name": "item_halffreezeduration",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 1
+          "max_value": 1,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -1284,7 +1467,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
       "is_belt_consumable": false
     },
@@ -1314,16 +1499,26 @@
           "name": "lightresist",
           "value": 17,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 79,
           "name": "item_goldbonus",
           "value": 39,
           "param": 0,
+          "param_bits": 0,
           "min_value": -100,
-          "max_value": 411
+          "max_value": 411,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -1335,7 +1530,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
       "is_belt_consumable": false
     },
@@ -1373,48 +1570,78 @@
           "name": "maxstamina",
           "value": 19,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 223
+          "max_value": 223,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 16,
           "name": "item_armor_percent",
           "value": 17,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 43,
           "name": "coldresist",
           "value": 14,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 118,
           "name": "item_halffreezeduration",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 1
+          "max_value": 1,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 201,
           "name": "item_skillongethit",
           "value": 5,
           "param": 2819,
+          "param_bits": 16,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Chance (%)",
+          "param_label": "Skill",
+          "param_kind": "ParamPackedSkill",
+          "param_preview": "Lv.3 Frost Nova (#44)"
         },
         {
           "stat_id": 252,
           "name": "item_replenish_durability",
           "value": 3,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 7,
@@ -1426,7 +1653,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/boot/heavy_boots.svg",
       "is_belt_consumable": false
     },
@@ -1462,64 +1691,104 @@
           "name": "maxhp",
           "value": 40,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 479
+          "max_value": 479,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 16,
           "name": "item_armor_percent",
           "value": 14,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 21,
           "name": "mindamage",
           "value": 5,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 23,
           "name": "secondary_mindamage",
           "value": 5,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 31,
           "name": "armorclass",
           "value": 10,
           "param": 0,
+          "param_bits": 0,
           "min_value": -10,
-          "max_value": 2037
+          "max_value": 2037,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 93,
           "name": "item_fasterattackrate",
           "value": 10,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 107
+          "max_value": 107,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 99,
           "name": "item_fastergethitrate",
           "value": 30,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 107
+          "max_value": 107,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 159,
           "name": "item_throw_mindamage",
           "value": 5,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 7,
@@ -1531,7 +1800,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/glove/heavy_gloves.svg",
       "is_belt_consumable": false
     },
@@ -1567,40 +1838,65 @@
           "name": "coldresist",
           "value": 28,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 45,
           "name": "poisonresist",
           "value": 20,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 78,
           "name": "item_attackertakesdamage",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 99,
           "name": "item_fastergethitrate",
           "value": 17,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 107
+          "max_value": 107,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 110,
           "name": "item_poisonlengthresist",
           "value": 25,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 235
+          "max_value": 235,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 9,
@@ -1612,7 +1908,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/belt/girdle_h.svg",
       "is_belt_consumable": false
     },
@@ -1643,7 +1941,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -1674,7 +1974,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/healing_potion2.svg",
       "is_belt_consumable": true
     },
@@ -1705,7 +2007,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -1736,7 +2040,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -1767,7 +2073,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
       "is_belt_consumable": true
     },
@@ -1806,56 +2114,91 @@
           "name": "strength",
           "value": 15,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 223
+          "max_value": 223,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 2,
           "name": "dexterity",
           "value": 8,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 95
+          "max_value": 95,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 17,
           "name": "item_maxdamage_percent",
           "value": 31,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 18,
           "name": "item_mindamage_percent",
           "value": 31,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 93,
           "name": "item_fasterattackrate",
           "value": 30,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 107
+          "max_value": 107,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 116,
           "name": "item_fractionaltargetac",
           "value": 50,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 150,
           "name": "item_slow",
           "value": 25,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -1867,7 +2210,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/weapon/spear/razortine.svg",
       "is_belt_consumable": false
     },
@@ -1905,40 +2250,65 @@
           "name": "item_armor_percent",
           "value": 99,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 45,
           "name": "poisonresist",
           "value": 90,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 46,
           "name": "maxpoisonresist",
           "value": 15,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 31
+          "max_value": 31,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 89,
           "name": "item_lightradius",
           "value": 2,
           "param": 0,
+          "param_bits": 0,
           "min_value": -4,
-          "max_value": 11
+          "max_value": 11,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 110,
           "name": "item_poisonlengthresist",
           "value": 50,
           "param": 0,
+          "param_bits": 0,
           "min_value": -20,
-          "max_value": 235
+          "max_value": 235,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 69,
@@ -1950,8 +2320,23 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 1,
       "socketed_names": [
         "Perfect Sapphire"
+      ],
+      "socketed_items": [
+        {
+          "code": "gpb",
+          "name_en": "Perfect Sapphire",
+          "name_ko": "최상급 사파이어",
+          "quality": "QualityUnknown",
+          "image_url": "/item-vectors/misc/gem/perfect_saphire.svg",
+          "properties": [
+            "Weapons: Adds 10-14 cold damage (3 sec duration)",
+            "Armor: +38 to Mana",
+            "Shields: Cold Resist +40%"
+          ]
+        }
       ],
       "image_url": "/item-vectors/armor/armor/breast_plate.svg",
       "is_belt_consumable": false
@@ -1983,7 +2368,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
       "is_belt_consumable": true
     },
@@ -2012,7 +2399,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/stamina_potion.svg",
       "is_belt_consumable": true
     },
@@ -2043,7 +2432,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/book/identify_book.svg",
       "is_belt_consumable": false
     },
@@ -2075,7 +2466,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/ring/rring4.svg",
       "is_belt_consumable": false
     },
@@ -2106,7 +2499,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -2137,7 +2532,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/light_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -2168,7 +2565,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -2199,7 +2598,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/greater_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -2230,7 +2631,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/strong_healing_potion.svg",
       "is_belt_consumable": true
     },
@@ -2259,7 +2662,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/quest/horadric_cube.svg",
       "is_belt_consumable": false
     },
@@ -2290,7 +2695,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
       "is_belt_consumable": true
     },
@@ -2321,7 +2728,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
       "is_belt_consumable": true
     },
@@ -2352,7 +2761,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/rejuv_potion.svg",
       "is_belt_consumable": true
     },
@@ -2383,7 +2794,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/potion/greater_mana_potion.svg",
       "is_belt_consumable": true
     },
@@ -2414,7 +2827,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/misc/book/town_portal_book.svg",
       "is_belt_consumable": false
     },
@@ -2452,56 +2867,91 @@
           "name": "strength",
           "value": 15,
           "param": 0,
+          "param_bits": 0,
           "min_value": -32,
-          "max_value": 223
+          "max_value": 223,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 17,
           "name": "item_maxdamage_percent",
           "value": 55,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 18,
           "name": "item_mindamage_percent",
           "value": 55,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 39,
           "name": "fireresist",
           "value": 50,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 81,
           "name": "item_knockback",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 89,
           "name": "item_lightradius",
           "value": 2,
           "param": 0,
+          "param_bits": 0,
           "min_value": -4,
-          "max_value": 11
+          "max_value": 11,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 136,
           "name": "item_crushingblow",
           "value": 33,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": null,
@@ -2513,7 +2963,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/weapon/mace/mace.svg",
       "is_belt_consumable": false
     },
@@ -2552,48 +3004,78 @@
           "name": "item_armor_percent",
           "value": 55,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 34,
           "name": "normal_damage_reduction",
           "value": 2,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 35,
           "name": "magic_damage_reduction",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 63
+          "max_value": 63,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 39,
           "name": "fireresist",
           "value": 19,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 41,
           "name": "lightresist",
           "value": 17,
           "param": 0,
+          "param_bits": 0,
           "min_value": -200,
-          "max_value": 311
+          "max_value": 311,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 78,
           "name": "item_attackertakesdamage",
           "value": 1,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 26,
@@ -2605,7 +3087,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/shield/tower_shield.svg",
       "is_belt_consumable": false
     }
@@ -2639,8 +3123,13 @@
           "name": "item_armor_percent",
           "value": 31,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         }
       ],
       "defense": 76,
@@ -2652,7 +3141,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/armor/chain_mail.svg",
       "is_belt_consumable": false
     },
@@ -2686,7 +3177,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 2,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/armor/helmet/helm.svg",
       "is_belt_consumable": false
     },
@@ -2722,32 +3215,52 @@
           "name": "item_maxdamage_percent",
           "value": 59,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 18,
           "name": "item_mindamage_percent",
           "value": 59,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 511
+          "max_value": 511,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 19,
           "name": "tohit",
           "value": 36,
           "param": 0,
+          "param_bits": 0,
           "min_value": 0,
-          "max_value": 1023
+          "max_value": 1023,
+          "value_label": "Value",
+          "param_label": "Param",
+          "param_kind": "ParamNone",
+          "param_preview": null
         },
         {
           "stat_id": 198,
           "name": "item_skillonhit",
           "value": 5,
           "param": 4225,
+          "param_bits": 16,
           "min_value": 0,
-          "max_value": 127
+          "max_value": 127,
+          "value_label": "Chance (%)",
+          "param_label": "Skill",
+          "param_kind": "ParamPackedSkill",
+          "param_preview": "Lv.1 Amplify Damage (#66)"
         }
       ],
       "defense": null,
@@ -2759,7 +3272,9 @@
       "set_pieces": [],
       "piece_set_bonuses": [],
       "set_bonuses": [],
+      "socket_count": 0,
       "socketed_names": [],
+      "socketed_items": [],
       "image_url": "/item-vectors/weapon/spear/trident.svg",
       "is_belt_consumable": false
     }
@@ -4156,5 +4671,3924 @@
       "summary": "Unique · qlvl 38"
     }
   ],
-  "stat_catalog": []
+  "stat_catalog": [
+    {
+      "stat_id": 0,
+      "name": "strength",
+      "min_value": -32,
+      "max_value": 223,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 1,
+      "name": "energy",
+      "min_value": -32,
+      "max_value": 95,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 2,
+      "name": "dexterity",
+      "min_value": -32,
+      "max_value": 95,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 3,
+      "name": "vitality",
+      "min_value": -32,
+      "max_value": 95,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 7,
+      "name": "maxhp",
+      "min_value": -32,
+      "max_value": 479,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 9,
+      "name": "maxmana",
+      "min_value": -32,
+      "max_value": 223,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 11,
+      "name": "maxstamina",
+      "min_value": -32,
+      "max_value": 223,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 16,
+      "name": "item_armor_percent",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 17,
+      "name": "item_maxdamage_percent",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 18,
+      "name": "item_mindamage_percent",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 19,
+      "name": "tohit",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 20,
+      "name": "toblock",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 21,
+      "name": "mindamage",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 22,
+      "name": "maxdamage",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 23,
+      "name": "secondary_mindamage",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 24,
+      "name": "secondary_maxdamage",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 25,
+      "name": "damagepercent",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 26,
+      "name": "manarecovery",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 27,
+      "name": "manarecoverybonus",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 28,
+      "name": "staminarecoverybonus",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 31,
+      "name": "armorclass",
+      "min_value": -10,
+      "max_value": 2037,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 32,
+      "name": "armorclass_vs_missile",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 33,
+      "name": "armorclass_vs_hth",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 34,
+      "name": "normal_damage_reduction",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 35,
+      "name": "magic_damage_reduction",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 36,
+      "name": "damageresist",
+      "min_value": -200,
+      "max_value": 311,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 37,
+      "name": "magicresist",
+      "min_value": -200,
+      "max_value": 311,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 38,
+      "name": "maxmagicresist",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 39,
+      "name": "fireresist",
+      "min_value": -200,
+      "max_value": 311,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 40,
+      "name": "maxfireresist",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 41,
+      "name": "lightresist",
+      "min_value": -200,
+      "max_value": 311,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 42,
+      "name": "maxlightresist",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 43,
+      "name": "coldresist",
+      "min_value": -200,
+      "max_value": 311,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 44,
+      "name": "maxcoldresist",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 45,
+      "name": "poisonresist",
+      "min_value": -200,
+      "max_value": 311,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 46,
+      "name": "maxpoisonresist",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 48,
+      "name": "firemindam",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 49,
+      "name": "firemaxdam",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 50,
+      "name": "lightmindam",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 51,
+      "name": "lightmaxdam",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 52,
+      "name": "magicmindam",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 53,
+      "name": "magicmaxdam",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 54,
+      "name": "coldmindam",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 55,
+      "name": "coldmaxdam",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 56,
+      "name": "coldlength",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 57,
+      "name": "poisonmindam",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 58,
+      "name": "poisonmaxdam",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 59,
+      "name": "poisonlength",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 60,
+      "name": "lifedrainmindam",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 62,
+      "name": "manadrainmindam",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 67,
+      "name": "velocitypercent",
+      "min_value": -30,
+      "max_value": 97,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 68,
+      "name": "attackrate",
+      "min_value": -30,
+      "max_value": 97,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 71,
+      "name": "value",
+      "min_value": -100,
+      "max_value": 155,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 72,
+      "name": "durability",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 73,
+      "name": "maxdurability",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 74,
+      "name": "hpregen",
+      "min_value": -30,
+      "max_value": 33,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 75,
+      "name": "item_maxdurability_percent",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 76,
+      "name": "item_maxhp_percent",
+      "min_value": -10,
+      "max_value": 53,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 77,
+      "name": "item_maxmana_percent",
+      "min_value": -10,
+      "max_value": 53,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 78,
+      "name": "item_attackertakesdamage",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 79,
+      "name": "item_goldbonus",
+      "min_value": -100,
+      "max_value": 411,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 80,
+      "name": "item_magicbonus",
+      "min_value": -100,
+      "max_value": 155,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 81,
+      "name": "item_knockback",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 82,
+      "name": "item_timeduration",
+      "min_value": -20,
+      "max_value": 491,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 83,
+      "name": "item_addclassskills",
+      "min_value": 0,
+      "max_value": 7,
+      "param_bits": 3,
+      "value_label": "+Class Skills",
+      "param_label": "Class",
+      "param_kind": "ParamClass"
+    },
+    {
+      "stat_id": 85,
+      "name": "item_addexperience",
+      "min_value": -50,
+      "max_value": 461,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 86,
+      "name": "item_healafterkill",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 87,
+      "name": "item_reducedprices",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 88,
+      "name": "item_doubleherbduration",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 89,
+      "name": "item_lightradius",
+      "min_value": -4,
+      "max_value": 11,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 90,
+      "name": "item_lightcolor",
+      "min_value": 0,
+      "max_value": 16777215,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 91,
+      "name": "item_req_percent",
+      "min_value": -100,
+      "max_value": 155,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 92,
+      "name": "item_levelreq",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 93,
+      "name": "item_fasterattackrate",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 94,
+      "name": "item_levelreqpct",
+      "min_value": -64,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 96,
+      "name": "item_fastermovevelocity",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 97,
+      "name": "item_nonclassskill",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 9,
+      "value_label": "Skill Level",
+      "param_label": "Skill",
+      "param_kind": "ParamSkill"
+    },
+    {
+      "stat_id": 98,
+      "name": "state",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 8,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamRaw"
+    },
+    {
+      "stat_id": 99,
+      "name": "item_fastergethitrate",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 102,
+      "name": "item_fasterblockrate",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 105,
+      "name": "item_fastercastrate",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 107,
+      "name": "item_singleskill",
+      "min_value": 0,
+      "max_value": 7,
+      "param_bits": 9,
+      "value_label": "Skill Level",
+      "param_label": "Skill",
+      "param_kind": "ParamSkill"
+    },
+    {
+      "stat_id": 108,
+      "name": "item_restinpeace",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 109,
+      "name": "curse_resistance",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 110,
+      "name": "item_poisonlengthresist",
+      "min_value": -20,
+      "max_value": 235,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 111,
+      "name": "item_normaldamage",
+      "min_value": -20,
+      "max_value": 491,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 112,
+      "name": "item_howl",
+      "min_value": 1,
+      "max_value": 128,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 113,
+      "name": "item_stupidity",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 114,
+      "name": "item_damagetomana",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 115,
+      "name": "item_ignoretargetac",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 116,
+      "name": "item_fractionaltargetac",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 117,
+      "name": "item_preventheal",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 118,
+      "name": "item_halffreezeduration",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 119,
+      "name": "item_tohit_percent",
+      "min_value": -20,
+      "max_value": 491,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 120,
+      "name": "item_damagetargetac",
+      "min_value": -128,
+      "max_value": -1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 121,
+      "name": "item_demondamage_percent",
+      "min_value": -20,
+      "max_value": 491,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 122,
+      "name": "item_undeaddamage_percent",
+      "min_value": -20,
+      "max_value": 491,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 123,
+      "name": "item_demon_tohit",
+      "min_value": -128,
+      "max_value": 895,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 124,
+      "name": "item_undead_tohit",
+      "min_value": -128,
+      "max_value": 895,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 125,
+      "name": "item_throwable",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 126,
+      "name": "item_elemskill",
+      "min_value": 0,
+      "max_value": 7,
+      "param_bits": 3,
+      "value_label": "+Element Skills",
+      "param_label": "Element",
+      "param_kind": "ParamElement"
+    },
+    {
+      "stat_id": 127,
+      "name": "item_allskills",
+      "min_value": 0,
+      "max_value": 7,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 128,
+      "name": "item_attackertakeslightdamage",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 134,
+      "name": "item_freeze",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 135,
+      "name": "item_openwounds",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 136,
+      "name": "item_crushingblow",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 137,
+      "name": "item_kickdamage",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 138,
+      "name": "item_manaafterkill",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 139,
+      "name": "item_healafterdemonkill",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 140,
+      "name": "item_extrablood",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 141,
+      "name": "item_deadlystrike",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 142,
+      "name": "item_absorbfire_percent",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 143,
+      "name": "item_absorbfire",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 144,
+      "name": "item_absorblight_percent",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 145,
+      "name": "item_absorblight",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 146,
+      "name": "item_absorbmagic_percent",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 147,
+      "name": "item_absorbmagic",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 148,
+      "name": "item_absorbcold_percent",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 149,
+      "name": "item_absorbcold",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 150,
+      "name": "item_slow",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 151,
+      "name": "item_aura",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 9,
+      "value_label": "Aura Level",
+      "param_label": "Aura Skill",
+      "param_kind": "ParamSkill"
+    },
+    {
+      "stat_id": 152,
+      "name": "item_indesctructible",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 153,
+      "name": "item_cannotbefrozen",
+      "min_value": 0,
+      "max_value": 1,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 154,
+      "name": "item_staminadrainpct",
+      "min_value": -20,
+      "max_value": 107,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 155,
+      "name": "item_reanimate",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 10,
+      "value_label": "Chance (%)",
+      "param_label": "Monster ID",
+      "param_kind": "ParamRaw"
+    },
+    {
+      "stat_id": 156,
+      "name": "item_pierce",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 157,
+      "name": "item_magicarrow",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 158,
+      "name": "item_explosivearrow",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 159,
+      "name": "item_throw_mindamage",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 160,
+      "name": "item_throw_maxdamage",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 179,
+      "name": "attack_vs_montype",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 10,
+      "value_label": "Stat Value",
+      "param_label": "Monster Type ID",
+      "param_kind": "ParamRaw"
+    },
+    {
+      "stat_id": 180,
+      "name": "damage_vs_montype",
+      "min_value": 0,
+      "max_value": 511,
+      "param_bits": 10,
+      "value_label": "Stat Value",
+      "param_label": "Monster Type ID",
+      "param_kind": "ParamRaw"
+    },
+    {
+      "stat_id": 181,
+      "name": "fade",
+      "min_value": 0,
+      "max_value": 7,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 185,
+      "name": "bonus_mindamage",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 186,
+      "name": "bonus_maxdamage",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 187,
+      "name": "item_pierce_cold_immunity",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 188,
+      "name": "item_addskill_tab",
+      "min_value": 0,
+      "max_value": 7,
+      "param_bits": 16,
+      "value_label": "+Tab Skills",
+      "param_label": "Skill Tab",
+      "param_kind": "ParamSkillTab"
+    },
+    {
+      "stat_id": 189,
+      "name": "item_pierce_fire_immunity",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 190,
+      "name": "item_pierce_light_immunity",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 191,
+      "name": "item_pierce_poison_immunity",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 192,
+      "name": "item_pierce_damage_immunity",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 193,
+      "name": "item_pierce_magic_immunity",
+      "min_value": 0,
+      "max_value": 1023,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 194,
+      "name": "item_numsockets",
+      "min_value": 0,
+      "max_value": 15,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 195,
+      "name": "item_skillonattack",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 16,
+      "value_label": "Chance (%)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 196,
+      "name": "item_skillonkill",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 16,
+      "value_label": "Chance (%)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 197,
+      "name": "item_skillondeath",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 16,
+      "value_label": "Chance (%)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 198,
+      "name": "item_skillonhit",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 16,
+      "value_label": "Chance (%)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 199,
+      "name": "item_skillonlevelup",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 16,
+      "value_label": "Chance (%)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 200,
+      "name": "item_charge_noconsume",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 201,
+      "name": "item_skillongethit",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 16,
+      "value_label": "Chance (%)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 204,
+      "name": "item_charged_skill",
+      "min_value": 0,
+      "max_value": 65535,
+      "param_bits": 16,
+      "value_label": "Charges ((max<<8)|cur)",
+      "param_label": "Skill",
+      "param_kind": "ParamPackedSkill"
+    },
+    {
+      "stat_id": 205,
+      "name": "item_noconsume",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 206,
+      "name": "passive_mastery_noconsume",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 207,
+      "name": "passive_mastery_replenish_oncrit",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 213,
+      "name": "passive_mastery_gethit_rate",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 213,
+      "name": "passive_mastery_attack_speed",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 214,
+      "name": "item_armor_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 215,
+      "name": "item_armorpercent_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 216,
+      "name": "item_hp_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 217,
+      "name": "item_mana_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 218,
+      "name": "item_maxdamage_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 219,
+      "name": "item_maxdamage_percent_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 220,
+      "name": "item_strength_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 221,
+      "name": "item_dexterity_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 222,
+      "name": "item_energy_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 223,
+      "name": "item_vitality_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 224,
+      "name": "item_tohit_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 225,
+      "name": "item_tohitpercent_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 226,
+      "name": "item_cold_damagemax_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 227,
+      "name": "item_fire_damagemax_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 228,
+      "name": "item_ltng_damagemax_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 229,
+      "name": "item_pois_damagemax_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 230,
+      "name": "item_resist_cold_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 231,
+      "name": "item_resist_fire_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 232,
+      "name": "item_resist_ltng_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 233,
+      "name": "item_resist_pois_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 234,
+      "name": "item_absorb_cold_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 235,
+      "name": "item_absorb_fire_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 236,
+      "name": "item_absorb_ltng_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 237,
+      "name": "item_absorb_pois_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 238,
+      "name": "item_thorns_perlevel",
+      "min_value": 0,
+      "max_value": 31,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 239,
+      "name": "item_find_gold_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 240,
+      "name": "item_find_magic_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 241,
+      "name": "item_regenstamina_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 242,
+      "name": "item_stamina_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 243,
+      "name": "item_damage_demon_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 244,
+      "name": "item_damage_undead_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 245,
+      "name": "item_tohit_demon_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 246,
+      "name": "item_tohit_undead_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 247,
+      "name": "item_crushingblow_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 248,
+      "name": "item_openwounds_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 249,
+      "name": "item_kick_damage_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 250,
+      "name": "item_deadlystrike_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 252,
+      "name": "item_replenish_durability",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 253,
+      "name": "item_replenish_quantity",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 254,
+      "name": "item_extra_stack",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 268,
+      "name": "item_armor_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 269,
+      "name": "item_armorpercent_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 270,
+      "name": "item_hp_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 271,
+      "name": "item_mana_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 272,
+      "name": "item_maxdamage_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 273,
+      "name": "item_maxdamage_percent_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 274,
+      "name": "item_strength_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 275,
+      "name": "item_dexterity_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 276,
+      "name": "item_energy_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 277,
+      "name": "item_vitality_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 278,
+      "name": "item_tohit_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 279,
+      "name": "item_tohitpercent_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 280,
+      "name": "item_cold_damagemax_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 281,
+      "name": "item_fire_damagemax_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 282,
+      "name": "item_ltng_damagemax_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 283,
+      "name": "item_pois_damagemax_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 284,
+      "name": "item_resist_cold_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 285,
+      "name": "item_resist_fire_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 286,
+      "name": "item_resist_ltng_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 287,
+      "name": "item_resist_pois_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 288,
+      "name": "item_absorb_cold_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 289,
+      "name": "item_absorb_fire_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 290,
+      "name": "item_absorb_ltng_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 291,
+      "name": "item_absorb_pois_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 292,
+      "name": "item_find_gold_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 293,
+      "name": "item_find_magic_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 294,
+      "name": "item_regenstamina_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 295,
+      "name": "item_stamina_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 296,
+      "name": "item_damage_demon_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 297,
+      "name": "item_damage_undead_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 298,
+      "name": "item_tohit_demon_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 299,
+      "name": "item_tohit_undead_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 300,
+      "name": "item_crushingblow_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 301,
+      "name": "item_openwounds_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 302,
+      "name": "item_kick_damage_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 303,
+      "name": "item_deadlystrike_bytime",
+      "min_value": 0,
+      "max_value": 4194303,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 305,
+      "name": "item_pierce_cold",
+      "min_value": -50,
+      "max_value": 205,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 306,
+      "name": "item_pierce_fire",
+      "min_value": -50,
+      "max_value": 205,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 307,
+      "name": "item_pierce_ltng",
+      "min_value": -50,
+      "max_value": 205,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 308,
+      "name": "item_pierce_pois",
+      "min_value": -50,
+      "max_value": 205,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 324,
+      "name": "item_extra_charges",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 329,
+      "name": "passive_fire_mastery",
+      "min_value": -50,
+      "max_value": 461,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 330,
+      "name": "passive_ltng_mastery",
+      "min_value": -50,
+      "max_value": 461,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 331,
+      "name": "passive_cold_mastery",
+      "min_value": -50,
+      "max_value": 461,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 332,
+      "name": "passive_pois_mastery",
+      "min_value": -50,
+      "max_value": 461,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 333,
+      "name": "passive_fire_pierce",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 334,
+      "name": "passive_ltng_pierce",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 335,
+      "name": "passive_cold_pierce",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 336,
+      "name": "passive_pois_pierce",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 337,
+      "name": "passive_critical_strike",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 338,
+      "name": "passive_dodge",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 339,
+      "name": "passive_avoid",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 340,
+      "name": "passive_evade",
+      "min_value": 0,
+      "max_value": 127,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 341,
+      "name": "passive_warmth",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 342,
+      "name": "passive_mastery_melee_th",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 343,
+      "name": "passive_mastery_melee_dmg",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 344,
+      "name": "passive_mastery_melee_crit",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 345,
+      "name": "passive_mastery_throw_th",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 346,
+      "name": "passive_mastery_throw_dmg",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 347,
+      "name": "passive_mastery_throw_crit",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 348,
+      "name": "passive_weaponblock",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 349,
+      "name": "passive_summon_resist",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 356,
+      "name": "questitemdifficulty",
+      "min_value": 0,
+      "max_value": 3,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 357,
+      "name": "passive_mag_mastery",
+      "min_value": -50,
+      "max_value": 461,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 358,
+      "name": "passive_mag_pierce",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 365,
+      "name": "item_magic_damagemax_perlevel",
+      "min_value": 0,
+      "max_value": 63,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    },
+    {
+      "stat_id": 366,
+      "name": "passive_dmg_pierce",
+      "min_value": 0,
+      "max_value": 255,
+      "param_bits": 0,
+      "value_label": "Value",
+      "param_label": "Param",
+      "param_kind": "ParamNone"
+    }
+  ],
+  "param_catalog": {
+    "classes": [
+      {
+        "value": 0,
+        "label": "#0 Amazon"
+      },
+      {
+        "value": 1,
+        "label": "#1 Sorceress"
+      },
+      {
+        "value": 2,
+        "label": "#2 Necromancer"
+      },
+      {
+        "value": 3,
+        "label": "#3 Paladin"
+      },
+      {
+        "value": 4,
+        "label": "#4 Barbarian"
+      },
+      {
+        "value": 5,
+        "label": "#5 Druid"
+      },
+      {
+        "value": 6,
+        "label": "#6 Assassin"
+      },
+      {
+        "value": 7,
+        "label": "#7 Warlock"
+      }
+    ],
+    "elements": [
+      {
+        "value": 0,
+        "label": "#0 Fire"
+      },
+      {
+        "value": 1,
+        "label": "#1 Lightning"
+      },
+      {
+        "value": 2,
+        "label": "#2 Magic"
+      },
+      {
+        "value": 3,
+        "label": "#3 Cold"
+      },
+      {
+        "value": 4,
+        "label": "#4 Poison"
+      }
+    ],
+    "skill_tabs": [
+      {
+        "value": 0,
+        "label": "#0 to Bow and Crossbow Skills"
+      },
+      {
+        "value": 1,
+        "label": "#1 to Passive and Magic Skills"
+      },
+      {
+        "value": 2,
+        "label": "#2 to Javelin and Spear Skills"
+      },
+      {
+        "value": 8,
+        "label": "#8 to Fire Skills"
+      },
+      {
+        "value": 9,
+        "label": "#9 to Lightning Skills"
+      },
+      {
+        "value": 10,
+        "label": "#10 to Cold Skills"
+      },
+      {
+        "value": 16,
+        "label": "#16 to Curses"
+      },
+      {
+        "value": 17,
+        "label": "#17 to Poison and Bone Skills"
+      },
+      {
+        "value": 18,
+        "label": "#18 + to Summoning Skills"
+      },
+      {
+        "value": 24,
+        "label": "#24 to Combat Skills"
+      },
+      {
+        "value": 25,
+        "label": "#25 to Offensive Auras"
+      },
+      {
+        "value": 26,
+        "label": "#26 to Defensive Auras"
+      },
+      {
+        "value": 32,
+        "label": "#32 to Combat Skills"
+      },
+      {
+        "value": 33,
+        "label": "#33 to Masteries"
+      },
+      {
+        "value": 34,
+        "label": "#34 to Warcries"
+      },
+      {
+        "value": 40,
+        "label": "#40 to Summoning Skills"
+      },
+      {
+        "value": 41,
+        "label": "#41 to Shape Shifting Skills"
+      },
+      {
+        "value": 42,
+        "label": "#42 to Elemental Skills"
+      },
+      {
+        "value": 48,
+        "label": "#48 to Traps"
+      },
+      {
+        "value": 49,
+        "label": "#49 to Shadow Disciplines"
+      },
+      {
+        "value": 50,
+        "label": "#50 to Martial Arts"
+      },
+      {
+        "value": 56,
+        "label": "#56 + to Demon Skills"
+      },
+      {
+        "value": 57,
+        "label": "#57 + to Eldritch Skills"
+      },
+      {
+        "value": 58,
+        "label": "#58 + to Chaos Skills"
+      }
+    ],
+    "skills": [
+      {
+        "value": 0,
+        "label": "#0 Attack"
+      },
+      {
+        "value": 1,
+        "label": "#1 Kick"
+      },
+      {
+        "value": 2,
+        "label": "#2 Throw"
+      },
+      {
+        "value": 3,
+        "label": "#3 Unsummon"
+      },
+      {
+        "value": 4,
+        "label": "#4 Left Hand Throw"
+      },
+      {
+        "value": 5,
+        "label": "#5 Left Hand Swing"
+      },
+      {
+        "value": 6,
+        "label": "#6 Magic Arrow"
+      },
+      {
+        "value": 7,
+        "label": "#7 Fire Arrow"
+      },
+      {
+        "value": 8,
+        "label": "#8 Inner Sight"
+      },
+      {
+        "value": 9,
+        "label": "#9 Critical Strike"
+      },
+      {
+        "value": 10,
+        "label": "#10 Jab"
+      },
+      {
+        "value": 11,
+        "label": "#11 Cold Arrow"
+      },
+      {
+        "value": 12,
+        "label": "#12 Multiple Shot"
+      },
+      {
+        "value": 13,
+        "label": "#13 Dodge"
+      },
+      {
+        "value": 14,
+        "label": "#14 Power Strike"
+      },
+      {
+        "value": 15,
+        "label": "#15 Poison Javelin"
+      },
+      {
+        "value": 16,
+        "label": "#16 Exploding Arrow"
+      },
+      {
+        "value": 17,
+        "label": "#17 Slow Missiles"
+      },
+      {
+        "value": 18,
+        "label": "#18 Avoid"
+      },
+      {
+        "value": 19,
+        "label": "#19 Impale"
+      },
+      {
+        "value": 20,
+        "label": "#20 Lightning Bolt"
+      },
+      {
+        "value": 21,
+        "label": "#21 Ice Arrow"
+      },
+      {
+        "value": 22,
+        "label": "#22 Guided Arrow"
+      },
+      {
+        "value": 23,
+        "label": "#23 Penetrate"
+      },
+      {
+        "value": 24,
+        "label": "#24 Charged Strike"
+      },
+      {
+        "value": 25,
+        "label": "#25 Plague Javelin"
+      },
+      {
+        "value": 26,
+        "label": "#26 Strafe"
+      },
+      {
+        "value": 27,
+        "label": "#27 Immolation Arrow"
+      },
+      {
+        "value": 28,
+        "label": "#28 Decoy"
+      },
+      {
+        "value": 29,
+        "label": "#29 Evade"
+      },
+      {
+        "value": 30,
+        "label": "#30 Fend"
+      },
+      {
+        "value": 31,
+        "label": "#31 Freezing Arrow"
+      },
+      {
+        "value": 32,
+        "label": "#32 Valkyrie"
+      },
+      {
+        "value": 33,
+        "label": "#33 Pierce"
+      },
+      {
+        "value": 34,
+        "label": "#34 Lightning Strike"
+      },
+      {
+        "value": 35,
+        "label": "#35 Lightning Fury"
+      },
+      {
+        "value": 36,
+        "label": "#36 Fire Bolt"
+      },
+      {
+        "value": 37,
+        "label": "#37 Warmth"
+      },
+      {
+        "value": 38,
+        "label": "#38 Charged Bolt"
+      },
+      {
+        "value": 39,
+        "label": "#39 Ice Bolt"
+      },
+      {
+        "value": 40,
+        "label": "#40 Frozen Armor"
+      },
+      {
+        "value": 41,
+        "label": "#41 Inferno"
+      },
+      {
+        "value": 42,
+        "label": "#42 Static Field"
+      },
+      {
+        "value": 43,
+        "label": "#43 Telekinesis"
+      },
+      {
+        "value": 44,
+        "label": "#44 Frost Nova"
+      },
+      {
+        "value": 45,
+        "label": "#45 Ice Blast"
+      },
+      {
+        "value": 46,
+        "label": "#46 Blaze"
+      },
+      {
+        "value": 47,
+        "label": "#47 Fire Ball"
+      },
+      {
+        "value": 48,
+        "label": "#48 Nova"
+      },
+      {
+        "value": 49,
+        "label": "#49 Lightning"
+      },
+      {
+        "value": 50,
+        "label": "#50 Shiver Armor"
+      },
+      {
+        "value": 51,
+        "label": "#51 Fire Wall"
+      },
+      {
+        "value": 52,
+        "label": "#52 Enchant"
+      },
+      {
+        "value": 53,
+        "label": "#53 Chain Lightning"
+      },
+      {
+        "value": 54,
+        "label": "#54 Teleport"
+      },
+      {
+        "value": 55,
+        "label": "#55 Glacial Spike"
+      },
+      {
+        "value": 56,
+        "label": "#56 Meteor"
+      },
+      {
+        "value": 57,
+        "label": "#57 Thunder Storm"
+      },
+      {
+        "value": 58,
+        "label": "#58 Energy Shield"
+      },
+      {
+        "value": 59,
+        "label": "#59 Blizzard"
+      },
+      {
+        "value": 60,
+        "label": "#60 Chilling Armor"
+      },
+      {
+        "value": 61,
+        "label": "#61 Fire Mastery"
+      },
+      {
+        "value": 62,
+        "label": "#62 Hydra"
+      },
+      {
+        "value": 63,
+        "label": "#63 Lightning Mastery"
+      },
+      {
+        "value": 64,
+        "label": "#64 Frozen Orb"
+      },
+      {
+        "value": 65,
+        "label": "#65 Cold Mastery"
+      },
+      {
+        "value": 66,
+        "label": "#66 Amplify Damage"
+      },
+      {
+        "value": 67,
+        "label": "#67 Teeth"
+      },
+      {
+        "value": 68,
+        "label": "#68 Bone Armor"
+      },
+      {
+        "value": 69,
+        "label": "#69 Skeleton Mastery"
+      },
+      {
+        "value": 70,
+        "label": "#70 Raise Skeleton"
+      },
+      {
+        "value": 71,
+        "label": "#71 Dim Vision"
+      },
+      {
+        "value": 72,
+        "label": "#72 Weaken"
+      },
+      {
+        "value": 73,
+        "label": "#73 Poison Dagger"
+      },
+      {
+        "value": 74,
+        "label": "#74 Corpse Explosion"
+      },
+      {
+        "value": 75,
+        "label": "#75 Clay Golem"
+      },
+      {
+        "value": 76,
+        "label": "#76 Iron Maiden"
+      },
+      {
+        "value": 77,
+        "label": "#77 Terror"
+      },
+      {
+        "value": 78,
+        "label": "#78 Bone Wall"
+      },
+      {
+        "value": 79,
+        "label": "#79 Golem Mastery"
+      },
+      {
+        "value": 80,
+        "label": "#80 Raise Skeletal Mage"
+      },
+      {
+        "value": 81,
+        "label": "#81 Confuse"
+      },
+      {
+        "value": 82,
+        "label": "#82 Life Tap"
+      },
+      {
+        "value": 83,
+        "label": "#83 Poison Explosion"
+      },
+      {
+        "value": 84,
+        "label": "#84 Bone Spear"
+      },
+      {
+        "value": 85,
+        "label": "#85 Blood Golem"
+      },
+      {
+        "value": 86,
+        "label": "#86 Attract"
+      },
+      {
+        "value": 87,
+        "label": "#87 Decrepify"
+      },
+      {
+        "value": 88,
+        "label": "#88 Bone Prison"
+      },
+      {
+        "value": 89,
+        "label": "#89 Summon Resist"
+      },
+      {
+        "value": 90,
+        "label": "#90 Iron Golem"
+      },
+      {
+        "value": 91,
+        "label": "#91 Lower Resist"
+      },
+      {
+        "value": 92,
+        "label": "#92 Poison Nova"
+      },
+      {
+        "value": 93,
+        "label": "#93 Bone Spirit"
+      },
+      {
+        "value": 94,
+        "label": "#94 Fire Golem"
+      },
+      {
+        "value": 95,
+        "label": "#95 Revive"
+      },
+      {
+        "value": 96,
+        "label": "#96 Sacrifice"
+      },
+      {
+        "value": 97,
+        "label": "#97 Smite"
+      },
+      {
+        "value": 98,
+        "label": "#98 Might"
+      },
+      {
+        "value": 99,
+        "label": "#99 Prayer"
+      },
+      {
+        "value": 100,
+        "label": "#100 Resist Fire"
+      },
+      {
+        "value": 101,
+        "label": "#101 Holy Bolt"
+      },
+      {
+        "value": 102,
+        "label": "#102 Holy Fire"
+      },
+      {
+        "value": 103,
+        "label": "#103 Thorns"
+      },
+      {
+        "value": 104,
+        "label": "#104 Defiance"
+      },
+      {
+        "value": 105,
+        "label": "#105 Resist Cold"
+      },
+      {
+        "value": 106,
+        "label": "#106 Zeal"
+      },
+      {
+        "value": 107,
+        "label": "#107 Charge"
+      },
+      {
+        "value": 108,
+        "label": "#108 Blessed Aim"
+      },
+      {
+        "value": 109,
+        "label": "#109 Cleansing"
+      },
+      {
+        "value": 110,
+        "label": "#110 Resist Lightning"
+      },
+      {
+        "value": 111,
+        "label": "#111 Vengeance"
+      },
+      {
+        "value": 112,
+        "label": "#112 Blessed Hammer"
+      },
+      {
+        "value": 113,
+        "label": "#113 Concentration"
+      },
+      {
+        "value": 114,
+        "label": "#114 Holy Freeze"
+      },
+      {
+        "value": 115,
+        "label": "#115 Vigor"
+      },
+      {
+        "value": 116,
+        "label": "#116 Conversion"
+      },
+      {
+        "value": 117,
+        "label": "#117 Holy Shield"
+      },
+      {
+        "value": 118,
+        "label": "#118 Holy Shock"
+      },
+      {
+        "value": 119,
+        "label": "#119 Sanctuary"
+      },
+      {
+        "value": 120,
+        "label": "#120 Meditation"
+      },
+      {
+        "value": 121,
+        "label": "#121 Fist of the Heavens"
+      },
+      {
+        "value": 122,
+        "label": "#122 Fanaticism"
+      },
+      {
+        "value": 123,
+        "label": "#123 Conviction"
+      },
+      {
+        "value": 124,
+        "label": "#124 Redemption"
+      },
+      {
+        "value": 125,
+        "label": "#125 Salvation"
+      },
+      {
+        "value": 126,
+        "label": "#126 Bash"
+      },
+      {
+        "value": 127,
+        "label": "#127 Blade Mastery"
+      },
+      {
+        "value": 128,
+        "label": "#128 Axe Mastery"
+      },
+      {
+        "value": 129,
+        "label": "#129 Mace Mastery"
+      },
+      {
+        "value": 130,
+        "label": "#130 Howl"
+      },
+      {
+        "value": 131,
+        "label": "#131 Find Potion"
+      },
+      {
+        "value": 132,
+        "label": "#132 Leap"
+      },
+      {
+        "value": 133,
+        "label": "#133 Double Swing"
+      },
+      {
+        "value": 134,
+        "label": "#134 Polearm Mastery"
+      },
+      {
+        "value": 135,
+        "label": "#135 Throwing Mastery"
+      },
+      {
+        "value": 136,
+        "label": "#136 Spear Mastery"
+      },
+      {
+        "value": 137,
+        "label": "#137 Taunt"
+      },
+      {
+        "value": 138,
+        "label": "#138 Shout"
+      },
+      {
+        "value": 139,
+        "label": "#139 Stun"
+      },
+      {
+        "value": 140,
+        "label": "#140 Double Throw"
+      },
+      {
+        "value": 141,
+        "label": "#141 Increased Stamina"
+      },
+      {
+        "value": 142,
+        "label": "#142 Find Item"
+      },
+      {
+        "value": 143,
+        "label": "#143 Leap Attack"
+      },
+      {
+        "value": 144,
+        "label": "#144 Concentrate"
+      },
+      {
+        "value": 145,
+        "label": "#145 Iron Skin"
+      },
+      {
+        "value": 146,
+        "label": "#146 Battle Cry"
+      },
+      {
+        "value": 147,
+        "label": "#147 Frenzy"
+      },
+      {
+        "value": 148,
+        "label": "#148 Increased Speed"
+      },
+      {
+        "value": 149,
+        "label": "#149 Battle Orders"
+      },
+      {
+        "value": 150,
+        "label": "#150 Grim Ward"
+      },
+      {
+        "value": 151,
+        "label": "#151 Whirlwind"
+      },
+      {
+        "value": 152,
+        "label": "#152 Berserk"
+      },
+      {
+        "value": 153,
+        "label": "#153 Natural Resistance"
+      },
+      {
+        "value": 154,
+        "label": "#154 War Cry"
+      },
+      {
+        "value": 155,
+        "label": "#155 Battle Command"
+      },
+      {
+        "value": 197,
+        "label": "#197 Firestorm"
+      },
+      {
+        "value": 217,
+        "label": "#217 Scroll of Identify"
+      },
+      {
+        "value": 218,
+        "label": "#218 Tome of Identify"
+      },
+      {
+        "value": 219,
+        "label": "#219 Scroll of Town Portal"
+      },
+      {
+        "value": 220,
+        "label": "#220 Tome of Town Portal"
+      },
+      {
+        "value": 221,
+        "label": "#221 Raven"
+      },
+      {
+        "value": 222,
+        "label": "#222 Poison Creeper"
+      },
+      {
+        "value": 223,
+        "label": "#223 Werewolf"
+      },
+      {
+        "value": 224,
+        "label": "#224 Lycanthropy"
+      },
+      {
+        "value": 225,
+        "label": "#225 Firestorm"
+      },
+      {
+        "value": 226,
+        "label": "#226 Oak Sage"
+      },
+      {
+        "value": 227,
+        "label": "#227 Summon Spirit Wolf"
+      },
+      {
+        "value": 228,
+        "label": "#228 Werebear"
+      },
+      {
+        "value": 229,
+        "label": "#229 Molten Boulder"
+      },
+      {
+        "value": 230,
+        "label": "#230 Arctic Blast"
+      },
+      {
+        "value": 231,
+        "label": "#231 Carrion Vine"
+      },
+      {
+        "value": 232,
+        "label": "#232 Feral Rage"
+      },
+      {
+        "value": 233,
+        "label": "#233 Maul"
+      },
+      {
+        "value": 234,
+        "label": "#234 Fissure"
+      },
+      {
+        "value": 235,
+        "label": "#235 Cyclone Armor"
+      },
+      {
+        "value": 236,
+        "label": "#236 Heart of Wolverine"
+      },
+      {
+        "value": 237,
+        "label": "#237 Summon Dire Wolf"
+      },
+      {
+        "value": 238,
+        "label": "#238 Rabies"
+      },
+      {
+        "value": 239,
+        "label": "#239 Fire Claws"
+      },
+      {
+        "value": 240,
+        "label": "#240 Twister"
+      },
+      {
+        "value": 241,
+        "label": "#241 Solar Creeper"
+      },
+      {
+        "value": 242,
+        "label": "#242 Hunger"
+      },
+      {
+        "value": 243,
+        "label": "#243 Shock Wave"
+      },
+      {
+        "value": 244,
+        "label": "#244 Volcano"
+      },
+      {
+        "value": 245,
+        "label": "#245 Tornado"
+      },
+      {
+        "value": 246,
+        "label": "#246 Spirit of Barbs"
+      },
+      {
+        "value": 247,
+        "label": "#247 Summon Grizzly"
+      },
+      {
+        "value": 248,
+        "label": "#248 Fury"
+      },
+      {
+        "value": 249,
+        "label": "#249 Armageddon"
+      },
+      {
+        "value": 250,
+        "label": "#250 Hurricane"
+      },
+      {
+        "value": 251,
+        "label": "#251 Fire Blast"
+      },
+      {
+        "value": 252,
+        "label": "#252 Claw Mastery"
+      },
+      {
+        "value": 253,
+        "label": "#253 Psychic Hammer"
+      },
+      {
+        "value": 254,
+        "label": "#254 Tiger Strike"
+      },
+      {
+        "value": 255,
+        "label": "#255 Dragon Talon"
+      },
+      {
+        "value": 256,
+        "label": "#256 Shock Web"
+      },
+      {
+        "value": 257,
+        "label": "#257 Blade Sentinel"
+      },
+      {
+        "value": 258,
+        "label": "#258 Burst of Speed"
+      },
+      {
+        "value": 259,
+        "label": "#259 Fists of Fire"
+      },
+      {
+        "value": 260,
+        "label": "#260 Dragon Claw"
+      },
+      {
+        "value": 261,
+        "label": "#261 Charged Bolt Sentry"
+      },
+      {
+        "value": 262,
+        "label": "#262 Wake of Fire"
+      },
+      {
+        "value": 263,
+        "label": "#263 Weapon Block"
+      },
+      {
+        "value": 264,
+        "label": "#264 Cloak of Shadows"
+      },
+      {
+        "value": 265,
+        "label": "#265 Cobra Strike"
+      },
+      {
+        "value": 266,
+        "label": "#266 Blade Fury"
+      },
+      {
+        "value": 267,
+        "label": "#267 Fade"
+      },
+      {
+        "value": 268,
+        "label": "#268 Shadow Warrior"
+      },
+      {
+        "value": 269,
+        "label": "#269 Claws of Thunder"
+      },
+      {
+        "value": 270,
+        "label": "#270 Dragon Tail"
+      },
+      {
+        "value": 271,
+        "label": "#271 Lightning Sentry"
+      },
+      {
+        "value": 272,
+        "label": "#272 Wake of Inferno"
+      },
+      {
+        "value": 273,
+        "label": "#273 Mind Blast"
+      },
+      {
+        "value": 274,
+        "label": "#274 Blades of Ice"
+      },
+      {
+        "value": 275,
+        "label": "#275 Dragon Flight"
+      },
+      {
+        "value": 276,
+        "label": "#276 Death Sentry"
+      },
+      {
+        "value": 277,
+        "label": "#277 Blade Shield"
+      },
+      {
+        "value": 278,
+        "label": "#278 Venom"
+      },
+      {
+        "value": 279,
+        "label": "#279 Shadow Master"
+      },
+      {
+        "value": 280,
+        "label": "#280 Phoenix Strike"
+      },
+      {
+        "value": 350,
+        "label": "#350 Delirium"
+      },
+      {
+        "value": 357,
+        "label": "#357 Interact"
+      },
+      {
+        "value": 358,
+        "label": "#358 Loot"
+      },
+      {
+        "value": 359,
+        "label": "#359 Scroll of Town Portal"
+      },
+      {
+        "value": 360,
+        "label": "#360 Emote Wheel"
+      },
+      {
+        "value": 361,
+        "label": "#361 Swap Weapons"
+      },
+      {
+        "value": 363,
+        "label": "#363 Show Items"
+      },
+      {
+        "value": 364,
+        "label": "#364 Run Toggle"
+      },
+      {
+        "value": 370,
+        "label": "#370 Loot to Cube"
+      },
+      {
+        "value": 371,
+        "label": "#371 Mark of the Bear"
+      },
+      {
+        "value": 372,
+        "label": "#372 Mark of the Wolf"
+      },
+      {
+        "value": 373,
+        "label": "#373 Summon Goatman"
+      },
+      {
+        "value": 374,
+        "label": "#374 Demonic Mastery"
+      },
+      {
+        "value": 375,
+        "label": "#375 Death Mark"
+      },
+      {
+        "value": 376,
+        "label": "#376 Summon Tainted"
+      },
+      {
+        "value": 377,
+        "label": "#377 Summon Defiler"
+      },
+      {
+        "value": 378,
+        "label": "#378 Blood Oath"
+      },
+      {
+        "value": 379,
+        "label": "#379 Engorge"
+      },
+      {
+        "value": 380,
+        "label": "#380 Blood Boil"
+      },
+      {
+        "value": 381,
+        "label": "#381 Consume"
+      },
+      {
+        "value": 382,
+        "label": "#382 Bind Demon"
+      },
+      {
+        "value": 383,
+        "label": "#383 Levitation Mastery"
+      },
+      {
+        "value": 384,
+        "label": "#384 Eldritch Blast"
+      },
+      {
+        "value": 385,
+        "label": "#385 Hex: Bane"
+      },
+      {
+        "value": 386,
+        "label": "#386 Hex: Siphon"
+      },
+      {
+        "value": 387,
+        "label": "#387 Psychic Ward"
+      },
+      {
+        "value": 388,
+        "label": "#388 Echoing Strike"
+      },
+      {
+        "value": 389,
+        "label": "#389 Hex: Purge"
+      },
+      {
+        "value": 390,
+        "label": "#390 Blade Warp"
+      },
+      {
+        "value": 391,
+        "label": "#391 Cleave"
+      },
+      {
+        "value": 392,
+        "label": "#392 Mirrored Blades"
+      },
+      {
+        "value": 393,
+        "label": "#393 Sigil: Lethargy"
+      },
+      {
+        "value": 394,
+        "label": "#394 Ring of Fire"
+      },
+      {
+        "value": 395,
+        "label": "#395 Miasma Bolt"
+      },
+      {
+        "value": 396,
+        "label": "#396 Sigil: Rancor"
+      },
+      {
+        "value": 397,
+        "label": "#397 Enhanced Entropy"
+      },
+      {
+        "value": 398,
+        "label": "#398 Flame Wave"
+      },
+      {
+        "value": 399,
+        "label": "#399 Miasma Chain"
+      },
+      {
+        "value": 400,
+        "label": "#400 Sigil: Death"
+      },
+      {
+        "value": 401,
+        "label": "#401 Apocalypse"
+      },
+      {
+        "value": 402,
+        "label": "#402 Abyss"
+      },
+      {
+        "value": 406,
+        "label": "#406 Fissure"
+      },
+      {
+        "value": 407,
+        "label": "#407 Leap Attack"
+      },
+      {
+        "value": 408,
+        "label": "#408 Enchant"
+      },
+      {
+        "value": 409,
+        "label": "#409 Enchant"
+      },
+      {
+        "value": 410,
+        "label": "#410 Whirlwind"
+      },
+      {
+        "value": 411,
+        "label": "#411 Town Portal"
+      },
+      {
+        "value": 412,
+        "label": "#412 Twister"
+      },
+      {
+        "value": 413,
+        "label": "#413 Volcano"
+      },
+      {
+        "value": 414,
+        "label": "#414 Thunder Storm"
+      },
+      {
+        "value": 416,
+        "label": "#416 Stun"
+      },
+      {
+        "value": 418,
+        "label": "#418 Berserk"
+      },
+      {
+        "value": 419,
+        "label": "#419 Cleave"
+      },
+      {
+        "value": 420,
+        "label": "#420 Resist Fire"
+      },
+      {
+        "value": 421,
+        "label": "#421 Fire Bolt"
+      },
+      {
+        "value": 422,
+        "label": "#422 Fire Ball"
+      },
+      {
+        "value": 423,
+        "label": "#423 Conviction"
+      },
+      {
+        "value": 424,
+        "label": "#424 Conviction"
+      },
+      {
+        "value": 425,
+        "label": "#425 Conviction"
+      },
+      {
+        "value": 427,
+        "label": "#427 Bash"
+      }
+    ],
+    "packed_skill": {
+      "stride": 64,
+      "min_level": 1,
+      "max_level": 63
+    }
+  },
+  "active_item_draft": null
 }

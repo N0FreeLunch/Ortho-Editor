@@ -131,7 +131,7 @@
             e.key === " " ||
             e.code === "Space" ||
             e.key === "Escape" ||
-            (!isInput && !e.ctrlKey && !e.altKey && !e.metaKey && ["s", "a", "i", "t", "e", "d", "r", "m", "q", "c"].includes(lower)) ||
+            (!isInput && !e.ctrlKey && !e.altKey && !e.metaKey && ["s", "a", "i", "t", "e", "d", "f", "r", "m", "q", "c"].includes(lower)) ||
             (e.ctrlKey && (lower === "z" || lower === "y"));
           if (isActionKey && !isInput) {
             e.preventDefault();

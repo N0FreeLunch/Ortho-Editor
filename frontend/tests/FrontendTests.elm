@@ -134,7 +134,9 @@ sampleSessionJson =
             "base_attributes": ["Required Level: 7"],
             "properties": ["+30% Better Chance of Getting Magic Items"],
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
+            "socket_count": 0,
             "socketed_names": [],
+            "socketed_items": [],
             "image_url": "/item-vectors/misc/ring/ring.svg",
             "is_belt_consumable": false,
             "detailed_properties": [],
@@ -154,7 +156,14 @@ sampleSessionJson =
             "base_attributes": ["Two-Hand Damage: 24 to 105", "Durability: 25 of 50"],
             "properties": ["Level 15 Meditation Aura When Equipped"],
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
+            "socket_count": 4,
             "socketed_names": ["Ral Rune", "Tir Rune", "Tal Rune", "Sol Rune"],
+            "socketed_items": [
+              { "code": "r08", "name_en": "Ral Rune", "name_ko": "랄 룬", "quality": "QualityNormal", "image_url": null, "properties": ["+30% Fire Resist"] },
+              { "code": "r03", "name_en": "Tir Rune", "name_ko": "티르 룬", "quality": "QualityNormal", "image_url": null, "properties": ["+2 to Mana After Each Kill"] },
+              { "code": "r07", "name_en": "Tal Rune", "name_ko": "탈 룬", "quality": "QualityNormal", "image_url": null, "properties": ["+30% Poison Resist"] },
+              { "code": "r12", "name_en": "Sol Rune", "name_ko": "솔 룬", "quality": "QualityNormal", "image_url": null, "properties": ["+9 to Minimum Damage"] }
+            ],
             "image_url": null,
             "is_belt_consumable": false,
             "detailed_properties": [],
@@ -175,7 +184,9 @@ sampleSessionJson =
             "base_attributes": [],
             "properties": [],
             "set_name": null, "set_pieces": [], "piece_set_bonuses": [], "set_bonuses": [],
+            "socket_count": 0,
             "socketed_names": [],
+            "socketed_items": [],
             "image_url": null,
             "is_belt_consumable": false,
             "detailed_properties": [],
@@ -261,15 +272,31 @@ sampleSessionJson =
             "stat_id": 0,
             "name": "strength",
             "min_value": -32,
-            "max_value": 223
+            "max_value": 223,
+            "param_bits": 0,
+            "value_label": "Value",
+            "param_label": "Param",
+            "param_kind": "ParamNone"
           },
           {
             "stat_id": 105,
             "name": "item_fastercastrate",
             "min_value": -20,
-            "max_value": 235
+            "max_value": 235,
+            "param_bits": 0,
+            "value_label": "Value",
+            "param_label": "Param",
+            "param_kind": "ParamNone"
           }
-        ]
+        ],
+        "param_catalog": {
+          "classes": [ { "value": 1, "label": "#1 Sorceress" } ],
+          "elements": [ { "value": 0, "label": "#0 Fire" } ],
+          "skill_tabs": [ { "value": 8, "label": "#8 Fire Skills (Sorceress Only)" } ],
+          "skills": [ { "value": 54, "label": "#54 Teleport" } ],
+          "packed_skill": { "stride": 64, "min_level": 1, "max_level": 63 }
+        },
+        "active_item_draft": null
       },
       "rejection": null
     }
@@ -425,6 +452,8 @@ suite =
                             |> Expect.all
                                 [ Query.findAll [ testId "merc-preview-badge" ]
                                     >> Query.count (Expect.equal 0)
+                                , Query.find [ testId "merc-persisted-badge" ]
+                                    >> Query.has [ Selector.text "Saved to .d2s" ]
                                 , Query.find [ testId "merc-act-5" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect (SelectMercAct 5)
@@ -1000,7 +1029,9 @@ suite =
                         , setPieces = [ "Sigon's Guard" ]
                         , pieceSetBonuses = [ { active = True, requiredCount = 2, lines = [ "+20% Increased Chance of Blocking" ] } ]
                         , setBonuses = [ { active = False, requiredCount = 2, lines = [ "10% Life stolen per hit" ] } ]
+                        , socketCount = 1
                         , socketedNames = [ "Perfect Diamond" ]
+                        , socketedItems = []
                         , imageUrl = Just "/item-vectors/misc/potion/lesser_healing_potion.svg"
                         , isBeltConsumable = True
                         , detailedProperties = []
@@ -1148,7 +1179,9 @@ suite =
                                 , setPieces = []
                                 , pieceSetBonuses = []
                                 , setBonuses = []
+                                , socketCount = 0
                                 , socketedNames = []
+                                , socketedItems = []
                                 , imageUrl = Nothing
                                 , isBeltConsumable = True
                                 , detailedProperties = []
@@ -1339,7 +1372,9 @@ suite =
                         , setPieces = []
                         , pieceSetBonuses = []
                         , setBonuses = []
+                        , socketCount = 0
                         , socketedNames = []
+                        , socketedItems = []
                         , imageUrl = Nothing
                         , isBeltConsumable = False
                         , detailedProperties = []
@@ -1488,7 +1523,7 @@ suite =
                             |> (\s ->
                                     case String.indexes "\"shop_catalog\": [" s of
                                         idx :: _ ->
-                                            String.left idx s ++ "\"shop_catalog\": [], \"stat_catalog\": [] }, \"rejection\": null }"
+                                            String.left idx s ++ "\"shop_catalog\": [], \"stat_catalog\": [], \"param_catalog\": { \"classes\": [], \"elements\": [], \"skill_tabs\": [], \"skills\": [], \"packed_skill\": { \"stride\": 64, \"min_level\": 1, \"max_level\": 63 } }, \"active_item_draft\": null }, \"rejection\": null }"
 
                                         _ ->
                                             s
@@ -1663,7 +1698,9 @@ suite =
                                                     , setPieces = []
                                                     , pieceSetBonuses = []
                                                     , setBonuses = []
+                                                    , socketCount = 0
                                                     , socketedNames = []
+                                                    , socketedItems = []
                                                     , imageUrl = Nothing
                                                     , isBeltConsumable = False
                                                     , defense = Nothing
@@ -1733,7 +1770,7 @@ suite =
                             |> Query.fromHtml
                             |> Expect.all
                                 [ Query.find [ testId "item-context-menu" ]
-                                    >> Query.has [ Selector.text "Edit Item" ]
+                                    >> Query.has [ Selector.text "Forge Item" ]
                                 , Query.find [ testId "context-action-edit" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect (ContextEditItem 0)
@@ -1793,12 +1830,12 @@ suite =
                             |> Query.fromHtml
                             |> Expect.all
                                 [ Query.find [ testId "item-editor-modal" ]
-                                    >> Query.has [ Selector.text "Item Option Studio" ]
+                                    >> Query.has [ Selector.text "Item Forge Studio" ]
                                 , Query.find [ testId "modal-catalog-stat-105" ]
                                     >> Query.has [ Selector.text "item_fastercastrate" ]
                                 , Query.find [ testId "btn-inject-stat" ]
                                     >> Event.simulate Event.click
-                                    >> Event.expect (AddItemProperty 0 105 20)
+                                    >> Event.expect (AddItemProperty 0 105 20 0)
                                 , Query.find [ testId "item-editor-close-btn" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect CloseItemEditorModal
@@ -1985,6 +2022,801 @@ suite =
                     [ \_ -> Expect.equal (EmitIntent (Protocol.SelectItemForMove { itemIndex = Just 0 })) pickupOut
                     , \_ -> Expect.equal (Just { container = Equipment, x = 5, y = 0 }) pickedModel.ui.hoveredDropTarget
                     , \_ -> Expect.equal (EmitIntent (Protocol.MoveItem { itemIndex = 0, targetContainer = Equipment, x = 5, y = 0 })) dropOut
+                    ]
+                    ()
+        , test "Cycle 21: View A inline gold editors emit FocusField/EditFocusedInput/CommitFocusedInput and socketed viewer renders child gems/runes" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update (SelectItem (Just 0))
+                            |> Tuple.first
+
+                    -- Promote merc_items[0] (Insight, 4 sockets) into session.items with index 99 for inspector socketed-viewer check
+                    socketedViewAModel =
+                        { viewAModel
+                            | session =
+                                viewAModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            let
+                                                insight =
+                                                    s.mercItems
+                                                        |> List.head
+                                                        |> Maybe.map (\it -> { it | index = 99 })
+                                            in
+                                            case insight of
+                                                Just it ->
+                                                    { s | items = s.items ++ [ it ] }
+
+                                                Nothing ->
+                                                    s
+                                        )
+                            , ui = State.UiState.setSelectedItem (Just 99) viewAModel.ui
+                        }
+                in
+                Workspace.view socketedViewAModel
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.find [ testId "viewa-input-gold-stash" ]
+                            >> Event.simulate (Event.input "500000")
+                            >> Event.expect (EditFocusedInput "500000")
+                        , Query.find [ testId "viewa-input-gold-inventory" ]
+                            >> Event.simulate (Event.input "12345")
+                            >> Event.expect (EditFocusedInput "12345")
+                        , Query.find [ testId "socketed-items-viewer" ]
+                            >> Query.has
+                                [ Selector.text "Socketed Gems / Runes"
+                                , Selector.text "4 / 4"
+                                , Selector.text "Ral Rune"
+                                , Selector.text "+30% Fire Resist"
+                                , Selector.text "Sol Rune"
+                                ]
+                        ]
+        , test "F key shortcut opens item editor modal for hovered or selected item" <|
+            \_ ->
+                let
+                    hoveredModel =
+                        loadedModel
+                            |> Update.update (HoverItem (Just 0))
+                            |> Tuple.first
+
+                    ( afterHoverF, _ ) =
+                        hoveredModel
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = "f"
+                                    , code = "KeyF"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+
+                    selectedModel =
+                        loadedModel
+                            |> Update.update (SelectItem (Just 0))
+                            |> Tuple.first
+
+                    ( afterSelectF, _ ) =
+                        selectedModel
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = "f"
+                                    , code = "KeyF"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+
+                    ( afterEsc, _ ) =
+                        afterSelectF
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = "Escape"
+                                    , code = "Escape"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (Just 0) afterHoverF.ui.itemEditorModalIndex
+                    , \_ -> Expect.equal (Just 0) afterSelectF.ui.itemEditorModalIndex
+                    , \_ -> Expect.equal Nothing afterEsc.ui.itemEditorModalIndex
+                    ]
+                    ()
+        , test "Direct integer input commits item_def and item_prop delta while rejecting invalid input" <|
+            \_ ->
+                let
+                    propModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            { s
+                                                | items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it
+                                                                    | detailedProperties =
+                                                                        [ { statId = 0
+                                                                          , name = "Strength"
+                                                                          , value = 10
+                                                                          , minValue = 0
+                                                                          , maxValue = 50
+                                                                          , param = 0
+                                                                          , paramBits = 0
+                                                                          , valueLabel = "Value"
+                                                                          , paramLabel = "Param"
+                                                                          , paramKind = Protocol.ParamNone
+                                                                          , paramPreview = Nothing
+                                                                          }
+                                                                        ]
+                                                                }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        s.items
+                                            }
+                                        )
+                        }
+
+                    ( defModel, defOut ) =
+                        propModel
+                            |> Update.update (FocusField "item_def:0" "10")
+                            |> Tuple.first
+                            |> Update.update (EditFocusedInput "250")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+
+                    ( badModel, badOut ) =
+                        propModel
+                            |> Update.update (FocusField "item_qty:0" "1")
+                            |> Tuple.first
+                            |> Update.update (EditFocusedInput "xyz")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+
+                    ( _, propOut ) =
+                        propModel
+                            |> Update.update (FocusField "item_prop:0:0" "10")
+                            |> Tuple.first
+                            |> Update.update (EditFocusedInput "17")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+                in
+                Expect.all
+                    [ \_ ->
+                        Expect.equal
+                            (EmitIntent
+                                (Protocol.MutateItemBase
+                                    { itemIndex = 0
+                                    , defense = Just 250
+                                    , currentDurability = Nothing
+                                    , maxDurability = Nothing
+                                    , quantity = Nothing
+                                    , isEthereal = Nothing
+                                    }
+                                )
+                            )
+                            defOut
+                    , \_ -> Expect.equal Nothing defModel.ui.focusedInput
+                    , \_ -> Expect.equal NoOut badOut
+                    , \_ ->
+                        Expect.equal
+                            True
+                            (badModel.ui.statusBanner
+                                |> Maybe.map (String.contains "Invalid integer")
+                                |> Maybe.withDefault False
+                            )
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent
+                                (Protocol.MutateItemProperty
+                                    { itemIndex = 0
+                                    , statId = 0
+                                    , delta = 7
+                                    }
+                                )
+                            )
+                            propOut
+                    ]
+                    ()
+        , test "Item Forge Studio notice bar shows focused range, clamps out-of-bounds values, and surfaces errors" <|
+            \_ ->
+                let
+                    modalWithPropModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            { s
+                                                | items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it
+                                                                    | detailedProperties =
+                                                                        [ { statId = 0
+                                                                          , name = "Strength"
+                                                                          , value = 10
+                                                                          , minValue = 0
+                                                                          , maxValue = 50
+                                                                          , param = 0
+                                                                          , paramBits = 0
+                                                                          , valueLabel = "Value"
+                                                                          , paramLabel = "Param"
+                                                                          , paramKind = Protocol.ParamNone
+                                                                          , paramPreview = Nothing
+                                                                          }
+                                                                        ]
+                                                                }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        s.items
+                                            }
+                                        )
+                        }
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update (OpenItemEditorModal 0)
+                            |> Tuple.first
+
+                    focusedModel =
+                        modalWithPropModel
+                            |> Update.update (FocusField "item_prop:0:0" "10")
+                            |> Tuple.first
+
+                    ( clampedHighModel, clampedHighOut ) =
+                        focusedModel
+                            |> Update.update (EditFocusedInput "999")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+
+                    ( clampedLowModel, clampedLowOut ) =
+                        focusedModel
+                            |> Update.update (EditFocusedInput "-5")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+
+                    ( invalidModalModel, invalidModalOut ) =
+                        focusedModel
+                            |> Update.update (EditFocusedInput "abc")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view focusedModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "allowed range 0 .. 50" ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.MutateItemProperty { itemIndex = 0, statId = 0, delta = 40 }))
+                            clampedHighOut
+                    , \_ ->
+                        Workspace.view clampedHighModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "clamped from 999 to 50" ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.MutateItemProperty { itemIndex = 0, statId = 0, delta = -10 }))
+                            clampedLowOut
+                    , \_ ->
+                        Workspace.view clampedLowModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "clamped from -5 to 0" ]
+                    , \_ -> Expect.equal NoOut invalidModalOut
+                    , \_ ->
+                        Workspace.view invalidModalModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "Invalid integer" ]
+                    ]
+                    ()
+        , test "Space picks item back up immediately after dropping into Equipment slot without mouse move" <|
+            \_ ->
+                let
+                    movingModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map (\s -> { s | selectedMoveItemIndex = Just 0 })
+                            , ui =
+                                loadedModel.ui
+                                    |> State.UiState.setHoveredItem Nothing
+                                    |> State.UiState.setHoveredDropTarget (Just { container = Equipment, x = 1, y = 0 })
+                        }
+
+                    placedSession =
+                        loadedModel.session
+                            |> Maybe.map
+                                (\s ->
+                                    { s
+                                        | selectedMoveItemIndex = Nothing
+                                        , items =
+                                            List.map
+                                                (\it ->
+                                                    if it.index == 0 then
+                                                        { it | container = Equipment, slotLabel = Just "Head", x = 0, y = 0 }
+
+                                                    else
+                                                        it
+                                                )
+                                                s.items
+                                    }
+                                )
+
+                    afterDropModel =
+                        Update.applyEnvelope
+                            { ok = True
+                            , session = placedSession
+                            , rejection = Nothing
+                            }
+                            movingModel
+
+                    ( _, spaceOut ) =
+                        afterDropModel
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = " "
+                                    , code = "Space"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (Just 0) afterDropModel.ui.hoveredItemIndex
+                    , \_ -> Expect.equal Nothing afterDropModel.ui.hoveredDropTarget
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SelectItemForMove { itemIndex = Just 0 }))
+                            spaceOut
+                    ]
+                    ()
+        , test "Cycle 22 renders full stat_catalog beyond 40 entries and supports param injection" <|
+            \_ ->
+                let
+                    largeCatalog =
+                        List.range 0 59
+                            |> List.map
+                                (\i ->
+                                    { statId = i
+                                    , name = "stat_" ++ String.fromInt i
+                                    , minValue = 0
+                                    , maxValue = 100
+                                    , paramBits =
+                                        if i == 59 then
+                                            9
+
+                                        else
+                                            0
+                                    , valueLabel =
+                                        if i == 59 then
+                                            "Skill Level"
+
+                                        else
+                                            "Value"
+                                    , paramLabel =
+                                        if i == 59 then
+                                            "Skill"
+
+                                        else
+                                            "Param"
+                                    , paramKind =
+                                        if i == 59 then
+                                            Protocol.ParamSkill
+
+                                        else
+                                            Protocol.ParamNone
+                                    }
+                                )
+
+                    modelWithLargeCatalog =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map (\s -> { s | statCatalog = largeCatalog })
+                        }
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update (OpenItemEditorModal 0)
+                            |> Tuple.first
+                            |> Update.update (SelectItemEditorInjectStat 59 3)
+                            |> Tuple.first
+                            |> Update.update (SetItemEditorInjectParam "54")
+                            |> Tuple.first
+                in
+                Workspace.view modelWithLargeCatalog
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.find [ testId "modal-catalog-stat-59" ]
+                            >> Query.has [ Selector.text "#59 stat_59" ]
+                        , Query.find [ testId "item-editor-inject-param" ]
+                            >> Query.has [ Selector.text "#54 Teleport" ]
+                        , Query.find [ testId "btn-inject-stat" ]
+                            >> Event.simulate Event.click
+                            >> Event.expect (AddItemProperty 0 59 3 54)
+                        ]
+        , test "Existing Properties edits both value and param with semantic labels and selector choices" <|
+            \_ ->
+                let
+                    paramPropModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            { s
+                                                | items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it
+                                                                    | detailedProperties =
+                                                                        [ { statId = 59
+                                                                          , name = "item_singleskill"
+                                                                          , value = 2
+                                                                          , minValue = 0
+                                                                          , maxValue = 30
+                                                                          , param = 54
+                                                                          , paramBits = 9
+                                                                          , valueLabel = "Skill Level"
+                                                                          , paramLabel = "Skill"
+                                                                          , paramKind = Protocol.ParamSkill
+                                                                          , paramPreview = Just "Teleport"
+                                                                          }
+                                                                        , { statId = 22
+                                                                          , name = "monster_test"
+                                                                          , value = 10
+                                                                          , minValue = 0
+                                                                          , maxValue = 100
+                                                                          , param = 7
+                                                                          , paramBits = 9
+                                                                          , valueLabel = "Stat Value"
+                                                                          , paramLabel = "Monster ID"
+                                                                          , paramKind = Protocol.ParamRaw
+                                                                          , paramPreview = Just "Fallen"
+                                                                          }
+                                                                        ]
+                                                                }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        s.items
+                                            }
+                                        )
+                        }
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update (OpenItemEditorModal 0)
+                            |> Tuple.first
+
+                    focusedRawParam =
+                        paramPropModel
+                            |> Update.update (FocusField "item_param:0:22" "7")
+                            |> Tuple.first
+
+                    ( _, commitRawParamOut ) =
+                        focusedRawParam
+                            |> Update.update (EditFocusedInput "12")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view focusedRawParam
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "modal-prop-row-59" ]
+                                    >> Query.has [ Selector.text "Skill Level", Selector.text "Skill", Selector.text "Teleport" ]
+                                , Query.find [ testId "modal-prop-param-input-59" ]
+                                    >> Event.simulate (Event.input "54")
+                                    >> Event.expect (SetItemPropertyParam 0 59 54)
+                                , Query.find [ testId "modal-prop-param-input-22" ]
+                                    >> Query.has [ Selector.attribute (Html.Attributes.value "7") ]
+                                , Query.find [ testId "item-editor-notice" ]
+                                    >> Query.has [ Selector.text "Monster ID", Selector.text "allowed range 0 .. 511", Selector.text "Fallen" ]
+                                ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetItemPropertyParam { itemIndex = 0, statId = 22, param = 12 }))
+                            commitRawParamOut
+                    ]
+                    ()
+        , test "Item Forge Studio validates and guides 2nd/3rd parameters (inject_param & Skill Level 1..63)" <|
+            \_ ->
+                let
+                    packedModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            { s
+                                                | statCatalog =
+                                                    [ { statId = 198
+                                                      , name = "item_skillonhit"
+                                                      , minValue = 1
+                                                      , maxValue = 100
+                                                      , paramBits = 16
+                                                      , valueLabel = "Chance (%)"
+                                                      , paramLabel = "Skill"
+                                                      , paramKind = Protocol.ParamPackedSkill
+                                                      }
+                                                    ]
+                                                , items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it
+                                                                    | detailedProperties =
+                                                                        [ { statId = 198
+                                                                          , name = "item_skillonhit"
+                                                                          , value = 10
+                                                                          , minValue = 1
+                                                                          , maxValue = 100
+                                                                          , param = 54 * 64 + 5
+                                                                          , paramBits = 16
+                                                                          , valueLabel = "Chance (%)"
+                                                                          , paramLabel = "Skill"
+                                                                          , paramKind = Protocol.ParamPackedSkill
+                                                                          , paramPreview = Just "Lv.5 Teleport (#54)"
+                                                                          }
+                                                                        ]
+                                                                }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        s.items
+                                            }
+                                        )
+                        }
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update (OpenItemEditorModal 0)
+                            |> Tuple.first
+                            |> Update.update (SelectItemEditorInjectStat 198 10)
+                            |> Tuple.first
+
+                    focusedLvl =
+                        packedModel
+                            |> Update.update (FocusField "item_param_lvl:0:198" "5")
+                            |> Tuple.first
+
+                    ( clampedLvlModel, clampedLvlOut ) =
+                        focusedLvl
+                            |> Update.update (EditFocusedInput "99")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+
+                    focusedInjectLvl =
+                        packedModel
+                            |> Update.update (FocusField "inject_param_lvl:198" "1")
+                            |> Tuple.first
+
+                    ( clampedInjectModel, _ ) =
+                        focusedInjectLvl
+                            |> Update.update (EditFocusedInput "99")
+                            |> Tuple.first
+                            |> Update.update CommitFocusedInput
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view focusedLvl
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "modal-prop-row-198" ]
+                                    >> Query.has [ Selector.text "Chance (%) (1..100)", Selector.text "Skill", Selector.text "Skill Lv (1..63)", Selector.text "-10", Selector.text "+10" ]
+                                , Query.find [ testId "item-editor-notice" ]
+                                    >> Query.has [ Selector.text "Skill Level", Selector.text "allowed range 1 .. 63" ]
+                                ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetItemPropertyParam { itemIndex = 0, statId = 198, param = 54 * 64 + 63 }))
+                            clampedLvlOut
+                    , \_ ->
+                        Workspace.view clampedLvlModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "clamped from 99 to 63" ]
+                    , \_ ->
+                        Workspace.view focusedInjectLvl
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "Inject #198", Selector.text "allowed range 1 .. 63" ]
+                    , \_ -> Expect.equal 63 (modBy 64 clampedInjectModel.ui.itemEditorInjectParam)
+                    ]
+                    ()
+        , test "Stepper +/- buttons surface allowed range and boundary warnings without input focus" <|
+            \_ ->
+                let
+                    modalModel =
+                        { loadedModel
+                            | session =
+                                loadedModel.session
+                                    |> Maybe.map
+                                        (\s ->
+                                            { s
+                                                | statCatalog =
+                                                    [ { statId = 198
+                                                      , name = "item_skillonhit"
+                                                      , minValue = 1
+                                                      , maxValue = 100
+                                                      , paramBits = 16
+                                                      , valueLabel = "Chance (%)"
+                                                      , paramLabel = "Skill"
+                                                      , paramKind = Protocol.ParamPackedSkill
+                                                      }
+                                                    ]
+                                                , items =
+                                                    List.map
+                                                        (\it ->
+                                                            if it.index == 0 then
+                                                                { it
+                                                                    | detailedProperties =
+                                                                        [ { statId = 198
+                                                                          , name = "item_skillonhit"
+                                                                          , value = 10
+                                                                          , minValue = 1
+                                                                          , maxValue = 100
+                                                                          , param = 54 * 64 + 5
+                                                                          , paramBits = 16
+                                                                          , valueLabel = "Chance (%)"
+                                                                          , paramLabel = "Skill"
+                                                                          , paramKind = Protocol.ParamPackedSkill
+                                                                          , paramPreview = Just "Lv.5 Teleport (#54)"
+                                                                          }
+                                                                        ]
+                                                                }
+
+                                                            else
+                                                                it
+                                                        )
+                                                        s.items
+                                            }
+                                        )
+                        }
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+                            |> Update.update (OpenItemEditorModal 0)
+                            |> Tuple.first
+                            |> Update.update (SelectItemEditorInjectStat 198 1)
+                            |> Tuple.first
+
+                    ( stepUpModel, stepUpOut ) =
+                        modalModel
+                            |> Update.update (MutateItemProperty 0 198 1)
+
+                    ( clampedStepModel, clampedStepOut ) =
+                        modalModel
+                            |> Update.update (MutateItemProperty 0 198 999)
+
+                    ( injectMinModel, _ ) =
+                        modalModel
+                            |> Update.update (SetItemEditorInjectValue "0")
+                in
+                Expect.all
+                    [ \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.MutateItemProperty { itemIndex = 0, statId = 198, delta = 1 }))
+                            stepUpOut
+                    , \_ ->
+                        Workspace.view stepUpModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "allowed 1..100" ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.MutateItemProperty { itemIndex = 0, statId = 198, delta = 90 }))
+                            clampedStepOut
+                    , \_ ->
+                        Workspace.view clampedStepModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "at boundary 100 (allowed 1..100)" ]
+                    , \_ -> Expect.equal 1 injectMinModel.ui.itemEditorInjectValue
+                    , \_ ->
+                        Workspace.view injectMinModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "item-editor-notice" ]
+                            |> Query.has [ Selector.text "at boundary 1 (allowed 1..100)" ]
+                    ]
+                    ()
+        , test "Cycle 23 Item Forge Draft staging emits OpenItemForgeDraft, renders draft card, and wires Save/Discard" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+
+                    ( openedModel, openOut ) =
+                        viewAModel
+                            |> Update.update (OpenItemEditorModal 0)
+
+                    stageDraft : Protocol.SessionView -> Protocol.SessionView
+                    stageDraft oldSession =
+                        case List.head oldSession.items of
+                            Just firstItem ->
+                                { oldSession
+                                    | activeItemDraft =
+                                        Just
+                                            { itemIndex = 0
+                                            , card = { firstItem | nameEn = "Staged Forge Sword" }
+                                            , dirty = True
+                                            }
+                                }
+
+                            Nothing ->
+                                oldSession
+
+                    draftSession =
+                        Maybe.map stageDraft openedModel.session
+
+                    stagedModel =
+                        { openedModel | session = draftSession }
+
+                    ( appliedModel, applyOut ) =
+                        stagedModel
+                            |> Update.update ApplyItemForgeDraft
+
+                    ( discardedModel, discardOut ) =
+                        stagedModel
+                            |> Update.update DiscardItemForgeDraft
+                in
+                Expect.all
+                    [ \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.OpenItemForgeDraft { itemIndex = 0 }))
+                            openOut
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent Protocol.ApplyItemForgeDraft)
+                            applyOut
+                    , \_ ->
+                        Expect.equal Nothing appliedModel.ui.itemEditorModalIndex
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent Protocol.DiscardItemForgeDraft)
+                            discardOut
+                    , \_ ->
+                        Expect.equal Nothing discardedModel.ui.itemEditorModalIndex
+                    , \_ ->
+                        Workspace.view stagedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "item-editor-modal" ]
+                                    >> Query.has [ Selector.text "Staged Forge Sword", Selector.text "Unsaved Draft" ]
+                                , Query.find [ testId "btn-forge-apply" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ApplyItemForgeDraft
+                                , Query.find [ testId "btn-forge-discard" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect DiscardItemForgeDraft
+                                ]
                     ]
                     ()
         ]
