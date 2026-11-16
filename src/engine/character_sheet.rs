@@ -170,6 +170,20 @@ pub fn count_anya_scroll_bonuses(quests: Option<&QuestSet>) -> i32 {
     completed_count * 10
 }
 
+#[derive(Default)]
+struct ResistanceBonuses {
+    resistance: i32,
+    maximum: i32,
+}
+
+#[derive(Default)]
+struct ElementalBonuses {
+    fire: ResistanceBonuses,
+    cold: ResistanceBonuses,
+    light: ResistanceBonuses,
+    poison: ResistanceBonuses,
+}
+
 /// Aggregates item properties based on container eligibility
 pub fn calculate_combat_sheet(
     attributes: Option<&AttributeSection>,
@@ -179,23 +193,8 @@ pub fn calculate_combat_sheet(
 ) -> CharacterCombatSheet {
     let anya_bonus = count_anya_scroll_bonuses(quests);
 
-    let mut gear_fire = 0;
-    let mut gear_fire_max = 0;
-    let mut gear_cold = 0;
-    let mut gear_cold_max = 0;
-    let mut gear_light = 0;
-    let mut gear_light_max = 0;
-    let mut gear_poison = 0;
-    let mut gear_poison_max = 0;
-
-    let mut charm_fire = 0;
-    let mut charm_fire_max = 0;
-    let mut charm_cold = 0;
-    let mut charm_cold_max = 0;
-    let mut charm_light = 0;
-    let mut charm_light_max = 0;
-    let mut charm_poison = 0;
-    let mut charm_poison_max = 0;
+    let mut gear = ElementalBonuses::default();
+    let mut charms = ElementalBonuses::default();
 
     let mut damage_reduction_pct = 0;
     let mut magic_res = 0;
@@ -217,66 +216,19 @@ pub fn calculate_combat_sheet(
             continue;
         }
 
+        let elemental = if is_equipped { &mut gear } else { &mut charms };
         for prop in &item.properties {
             let val = prop.value;
 
             match prop.stat_id {
-                STAT_FIRE_RESIST => {
-                    if is_equipped {
-                        gear_fire += val;
-                    } else {
-                        charm_fire += val;
-                    }
-                }
-                STAT_MAX_FIRE_RESIST => {
-                    if is_equipped {
-                        gear_fire_max += val;
-                    } else {
-                        charm_fire_max += val;
-                    }
-                }
-                STAT_COLD_RESIST => {
-                    if is_equipped {
-                        gear_cold += val;
-                    } else {
-                        charm_cold += val;
-                    }
-                }
-                STAT_MAX_COLD_RESIST => {
-                    if is_equipped {
-                        gear_cold_max += val;
-                    } else {
-                        charm_cold_max += val;
-                    }
-                }
-                STAT_LIGHT_RESIST => {
-                    if is_equipped {
-                        gear_light += val;
-                    } else {
-                        charm_light += val;
-                    }
-                }
-                STAT_MAX_LIGHT_RESIST => {
-                    if is_equipped {
-                        gear_light_max += val;
-                    } else {
-                        charm_light_max += val;
-                    }
-                }
-                STAT_POISON_RESIST => {
-                    if is_equipped {
-                        gear_poison += val;
-                    } else {
-                        charm_poison += val;
-                    }
-                }
-                STAT_MAX_POISON_RESIST => {
-                    if is_equipped {
-                        gear_poison_max += val;
-                    } else {
-                        charm_poison_max += val;
-                    }
-                }
+                STAT_FIRE_RESIST => elemental.fire.resistance += val,
+                STAT_MAX_FIRE_RESIST => elemental.fire.maximum += val,
+                STAT_COLD_RESIST => elemental.cold.resistance += val,
+                STAT_MAX_COLD_RESIST => elemental.cold.maximum += val,
+                STAT_LIGHT_RESIST => elemental.light.resistance += val,
+                STAT_MAX_LIGHT_RESIST => elemental.light.maximum += val,
+                STAT_POISON_RESIST => elemental.poison.resistance += val,
+                STAT_MAX_POISON_RESIST => elemental.poison.maximum += val,
                 STAT_DAMAGE_RESIST => damage_reduction_pct += val,
                 STAT_MAGIC_RESIST => magic_res += val,
                 STAT_FCR => fcr += val,
@@ -293,34 +245,34 @@ pub fn calculate_combat_sheet(
     }
 
     let fire_res = ResistanceDetail::calculate(
-        gear_fire,
-        gear_fire_max,
-        charm_fire,
-        charm_fire_max,
+        gear.fire.resistance,
+        gear.fire.maximum,
+        charms.fire.resistance,
+        charms.fire.maximum,
         anya_bonus,
         difficulty,
     );
     let cold_res = ResistanceDetail::calculate(
-        gear_cold,
-        gear_cold_max,
-        charm_cold,
-        charm_cold_max,
+        gear.cold.resistance,
+        gear.cold.maximum,
+        charms.cold.resistance,
+        charms.cold.maximum,
         anya_bonus,
         difficulty,
     );
     let light_res = ResistanceDetail::calculate(
-        gear_light,
-        gear_light_max,
-        charm_light,
-        charm_light_max,
+        gear.light.resistance,
+        gear.light.maximum,
+        charms.light.resistance,
+        charms.light.maximum,
         anya_bonus,
         difficulty,
     );
     let poison_res = ResistanceDetail::calculate(
-        gear_poison,
-        gear_poison_max,
-        charm_poison,
-        charm_poison_max,
+        gear.poison.resistance,
+        gear.poison.maximum,
+        charms.poison.resistance,
+        charms.poison.maximum,
         anya_bonus,
         difficulty,
     );
@@ -390,6 +342,133 @@ mod tests {
             logical_value,
             ItemBitRange::default(),
         )
+    }
+
+    #[d2r_macros::hypothesis_test]
+    fn current_combat_sources_preserve_values_scope_and_input() {
+        fn source_item(code: &str, values: &[(u32, i32)]) -> Item {
+            let mut item = Item::default();
+            item.code = code.into();
+            item.properties = values
+                .iter()
+                .map(|&(id, value)| {
+                    ItemProperty::new(id, String::new(), 0, 12_345, value, ItemBitRange::default())
+                })
+                .collect();
+            item
+        }
+
+        let gear_values = [
+            (STAT_FIRE_RESIST, 20),
+            (STAT_FIRE_RESIST, 20),
+            (STAT_MAX_FIRE_RESIST, 5),
+            (STAT_COLD_RESIST, 50),
+            (STAT_MAX_COLD_RESIST, 6),
+            (STAT_LIGHT_RESIST, 60),
+            (STAT_MAX_LIGHT_RESIST, 7),
+            (STAT_POISON_RESIST, 70),
+            (STAT_MAX_POISON_RESIST, 8),
+            (STAT_STRENGTH, 11),
+            (STAT_ENERGY, 12),
+            (STAT_DEXTERITY, 13),
+            (STAT_VITALITY, 14),
+            (STAT_DAMAGE_RESIST, 5),
+            (STAT_MAGIC_RESIST, 6),
+            (STAT_IAS, 7),
+            (STAT_FHR, 8),
+            (STAT_FBR, 9),
+            (STAT_FCR, 10),
+            (999, 9_000),
+        ];
+        let mut gear = source_item("cap", &gear_values);
+        gear.is_runeword = true;
+        gear.runeword_attributes = vec![make_test_prop(STAT_FIRE_RESIST, 5_000)];
+        gear.set_attributes = vec![vec![make_test_prop(STAT_FIRE_RESIST, 5_000)]];
+        gear.socketed_items = vec![source_item("r01", &[(STAT_FIRE_RESIST, 5_000)])];
+        let mut charm = source_item(
+            "cm2 ",
+            &[
+                (STAT_FIRE_RESIST, -15),
+                (STAT_MAX_FIRE_RESIST, 1),
+                (STAT_COLD_RESIST, -25),
+                (STAT_MAX_COLD_RESIST, 2),
+                (STAT_LIGHT_RESIST, -35),
+                (STAT_MAX_LIGHT_RESIST, 3),
+                (STAT_POISON_RESIST, -45),
+                (STAT_MAX_POISON_RESIST, 4),
+            ],
+        );
+        for id in [
+            STAT_STRENGTH,
+            STAT_ENERGY,
+            STAT_DEXTERITY,
+            STAT_VITALITY,
+            STAT_DAMAGE_RESIST,
+            STAT_MAGIC_RESIST,
+            STAT_IAS,
+            STAT_FHR,
+            STAT_FBR,
+            STAT_FCR,
+        ] {
+            charm.properties.push(make_test_prop(id, 1));
+        }
+        let equipped_charm = source_item(
+            "cm1 ",
+            &[
+                (STAT_FIRE_RESIST, 5),
+                (STAT_MAX_FIRE_RESIST, 1),
+                (STAT_COLD_RESIST, 5),
+                (STAT_MAX_COLD_RESIST, 1),
+                (STAT_LIGHT_RESIST, 5),
+                (STAT_MAX_LIGHT_RESIST, 1),
+                (STAT_POISON_RESIST, 5),
+                (STAT_MAX_POISON_RESIST, 1),
+            ],
+        );
+        let excluded: Vec<_> = gear_values.iter().map(|&(id, _)| (id, 777)).collect();
+        let items = vec![
+            (gear, ItemContainer::Equipment),
+            (equipped_charm, ItemContainer::Equipment),
+            (charm, ItemContainer::Inventory),
+            (source_item("cap", &excluded), ItemContainer::Inventory),
+            (source_item("cm3 ", &excluded), ItemContainer::Stash),
+        ];
+        let before = items.clone();
+        for difficulty in [Difficulty::Normal, Difficulty::Nightmare, Difficulty::Hell] {
+            let sheet = calculate_combat_sheet(None, None, &items, difficulty);
+            assert_eq!(
+                sheet.fire_res,
+                ResistanceDetail::calculate(45, 6, -15, 1, 0, difficulty)
+            );
+            assert_eq!(
+                sheet.cold_res,
+                ResistanceDetail::calculate(55, 7, -25, 2, 0, difficulty)
+            );
+            assert_eq!(
+                sheet.light_res,
+                ResistanceDetail::calculate(65, 8, -35, 3, 0, difficulty)
+            );
+            assert_eq!(
+                sheet.poison_res,
+                ResistanceDetail::calculate(75, 9, -45, 4, 0, difficulty)
+            );
+            assert_eq!((sheet.damage_reduction_pct, sheet.magic_res), (6, 7));
+            assert_eq!((sheet.ias, sheet.fhr, sheet.fbr, sheet.fcr), (8, 9, 10, 11));
+            assert_eq!(
+                (
+                    sheet.strength.total,
+                    sheet.energy.total,
+                    sheet.dexterity.total,
+                    sheet.vitality.total
+                ),
+                (12, 13, 14, 15)
+            );
+            assert_eq!(
+                (sheet.unspent_stat_points, sheet.unspent_skill_points),
+                (0, 0)
+            );
+        }
+        assert_eq!(items, before);
     }
 
     #[test]
