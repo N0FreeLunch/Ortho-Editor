@@ -69,6 +69,15 @@ fn stat_ranges_to_properties(ranges: &[crate::data::item_specs::ItemStatRange]) 
         .collect()
 }
 
+fn append_warning(
+    warning: crate::engine::validation::ValidationWarning,
+    warnings: &mut Vec<String>,
+    detailed_warnings: &mut Vec<crate::engine::validation::ValidationWarning>,
+) {
+    warnings.push(warning.message.clone());
+    detailed_warnings.push(warning);
+}
+
 pub fn format_item(item: &Item, language: &str, active_set_count: usize, char_level: u8) -> FormattedItem {
     format_item_with_mode(item, language, active_set_count, char_level, StatDisplayMode::Fused)
 }
@@ -416,8 +425,7 @@ pub fn format_item_with_mode(
             crate::engine::validation::WarningConfidenceTier::Advisory,
             "quantity_context",
         );
-        warnings.push(warning.message.clone());
-        detailed_warnings.push(warning);
+        append_warning(warning, &mut warnings, &mut detailed_warnings);
     }
 
     if let Some((_, reason)) = durability_advisory {
@@ -426,8 +434,7 @@ pub fn format_item_with_mode(
             crate::engine::validation::WarningConfidenceTier::Advisory,
             "durability_context",
         );
-        warnings.push(warning.message.clone());
-        detailed_warnings.push(warning);
+        append_warning(warning, &mut warnings, &mut detailed_warnings);
     }
 
     if let Some(reason) = defense_advisory {
@@ -436,8 +443,7 @@ pub fn format_item_with_mode(
             crate::engine::validation::WarningConfidenceTier::Advisory,
             "defense_context",
         );
-        warnings.push(warning.message.clone());
-        detailed_warnings.push(warning);
+        append_warning(warning, &mut warnings, &mut detailed_warnings);
     }
 
     if let Some(reason) = socket_advisory {
@@ -446,8 +452,7 @@ pub fn format_item_with_mode(
             crate::engine::validation::WarningConfidenceTier::Advisory,
             "socket_context",
         );
-        warnings.push(warning.message.clone());
-        detailed_warnings.push(warning);
+        append_warning(warning, &mut warnings, &mut detailed_warnings);
     }
 
     FormattedItem {
