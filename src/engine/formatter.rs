@@ -659,104 +659,43 @@ fn apply_composite_rules(
 ) {
     let rules = crate::data::properties::get_composite_rules();
     for rule in rules {
-        // Check if all stat_ids in the rule are present with the same value and non-opaque
-        let mut matched_indices = Vec::with_capacity(rule.stat_ids.len());
-        let mut common_val: Option<i32> = None;
-        let mut all_match = true;
+        if let Some(matched) = crate::engine::property_groups::matching_composite_rule(
+            props,
+            rule.stat_ids,
+            skip_indices,
+        ) {
+            let val = matched.value;
+            let matched_indices = matched.indices;
+            for &idx in &matched_indices {
+                skip_indices.insert(idx);
+            }
 
-        for &target_stat_id in rule.stat_ids {
-            let found = props.iter().enumerate().find(|(idx, p)| {
-                !skip_indices.contains(idx)
-                    && p.stat_id == target_stat_id
-                    && !p.is_opaque
-                    && p.opaque_bits.is_none()
-            });
-
-            if let Some((idx, p)) = found {
-                if let Some(val) = common_val {
-                    if p.value != val {
-                        all_match = false;
-                        break;
-                    }
+            let template = get_loc(rule.loc_key, language);
+            let formatted = if template.contains('%') {
+                format_template(template, &[val.to_string()])
+            } else if rule.code == "all-stats" {
+                if language == "ko" {
+                    format!("+{} 모든 능력치", val)
                 } else {
-                    common_val = Some(p.value);
+                    format!("+{} to all Attributes", val)
                 }
-                matched_indices.push(idx);
+            } else if rule.code == "res-all-max" {
+                if language == "ko" {
+                    format!("모든 최대 저항력 +{}%", val)
+                } else {
+                    format!("+{}% to All Maximum Resistances", val)
+                }
             } else {
-                all_match = false;
-                break;
-            }
-        }
+                format!("{} +{}", template, val)
+            };
 
-        if all_match && matched_indices.len() == rule.stat_ids.len() {
-            if let Some(val) = common_val {
-                for &idx in &matched_indices {
-                    skip_indices.insert(idx);
-                }
-
-                let template = get_loc(rule.loc_key, language);
-                let formatted = if template.contains('%') {
-                    format_template(template, &[val.to_string()])
-                } else if rule.code == "all-stats" {
-                    if language == "ko" {
-                        format!("+{} 모든 능력치", val)
-                    } else {
-                        format!("+{} to all Attributes", val)
-                    }
-                } else if rule.code == "res-all-max" {
-                    if language == "ko" {
-                        format!("모든 최대 저항력 +{}%", val)
-                    } else {
-                        format!("+{}% to All Maximum Resistances", val)
-                    }
-                } else {
-                    format!("{} +{}", template, val)
-                };
-
-                out.push(formatted);
-            }
+            out.push(formatted);
         }
     }
 }
 
 
-fn damage_companion_indices(props: &[ItemProperty], primary: usize) -> Option<Vec<usize>> {
-    use crate::domain::stats::entity::StatMaturityTier;
-
-    let anchor = props.get(primary)?;
-    let family = match anchor.stat_id {
-        21 => [21, 23, 159],
-        22 => [22, 24, 160],
-        _ => return None,
-    };
-    let members: Vec<_> = props
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| family.contains(&p.stat_id))
-        .collect();
-    if !(2..=3).contains(&members.len()) || members.first()?.0 != primary || anchor.value <= 0 {
-        return None;
-    }
-    let mut ids = std::collections::HashSet::new();
-    if members.iter().any(|(_, p)| {
-        !ids.insert(p.stat_id)
-            || p.param != 0
-            || p.is_opaque
-            || p.opaque_bits.is_some()
-            || p.maturity != StatMaturityTier::Verified
-            || p.value != anchor.value
-            || p.raw_value != p.value
-    }) {
-        return None;
-    }
-    Some(
-        members
-            .into_iter()
-            .skip(1)
-            .map(|(index, _)| index)
-            .collect(),
-    )
-}
+use crate::engine::property_groups::damage_companion_indices;
 
 fn format_poison_triplet(props: &[ItemProperty], language: &str) -> Option<String> {
     let display = crate::engine::poison::displayed_poison(props)?;
