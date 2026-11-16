@@ -759,29 +759,10 @@ fn damage_companion_indices(props: &[ItemProperty], primary: usize) -> Option<Ve
 }
 
 fn format_poison_triplet(props: &[ItemProperty], language: &str) -> Option<String> {
-    use crate::domain::stats::entity::StatMaturityTier;
-
-    let group = props.get(..3)?;
-    if group.iter().map(|p| p.stat_id).ne([57, 58, 59])
-        || group.iter().any(|p| {
-            p.param != 0
-                || p.is_opaque
-                || p.opaque_bits.is_some()
-                || p.maturity != StatMaturityTier::Verified
-                || p.value < 0
-        })
-        || group[0].value > group[1].value
-        || group[2].value == 0
-    {
-        return None;
-    }
-
-    // Poison rates are damage/256 per frame; duration uses 25 frames/second.
-    // Truncate totals before choosing the equal-damage or range template.
-    let frames = i64::from(group[2].value);
-    let min = i64::from(group[0].value).checked_mul(frames)? / 256;
-    let max = i64::from(group[1].value).checked_mul(frames)? / 256;
-    let seconds = (frames / 25).to_string();
+    let display = crate::engine::poison::displayed_poison(props)?;
+    let min = display.min_damage;
+    let max = display.max_damage;
+    let seconds = display.duration_seconds.to_string();
     let (key, args) = if min == max {
         ("strModPoisonDamage", vec![min.to_string(), seconds])
     } else {
