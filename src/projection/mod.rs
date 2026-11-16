@@ -39,7 +39,8 @@ use crate::engine::character_sheet::{
     Difficulty, calculate_combat_sheet,
 };
 use crate::engine::defense::equipped_set_piece_counts;
-use crate::engine::formatter::{format_item, get_loc};
+use crate::engine::formatter::format_item;
+use crate::localization::get_loc;
 use crate::engine::mercenary_items::{collect_mercenary_items, mercenary_item_slot};
 use crate::inventory::get_item_size;
 use crate::item::{HuffmanTree, Item, ItemQuality};

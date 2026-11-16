@@ -7,6 +7,7 @@ pub mod engine;
 pub mod error;
 pub mod inventory;
 pub mod item;
+pub mod localization;
 pub mod projection;
 pub mod save;
 pub mod spec;

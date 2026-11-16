@@ -1249,57 +1249,7 @@ pub fn list_param_choices(
     (classes, elements, skill_tabs, skills)
 }
 
-pub fn format_template(template: &str, args: &[String]) -> String {
-    let mut out = String::new();
-    let chars: Vec<char> = template.chars().collect();
-    let mut i = 0;
-    let mut arg_idx = 0;
-
-    while i < chars.len() {
-        if chars[i] == '%' {
-            if i + 1 < chars.len() {
-                match chars[i + 1] {
-                    '%' => {
-                        out.push('%');
-                        i += 2;
-                        continue;
-                    }
-                    'd' | 'i' | 'u' | 's' => {
-                        if let Some(val) = args.get(arg_idx) {
-                            out.push_str(val);
-                            arg_idx += 1;
-                        }
-                        i += 2;
-                        continue;
-                    }
-                    '+' => {
-                        if i + 2 < chars.len() {
-                            match chars[i + 2] {
-                                'd' | 'i' | 'u' => {
-                                    if let Some(val) = args.get(arg_idx) {
-                                        if !val.starts_with('-') && !val.starts_with('+') {
-                                            out.push('+');
-                                        }
-                                        out.push_str(val);
-                                        arg_idx += 1;
-                                    }
-                                    i += 3;
-                                    continue;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        out.push(chars[i]);
-        i += 1;
-    }
-
-    out
-}
+pub use crate::localization::{format_template, get_loc, get_loc_optional};
 
 fn rare_name_key(raw_id: u8) -> Option<&'static str> {
     let index = usize::from(raw_id).checked_sub(1)?;
@@ -1470,17 +1420,6 @@ fn base_item_name<'a>(item: &'a Item, language: &str) -> &'a str {
         .and_then(|source| get_loc_optional(source.name_key, language))
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| get_loc(template.name, language))
-}
-
-pub fn get_loc(key: &str, language: &str) -> &'static str {
-    get_loc_optional(key, language).unwrap_or_else(|| Box::leak(key.to_string().into_boxed_str()))
-}
-
-pub fn get_loc_optional(key: &str, language: &str) -> Option<&'static str> {
-    LOCALIZATIONS
-        .iter()
-        .find(|l| l.key == key)
-        .map(|l| if language == "ko" { l.ko } else { l.en })
 }
 
 #[cfg(test)]

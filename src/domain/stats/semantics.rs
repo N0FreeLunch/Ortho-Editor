@@ -4,7 +4,7 @@ use crate::data::skills::SKILLS;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::stats::ItemProperty;
-use crate::engine::formatter::{format_template, get_loc};
+use crate::localization::{format_template, get_loc};
 
 /// Semantic interpretation of item properties (skills, skill tabs, class skills, charges, auras, monster bonuses).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
