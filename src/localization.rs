@@ -64,3 +64,18 @@ pub fn get_loc_optional(key: &str, language: &str) -> Option<&'static str> {
         .find(|l| l.key == key)
         .map(|l| if language == "ko" { l.ko } else { l.en })
 }
+
+pub fn strip_d2_color_codes(s: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\u{00FF}' && i + 1 < chars.len() && chars[i + 1] == 'c' {
+            i += 3; // Skip `ÿ`, c, and the color code character
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}

@@ -3919,9 +3919,9 @@ fn build_item_card(
                 .map(|s| s.save_param_bits as i32)
                 .unwrap_or(0);
             let (value_label, param_label, kind_tag) =
-                crate::engine::formatter::describe_stat_input_labels(p.stat_id);
+                crate::engine::stat_catalog::describe_stat_input_labels(p.stat_id);
             let param_preview =
-                crate::engine::formatter::describe_stat_param_value(p.stat_id, p.param, "en");
+                crate::engine::stat_catalog::describe_stat_param_value(p.stat_id, p.param, "en");
             ItemPropertyView {
                 stat_id: p.stat_id as i32,
                 name: p.name.clone(),
@@ -4537,7 +4537,7 @@ fn cached_stat_catalog() -> &'static [StatCatalogEntryView] {
             .filter_map(|s| {
                 let (min_value, max_value, _) = stat_value_bounds(s.id)?;
                 let (value_label, param_label, kind_tag) =
-                    crate::engine::formatter::describe_stat_input_labels(s.id);
+                    crate::engine::stat_catalog::describe_stat_input_labels(s.id);
                 Some(StatCatalogEntryView {
                     stat_id: s.id as i32,
                     name: s.name.to_string(),
@@ -4559,7 +4559,7 @@ fn cached_param_catalog() -> &'static ParamCatalogView {
     static PARAM_CATALOG: OnceLock<ParamCatalogView> = OnceLock::new();
     PARAM_CATALOG.get_or_init(|| {
         let (classes, elements, skill_tabs, skills) =
-            crate::engine::formatter::list_param_choices("en");
+            crate::engine::stat_catalog::list_param_choices("en");
         let to_opts = |items: Vec<(i32, String)>| -> Vec<ParamOptionView> {
             items
                 .into_iter()
