@@ -208,8 +208,12 @@ type UiIntent
     | SpawnShopItem { catalogId : String, targetContainer : ShopSpawnTarget }
     | MutateItemBase { itemIndex : Int, defense : Maybe (Int), currentDurability : Maybe (Int), maxDurability : Maybe (Int), quantity : Maybe (Int), isEthereal : Maybe (Bool) }
     | MutateItemProperty { itemIndex : Int, statId : Int, delta : Int }
-    | AddItemProperty { itemIndex : Int, statId : Int, value : Int }
+    | AddItemProperty { itemIndex : Int, statId : Int, value : Int, param : Int }
     | RemoveItemProperty { itemIndex : Int, statId : Int }
+    | SetItemPropertyParam { itemIndex : Int, statId : Int, param : Int }
+    | OpenItemForgeDraft { itemIndex : Int }
+    | ApplyItemForgeDraft
+    | DiscardItemForgeDraft
     | QuickMoveItem { itemIndex : Int, targetContainer : ContainerKind }
     | DuplicateItem { itemIndex : Int }
     | DeleteItem { itemIndex : Int }
@@ -270,10 +274,18 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "MutateItemBase", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "defense", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) defense ), ( "current_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) currentDurability ), ( "max_durability", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) maxDurability ), ( "quantity", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.int)) quantity ), ( "is_ethereal", (Maybe.withDefault Json.Encode.null << Maybe.map (Json.Encode.bool)) isEthereal ) ] ) ]
         MutateItemProperty { itemIndex, statId, delta } ->
             Json.Encode.object [ ( "MutateItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "delta", (Json.Encode.int) delta ) ] ) ]
-        AddItemProperty { itemIndex, statId, value } ->
-            Json.Encode.object [ ( "AddItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "value", (Json.Encode.int) value ) ] ) ]
+        AddItemProperty { itemIndex, statId, value, param } ->
+            Json.Encode.object [ ( "AddItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "value", (Json.Encode.int) value ), ( "param", (Json.Encode.int) param ) ] ) ]
         RemoveItemProperty { itemIndex, statId } ->
             Json.Encode.object [ ( "RemoveItemProperty", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ) ] ) ]
+        SetItemPropertyParam { itemIndex, statId, param } ->
+            Json.Encode.object [ ( "SetItemPropertyParam", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "stat_id", (Json.Encode.int) statId ), ( "param", (Json.Encode.int) param ) ] ) ]
+        OpenItemForgeDraft { itemIndex } ->
+            Json.Encode.object [ ( "OpenItemForgeDraft", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ) ] ) ]
+        ApplyItemForgeDraft ->
+            Json.Encode.string "ApplyItemForgeDraft"
+        DiscardItemForgeDraft ->
+            Json.Encode.string "DiscardItemForgeDraft"
         QuickMoveItem { itemIndex, targetContainer } ->
             Json.Encode.object [ ( "QuickMoveItem", Json.Encode.object [ ( "item_index", (Json.Encode.int) itemIndex ), ( "target_container", (containerKindEncoder) targetContainer ) ] ) ]
         DuplicateItem { itemIndex } ->
@@ -883,8 +895,13 @@ type alias ItemPropertyView =
     , name : String
     , value : Int
     , param : Int
+    , paramBits : Int
     , minValue : Int
     , maxValue : Int
+    , valueLabel : String
+    , paramLabel : String
+    , paramKind : StatParamKind
+    , paramPreview : Maybe (String)
     }
 
 
@@ -895,8 +912,34 @@ itemPropertyViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "value" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_bits" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "min_value" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "max_value" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "value_label" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_label" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_kind" (statParamKindDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_preview" (Json.Decode.nullable (Json.Decode.string))))
+
+
+type alias SocketedItemView =
+    { code : String
+    , nameEn : String
+    , nameKo : String
+    , quality : ItemQualityKind
+    , imageUrl : Maybe (String)
+    , properties : List (String)
+    }
+
+
+socketedItemViewDecoder : Json.Decode.Decoder SocketedItemView
+socketedItemViewDecoder =
+    Json.Decode.succeed SocketedItemView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "code" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_en" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "quality" (itemQualityKindDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "image_url" (Json.Decode.nullable (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "properties" (Json.Decode.list (Json.Decode.string))))
 
 
 type alias ItemCardView =
@@ -924,7 +967,9 @@ type alias ItemCardView =
     , setPieces : List (String)
     , pieceSetBonuses : List (SetBonusView)
     , setBonuses : List (SetBonusView)
+    , socketCount : Int
     , socketedNames : List (String)
+    , socketedItems : List (SocketedItemView)
     , imageUrl : Maybe (String)
     , isBeltConsumable : Bool
     }
@@ -957,7 +1002,9 @@ itemCardViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_pieces" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "piece_set_bonuses" (Json.Decode.list (setBonusViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "set_bonuses" (Json.Decode.list (setBonusViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "socket_count" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "socketed_names" (Json.Decode.list (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "socketed_items" (Json.Decode.list (socketedItemViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "image_url" (Json.Decode.nullable (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "is_belt_consumable" (Json.Decode.bool)))
 
@@ -1035,11 +1082,155 @@ shopCatalogItemViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "summary" (Json.Decode.string)))
 
 
+type StatParamKind
+    = ParamNone
+    | ParamRaw
+    | ParamClass
+    | ParamElement
+    | ParamSkillTab
+    | ParamSkill
+    | ParamPackedSkill
+
+
+statParamKindDecoder : Json.Decode.Decoder StatParamKind
+statParamKindDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamNone" ->
+                            Json.Decode.succeed ParamNone
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamRaw" ->
+                            Json.Decode.succeed ParamRaw
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamClass" ->
+                            Json.Decode.succeed ParamClass
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamElement" ->
+                            Json.Decode.succeed ParamElement
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamSkillTab" ->
+                            Json.Decode.succeed ParamSkillTab
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamSkill" ->
+                            Json.Decode.succeed ParamSkill
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "ParamPackedSkill" ->
+                            Json.Decode.succeed ParamPackedSkill
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
+type alias ParamOptionView =
+    { value : Int
+    , label : String
+    }
+
+
+paramOptionViewDecoder : Json.Decode.Decoder ParamOptionView
+paramOptionViewDecoder =
+    Json.Decode.succeed ParamOptionView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "value" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "label" (Json.Decode.string)))
+
+
+type alias PackedSkillSpecView =
+    { stride : Int
+    , minLevel : Int
+    , maxLevel : Int
+    }
+
+
+packedSkillSpecViewDecoder : Json.Decode.Decoder PackedSkillSpecView
+packedSkillSpecViewDecoder =
+    Json.Decode.succeed PackedSkillSpecView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stride" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "min_level" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "max_level" (Json.Decode.int)))
+
+
+type alias ParamCatalogView =
+    { classes : List (ParamOptionView)
+    , elements : List (ParamOptionView)
+    , skillTabs : List (ParamOptionView)
+    , skills : List (ParamOptionView)
+    , packedSkill : PackedSkillSpecView
+    }
+
+
+paramCatalogViewDecoder : Json.Decode.Decoder ParamCatalogView
+paramCatalogViewDecoder =
+    Json.Decode.succeed ParamCatalogView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "classes" (Json.Decode.list (paramOptionViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "elements" (Json.Decode.list (paramOptionViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skill_tabs" (Json.Decode.list (paramOptionViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skills" (Json.Decode.list (paramOptionViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "packed_skill" (packedSkillSpecViewDecoder)))
+
+
+type alias ItemForgeDraftView =
+    { itemIndex : Int
+    , dirty : Bool
+    , card : ItemCardView
+    }
+
+
+itemForgeDraftViewDecoder : Json.Decode.Decoder ItemForgeDraftView
+itemForgeDraftViewDecoder =
+    Json.Decode.succeed ItemForgeDraftView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "item_index" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "dirty" (Json.Decode.bool)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "card" (itemCardViewDecoder)))
+
+
 type alias StatCatalogEntryView =
     { statId : Int
     , name : String
     , minValue : Int
     , maxValue : Int
+    , paramBits : Int
+    , valueLabel : String
+    , paramLabel : String
+    , paramKind : StatParamKind
     }
 
 
@@ -1050,6 +1241,10 @@ statCatalogEntryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "min_value" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "max_value" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_bits" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "value_label" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_label" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_kind" (statParamKindDecoder)))
 
 
 type alias SessionView =
@@ -1086,6 +1281,8 @@ type alias SessionView =
     , skills : List (SkillNodeView)
     , shopCatalog : List (ShopCatalogItemView)
     , statCatalog : List (StatCatalogEntryView)
+    , paramCatalog : ParamCatalogView
+    , activeItemDraft : Maybe (ItemForgeDraftView)
     }
 
 
@@ -1125,6 +1322,8 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skills" (Json.Decode.list (skillNodeViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "shop_catalog" (Json.Decode.list (shopCatalogItemViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_catalog" (Json.Decode.list (statCatalogEntryViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "param_catalog" (paramCatalogViewDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "active_item_draft" (Json.Decode.nullable (itemForgeDraftViewDecoder))))
 
 
 type RejectionCode

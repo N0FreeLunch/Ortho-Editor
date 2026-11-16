@@ -200,7 +200,9 @@ fn intents_mutate_state_and_reject_invalid_merc_level() {
         set_pieces: vec![],
         piece_set_bonuses: vec![],
         set_bonuses: vec![],
+        socket_count: 0,
         socketed_names: vec![],
+        socketed_items: vec![],
         image_url: None,
         is_belt_consumable: false,
         detailed_properties: vec![],
@@ -985,14 +987,28 @@ fn cycle_18_merc_item_move_act_swap_replaced_staging_and_d2s_roundtrip() {
     assert_eq!(act2_view.merc.dismissed.as_ref().map(|d| d.act_index), Some(3));
     assert!(!act2_view.export_supported);
 
-    // Dropping into MercReplaced must be rejected.
+    // Staged items in MercReplaced can be picked up and placed back into MercReplaced,
+    // while external items (e.g. Inventory) cannot be dropped into MercReplaced.
     let drop_replaced = session.apply_intent(UiIntent::MoveItem {
         item_index: helm_idx,
         target_container: ContainerKind::MercReplaced,
         x: 1,
         y: 0,
     });
-    assert!(!drop_replaced.ok);
+    assert!(drop_replaced.ok);
+    if let Some(inv_item) = act2_view
+        .items
+        .iter()
+        .find(|it| it.container == ContainerKind::Inventory)
+    {
+        let drop_external = session.apply_intent(UiIntent::MoveItem {
+            item_index: inv_item.index,
+            target_container: ContainerKind::MercReplaced,
+            x: 1,
+            y: 0,
+        });
+        assert!(!drop_external.ok);
+    }
 
     // 3. Restore Replaced Mercenary -> swaps Act 3 and its 2 items back.
     let restored = session.apply_intent(UiIntent::RestoreReplacedMerc);
@@ -1103,10 +1119,11 @@ fn cycle_20_add_remove_item_property_and_d2s_roundtrip() {
         .stat_catalog
         .iter()
         .find(|s| {
-            !target_item
-                .detailed_properties
-                .iter()
-                .any(|p| p.stat_id == s.stat_id)
+            s.param_bits == 0
+                && !target_item
+                    .detailed_properties
+                    .iter()
+                    .any(|p| p.stat_id == s.stat_id)
                 && s.max_value >= 15
         })
         .expect("unused writable stat");
@@ -1116,6 +1133,7 @@ fn cycle_20_add_remove_item_property_and_d2s_roundtrip() {
         item_index: target_item.index,
         stat_id: chosen_stat.stat_id,
         value: 15,
+        param: 0,
     });
     assert!(add_env.ok, "{:?}", add_env.rejection);
     let add_view = add_env.session.unwrap();
@@ -1140,6 +1158,7 @@ fn cycle_20_add_remove_item_property_and_d2s_roundtrip() {
         item_index: target_item.index,
         stat_id: chosen_stat.stat_id,
         value: 10,
+        param: 0,
     });
     assert!(!dup_err.ok);
 
@@ -1191,5 +1210,246 @@ fn cycle_20_add_remove_item_property_and_d2s_roundtrip() {
             .detailed_properties
             .iter()
             .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 15)
+    );
+
+    // 5. Cycle 22: parameterized stat injection (param_bits > 0) + out-of-range param rejection + .d2s roundtrip.
+    let param_stat = initial
+        .stat_catalog
+        .iter()
+        .find(|s| {
+            s.param_bits >= 4
+                && !reloaded_item
+                    .detailed_properties
+                    .iter()
+                    .any(|p| p.stat_id == s.stat_id)
+                && s.max_value >= 2
+                && s.min_value <= 2
+        })
+        .expect("parameterized writable stat in catalog");
+
+    let bad_param_err = session.apply_intent(UiIntent::AddItemProperty {
+        item_index: target_item.index,
+        stat_id: param_stat.stat_id,
+        value: 2,
+        param: -1,
+    });
+    assert!(!bad_param_err.ok, "negative param must be rejected");
+
+    let add_param_env = session.apply_intent(UiIntent::AddItemProperty {
+        item_index: target_item.index,
+        stat_id: param_stat.stat_id,
+        value: 2,
+        param: 7,
+    });
+    assert!(add_param_env.ok, "{:?}", add_param_env.rejection);
+
+    let set_param_env = session.apply_intent(UiIntent::SetItemPropertyParam {
+        item_index: target_item.index,
+        stat_id: param_stat.stat_id,
+        param: 12,
+    });
+    assert!(set_param_env.ok, "{:?}", set_param_env.rejection);
+
+    let exported_param = session.to_save_bytes().expect("export cycle 22 param .d2s");
+    let reloaded_param = EditorSession::from_bytes(&exported_param, "cycle22_param.d2s")
+        .expect("reload cycle 22 param .d2s");
+    let reloaded_param_item = reloaded_param
+        .project()
+        .items
+        .into_iter()
+        .find(|it| it.index == target_item.index)
+        .expect("reloaded param item");
+    assert!(
+        reloaded_param_item
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == param_stat.stat_id && p.value == 2 && p.param == 12),
+        "expected stat {} with value=2, param=12 after .d2s roundtrip",
+        param_stat.stat_id
+    );
+}
+
+#[test]
+fn cycle21_socketed_item_view_and_gold_roundtrip() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let bytes = std::fs::read(&fixture).expect("read TESTDRUID fixture");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("parse fixture");
+
+    let initial_view = session.project();
+    assert!(initial_view.merc.persistence_supported);
+    for item in initial_view.items.iter().chain(initial_view.merc_items.iter()) {
+        assert_eq!(item.socketed_items.len(), item.socketed_names.len());
+        assert!(item.socket_count >= item.socketed_items.len() as i32);
+    }
+
+    let stash_env = session.apply_intent(UiIntent::SetCharacterField {
+        field: d2r_core::projection::CharacterField::GoldStash,
+        value: 777_777,
+    });
+    assert!(stash_env.ok);
+    let inv_env = session.apply_intent(UiIntent::SetCharacterField {
+        field: d2r_core::projection::CharacterField::GoldCharacter,
+        value: 55_555,
+    });
+    assert!(inv_env.ok);
+
+    let exported = session.to_save_bytes().expect("export cycle 21 .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "cycle21.d2s").expect("reload .d2s");
+    let reloaded_view = reloaded.project();
+    assert_eq!(reloaded_view.stats.gold_stash, 777_777);
+    assert_eq!(reloaded_view.stats.gold_inventory, 55_555);
+}
+
+#[test]
+fn cycle_23_item_forge_draft_staging_apply_discard_and_undo_roundtrip() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/savegames/gameplay/normal/act3/TESTASSASSIN_Act3_ColdMercLvl21.d2s");
+    let bytes = std::fs::read(&fixture).expect("read fixture");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTASSASSIN_Act3_ColdMercLvl21.d2s")
+        .expect("load session");
+    let initial = session.project();
+    let target_item = initial
+        .items
+        .iter()
+        .find(|it| !it.detailed_properties.is_empty())
+        .expect("non-compact item");
+    let chosen_stat = initial
+        .stat_catalog
+        .iter()
+        .find(|s| {
+            s.param_bits == 0
+                && !target_item
+                    .detailed_properties
+                    .iter()
+                    .any(|p| p.stat_id == s.stat_id)
+                && s.max_value >= 25
+        })
+        .expect("unused stat");
+
+    // 1. Open draft and mutate; main session & undo_stack remain untouched and export is guarded while draft is dirty.
+    let open_env = session.apply_intent(UiIntent::OpenItemForgeDraft {
+        item_index: target_item.index,
+    });
+    assert!(open_env.ok);
+    let open_view = open_env.session.unwrap();
+    assert!(!open_view.active_item_draft.as_ref().unwrap().dirty);
+    assert!(open_view.export_supported);
+
+    let add_draft_env = session.apply_intent(UiIntent::AddItemProperty {
+        item_index: target_item.index,
+        stat_id: chosen_stat.stat_id,
+        value: 20,
+        param: 0,
+    });
+    assert!(add_draft_env.ok);
+    let draft_view = add_draft_env.session.unwrap();
+    assert!(!draft_view.dirty, "main session must stay clean while editing draft");
+    assert!(!draft_view.can_undo, "draft edits must not pollute main undo_stack");
+    assert!(!draft_view.export_supported, "dirty draft must block .d2s export");
+    let active_draft = draft_view.active_item_draft.as_ref().unwrap();
+    assert!(active_draft.dirty);
+    assert!(
+        active_draft
+            .card
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 20)
+    );
+    assert!(
+        !draft_view
+            .items
+            .iter()
+            .find(|it| it.index == target_item.index)
+            .unwrap()
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id),
+        "main items must not reflect draft edits before ApplyItemForgeDraft"
+    );
+
+    // 2. Discard draft drops staged changes cleanly.
+    let discard_env = session.apply_intent(UiIntent::DiscardItemForgeDraft);
+    assert!(discard_env.ok);
+    let discarded = discard_env.session.unwrap();
+    assert!(discarded.active_item_draft.is_none());
+    assert!(!discarded.dirty);
+    assert!(discarded.export_supported);
+
+    // 3. Open again, make two edits, Apply commits atomically in 1 Undo step.
+    assert!(
+        session
+            .apply_intent(UiIntent::OpenItemForgeDraft {
+                item_index: target_item.index,
+            })
+            .ok
+    );
+    assert!(
+        session
+            .apply_intent(UiIntent::AddItemProperty {
+                item_index: target_item.index,
+                stat_id: chosen_stat.stat_id,
+                value: 20,
+                param: 0,
+            })
+            .ok
+    );
+    assert!(
+        session
+            .apply_intent(UiIntent::MutateItemProperty {
+                item_index: target_item.index,
+                stat_id: chosen_stat.stat_id,
+                delta: 5,
+            })
+            .ok
+    );
+    let apply_env = session.apply_intent(UiIntent::ApplyItemForgeDraft);
+    assert!(apply_env.ok, "{:?}", apply_env.rejection);
+    let applied = apply_env.session.unwrap();
+    assert!(applied.active_item_draft.is_none());
+    assert!(applied.dirty);
+    assert!(applied.can_undo);
+    assert!(applied.export_supported);
+    assert!(
+        applied
+            .items
+            .iter()
+            .find(|it| it.index == target_item.index)
+            .unwrap()
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 25)
+    );
+
+    // 4. Single Undo reverts the entire draft transaction; Redo restores it for .d2s roundtrip.
+    let undo_env = session.apply_intent(UiIntent::Undo);
+    assert!(undo_env.ok);
+    let undone = undo_env.session.unwrap();
+    assert!(!undone.can_undo, "all draft edits must collapse into 1 undo step");
+    assert!(
+        !undone
+            .items
+            .iter()
+            .find(|it| it.index == target_item.index)
+            .unwrap()
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id)
+    );
+
+    assert!(session.apply_intent(UiIntent::Redo).ok);
+    let exported = session.to_save_bytes().expect("export cycle 23 .d2s");
+    let reloaded = EditorSession::from_bytes(&exported, "cycle23.d2s").expect("reload .d2s");
+    assert!(
+        reloaded
+            .project()
+            .items
+            .iter()
+            .find(|it| it.index == target_item.index)
+            .unwrap()
+            .detailed_properties
+            .iter()
+            .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 25)
     );
 }
