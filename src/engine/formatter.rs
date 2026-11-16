@@ -615,18 +615,17 @@ fn format_elemental_pair(
     language: &str,
     skip_indices: &std::collections::HashSet<usize>,
 ) -> Option<(usize, String)> {
-    let p = &props[primary];
-    let (max_stat_id, english, korean) = match p.stat_id {
-        48 => (49, "fire", "파이어"),
-        50 => (51, "lightning", "라이트닝"),
-        52 => (53, "magic", "마법"),
-        _ => return None,
+    use crate::engine::property_groups::{ElementalKind, matching_elemental_pair};
+
+    let pair = matching_elemental_pair(props, primary, skip_indices)?;
+    let (english, korean) = match pair.kind {
+        ElementalKind::Fire => ("fire", "파이어"),
+        ElementalKind::Lightning => ("lightning", "라이트닝"),
+        ElementalKind::Magic => ("magic", "마법"),
     };
-    let (max_idx, max_p) = props.iter().enumerate().find(|(idx, other)| {
-        *idx > primary && other.stat_id == max_stat_id && !skip_indices.contains(idx)
-    })?;
-    let min = p.value;
-    let max = max_p.value;
+    let min = pair.min;
+    let max = pair.max;
+    let max_idx = pair.max_index;
     let line = format_elemental_range(min, max, english, korean, language);
     Some((max_idx, line))
 }

@@ -94,3 +94,41 @@ pub(crate) fn damage_companion_indices(
             .collect(),
     )
 }
+
+pub(crate) enum ElementalKind {
+    Fire,
+    Lightning,
+    Magic,
+}
+
+pub(crate) struct ElementalPair {
+    pub max_index: usize,
+    pub min: i32,
+    pub max: i32,
+    pub kind: ElementalKind,
+}
+
+pub(crate) fn matching_elemental_pair(
+    props: &[ItemProperty],
+    primary: usize,
+    skip_indices: &HashSet<usize>,
+) -> Option<ElementalPair> {
+    let p = &props[primary];
+    let (max_stat_id, kind) = match p.stat_id {
+        48 => (49, ElementalKind::Fire),
+        50 => (51, ElementalKind::Lightning),
+        52 => (53, ElementalKind::Magic),
+        _ => return None,
+    };
+    let (max_idx, max_p) = props.iter().enumerate().find(|(idx, other)| {
+        *idx > primary && other.stat_id == max_stat_id && !skip_indices.contains(idx)
+    })?;
+    let min = p.value;
+    let max = max_p.value;
+    Some(ElementalPair {
+        max_index: max_idx,
+        min,
+        max,
+        kind,
+    })
+}
