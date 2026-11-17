@@ -2,14 +2,14 @@
 //! These checks prove encoding/layout, not an item's unknown creation history.
 
 use crate::data::gems::GEMS;
-use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
-use crate::domain::stats::{stat_save_add, stat_save_bits};
 use crate::engine::is_explicit_v105;
 use crate::domain::item::type_hierarchy::get_all_item_types;
-use crate::engine::validation::{ValidationWarning, WarningConfidenceTier};
 use crate::item::{Item, ItemProperty, ItemQuality};
 use std::collections::{HashMap, HashSet};
+
+pub(super) mod validation_policy;
+pub(crate) use validation_policy::stored_defense_warnings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefenseContextError {
@@ -53,58 +53,6 @@ pub enum DefenseDisplay {
         value: u32,
         reason: DefenseContextError,
     },
-}
-
-pub(crate) fn stored_defense_warnings(item: &Item) -> Vec<ValidationWarning> {
-    let mut warnings = Vec::new();
-    let Some(template) = DataRepository::get_item_template(item.code.trim()) else {
-        return warnings;
-    };
-    let mut warn = |category, message| {
-        warnings.push(ValidationWarning::new(
-            message,
-            WarningConfidenceTier::HardInvariant,
-            category,
-        ));
-    };
-    if item.body.defense != item.defense {
-        warn(
-            "defense_mirror",
-            "Stored defense disagrees with its legacy mirror.".to_string(),
-        );
-    }
-    if !template.is_armor {
-        if item.body.defense.is_some() {
-            warn(
-                "defense_layout",
-                "A non-armor item contains a stored armor defense field.".to_string(),
-            );
-        }
-        return warnings;
-    }
-    let Some(base) = item.body.defense else {
-        warn(
-            "defense_missing",
-            "The armor's stored defense field is missing.".to_string(),
-        );
-        return warnings;
-    };
-    let representable = stat_save_bits(31)
-        .zip(stat_save_add(31))
-        .is_some_and(|(bits, add)| {
-            if !(1..=32).contains(&bits) {
-                return false;
-            }
-            let encoded = i64::from(base) + i64::from(add);
-            encoded >= 0 && encoded < (1_i64 << bits)
-        });
-    if !representable {
-        warn(
-            "defense_encoding",
-            format!("Stored defense {base} does not fit its save-field encoding."),
-        );
-    }
-    warnings
 }
 
 #[derive(Default)]
