@@ -26,8 +26,7 @@
 //! assert!(resolver(&Item::default()).is_none());
 //! ```
 
-use crate::data::item_specs::{Affix, ItemStatRange, Runeword, SetItem, UniqueItem, get_base_item_spec};
-use crate::data::{set_items, unique_items};
+use crate::data::item_specs::{Affix, ItemStatRange, get_base_item_spec};
 use crate::data::DataRepository;
 use crate::data::item_types::ITEM_TYPES;
 use crate::data::legitimacy::{SOCKET_RULES, calc_alvl, STAFFMOD_ENTRIES};
@@ -48,50 +47,9 @@ pub use model::{
     StatValidation, StatValidationStatus, ValidationResult, ValidationWarning, WarningConfidenceTier,
 };
 
-pub enum ItemSpec {
-    Unique(&'static UniqueItem),
-    Set(&'static SetItem),
-    Runeword(&'static Runeword),
-    Affix(&'static Affix),
-}
-
-impl ItemSpec {
-    pub fn name(&self) -> &str {
-        match self {
-            ItemSpec::Unique(ui) => ui.index,
-            ItemSpec::Set(si) => si.index,
-            ItemSpec::Runeword(rw) => runeword_display_name(rw),
-            ItemSpec::Affix(a) => a.name,
-        }
-    }
-}
-
 pub use crate::domain::item::affix_catalog::{lookup_prefix, lookup_suffix};
 
-pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
-    if item.is_runeword || item.header.is_runeword {
-        return resolve_runeword(item).map(|resolved| ItemSpec::Runeword(resolved.template));
-    }
-
-    match item.quality {
-        Some(ItemQuality::Unique) => {
-            if let Some(uid) = item.unique_id {
-                return unique_items::UNIQUE_ITEMS.iter()
-                    .find(|ui| ui.id == uid as u32)
-                    .map(ItemSpec::Unique);
-            }
-        }
-        Some(ItemQuality::Set) => {
-            if let Some(sid) = item.unique_id {
-                return set_items::SET_ITEMS.iter()
-                    .find(|si| si.id == sid as u32)
-                    .map(ItemSpec::Set);
-            }
-        }
-        _ => {}
-    }
-    None
-}
+pub use crate::domain::item::specification::{ItemSpec, lookup_spec};
 
 
 pub fn validate_item(item: &Item) -> Option<ValidationResult> {

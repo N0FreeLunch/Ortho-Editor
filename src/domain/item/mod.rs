@@ -2,6 +2,7 @@ pub mod quality;
 pub(crate) mod type_hierarchy;
 pub(crate) mod affix_catalog;
 pub(crate) mod runeword;
+pub(crate) mod specification;
 pub mod image;
 pub mod entity;
 pub mod builder;
