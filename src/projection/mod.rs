@@ -96,9 +96,10 @@ impl DifficultyMode {
 
 /// Skill allocation rule mode used by the editor.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode,
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode,
 )]
 pub enum EditMode {
+    #[default]
     Legit,
     Free,
 }
@@ -153,6 +154,22 @@ pub struct CharacterStatsView {
     pub magic_find: i32,
     #[serde(default)]
     pub all_skills_bonus: i32,
+    #[serde(default)]
+    pub stat_points_rule_cap: i32,
+    #[serde(default)]
+    pub stat_points_invested: i32,
+    #[serde(default)]
+    pub life_pure: i32,
+    #[serde(default)]
+    pub life_bonus: i32,
+    #[serde(default)]
+    pub mana_pure: i32,
+    #[serde(default)]
+    pub mana_bonus: i32,
+    #[serde(default)]
+    pub stamina_pure: i32,
+    #[serde(default)]
+    pub stamina_bonus: i32,
 }
 
 /// Projected class skill node for the 30-skill tree in View B.
@@ -196,6 +213,22 @@ pub struct CharacterSchemaView {
     pub stat_points_max: i32,
     pub gold_character_max: i32,
     pub gold_stash_max: i32,
+    #[serde(default)]
+    pub class_base_str: i32,
+    #[serde(default)]
+    pub class_base_dex: i32,
+    #[serde(default)]
+    pub class_base_vit: i32,
+    #[serde(default)]
+    pub class_base_ene: i32,
+    #[serde(default)]
+    pub item_defense_max: i32,
+    #[serde(default)]
+    pub item_quantity_max: i32,
+    #[serde(default)]
+    pub skill_legit_max: i32,
+    #[serde(default)]
+    pub skill_free_max: i32,
 }
 
 /// Item counts across player containers, temporary dock, and mercenary slots.
@@ -614,6 +647,8 @@ pub struct SessionView {
     pub is_expansion: bool,
     pub res_difficulty: DifficultyMode,
     pub skill_mode: EditMode,
+    #[serde(default)]
+    pub stat_mode: EditMode,
     pub dirty: bool,
     pub schema: CharacterSchemaView,
     pub stats: CharacterStatsView,
@@ -659,6 +694,11 @@ pub enum UiIntent {
     SelectSkillMode {
         mode: EditMode,
     },
+    SelectStatMode {
+        mode: EditMode,
+    },
+    ResetStats,
+    SyncStatPointsToRules,
     SetMercLevel {
         level: i32,
     },
@@ -868,6 +908,7 @@ pub struct EditorSession {
     is_expansion: bool,
     res_difficulty: DifficultyMode,
     skill_mode: EditMode,
+    stat_mode: EditMode,
     attributes: AttributeSection,
     progression: Progression,
     waypoints_by_diff: [WaypointSet; 3],
@@ -948,6 +989,7 @@ struct SessionSnapshot {
     dirty: bool,
     res_difficulty: DifficultyMode,
     skill_mode: EditMode,
+    stat_mode: EditMode,
     attributes: AttributeSection,
     progression: Progression,
     waypoints_by_diff: [WaypointSet; 3],
@@ -1119,6 +1161,7 @@ impl EditorSession {
             is_expansion,
             res_difficulty: DifficultyMode::Normal,
             skill_mode: EditMode::Legit,
+            stat_mode: EditMode::Legit,
             attributes,
             progression,
             waypoints_by_diff,
@@ -1225,6 +1268,49 @@ impl EditorSession {
             }
         }
 
+        let class_rule = crate::data::char_base_stats::class_base_rule(self.char_class_id);
+        let lam_esen_bonus = crate::engine::character_sheet::count_lam_esen_bonuses(Some(&self.progression.quests));
+        let golden_bird_bonus = crate::engine::character_sheet::count_golden_bird_bonuses(Some(&self.progression.quests));
+        let lvl_i32 = i32::from(self.char_level.clamp(1, 99));
+        let stat_points_rule_cap =
+            (lvl_i32 - 1) * crate::data::char_base_stats::STAT_POINTS_PER_LEVEL + lam_esen_bonus;
+        let stat_points_invested = (sheet.strength.base - class_rule.base_str).max(0)
+            + (sheet.dexterity.base - class_rule.base_dex).max(0)
+            + (sheet.vitality.base - class_rule.base_vit).max(0)
+            + (sheet.energy.base - class_rule.base_ene).max(0);
+
+        let life_pure = class_rule.base_life
+            + ((lvl_i32 - 1) * class_rule.life_per_level_x4) / 4
+            + ((sheet.vitality.base - class_rule.base_vit).max(0) * class_rule.life_per_vit_x4) / 4
+            + golden_bird_bonus;
+        let life_from_gear_vit = (sheet.vitality.bonus * class_rule.life_per_vit_x4) / 4;
+        let life_per_lv = (sheet.gear_life_per_level_x8 * lvl_i32) / 8;
+        let life_sub = life_pure + sheet.gear_life_flat + life_per_lv + life_from_gear_vit;
+        let life_pct_bonus = (life_sub * sheet.gear_life_pct) / 100;
+        let life_bonus = sheet.gear_life_flat + life_per_lv + life_from_gear_vit + life_pct_bonus;
+        let effective_max_life = (life_pure + life_bonus).max(1);
+        let current_life = (get_stat(6) / 256).clamp(0, effective_max_life);
+
+        let mana_pure = class_rule.base_mana
+            + ((lvl_i32 - 1) * class_rule.mana_per_level_x4) / 4
+            + ((sheet.energy.base - class_rule.base_ene).max(0) * class_rule.mana_per_ene_x4) / 4;
+        let mana_from_gear_ene = (sheet.energy.bonus * class_rule.mana_per_ene_x4) / 4;
+        let mana_per_lv = (sheet.gear_mana_per_level_x8 * lvl_i32) / 8;
+        let mana_sub = mana_pure + sheet.gear_mana_flat + mana_per_lv + mana_from_gear_ene;
+        let mana_pct_bonus = (mana_sub * sheet.gear_mana_pct) / 100;
+        let mana_bonus = sheet.gear_mana_flat + mana_per_lv + mana_from_gear_ene + mana_pct_bonus;
+        let effective_max_mana = (mana_pure + mana_bonus).max(1);
+        let current_mana = (get_stat(8) / 256).clamp(0, effective_max_mana);
+
+        let stamina_pure = class_rule.base_stamina
+            + ((lvl_i32 - 1) * class_rule.stamina_per_level_x4) / 4
+            + ((sheet.vitality.base - class_rule.base_vit).max(0) * class_rule.stamina_per_vit_x4) / 4;
+        let stamina_from_gear_vit = (sheet.vitality.bonus * class_rule.stamina_per_vit_x4) / 4;
+        let stamina_per_lv = (sheet.gear_stamina_per_level_x8 * lvl_i32) / 8;
+        let stamina_bonus = sheet.gear_stamina_flat + stamina_per_lv + stamina_from_gear_vit;
+        let effective_max_stamina = (stamina_pure + stamina_bonus).max(1);
+        let current_stamina = (get_stat(10) / 256).clamp(0, effective_max_stamina);
+
         let stats = CharacterStatsView {
             strength_base: sheet.strength.base,
             strength_bonus: sheet.strength.bonus,
@@ -1234,12 +1320,12 @@ impl EditorSession {
             vitality_bonus: sheet.vitality.bonus,
             energy_base: sheet.energy.base,
             energy_bonus: sheet.energy.bonus,
-            life: get_stat(6) / 256,
-            max_life: get_stat(7) / 256,
-            mana: get_stat(8) / 256,
-            max_mana: get_stat(9) / 256,
-            stamina: get_stat(10) / 256,
-            max_stamina: get_stat(11) / 256,
+            life: current_life,
+            max_life: effective_max_life,
+            mana: current_mana,
+            max_mana: effective_max_mana,
+            stamina: current_stamina,
+            max_stamina: effective_max_stamina,
             unspent_stat_points: sheet.unspent_stat_points as i32,
             unspent_skill_points: sheet.unspent_skill_points as i32,
             gold_inventory: get_stat(14),
@@ -1251,6 +1337,14 @@ impl EditorSession {
             ias: sheet.ias,
             magic_find,
             all_skills_bonus,
+            stat_points_rule_cap,
+            stat_points_invested,
+            life_pure,
+            life_bonus,
+            mana_pure,
+            mana_bonus,
+            stamina_pure,
+            stamina_bonus,
         };
 
         let mut counts = ContainerCountsView {
@@ -1304,6 +1398,14 @@ impl EditorSession {
             stat_points_max: 1023,
             gold_character_max: i32::from(self.char_level.clamp(1, 99)) * 10_000,
             gold_stash_max: StashGoldValue::MAX_STASH_GOLD as i32,
+            class_base_str: class_rule.base_str,
+            class_base_dex: class_rule.base_dex,
+            class_base_vit: class_rule.base_vit,
+            class_base_ene: class_rule.base_ene,
+            item_defense_max: 2037,
+            item_quantity_max: 511,
+            skill_legit_max: 20,
+            skill_free_max: 99,
         };
 
         let export_unsupported_reason = export_unsupported_reason(self.save_version).or_else(|| {
@@ -1369,6 +1471,7 @@ impl EditorSession {
             is_expansion: self.is_expansion,
             res_difficulty: self.res_difficulty,
             skill_mode: self.skill_mode,
+            stat_mode: self.stat_mode,
             dirty: self.dirty,
             schema,
             stats,
@@ -1440,6 +1543,7 @@ impl EditorSession {
             dirty: self.dirty,
             res_difficulty: self.res_difficulty,
             skill_mode: self.skill_mode,
+            stat_mode: self.stat_mode,
             attributes: self.attributes.clone(),
             progression: self.progression.clone(),
             waypoints_by_diff: self.waypoints_by_diff.clone(),
@@ -1467,6 +1571,7 @@ impl EditorSession {
         self.dirty = snap.dirty;
         self.res_difficulty = snap.res_difficulty;
         self.skill_mode = snap.skill_mode;
+        self.stat_mode = snap.stat_mode;
         self.attributes = snap.attributes;
         self.progression = snap.progression;
         self.waypoints_by_diff = snap.waypoints_by_diff;
@@ -1517,6 +1622,8 @@ impl EditorSession {
                     | UiIntent::SetWaypointsBatch { .. }
                     | UiIntent::SetAllDiffWaypoints { .. }
                     | UiIntent::SetCharacterField { .. }
+                    | UiIntent::ResetStats
+                    | UiIntent::SyncStatPointsToRules
                     | UiIntent::SetCharacterName { .. }
                     | UiIntent::MoveItem { .. }
                     | UiIntent::ClearTempInventory
@@ -1574,6 +1681,12 @@ impl EditorSession {
                 self.skill_mode = mode;
                 Ok(())
             }
+            UiIntent::SelectStatMode { mode } => {
+                self.stat_mode = mode;
+                Ok(())
+            }
+            UiIntent::ResetStats => self.apply_reset_stats(),
+            UiIntent::SyncStatPointsToRules => self.apply_sync_stat_points_to_rules(),
             UiIntent::SetMercLevel { level } => {
                 if !(1..=98).contains(&level) {
                     return Err(ActionRejection::new(
@@ -1848,6 +1961,61 @@ impl EditorSession {
                 Ok(())
             }
             UiIntent::SetCharacterField { field, value } => {
+                let mut legit_next_unspent: Option<u32> = None;
+                if self.stat_mode == EditMode::Legit {
+                    let alpha = self.save_version == 105;
+                    let class_rule = crate::data::char_base_stats::class_base_rule(self.char_class_id);
+                    let unspent_now = self.attributes.actual_value(4, alpha).unwrap_or(0).max(0);
+                    match field {
+                        CharacterField::StatPoints => {
+                            return Err(ActionRejection::new(
+                                RejectionCode::RejectionStatOutOfRange,
+                                "stat_points_locked_in_legit_mode",
+                                "Unspent stat points are rule-managed in Legit mode. Switch to Free mode or use Sync to Rules.",
+                            )
+                            .with_target("stat_points")
+                            .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+                        }
+                        CharacterField::Strength
+                        | CharacterField::Dexterity
+                        | CharacterField::Vitality
+                        | CharacterField::Energy => {
+                            let (stat_id, base_min, target_name) = match field {
+                                CharacterField::Strength => (0u32, class_rule.base_str, "strength"),
+                                CharacterField::Dexterity => (2u32, class_rule.base_dex, "dexterity"),
+                                CharacterField::Vitality => (3u32, class_rule.base_vit, "vitality"),
+                                CharacterField::Energy => (1u32, class_rule.base_ene, "energy"),
+                                _ => unreachable!(),
+                            };
+                            let current_val = self.attributes.actual_value(stat_id, alpha).unwrap_or(0);
+                            let floor_val = base_min.min(current_val);
+                            if value < floor_val {
+                                return Err(ActionRejection::new(
+                                    RejectionCode::RejectionStatOutOfRange,
+                                    "stat_below_class_base",
+                                    format!("Cannot reduce {target_name} below class base ({base_min}) in Legit mode."),
+                                )
+                                .with_target(target_name)
+                                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+                            }
+                            let delta = value - current_val;
+                            if delta > unspent_now {
+                                return Err(ActionRejection::new(
+                                    RejectionCode::RejectionStatOutOfRange,
+                                    "insufficient_stat_points",
+                                    format!(
+                                        "Insufficient unspent stat points (need {delta}, remaining {unspent_now}) in Legit mode."
+                                    ),
+                                )
+                                .with_target(target_name)
+                                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+                            }
+                            let next_unspent = (unspent_now - delta).clamp(0, 1023) as u32;
+                            legit_next_unspent = Some(next_unspent);
+                        }
+                        _ => {}
+                    }
+                }
                 self.apply_character_edit(|edits| {
                     match field {
                         CharacterField::Level => {
@@ -1877,6 +2045,11 @@ impl EditorSession {
                                 _ => unreachable!(),
                             };
                             *slot = Some(NumericOp::Set(vo));
+                            if let Some(next_unspent) = legit_next_unspent {
+                                let unspent_vo =
+                                    StatPointValue::new(next_unspent, 1023).map_err(|e| e.to_string())?;
+                                edits.stat_points = Some(NumericOp::Set(unspent_vo));
+                            }
                         }
                         CharacterField::GoldCharacter => {
                             let gold = u32::try_from(value).map_err(|_| {
@@ -2751,6 +2924,64 @@ impl EditorSession {
         self.has_skill_edits = true;
         self.dirty = true;
         Ok(())
+    }
+
+    fn apply_reset_stats(&mut self) -> Result<(), ActionRejection> {
+        let alpha = self.save_version == 105;
+        let rule = crate::data::char_base_stats::class_base_rule(self.char_class_id);
+        let cur_str = self.attributes.actual_value(0, alpha).unwrap_or(rule.base_str);
+        let cur_ene = self.attributes.actual_value(1, alpha).unwrap_or(rule.base_ene);
+        let cur_dex = self.attributes.actual_value(2, alpha).unwrap_or(rule.base_dex);
+        let cur_vit = self.attributes.actual_value(3, alpha).unwrap_or(rule.base_vit);
+        let refund = (cur_str - rule.base_str).max(0)
+            + (cur_ene - rule.base_ene).max(0)
+            + (cur_dex - rule.base_dex).max(0)
+            + (cur_vit - rule.base_vit).max(0);
+        let unspent_now = self.attributes.actual_value(4, alpha).unwrap_or(0).max(0);
+        let next_unspent = (unspent_now + refund).clamp(0, 1023) as u32;
+
+        self.apply_character_edit(|edits| {
+            edits.strength = Some(NumericOp::Set(
+                StatPointValue::new(rule.base_str.max(1) as u32, 1023).map_err(|e| e.to_string())?,
+            ));
+            edits.energy = Some(NumericOp::Set(
+                StatPointValue::new(rule.base_ene.max(1) as u32, 1023).map_err(|e| e.to_string())?,
+            ));
+            edits.dexterity = Some(NumericOp::Set(
+                StatPointValue::new(rule.base_dex.max(1) as u32, 1023).map_err(|e| e.to_string())?,
+            ));
+            edits.vitality = Some(NumericOp::Set(
+                StatPointValue::new(rule.base_vit.max(1) as u32, 1023).map_err(|e| e.to_string())?,
+            ));
+            edits.stat_points = Some(NumericOp::Set(
+                StatPointValue::new(next_unspent, 1023).map_err(|e| e.to_string())?,
+            ));
+            Ok(())
+        })
+    }
+
+    fn apply_sync_stat_points_to_rules(&mut self) -> Result<(), ActionRejection> {
+        let alpha = self.save_version == 105;
+        let rule = crate::data::char_base_stats::class_base_rule(self.char_class_id);
+        let lam_esen_bonus =
+            crate::engine::character_sheet::count_lam_esen_bonuses(Some(&self.progression.quests));
+        let lvl = i32::from(self.char_level.clamp(1, 99));
+        let rule_cap = (lvl - 1) * crate::data::char_base_stats::STAT_POINTS_PER_LEVEL + lam_esen_bonus;
+        let cur_str = self.attributes.actual_value(0, alpha).unwrap_or(rule.base_str);
+        let cur_ene = self.attributes.actual_value(1, alpha).unwrap_or(rule.base_ene);
+        let cur_dex = self.attributes.actual_value(2, alpha).unwrap_or(rule.base_dex);
+        let cur_vit = self.attributes.actual_value(3, alpha).unwrap_or(rule.base_vit);
+        let invested = (cur_str - rule.base_str).max(0)
+            + (cur_ene - rule.base_ene).max(0)
+            + (cur_dex - rule.base_dex).max(0)
+            + (cur_vit - rule.base_vit).max(0);
+        let next_unspent = (rule_cap - invested).clamp(0, 1023) as u32;
+        self.apply_character_edit(|edits| {
+            edits.stat_points = Some(NumericOp::Set(
+                StatPointValue::new(next_unspent, 1023).map_err(|e| e.to_string())?,
+            ));
+            Ok(())
+        })
     }
 
     fn apply_reset_skills(&mut self) -> Result<(), ActionRejection> {

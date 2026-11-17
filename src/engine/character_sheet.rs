@@ -12,6 +12,14 @@ pub const STAT_STRENGTH: u32 = 0;
 pub const STAT_ENERGY: u32 = 1;
 pub const STAT_DEXTERITY: u32 = 2;
 pub const STAT_VITALITY: u32 = 3;
+pub const STAT_MAXHP: u32 = 7;
+pub const STAT_MAXMANA: u32 = 9;
+pub const STAT_MAXSTAMINA: u32 = 11;
+pub const STAT_MAXHP_PERCENT: u32 = 76;
+pub const STAT_MAXMANA_PERCENT: u32 = 77;
+pub const STAT_HP_PER_LEVEL: u32 = 216;
+pub const STAT_MANA_PER_LEVEL: u32 = 217;
+pub const STAT_STAMINA_PER_LEVEL: u32 = 218;
 
 pub const STAT_DAMAGE_RESIST: u32 = 36;
 pub const STAT_MAGIC_RESIST: u32 = 37;
@@ -151,6 +159,14 @@ pub struct CharacterCombatSheet {
     pub energy: AttributeDetail,
     pub unspent_stat_points: u32,
     pub unspent_skill_points: u32,
+    pub gear_life_flat: i32,
+    pub gear_life_pct: i32,
+    pub gear_life_per_level_x8: i32,
+    pub gear_mana_flat: i32,
+    pub gear_mana_pct: i32,
+    pub gear_mana_per_level_x8: i32,
+    pub gear_stamina_flat: i32,
+    pub gear_stamina_per_level_x8: i32,
 }
 
 fn is_charm_item_code(code: &str) -> bool {
@@ -168,6 +184,28 @@ pub fn count_anya_scroll_bonuses(quests: Option<&QuestSet>) -> i32 {
         }
     }
     completed_count * 10
+}
+
+/// Counts completed Lam Esen's Tome quests across difficulties (+5 stat points each).
+pub fn count_lam_esen_bonuses(quests: Option<&QuestSet>) -> i32 {
+    let Some(qs) = quests else { return 0 };
+    let completed = qs
+        .quests()
+        .iter()
+        .filter(|q| q.name().ends_with("Lam Esen's Tome") && q.is_completed())
+        .count() as i32;
+    completed * crate::data::char_base_stats::LAM_ESEN_STAT_POINTS_PER_DIFF
+}
+
+/// Counts completed Golden Bird quests across difficulties (+20 life each).
+pub fn count_golden_bird_bonuses(quests: Option<&QuestSet>) -> i32 {
+    let Some(qs) = quests else { return 0 };
+    let completed = qs
+        .quests()
+        .iter()
+        .filter(|q| q.name().ends_with("The Golden Bird") && q.is_completed())
+        .count() as i32;
+    completed * crate::data::char_base_stats::GOLDEN_BIRD_LIFE_PER_DIFF
 }
 
 #[derive(Default)]
@@ -207,6 +245,14 @@ pub fn calculate_combat_sheet(
     let mut bonus_dex = 0;
     let mut bonus_vit = 0;
     let mut bonus_ene = 0;
+    let mut gear_life_flat = 0;
+    let mut gear_life_pct = 0;
+    let mut gear_life_per_level_x8 = 0;
+    let mut gear_mana_flat = 0;
+    let mut gear_mana_pct = 0;
+    let mut gear_mana_per_level_x8 = 0;
+    let mut gear_stamina_flat = 0;
+    let mut gear_stamina_per_level_x8 = 0;
 
     for (item, container) in items {
         let is_equipped = *container == ItemContainer::Equipment;
@@ -239,6 +285,14 @@ pub fn calculate_combat_sheet(
                 STAT_DEXTERITY => bonus_dex += val,
                 STAT_VITALITY => bonus_vit += val,
                 STAT_ENERGY => bonus_ene += val,
+                STAT_MAXHP => gear_life_flat += val,
+                STAT_MAXMANA => gear_mana_flat += val,
+                STAT_MAXSTAMINA => gear_stamina_flat += val,
+                STAT_MAXHP_PERCENT => gear_life_pct += val,
+                STAT_MAXMANA_PERCENT => gear_mana_pct += val,
+                STAT_HP_PER_LEVEL => gear_life_per_level_x8 += val,
+                STAT_MANA_PER_LEVEL => gear_mana_per_level_x8 += val,
+                STAT_STAMINA_PER_LEVEL => gear_stamina_per_level_x8 += val,
                 _ => {}
             }
         }
@@ -323,6 +377,14 @@ pub fn calculate_combat_sheet(
         },
         unspent_stat_points: unspent_stat,
         unspent_skill_points: unspent_skill,
+        gear_life_flat,
+        gear_life_pct,
+        gear_life_per_level_x8,
+        gear_mana_flat,
+        gear_mana_pct,
+        gear_mana_per_level_x8,
+        gear_stamina_flat,
+        gear_stamina_per_level_x8,
     }
 }
 

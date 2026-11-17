@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use d2r_core::projection::{
-    ContainerKind, DifficultyMode, EditMode, EditorSession, ItemCardView, ItemQualityKind,
-    RejectionCode, SessionEnvelope, ShopSpawnTarget, SuggestedRecovery, UiIntent,
+    CharacterField, ContainerKind, DifficultyMode, EditMode, EditorSession, ItemCardView,
+    ItemQualityKind, RejectionCode, SessionEnvelope, ShopSpawnTarget, SuggestedRecovery, UiIntent,
     generate_elm_protocol_module,
 };
 
@@ -438,6 +438,13 @@ fn character_profile_and_stat_mutations_enforce_bounds_and_roundtrip_bytes() {
             .apply_intent(UiIntent::SetCharacterField {
                 field: CharacterField::Level,
                 value: 50,
+            })
+            .ok
+    );
+    assert!(
+        session
+            .apply_intent(UiIntent::SelectStatMode {
+                mode: EditMode::Free,
             })
             .ok
     );
@@ -1452,4 +1459,56 @@ fn cycle_23_item_forge_draft_staging_apply_discard_and_undo_roundtrip() {
             .iter()
             .any(|p| p.stat_id == chosen_stat.stat_id && p.value == 25)
     );
+}
+
+#[test]
+fn cycle_25_stat_mode_legit_free_reset_sync_and_vitals_breakdown() {
+    let bytes = fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session = EditorSession::from_bytes(&bytes, "testdruid_cycle25.d2s").expect("load session");
+    let v0 = session.project();
+    assert_eq!(v0.stat_mode, EditMode::Legit);
+    assert!(v0.stats.life <= v0.stats.max_life);
+    assert!(v0.stats.mana <= v0.stats.max_mana);
+    assert!(v0.stats.stamina <= v0.stats.max_stamina);
+    assert_eq!(v0.stats.max_life, v0.stats.life_pure + v0.stats.life_bonus);
+
+    // 1. SyncStatPointsToRules aligns unspent_stat_points to rule_cap - invested
+    let sync_env = session.apply_intent(UiIntent::SyncStatPointsToRules);
+    assert!(sync_env.ok);
+    let synced = sync_env.session.unwrap();
+    let expected_unspent = (synced.stats.stat_points_rule_cap - synced.stats.stat_points_invested).max(0);
+    assert_eq!(synced.stats.unspent_stat_points, expected_unspent);
+
+    // 2. Legit mode debits unspent_stat_points on Strength increase and rejects over-spend
+    let cur_str = synced.stats.strength_base;
+    let inc_env = session.apply_intent(UiIntent::SetCharacterField {
+        field: CharacterField::Strength,
+        value: cur_str + 5,
+    });
+    assert!(inc_env.ok);
+    let after_inc = inc_env.session.unwrap();
+    assert_eq!(after_inc.stats.strength_base, cur_str + 5);
+    assert_eq!(after_inc.stats.unspent_stat_points, expected_unspent - 5);
+
+    let over_env = session.apply_intent(UiIntent::SetCharacterField {
+        field: CharacterField::Strength,
+        value: cur_str + 5 + expected_unspent + 10,
+    });
+    assert!(!over_env.ok);
+
+    // 3. ResetStats returns attributes to class base and refunds invested points
+    let reset_env = session.apply_intent(UiIntent::ResetStats);
+    assert!(reset_env.ok);
+    let after_reset = reset_env.session.unwrap();
+    assert_eq!(after_reset.stats.strength_base, after_reset.schema.class_base_str);
+    assert_eq!(after_reset.stats.stat_points_invested, 0);
+
+    // 4. Free mode allows direct StatPoints and arbitrary Strength within 1..=1023
+    assert!(session.apply_intent(UiIntent::SelectStatMode { mode: EditMode::Free }).ok);
+    let free_env = session.apply_intent(UiIntent::SetCharacterField {
+        field: CharacterField::StatPoints,
+        value: 321,
+    });
+    assert!(free_env.ok);
+    assert_eq!(free_env.session.unwrap().stats.unspent_stat_points, 321);
 }

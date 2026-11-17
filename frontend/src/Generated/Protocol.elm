@@ -184,6 +184,9 @@ shopSpawnTargetEncoder enum =
 type UiIntent
     = SelectResDifficulty { difficulty : DifficultyMode }
     | SelectSkillMode { mode : EditMode }
+    | SelectStatMode { mode : EditMode }
+    | ResetStats
+    | SyncStatPointsToRules
     | SetMercLevel { level : Int }
     | SelectMercAct { actIndex : Int }
     | RestoreReplacedMerc
@@ -226,6 +229,12 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "SelectResDifficulty", Json.Encode.object [ ( "difficulty", (difficultyModeEncoder) difficulty ) ] ) ]
         SelectSkillMode { mode } ->
             Json.Encode.object [ ( "SelectSkillMode", Json.Encode.object [ ( "mode", (editModeEncoder) mode ) ] ) ]
+        SelectStatMode { mode } ->
+            Json.Encode.object [ ( "SelectStatMode", Json.Encode.object [ ( "mode", (editModeEncoder) mode ) ] ) ]
+        ResetStats ->
+            Json.Encode.string "ResetStats"
+        SyncStatPointsToRules ->
+            Json.Encode.string "SyncStatPointsToRules"
         SetMercLevel { level } ->
             Json.Encode.object [ ( "SetMercLevel", Json.Encode.object [ ( "level", (Json.Encode.int) level ) ] ) ]
         SelectMercAct { actIndex } ->
@@ -621,6 +630,14 @@ type alias CharacterSchemaView =
     , statPointsMax : Int
     , goldCharacterMax : Int
     , goldStashMax : Int
+    , classBaseStr : Int
+    , classBaseDex : Int
+    , classBaseVit : Int
+    , classBaseEne : Int
+    , itemDefenseMax : Int
+    , itemQuantityMax : Int
+    , skillLegitMax : Int
+    , skillFreeMax : Int
     }
 
 
@@ -637,6 +654,14 @@ characterSchemaViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_points_max" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "gold_character_max" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "gold_stash_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "class_base_str" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "class_base_dex" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "class_base_vit" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "class_base_ene" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "item_defense_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "item_quantity_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skill_legit_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skill_free_max" (Json.Decode.int)))
 
 
 type alias CharacterStatsView =
@@ -665,6 +690,14 @@ type alias CharacterStatsView =
     , ias : Int
     , magicFind : Int
     , allSkillsBonus : Int
+    , statPointsRuleCap : Int
+    , statPointsInvested : Int
+    , lifePure : Int
+    , lifeBonus : Int
+    , manaPure : Int
+    , manaBonus : Int
+    , staminaPure : Int
+    , staminaBonus : Int
     }
 
 
@@ -696,6 +729,14 @@ characterStatsViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "ias" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "magic_find" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "all_skills_bonus" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_points_rule_cap" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_points_invested" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "life_pure" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "life_bonus" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "mana_pure" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "mana_bonus" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stamina_pure" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stamina_bonus" (Json.Decode.int)))
 
 
 type alias ContainerCountsView =
@@ -1261,6 +1302,7 @@ type alias SessionView =
     , isExpansion : Bool
     , resDifficulty : DifficultyMode
     , skillMode : EditMode
+    , statMode : EditMode
     , dirty : Bool
     , schema : CharacterSchemaView
     , stats : CharacterStatsView
@@ -1302,6 +1344,7 @@ sessionViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "is_expansion" (Json.Decode.bool)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "res_difficulty" (difficultyModeDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "skill_mode" (editModeDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stat_mode" (editModeDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "dirty" (Json.Decode.bool)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "schema" (characterSchemaViewDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "stats" (characterStatsViewDecoder)))
