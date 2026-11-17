@@ -502,7 +502,8 @@ test("Closed-loop scenario 3: focusedInput draft isolation, Rust boundary reject
     assert.equal(canceled.snap.focusedInputKey, null);
     assert.equal(canceled.snap.dirty, false);
 
-    // 4. Commit valid character profile edits (level=50, strength=200, gold_stash=1234567, char_name=OrthoDruid)
+    // 4. Commit valid character profile edits (Free stat mode for arbitrary strength=200)
+    await driver.stepCommand({ kind: "SelectStatMode", mode: "free" });
     for (const [key, raw] of [
       ["level", "50"],
       ["strength", "200"],
@@ -1008,6 +1009,55 @@ test("Closed-loop scenario 9 (Cycle 23): Item Forge Draft staging, Discard isola
     const { reloaded } = await driver.exportAndReload("scenario9-cycle23-roundtrip.d2s");
     const reloadedItem = reloaded.envelope.session.items.find((it) => it.index === targetItem.index);
     assert.ok(reloadedItem.detailed_properties.some((p) => p.stat_id === chosenStat.stat_id && p.value === 15));
+  } finally {
+    await driver.close();
+  }
+});
+
+test("Closed-loop scenario 10 (Cycle 25): StatMode Legit/Free, ResetStats, SyncStatPointsToRules, Vitals breakdown, and .d2s roundtrip", async () => {
+  const driver = createClosedLoopDriver();
+  try {
+    const loadRes = await driver.requestHost({
+      cmd: "load_fixture_path",
+      path: "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+    });
+    assert.equal(loadRes.resp.ok, true);
+    const s0 = loadRes.resp.envelope.session;
+    assert.equal(s0.stat_mode, "Legit");
+    assert.ok(s0.stats.life <= s0.stats.max_life);
+    assert.ok(s0.stats.mana <= s0.stats.max_mana);
+    assert.ok(s0.stats.stamina <= s0.stats.max_stamina);
+    assert.equal(s0.stats.max_life, s0.stats.life_pure + s0.stats.life_bonus);
+
+    // 1. SyncStatPointsToRules aligns unspent points to rule_cap - invested
+    const syncRes = await driver.stepCommand({ kind: "SyncStatPointsToRules" });
+    assert.equal(syncRes.resp.ok, true);
+    const s1 = syncRes.resp.envelope.session;
+    const expectedUnspent = Math.max(0, s1.stats.stat_points_rule_cap - s1.stats.stat_points_invested);
+    assert.equal(s1.stats.unspent_stat_points, expectedUnspent);
+
+    // 2. Legit mode debits unspent on increase and blocks over-allocation
+    const curStr = s1.stats.strength_base;
+    await driver.stepCommand({ kind: "FocusField", key: "strength", initial: String(curStr) });
+    await driver.stepCommand({ kind: "EditFocusedInput", raw: String(curStr + 10) });
+    const incRes = await driver.stepCommand({ kind: "CommitFocusedInput" });
+    assert.equal(incRes.resp.ok, true);
+    assert.equal(incRes.resp.envelope.session.stats.strength_base, curStr + 10);
+    assert.equal(incRes.resp.envelope.session.stats.unspent_stat_points, expectedUnspent - 10);
+
+    await driver.stepCommand({ kind: "FocusField", key: "strength", initial: String(curStr + 10) });
+    await driver.stepCommand({ kind: "EditFocusedInput", raw: String(curStr + 10 + expectedUnspent) });
+    const overRes = await driver.stepCommand({ kind: "CommitFocusedInput" });
+    assert.equal(overRes.resp.ok, false);
+
+    // 3. ResetStats restores class base stats and refunds invested points, persisted across .d2s roundtrip
+    const resetRes = await driver.stepCommand({ kind: "ResetStats" });
+    assert.equal(resetRes.resp.ok, true);
+    assert.equal(resetRes.resp.envelope.session.stats.strength_base, resetRes.resp.envelope.session.schema.class_base_str);
+    assert.equal(resetRes.resp.envelope.session.stats.stat_points_invested, 0);
+
+    const { reloaded } = await driver.exportAndReload("scenario10-cycle25-roundtrip.d2s");
+    assert.equal(reloaded.envelope.session.stats.strength_base, reloaded.envelope.session.schema.class_base_str);
   } finally {
     await driver.close();
   }

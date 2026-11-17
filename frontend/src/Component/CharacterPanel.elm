@@ -45,18 +45,19 @@ view ui session =
                 session.charName
                 (String.fromInt schema.nameMinLen ++ ".." ++ String.fromInt schema.nameMaxLen ++ " ASCII")
                 "input-char-name"
-            , editableFieldChip ui
+            , editableStepperFieldChip ui
                 "level"
                 "Level"
                 (String.fromInt session.charLevel)
                 (String.fromInt schema.levelMin ++ ".." ++ String.fromInt schema.levelMax)
                 "input-char-level"
             ]
+        , viewStatModeStrip ui schema session.statMode session.stats
         , div [ class "stat-breakdown-grid" ]
-            [ editableStatChip ui "strength" "STR" session.stats.strengthBase session.stats.strengthBonus schema "input-stat-strength"
-            , editableStatChip ui "dexterity" "DEX" session.stats.dexterityBase session.stats.dexterityBonus schema "input-stat-dexterity"
-            , editableStatChip ui "vitality" "VIT" session.stats.vitalityBase session.stats.vitalityBonus schema "input-stat-vitality"
-            , editableStatChip ui "energy" "ENE" session.stats.energyBase session.stats.energyBonus schema "input-stat-energy"
+            [ editableStatChip ui session.statMode "strength" "STR" session.stats.strengthBase session.stats.strengthBonus schema.classBaseStr schema "input-stat-strength"
+            , editableStatChip ui session.statMode "dexterity" "DEX" session.stats.dexterityBase session.stats.dexterityBonus schema.classBaseDex schema "input-stat-dexterity"
+            , editableStatChip ui session.statMode "vitality" "VIT" session.stats.vitalityBase session.stats.vitalityBonus schema.classBaseVit schema "input-stat-vitality"
+            , editableStatChip ui session.statMode "energy" "ENE" session.stats.energyBase session.stats.energyBonus schema.classBaseEne schema "input-stat-energy"
             ]
         , viewVitalsGauges session.stats
         , div [ class "stat-strip" ]
@@ -81,17 +82,24 @@ view ui session =
 viewVitalsGauges : CharacterStatsView -> Html Msg
 viewVitalsGauges stats =
     div [ class "vitals-group", attribute "data-testid" "vitals-gauges" ]
-        [ vitalBar "Life" "life" stats.life stats.maxLife
-        , vitalBar "Mana" "mana" stats.mana stats.maxMana
-        , vitalBar "Stamina" "stamina" stats.stamina stats.maxStamina
+        [ vitalBar "Life" "life" stats.life stats.maxLife stats.lifePure stats.lifeBonus
+        , vitalBar "Mana" "mana" stats.mana stats.maxMana stats.manaPure stats.manaBonus
+        , vitalBar "Stamina" "stamina" stats.stamina stats.maxStamina stats.staminaPure stats.staminaBonus
         ]
 
 
-vitalBar : String -> String -> Int -> Int -> Html Msg
-vitalBar label barClass current maxVal =
+vitalBar : String -> String -> Int -> Int -> Int -> Int -> Html Msg
+vitalBar label barClass current maxVal pureVal gearBonus =
     let
         pct =
             clamp 0 100 ((max 0 current * 100) // max 1 maxVal)
+
+        bonusSign =
+            if gearBonus >= 0 then
+                "+"
+
+            else
+                ""
     in
     div [ class "vital-gauge-wrapper" ]
         [ div [ class "vital-gauge-label" ]
@@ -105,27 +113,79 @@ vitalBar label barClass current maxVal =
                 ]
                 []
             ]
+        , div [ class "vital-breakdown", attribute "data-testid" ("vital-breakdown-" ++ barClass) ]
+            [ text ("Pure " ++ String.fromInt pureVal ++ " + Gear " ++ bonusSign ++ String.fromInt gearBonus) ]
+        ]
+
+
+viewStatModeStrip : UiState -> CharacterSchemaView -> EditMode -> CharacterStatsView -> Html Msg
+viewStatModeStrip ui schema activeMode stats =
+    let
+        statModeBtn targetMode label =
+            button
+                [ classList [ ( "seg-btn", True ), ( "active", activeMode == targetMode ) ]
+                , attribute "data-testid" ("stat-mode-" ++ String.toLower label)
+                , onClick (SelectStatMode targetMode)
+                ]
+                [ text label ]
+
+        ruleExpectedUnspent =
+            max 0 (stats.statPointsRuleCap - stats.statPointsInvested)
+
+        isOutOfSync =
+            stats.unspentStatPoints /= ruleExpectedUnspent
+    in
+    div [ class "res-section", attribute "data-testid" "stat-mode-panel" ]
+        [ div [ class "res-header" ]
+            [ span [] [ text "Stat Mode" ]
+            , div [ class "segmented" ]
+                [ statModeBtn Legit "Legit"
+                , statModeBtn Free "Free"
+                ]
+            ]
+        , div [ class "stat-strip" ]
+            [ if activeMode == Free then
+                editableFieldChip ui
+                    "stat_points"
+                    "Unspent Stats"
+                    (String.fromInt stats.unspentStatPoints)
+                    ("/ " ++ String.fromInt stats.statPointsRuleCap ++ " (Free)")
+                    "input-stat-points"
+
+              else
+                plainChip "Unspent Stats" (String.fromInt stats.unspentStatPoints ++ " / " ++ String.fromInt stats.statPointsRuleCap)
+            , plainChip "Invested" (String.fromInt stats.statPointsInvested ++ " / " ++ String.fromInt stats.statPointsRuleCap)
+            ]
+        , div [ class "stat-mode-actions" ]
+            [ button
+                [ class "mini-btn"
+                , attribute "data-testid" "reset-stats-btn"
+                , onClick ClickResetStats
+                ]
+                [ text "Reset Stats" ]
+            , button
+                [ classList [ ( "mini-btn", True ), ( "is-attention", isOutOfSync ) ]
+                , attribute "data-testid" "sync-stat-points-btn"
+                , title ("Set unspent stat points to rule expected (" ++ String.fromInt ruleExpectedUnspent ++ ")")
+                , onClick ClickSyncStatPointsToRules
+                ]
+                [ text ("Sync (" ++ String.fromInt ruleExpectedUnspent ++ ")") ]
+            ]
         ]
 
 
 viewSkillModeStrip : UiState -> CharacterSchemaView -> EditMode -> CharacterStatsView -> Html Msg
-viewSkillModeStrip ui schema activeMode stats =
+viewSkillModeStrip _ _ activeMode stats =
     div [ class "res-section", attribute "data-testid" "skill-mode-panel" ]
         [ div [ class "res-header" ]
-            [ span [] [ text "Allocation Mode" ]
+            [ span [] [ text "Skill Mode" ]
             , div [ class "segmented" ]
                 [ modeButton activeMode Legit "Legit"
                 , modeButton activeMode Free "Free"
                 ]
             ]
         , div [ class "stat-strip" ]
-            [ editableFieldChip ui
-                "stat_points"
-                "Unspent Stats"
-                (String.fromInt stats.unspentStatPoints)
-                (String.fromInt schema.statPointsMin ++ ".." ++ String.fromInt schema.statPointsMax)
-                "input-stat-points"
-            , plainChip "Unspent Skills" (String.fromInt stats.unspentSkillPoints)
+            [ plainChip "Unspent Skills" (String.fromInt stats.unspentSkillPoints)
             , plainChip "Active Skills" (String.fromInt stats.activeSkillCount)
             ]
         ]
@@ -231,10 +291,10 @@ viewSkillNode session s =
         canIncrease =
             case session.skillMode of
                 Free ->
-                    s.level < 99
+                    s.level < session.schema.skillFreeMax
 
                 Legit ->
-                    s.level < 20
+                    s.level < session.schema.skillLegitMax
                         && session.stats.unspentSkillPoints > 0
                         && session.charLevel >= s.reqLevel
     in
@@ -406,23 +466,62 @@ editableFieldChip ui key label serverVal hint tid =
         ]
 
 
-editableStatChip : UiState -> String -> String -> Int -> Int -> CharacterSchemaView -> String -> Html Msg
-editableStatChip ui key label baseVal bonusVal schema tid =
-    div [ class "stat-chip" ]
-        [ span [ class "stat-label" ] [ text label ]
-        , draftInputEl ui key (String.fromInt baseVal) tid
-        , span [ class "stat-sub" ]
-            [ text
-                ("+"
-                    ++ String.fromInt bonusVal
-                    ++ " ("
-                    ++ String.fromInt schema.statMin
-                    ++ ".."
-                    ++ String.fromInt schema.statMax
-                    ++ ")"
-                )
+editableStepperFieldChip : UiState -> String -> String -> String -> String -> String -> Html Msg
+editableStepperFieldChip ui key label serverVal hint tid =
+    div [ class "stat-chip stat-chip-stepper" ]
+        [ div [ class "stepper-input-row" ]
+            [ span [ class "stat-label" ] [ text label ]
+            , draftInputEl ui key serverVal tid
+            , span [ class "stat-sub" ] [ text hint ]
             ]
+        , stepButtonRow key
         ]
+
+
+editableStatChip : UiState -> EditMode -> String -> String -> Int -> Int -> Int -> CharacterSchemaView -> String -> Html Msg
+editableStatChip ui statMode key label baseVal bonusVal classBase schema tid =
+    let
+        minHint =
+            if statMode == Legit then
+                min classBase baseVal
+
+            else
+                schema.statMin
+    in
+    div [ class "stat-chip stat-chip-stepper" ]
+        [ div [ class "stepper-input-row" ]
+            [ span [ class "stat-label" ] [ text label ]
+            , draftInputEl ui key (String.fromInt baseVal) tid
+            , span [ class "stat-sub" ]
+                [ text
+                    ("+"
+                        ++ String.fromInt bonusVal
+                        ++ " ("
+                        ++ String.fromInt minHint
+                        ++ ".."
+                        ++ String.fromInt schema.statMax
+                        ++ ")"
+                    )
+                ]
+            ]
+        , stepButtonRow key
+        ]
+
+
+stepButtonRow : String -> Html Msg
+stepButtonRow key =
+    div [ class "stepper-btn-row" ]
+        (List.map
+            (\( delta, lbl ) ->
+                button
+                    [ class "mini-btn"
+                    , attribute "data-testid" ("step-" ++ key ++ "-" ++ String.fromInt delta)
+                    , onClick (StepCharacterField key delta)
+                    ]
+                    [ text lbl ]
+            )
+            [ ( -1, "-1" ), ( 1, "+1" ), ( -10, "-10" ), ( 10, "+10" ) ]
+        )
 
 
 plainChip : String -> String -> Html Msg

@@ -52,6 +52,7 @@ type Msg
     | SwitchView ViewTab
     | SelectResDifficulty DifficultyMode
     | SelectSkillMode EditMode
+    | SelectStatMode EditMode
     | AdjustMercLevel Int
     | SetMercLevelExact Int
     | SelectMercAct Int
@@ -83,6 +84,7 @@ type Msg
     | EditFocusedInput String
     | CommitFocusedInput
     | CancelFocusedInput
+    | StepCharacterField String Int
     | ClearBanner
     | ToggleTheme
     | SelectStashTab StashTab
@@ -92,6 +94,8 @@ type Msg
     | ClickDisposeHeldItem
     | ClickAdjustSkillRank Int Int
     | ClickResetSkills
+    | ClickResetStats
+    | ClickSyncStatPointsToRules
     | SelectShopQualityTab ItemQualityKind
     | SelectShopCategory String
     | ChangeShopPage Int
@@ -200,6 +204,9 @@ update msg model =
 
         SelectSkillMode mode ->
             ( model, EmitIntent (Protocol.SelectSkillMode { mode = mode }) )
+
+        SelectStatMode mode ->
+            ( model, EmitIntent (Protocol.SelectStatMode { mode = mode }) )
 
         AdjustMercLevel delta ->
             let
@@ -399,6 +406,9 @@ update msg model =
         CommitFocusedInput ->
             commitFocusedInput model
 
+        StepCharacterField key delta ->
+            stepCharacterField key delta model
+
         ClearBanner ->
             ( { model | lastRejection = Nothing, ui = UiState.setStatusBanner Nothing model.ui }, NoOut )
 
@@ -432,6 +442,12 @@ update msg model =
 
         ClickResetSkills ->
             ( model, EmitIntent Protocol.ResetSkills )
+
+        ClickResetStats ->
+            ( model, EmitIntent Protocol.ResetStats )
+
+        ClickSyncStatPointsToRules ->
+            ( model, EmitIntent Protocol.SyncStatPointsToRules )
 
         HoverItem maybeIdx ->
             ( { model | ui = UiState.setHoveredItem maybeIdx model.ui }, NoOut )
@@ -498,22 +514,28 @@ update msg model =
                 clampOpt minVal maxVal maybeVal =
                     Maybe.map (clamp minVal maxVal) maybeVal
 
+                schemaDefMax =
+                    model.session |> Maybe.map (.schema >> .itemDefenseMax) |> Maybe.withDefault 2037
+
+                schemaQtyMax =
+                    model.session |> Maybe.map (.schema >> .itemQuantityMax) |> Maybe.withDefault 511
+
                 maxDur =
                     maybeItem |> Maybe.andThen .maxDurability |> Maybe.withDefault 255
 
                 clampedDef =
-                    clampOpt 0 2037 defense
+                    clampOpt 0 schemaDefMax defense
 
                 clampedCurDur =
                     clampOpt 0 maxDur currentDurability
 
                 clampedQty =
-                    clampOpt 1 511 quantity
+                    clampOpt 1 schemaQtyMax quantity
 
                 noticeFromBase =
                     case ( defense, clampedDef ) of
                         ( Just rawDef, Just cDef ) ->
-                            Just (rangeNotice "Defense" 0 2037 rawDef cDef (maybeItem |> Maybe.andThen .defense |> Maybe.map ((==) cDef) |> Maybe.withDefault False))
+                            Just (rangeNotice "Defense" 0 schemaDefMax rawDef cDef (maybeItem |> Maybe.andThen .defense |> Maybe.map ((==) cDef) |> Maybe.withDefault False))
 
                         _ ->
                             case ( currentDurability, clampedCurDur ) of
@@ -523,7 +545,7 @@ update msg model =
                                 _ ->
                                     case ( quantity, clampedQty ) of
                                         ( Just rawQty, Just cQty ) ->
-                                            Just (rangeNotice "Quantity" 1 511 rawQty cQty (maybeItem |> Maybe.andThen .quantity |> Maybe.map ((==) cQty) |> Maybe.withDefault False))
+                                            Just (rangeNotice "Quantity" 1 schemaQtyMax rawQty cQty (maybeItem |> Maybe.andThen .quantity |> Maybe.map ((==) cQty) |> Maybe.withDefault False))
 
                                         _ ->
                                             Nothing
@@ -971,117 +993,76 @@ handleKeyShortcut payload model =
                     ( model, NoOut )
 
         else if heldIdx == Nothing then
-            case ( model.session, model.ui.hoveredItemIndex ) of
-                ( Just session, Just hovIdx ) ->
+            case model.session of
+                Just session ->
                     let
-                        currentContainer =
-                            (session.items ++ session.mercItems ++ session.mercReplacedItems)
-                                |> List.filter (\it -> it.index == hovIdx)
-                                |> List.head
-                                |> Maybe.map .container
-                                |> Maybe.withDefault Inventory
+                        undoableOrigin =
+                            model.ui.quickMoveOrigin
+                                |> Maybe.andThen
+                                    (\origin ->
+                                        if
+                                            session.revision
+                                                /= origin.sentRevision
+                                                && session.canUndo
+                                                && (hotkeyTarget origin.container lowerKey == Just origin.destContainer)
+                                        then
+                                            Just origin
 
-                        maybeTarget =
-                            case lowerKey of
-                                "s" ->
-                                    Just
-                                        (if currentContainer == Stash then
-                                            Inventory
-
-                                         else
-                                            Stash
-                                        )
-
-                                "a" ->
-                                    if currentContainer == Inventory then
-                                        Nothing
-
-                                    else
-                                        Just Inventory
-
-                                "i" ->
-                                    if currentContainer == Inventory then
-                                        Nothing
-
-                                    else
-                                        Just Inventory
-
-                                "t" ->
-                                    Just
-                                        (if currentContainer == TempInventory then
-                                            Inventory
-
-                                         else
-                                            TempInventory
-                                        )
-
-                                "e" ->
-                                    Just
-                                        (if currentContainer == Equipment then
-                                            Inventory
-
-                                         else
-                                            Equipment
-                                        )
-
-                                "d" ->
-                                    Just
-                                        (if currentContainer == Equipment then
-                                            Inventory
-
-                                         else
-                                            Equipment
-                                        )
-
-                                "r" ->
-                                    Just
-                                        (if currentContainer == MercEquipment || currentContainer == MercReplaced then
-                                            Inventory
-
-                                         else
-                                            MercEquipment
-                                        )
-
-                                "m" ->
-                                    Just
-                                        (if currentContainer == MercEquipment || currentContainer == MercReplaced then
-                                            Inventory
-
-                                         else
-                                            MercEquipment
-                                        )
-
-                                "q" ->
-                                    Just
-                                        (if currentContainer == Cube then
-                                            Inventory
-
-                                         else
-                                            Cube
-                                        )
-
-                                "c" ->
-                                    Just
-                                        (if currentContainer == Cube then
-                                            Inventory
-
-                                         else
-                                            Cube
-                                        )
-
-                                _ ->
-                                    Nothing
+                                        else
+                                            Nothing
+                                    )
                     in
-                    case maybeTarget of
-                        Just dest ->
-                            ( { model | ui = UiState.closeItemMenu model.ui }
-                            , EmitIntent (Protocol.QuickMoveItem { itemIndex = hovIdx, targetContainer = dest })
+                    case undoableOrigin of
+                        Just origin ->
+                            ( { model
+                                | ui =
+                                    model.ui
+                                        |> UiState.clearQuickMoveOrigin
+                                        |> UiState.setHoveredItem (Just origin.itemIndex)
+                                        |> UiState.closeItemMenu
+                              }
+                            , EmitIntent Protocol.Undo
                             )
 
                         Nothing ->
-                            ( model, NoOut )
+                            let
+                                targetHoverIdx =
+                                    case model.ui.hoveredItemIndex of
+                                        Just idx ->
+                                            Just idx
 
-                _ ->
+                                        Nothing ->
+                                            Maybe.map .itemIndex model.ui.quickMoveOrigin
+                            in
+                            case targetHoverIdx |> Maybe.andThen (findSessionItem (Just session)) of
+                                Just item ->
+                                    case hotkeyTarget item.container lowerKey of
+                                        Just dest ->
+                                            ( { model
+                                                | ui =
+                                                    model.ui
+                                                        |> UiState.setQuickMoveOrigin
+                                                            { itemIndex = item.index
+                                                            , destContainer = dest
+                                                            , container = item.container
+                                                            , x = item.x
+                                                            , y = item.y
+                                                            , width = item.width
+                                                            , height = item.height
+                                                            , sentRevision = session.revision
+                                                            }
+                                                        |> UiState.closeItemMenu
+                                              }
+                                            , EmitIntent (Protocol.QuickMoveItem { itemIndex = item.index, targetContainer = dest })
+                                            )
+
+                                        Nothing ->
+                                            ( model, NoOut )
+
+                                Nothing ->
+                                    ( model, NoOut )
+
+                Nothing ->
                     ( model, NoOut )
 
         else
@@ -1089,6 +1070,99 @@ handleKeyShortcut payload model =
 
     else
         ( model, NoOut )
+
+
+hotkeyTarget : ContainerKind -> String -> Maybe ContainerKind
+hotkeyTarget currentContainer lowerKey =
+    case lowerKey of
+        "s" ->
+            Just
+                (if currentContainer == Stash then
+                    Inventory
+
+                 else
+                    Stash
+                )
+
+        "a" ->
+            if currentContainer == Inventory then
+                Nothing
+
+            else
+                Just Inventory
+
+        "i" ->
+            if currentContainer == Inventory then
+                Nothing
+
+            else
+                Just Inventory
+
+        "t" ->
+            Just
+                (if currentContainer == TempInventory then
+                    Inventory
+
+                 else
+                    TempInventory
+                )
+
+        "e" ->
+            Just
+                (if currentContainer == Equipment then
+                    Inventory
+
+                 else
+                    Equipment
+                )
+
+        "d" ->
+            Just
+                (if currentContainer == Equipment then
+                    Inventory
+
+                 else
+                    Equipment
+                )
+
+        "r" ->
+            Just
+                (if currentContainer == MercEquipment || currentContainer == MercReplaced then
+                    Inventory
+
+                 else
+                    MercEquipment
+                )
+
+        "m" ->
+            Just
+                (if currentContainer == MercEquipment || currentContainer == MercReplaced then
+                    Inventory
+
+                 else
+                    MercEquipment
+                )
+
+        "q" ->
+            Just
+                (if currentContainer == Cube then
+                    Inventory
+
+                 else
+                    Cube
+                )
+
+        "c" ->
+            Just
+                (if currentContainer == Cube then
+                    Inventory
+
+                 else
+                    Cube
+                )
+
+        _ ->
+            Nothing
 
 
 findSessionItem : Maybe SessionView -> Int -> Maybe ItemCardView
@@ -1337,6 +1411,77 @@ commitFocusedInput model =
 
                     Nothing ->
                         commitItemFocusedInput model key trimmed nextUi
+
+
+stepCharacterField : String -> Int -> Model -> ( Model, OutMsg )
+stepCharacterField key delta model =
+    case ( model.session, characterFieldFromKey key ) of
+        ( Just session, Just field ) ->
+            let
+                schema =
+                    session.schema
+
+                statFloor baseMin curVal =
+                    if session.statMode == Protocol.Legit then
+                        min baseMin curVal
+
+                    else
+                        schema.statMin
+
+                statCeil curVal =
+                    if session.statMode == Protocol.Legit then
+                        min schema.statMax (curVal + max 0 session.stats.unspentStatPoints)
+
+                    else
+                        schema.statMax
+
+                spec =
+                    case key of
+                        "level" ->
+                            { label = "Level", currentVal = session.charLevel, minVal = schema.levelMin, maxVal = schema.levelMax }
+
+                        "strength" ->
+                            { label = "STR", currentVal = session.stats.strengthBase, minVal = statFloor schema.classBaseStr session.stats.strengthBase, maxVal = statCeil session.stats.strengthBase }
+
+                        "dexterity" ->
+                            { label = "DEX", currentVal = session.stats.dexterityBase, minVal = statFloor schema.classBaseDex session.stats.dexterityBase, maxVal = statCeil session.stats.dexterityBase }
+
+                        "vitality" ->
+                            { label = "VIT", currentVal = session.stats.vitalityBase, minVal = statFloor schema.classBaseVit session.stats.vitalityBase, maxVal = statCeil session.stats.vitalityBase }
+
+                        "energy" ->
+                            { label = "ENE", currentVal = session.stats.energyBase, minVal = statFloor schema.classBaseEne session.stats.energyBase, maxVal = statCeil session.stats.energyBase }
+
+                        _ ->
+                            { label = key, currentVal = 0, minVal = 0, maxVal = 0 }
+
+                rawNext =
+                    spec.currentVal + delta
+
+                clamped =
+                    clamp spec.minVal spec.maxVal rawNext
+
+                nextUi =
+                    model.ui
+                        |> UiState.clearFocusInput
+                        |> UiState.setStatusBanner
+                            (if rawNext /= clamped || clamped == spec.currentVal then
+                                Just (spec.label ++ " at boundary " ++ String.fromInt clamped ++ " (allowed " ++ String.fromInt spec.minVal ++ ".." ++ String.fromInt spec.maxVal ++ ").")
+
+                             else
+                                Nothing
+                            )
+            in
+            if clamped == spec.currentVal then
+                ( { model | ui = nextUi }, NoOut )
+
+            else
+                ( { model | ui = nextUi }
+                , EmitIntent (Protocol.SetCharacterField { field = field, value = clamped })
+                )
+
+        _ ->
+            ( model, NoOut )
 
 
 commitItemFocusedInput : Model -> String -> String -> UiState -> ( Model, OutMsg )
@@ -1613,10 +1758,14 @@ commitItemFocusedInput model key trimmed nextUi =
         [ "item_def", itemIdxStr ] ->
             case String.toInt itemIdxStr of
                 Just itemIdx ->
+                    let
+                        defMax =
+                            model.session |> Maybe.map (.schema >> .itemDefenseMax) |> Maybe.withDefault 2037
+                    in
                     commitClampedField
                         "Defense"
                         0
-                        2037
+                        defMax
                         (findItem itemIdx |> Maybe.andThen .defense)
                         (\clamped ->
                             EmitIntent
@@ -1668,10 +1817,14 @@ commitItemFocusedInput model key trimmed nextUi =
         [ "item_qty", itemIdxStr ] ->
             case String.toInt itemIdxStr of
                 Just itemIdx ->
+                    let
+                        qtyMax =
+                            model.session |> Maybe.map (.schema >> .itemQuantityMax) |> Maybe.withDefault 511
+                    in
                     commitClampedField
                         "Quantity"
                         1
-                        511
+                        qtyMax
                         (findItem itemIdx |> Maybe.andThen .quantity)
                         (\clamped ->
                             EmitIntent
@@ -1709,7 +1862,9 @@ applyEnvelope envelope model =
                 Just rej ->
                     let
                         withToast =
-                            UiState.setToast rej model.ui
+                            model.ui
+                                |> UiState.clearQuickMoveOrigin
+                                |> UiState.setToast rej
                     in
                     if withToast.itemEditorModalIndex /= Nothing then
                         UiState.setItemEditorNotice (Just (UiState.NoticeError (rej.rawCode ++ ": " ++ rej.message))) withToast

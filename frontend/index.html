@@ -127,13 +127,11 @@
           const activeTag = document.activeElement ? document.activeElement.tagName : "";
           const isInput = ["INPUT", "SELECT", "TEXTAREA"].includes(activeTag);
           const lower = (e.key || "").toLowerCase();
-          const isActionKey =
+          const shouldPreventDefault =
             e.key === " " ||
             e.code === "Space" ||
-            e.key === "Escape" ||
-            (!isInput && !e.ctrlKey && !e.altKey && !e.metaKey && ["s", "a", "i", "t", "e", "d", "f", "r", "m", "q", "c"].includes(lower)) ||
             (e.ctrlKey && (lower === "z" || lower === "y"));
-          if (isActionKey && !isInput) {
+          if (shouldPreventDefault && !isInput) {
             e.preventDefault();
           }
           app.ports.receiveKeyShortcut.send({

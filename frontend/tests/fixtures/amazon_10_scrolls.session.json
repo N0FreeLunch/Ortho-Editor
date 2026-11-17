@@ -12,6 +12,7 @@
   "is_expansion": false,
   "res_difficulty": "Normal",
   "skill_mode": "Legit",
+  "stat_mode": "Legit",
   "dirty": false,
   "schema": {
     "name_min_len": 2,
@@ -23,7 +24,15 @@
     "stat_points_min": 0,
     "stat_points_max": 1023,
     "gold_character_max": 10000,
-    "gold_stash_max": 2500000
+    "gold_stash_max": 2500000,
+    "class_base_str": 20,
+    "class_base_dex": 25,
+    "class_base_vit": 20,
+    "class_base_ene": 15,
+    "item_defense_max": 2037,
+    "item_quantity_max": 511,
+    "skill_legit_max": 20,
+    "skill_free_max": 99
   },
   "stats": {
     "strength_base": 20,
@@ -50,7 +59,15 @@
     "frw": 0,
     "ias": 0,
     "magic_find": 0,
-    "all_skills_bonus": 0
+    "all_skills_bonus": 0,
+    "stat_points_rule_cap": 0,
+    "stat_points_invested": 0,
+    "life_pure": 50,
+    "life_bonus": 0,
+    "mana_pure": 15,
+    "mana_bonus": 0,
+    "stamina_pure": 84,
+    "stamina_bonus": 0
   },
   "resistances": {
     "difficulty": "Normal",

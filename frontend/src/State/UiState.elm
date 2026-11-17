@@ -5,6 +5,7 @@ module State.UiState exposing
     , MarqueeSelection
     , ModalNotice(..)
     , PaintMode(..)
+    , QuickMoveOrigin
     , StashTab(..)
     , ThemeMode(..)
     , Toast
@@ -15,6 +16,7 @@ module State.UiState exposing
     , clearFocusInput
     , clearMarquee
     , clampDropAnchor
+    , clearQuickMoveOrigin
     , clearToast
     , closeItemMenu
     , closeItemEditorModal
@@ -38,6 +40,7 @@ module State.UiState exposing
     , setItemEditorSearch
     , setPaintMode
     , setProgressionDifficulty
+    , setQuickMoveOrigin
     , setSelectedItem
     , setShopCategoryFilter
     , setShopPage
@@ -137,6 +140,7 @@ type alias UiState =
     , hoveredItemIndex : Maybe Int
     , hoverMousePos : Maybe { x : Int, y : Int, vw : Int, vh : Int }
     , hoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int }
+    , quickMoveOrigin : Maybe QuickMoveOrigin
     , statusBanner : Maybe String
     , toast : Maybe Toast
     , focusedInput : Maybe FocusedInput
@@ -168,6 +172,7 @@ init =
     , hoveredItemIndex = Nothing
     , hoverMousePos = Nothing
     , hoveredDropTarget = Nothing
+    , quickMoveOrigin = Nothing
     , statusBanner = Nothing
     , toast = Nothing
     , focusedInput = Nothing
@@ -188,7 +193,7 @@ init =
 
 setView : ViewTab -> UiState -> UiState
 setView tab ui =
-    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing, itemMenu = NoItemMenu }
+    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing, quickMoveOrigin = Nothing, itemMenu = NoItemMenu }
 
 
 openActionPalette : Int -> Int -> Int -> UiState -> UiState
@@ -436,10 +441,49 @@ setShopPage page ui =
     { ui | shopPage = max 0 page }
 
 
+type alias QuickMoveOrigin =
+    { itemIndex : Int
+    , destContainer : ContainerKind
+    , container : ContainerKind
+    , x : Int
+    , y : Int
+    , width : Int
+    , height : Int
+    , sentRevision : Int
+    }
+
+
+setQuickMoveOrigin : QuickMoveOrigin -> UiState -> UiState
+setQuickMoveOrigin origin ui =
+    { ui | quickMoveOrigin = Just origin }
+
+
+clearQuickMoveOrigin : UiState -> UiState
+clearQuickMoveOrigin ui =
+    { ui | quickMoveOrigin = Nothing }
+
+
 setHoveredItem : Maybe Int -> UiState -> UiState
 setHoveredItem maybeIdx ui =
+    let
+        nextQuickOrigin =
+            case ( maybeIdx, ui.quickMoveOrigin ) of
+                ( Just idx, Just origin ) ->
+                    if origin.itemIndex == idx then
+                        Just origin
+
+                    else
+                        Nothing
+
+                ( Nothing, existing ) ->
+                    existing
+
+                _ ->
+                    Nothing
+    in
     { ui
         | hoveredItemIndex = maybeIdx
+        , quickMoveOrigin = nextQuickOrigin
         , hoverMousePos =
             case maybeIdx of
                 Nothing ->
@@ -457,7 +501,40 @@ setHoverMousePos x y vw vh ui =
 
 setHoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int } -> UiState -> UiState
 setHoveredDropTarget target ui =
-    { ui | hoveredDropTarget = target }
+    let
+        nextQuickOrigin =
+            case ( target, ui.quickMoveOrigin ) of
+                ( Just t, Just origin ) ->
+                    if t.container /= origin.container then
+                        Nothing
+
+                    else
+                        case origin.container of
+                            Equipment ->
+                                Just origin
+
+                            MercEquipment ->
+                                Just origin
+
+                            MercReplaced ->
+                                Just origin
+
+                            _ ->
+                                if
+                                    t.x >= origin.x
+                                        && t.x < origin.x + max 1 origin.width
+                                        && t.y >= origin.y
+                                        && t.y < origin.y + max 1 origin.height
+                                then
+                                    Just origin
+
+                                else
+                                    Nothing
+
+                _ ->
+                    Nothing
+    in
+    { ui | hoveredDropTarget = target, quickMoveOrigin = nextQuickOrigin }
 
 
 containerGridDims : ContainerKind -> Maybe ( Int, Int )

@@ -340,6 +340,26 @@ commandDecoder =
                     "DiscardItemForgeDraft" ->
                         Json.Decode.succeed DiscardItemForgeDraft
 
+                    "SelectStatMode" ->
+                        Json.Decode.field "mode"
+                            (Json.Decode.string
+                                |> Json.Decode.map
+                                    (\s ->
+                                        if String.toLower s == "free" then
+                                            Protocol.Free
+
+                                        else
+                                            Protocol.Legit
+                                    )
+                            )
+                            |> Json.Decode.map SelectStatMode
+
+                    "ResetStats" ->
+                        Json.Decode.succeed ClickResetStats
+
+                    "SyncStatPointsToRules" ->
+                        Json.Decode.succeed ClickSyncStatPointsToRules
+
                     other ->
                         Json.Decode.fail ("Unknown harness command: " ++ other)
             )

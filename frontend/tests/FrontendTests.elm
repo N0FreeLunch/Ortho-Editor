@@ -39,6 +39,7 @@ sampleSessionJson =
         "is_expansion": true,
         "res_difficulty": "Normal",
         "skill_mode": "Legit",
+        "stat_mode": "Legit",
         "revision": 1,
         "dirty": false,
         "schema": {
@@ -51,16 +52,24 @@ sampleSessionJson =
           "stat_points_min": 0,
           "stat_points_max": 1023,
           "gold_character_max": 310000,
-          "gold_stash_max": 2500000
+          "gold_stash_max": 2500000,
+          "class_base_str": 15,
+          "class_base_dex": 20,
+          "class_base_vit": 25,
+          "class_base_ene": 20,
+          "item_defense_max": 2037,
+          "item_quantity_max": 511,
+          "skill_legit_max": 20,
+          "skill_free_max": 99
         },
         "stats": {
           "strength_base": 60, "strength_bonus": 18,
           "dexterity_base": 20, "dexterity_bonus": 2,
           "vitality_base": 60, "vitality_bonus": 0,
           "energy_base": 20, "energy_bonus": 18,
-          "life": 230, "max_life": 190,
-          "mana": 126, "max_mana": 80,
-          "stamina": 190, "max_stamina": 149,
+          "life": 190, "max_life": 230,
+          "mana": 80, "max_mana": 126,
+          "stamina": 149, "max_stamina": 190,
           "unspent_stat_points": 75,
           "unspent_skill_points": 1,
           "gold_inventory": 229492,
@@ -71,7 +80,15 @@ sampleSessionJson =
           "frw": 25,
           "ias": 15,
           "magic_find": 55,
-          "all_skills_bonus": 2
+          "all_skills_bonus": 2,
+          "stat_points_rule_cap": 155,
+          "stat_points_invested": 80,
+          "life_pure": 170,
+          "life_bonus": 60,
+          "mana_pure": 80,
+          "mana_bonus": 46,
+          "stamina_pure": 149,
+          "stamina_bonus": 41
         },
         "resistances": {
           "difficulty": "Normal",
@@ -830,10 +847,16 @@ suite =
                         , { tid = "input-stat-points", fieldKey = "stat_points", rawVal = "75", nextRaw = "10", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.StatPoints, value = 10 }) }
                         ]
 
+                    freeStatModel =
+                        { loadedModel
+                            | session =
+                                Maybe.map (\s -> { s | statMode = Protocol.Free }) loadedModel.session
+                        }
+
                     checkCharInput { tid, fieldKey, rawVal, nextRaw, expectedOut } _ =
                         let
                             ( focused, _ ) =
-                                Update.update (FocusField fieldKey rawVal) loadedModel
+                                Update.update (FocusField fieldKey rawVal) freeStatModel
 
                             ( edited, _ ) =
                                 Update.update (EditFocusedInput nextRaw) focused
@@ -846,7 +869,7 @@ suite =
                         in
                         Expect.all
                             [ \_ ->
-                                Workspace.view loadedModel
+                                Workspace.view freeStatModel
                                     |> Query.fromHtml
                                     |> Query.find [ testId tid ]
                                     |> Event.simulate Event.focus
@@ -2817,6 +2840,209 @@ suite =
                                     >> Event.simulate Event.click
                                     >> Event.expect DiscardItemForgeDraft
                                 ]
+                    ]
+                    ()
+        , test "QuickMove hotkey toggles back via Undo when cursor stays inside origin item bounds, and clears when leaving" <|
+            \_ ->
+                let
+                    viewAModel =
+                        loadedModel
+                            |> Update.update (SwitchView ViewA)
+                            |> Tuple.first
+
+                    firstItem =
+                        viewAModel.session
+                            |> Maybe.andThen (.items >> List.head)
+
+                    ( afterMove, moveOut ) =
+                        case firstItem of
+                            Just it ->
+                                viewAModel
+                                    |> Update.update (HoverItem (Just it.index))
+                                    |> Tuple.first
+                                    |> Update.update
+                                        (HandleKeyShortcut
+                                            { key = "s"
+                                            , code = "KeyS"
+                                            , ctrlKey = False
+                                            , altKey = False
+                                            , metaKey = False
+                                            , isInput = False
+                                            }
+                                        )
+
+                            Nothing ->
+                                ( viewAModel, NoOut )
+
+                    simulatedAfterMove =
+                        let
+                            nextSession =
+                                afterMove.session
+                                    |> Maybe.map (\s -> { s | revision = s.revision + 1, canUndo = True })
+                        in
+                        { afterMove | session = nextSession }
+                            |> Update.update (HoverItem Nothing)
+                            |> Tuple.first
+
+                    sameSpotModel =
+                        case firstItem of
+                            Just it ->
+                                simulatedAfterMove
+                                    |> Update.update (HoverDropTarget (Just { container = it.container, x = it.x, y = it.y }))
+                                    |> Tuple.first
+
+                            Nothing ->
+                                simulatedAfterMove
+
+                    ( afterUndoShortcut, undoOut ) =
+                        sameSpotModel
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = "s"
+                                    , code = "KeyS"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+
+                    leftAreaModel =
+                        simulatedAfterMove
+                            |> Update.update (HoverDropTarget Nothing)
+                            |> Tuple.first
+
+                    ( _, leftShortcutOut ) =
+                        leftAreaModel
+                            |> Update.update
+                                (HandleKeyShortcut
+                                    { key = "s"
+                                    , code = "KeyS"
+                                    , ctrlKey = False
+                                    , altKey = False
+                                    , metaKey = False
+                                    , isInput = False
+                                    }
+                                )
+                in
+                Expect.all
+                    [ \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.QuickMoveItem { itemIndex = 0, targetContainer = Stash }))
+                            moveOut
+                    , \_ -> Expect.equal (EmitIntent Protocol.Undo) undoOut
+                    , \_ -> Expect.equal (Just 0) afterUndoShortcut.ui.hoveredItemIndex
+                    , \_ -> Expect.equal NoOut leftShortcutOut
+                    ]
+                    ()
+        , test "Cycle 24 CharacterPanel Level and STR/DEX/VIT/ENE render -1/+1/-10/+10 steppers and clamp boundaries" <|
+            \_ ->
+                let
+                    ( stepLvlOutModel, stepLvlOut ) =
+                        loadedModel
+                            |> Update.update (StepCharacterField "level" 10)
+
+                    ( clampedLvlModel, clampedLvlOut ) =
+                        loadedModel
+                            |> Update.update (StepCharacterField "level" 999)
+
+                    ( _, stepStrOut ) =
+                        loadedModel
+                            |> Update.update (StepCharacterField "strength" -10)
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "step-level-10" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (StepCharacterField "level" 10)
+                                , Query.find [ testId "step-level--1" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (StepCharacterField "level" -1)
+                                , Query.find [ testId "step-strength-10" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (StepCharacterField "strength" 10)
+                                , Query.find [ testId "step-dexterity--10" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (StepCharacterField "dexterity" -10)
+                                , Query.find [ testId "step-vitality-1" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (StepCharacterField "vitality" 1)
+                                , Query.find [ testId "step-energy--1" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (StepCharacterField "energy" -1)
+                                ]
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetCharacterField { field = Protocol.Level, value = 41 }))
+                            stepLvlOut
+                    , \_ ->
+                        Expect.equal Nothing stepLvlOutModel.ui.statusBanner
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetCharacterField { field = Protocol.Level, value = 99 }))
+                            clampedLvlOut
+                    , \_ ->
+                        Expect.equal
+                            (Just "Level at boundary 99 (allowed 1..99).")
+                            clampedLvlModel.ui.statusBanner
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetCharacterField { field = Protocol.Strength, value = 50 }))
+                            stepStrOut
+                    ]
+                    ()
+        , test "Cycle 25 StatMode Legit/Free, Reset/Sync buttons, and Vitals Pure+Gear breakdown render cleanly" <|
+            \_ ->
+                let
+                    ( _, modeOut ) =
+                        loadedModel
+                            |> Update.update (SelectStatMode Protocol.Free)
+
+                    ( _, resetOut ) =
+                        loadedModel
+                            |> Update.update ClickResetStats
+
+                    ( _, syncOut ) =
+                        loadedModel
+                            |> Update.update ClickSyncStatPointsToRules
+
+                    ( clampedLegitModel, _ ) =
+                        loadedModel
+                            |> Update.update (StepCharacterField "strength" 500)
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "stat-mode-panel" ]
+                                    >> Query.has [ Selector.text "75 / 155", Selector.text "80 / 155" ]
+                                , Query.find [ testId "stat-mode-free" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (SelectStatMode Protocol.Free)
+                                , Query.find [ testId "reset-stats-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickResetStats
+                                , Query.find [ testId "sync-stat-points-btn" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect ClickSyncStatPointsToRules
+                                , Query.find [ testId "vital-breakdown-life" ]
+                                    >> Query.has [ Selector.text "Pure 170 + Gear +60" ]
+                                , Query.find [ testId "vital-breakdown-mana" ]
+                                    >> Query.has [ Selector.text "Pure 80 + Gear +46" ]
+                                , Query.find [ testId "vital-breakdown-stamina" ]
+                                    >> Query.has [ Selector.text "Pure 149 + Gear +41" ]
+                                ]
+                    , \_ -> Expect.equal (EmitIntent (Protocol.SelectStatMode { mode = Protocol.Free })) modeOut
+                    , \_ -> Expect.equal (EmitIntent Protocol.ResetStats) resetOut
+                    , \_ -> Expect.equal (EmitIntent Protocol.SyncStatPointsToRules) syncOut
+                    , \_ ->
+                        Expect.equal
+                            (Just "STR at boundary 135 (allowed 15..135).")
+                            clampedLegitModel.ui.statusBanner
                     ]
                     ()
         ]

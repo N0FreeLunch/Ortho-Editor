@@ -1169,6 +1169,25 @@ button:disabled {
   gap: 6px;
   align-items: baseline;
 }
+.stat-chip.stat-chip-stepper {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.vital-breakdown {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.stat-mode-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mini-btn.is-attention {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+}
 
 /* ==========================================================
    VIEW B: 4-COLUMN SPEC & PROGRESSION BENTO (.spec-grid)
