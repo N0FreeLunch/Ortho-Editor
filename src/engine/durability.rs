@@ -6,7 +6,7 @@ use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::engine::is_explicit_v105;
-use crate::engine::validation::get_all_item_types;
+use crate::domain::item::type_hierarchy::get_all_item_types;
 use crate::item::{Item, ItemProperty, ItemQuality};
 use std::collections::HashSet;
 

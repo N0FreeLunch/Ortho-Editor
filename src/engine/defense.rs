@@ -6,7 +6,8 @@ use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
 use crate::domain::stats::{stat_save_add, stat_save_bits};
 use crate::engine::is_explicit_v105;
-use crate::engine::validation::{ValidationWarning, WarningConfidenceTier, get_all_item_types};
+use crate::domain::item::type_hierarchy::get_all_item_types;
+use crate::engine::validation::{ValidationWarning, WarningConfidenceTier};
 use crate::item::{Item, ItemProperty, ItemQuality};
 use std::collections::{HashMap, HashSet};
 
