@@ -26,7 +26,7 @@
 //! assert!(resolver(&Item::default()).is_none());
 //! ```
 
-use crate::data::item_specs::{Affix, ItemStatRange, get_base_item_spec};
+use crate::data::item_specs::get_base_item_spec;
 use crate::data::DataRepository;
 use crate::data::item_types::ITEM_TYPES;
 use crate::data::legitimacy::{SOCKET_RULES, calc_alvl, STAFFMOD_ENTRIES};
@@ -42,7 +42,7 @@ use crate::domain::item::runeword::{runeword_expected_item_types, runeword_expec
 mod grading;
 mod model;
 
-use grading::validate_item_properties;
+use grading::{consolidate_affix_stats, validate_item_properties};
 pub use model::{
     StatValidation, StatValidationStatus, ValidationResult, ValidationWarning, WarningConfidenceTier,
 };
@@ -623,27 +623,6 @@ pub fn check_runeword_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning>
     warnings
 }
 
-fn consolidate_affix_stats(prefixes: &[&Affix], suffixes: &[&Affix]) -> Vec<ItemStatRange> {
-    let mut merged: std::collections::HashMap<(u32, u32), ItemStatRange> =
-        std::collections::HashMap::new();
-
-    let all_affixes = prefixes.iter().chain(suffixes.iter());
-    for affix in all_affixes {
-        for spec_stat in affix.stats {
-            let key = (spec_stat.stat_id, spec_stat.param);
-            let entry = merged.entry(key).or_insert(ItemStatRange {
-                stat_id: spec_stat.stat_id,
-                param: spec_stat.param,
-                min: 0,
-                max: 0,
-            });
-            entry.min += spec_stat.min;
-            entry.max += spec_stat.max;
-        }
-    }
-
-    merged.into_values().collect()
-}
 
 
 #[cfg(test)]

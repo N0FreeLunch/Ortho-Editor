@@ -1,7 +1,7 @@
-//! Match explicit property ranges and grade their existing rolls.
+//! Assemble affix ranges, match properties, and grade their existing rolls.
 
 use super::model::{StatValidation, StatValidationStatus, ValidationResult};
-use crate::data::item_specs::ItemStatRange;
+use crate::data::item_specs::{Affix, ItemStatRange};
 use crate::item::{ItemBitRange, ItemProperty};
 
 pub(super) fn validate_item_properties(
@@ -159,4 +159,29 @@ fn calculate_score(current: i32, min: i32, max: i32) -> (f32, bool, bool) {
     let range = (min - max) as f32;
     let ratio = ((min - current) as f32 / range).clamp(0.0, 1.0);
     (ratio, true, current == max)
+}
+
+pub(super) fn consolidate_affix_stats(
+    prefixes: &[&Affix],
+    suffixes: &[&Affix],
+) -> Vec<ItemStatRange> {
+    let mut merged: std::collections::HashMap<(u32, u32), ItemStatRange> =
+        std::collections::HashMap::new();
+
+    let all_affixes = prefixes.iter().chain(suffixes.iter());
+    for affix in all_affixes {
+        for spec_stat in affix.stats {
+            let key = (spec_stat.stat_id, spec_stat.param);
+            let entry = merged.entry(key).or_insert(ItemStatRange {
+                stat_id: spec_stat.stat_id,
+                param: spec_stat.param,
+                min: 0,
+                max: 0,
+            });
+            entry.min += spec_stat.min;
+            entry.max += spec_stat.max;
+        }
+    }
+
+    merged.into_values().collect()
 }
