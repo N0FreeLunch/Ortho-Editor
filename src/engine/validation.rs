@@ -26,7 +26,7 @@
 //! assert!(resolver(&Item::default()).is_none());
 //! ```
 
-use crate::data::item_specs::{Affix, ItemStatRange, Runeword, SetItem, UniqueItem, BASE_ITEM_SPECS};
+use crate::data::item_specs::{Affix, ItemStatRange, Runeword, SetItem, UniqueItem, get_base_item_spec};
 use crate::data::{set_items, unique_items};
 use crate::data::DataRepository;
 use crate::data::item_types::ITEM_TYPES;
@@ -368,7 +368,7 @@ pub fn check_alvl_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning> {
 
     // Lookup qlvl
     let trimmed = item.code.trim();
-    let qlvl = match BASE_ITEM_SPECS.iter().find(|s| s.code == trimmed) {
+    let qlvl = match get_base_item_spec(trimmed) {
         Some(spec) => spec.qlvl as u8,
         None => 0,
     };
@@ -432,7 +432,7 @@ pub fn check_ethereal_legitimacy(item: &Item) -> Vec<String> {
     }
 
     let trimmed = item.code.trim();
-    let spec = if let Some(s) = BASE_ITEM_SPECS.iter().find(|s| s.code == trimmed) {
+    let spec = if let Some(s) = get_base_item_spec(trimmed) {
         s
     } else {
         return warnings;
@@ -479,7 +479,7 @@ pub fn check_base_stat_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning
     }
     let mut warnings = Vec::new();
     let trimmed = item.code.trim();
-    let spec = if let Some(s) = BASE_ITEM_SPECS.iter().find(|s| s.code == trimmed) {
+    let spec = if let Some(s) = get_base_item_spec(trimmed) {
         s
     } else {
         return warnings;
