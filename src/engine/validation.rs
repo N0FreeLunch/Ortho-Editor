@@ -31,83 +31,22 @@ use crate::data::{affixes, set_items, unique_items};
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::item_types::ITEM_TYPES;
 use crate::data::legitimacy::{SOCKET_RULES, calc_alvl, STAFFMOD_ENTRIES};
-use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
+use crate::item::{Item, ItemQuality};
+#[cfg(test)]
+use crate::item::{ItemBitRange, ItemProperty};
 pub use crate::domain::item::type_hierarchy::get_all_item_types;
 pub use crate::domain::item::runeword::{
     ResolvedRuneword, RunewordMatchSource, resolve_runeword, runeword_display_name,
 };
 use crate::domain::item::runeword::{runeword_expected_item_types, runeword_expected_runes};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum WarningConfidenceTier {
-    /// 1. Hard Invariant: Absolute physical integrity violation (e.g., bit desync, ghost items)
-    HardInvariant,
-    /// 2. Settled Contract: Violation against fixed game templates (Unique, Set, Runeword specs)
-    SettledContract,
-    /// 3. Evolving Hypothesis: Observation divergence against evolving heuristic models (e.g. Rare defense rolling, alvl)
-    EvolvingHypothesis,
-    /// 4. Advisory: Pure informational advisory
-    Advisory,
-}
+mod grading;
+mod model;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ValidationWarning {
-    pub message: String,
-    pub tier: WarningConfidenceTier,
-    pub category: &'static str,
-}
-
-impl ValidationWarning {
-    pub fn new(message: impl Into<String>, tier: WarningConfidenceTier, category: &'static str) -> Self {
-        Self {
-            message: message.into(),
-            tier,
-            category,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidationResult {
-    pub spec_name: String,
-    pub is_perfect: bool,
-    pub score: f32, // Overall perfection score
-    pub stats: Vec<StatValidation>,
-    pub warnings: Vec<String>,
-    pub detailed_warnings: Vec<ValidationWarning>,
-}
-
-impl ValidationResult {
-    // Project every legacy message before appending the detailed batch.
-    fn extend_detailed_warnings(&mut self, warnings: Vec<ValidationWarning>) {
-        for w in &warnings {
-            self.warnings.push(w.message.clone());
-        }
-        self.detailed_warnings.extend(warnings);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct StatValidation {
-    pub stat_id: u32,
-    pub name: String,
-    pub param: u32,
-    pub current: i32,
-    pub min: i32,
-    pub max: i32,
-    pub is_perfect: bool,
-    pub score: f32,
-    pub status: StatValidationStatus,
-    pub range: ItemBitRange,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatValidationStatus {
-    InRange,
-    OutOfRange,
-    MissingOnItem,
-    UnexpectedOnItem,
-}
+use grading::validate_item_properties;
+pub use model::{
+    StatValidation, StatValidationStatus, ValidationResult, ValidationWarning, WarningConfidenceTier,
+};
 
 pub enum ItemSpec {
     Unique(&'static UniqueItem),
@@ -770,165 +709,6 @@ pub fn is_affix_eligible_for(affix: &Affix, item_types: &[&str]) -> bool {
     }
 
     true
-}
-
-fn validate_item_properties(
-    spec_name: &str,
-    spec_stats: &[ItemStatRange],
-    item_properties: &[ItemProperty],
-) -> ValidationResult {
-    let mut stats: Vec<StatValidation> = Vec::new();
-    let mut used_specs = vec![false; spec_stats.len()];
-
-    for prop in item_properties {
-        if let Some(spec_idx) = find_matching_spec_index(prop, spec_stats, &used_specs) {
-            used_specs[spec_idx] = true;
-            let spec_stat = &spec_stats[spec_idx];
-            let (score, in_range, is_perfect) = calculate_score(prop.value, spec_stat.min, spec_stat.max);
-
-            stats.push(StatValidation {
-                stat_id: prop.stat_id,
-                name: prop.name.clone(),
-                param: prop.param,
-                current: prop.value,
-                min: spec_stat.min,
-                max: spec_stat.max,
-                is_perfect,
-                score,
-                status: if in_range {
-                    StatValidationStatus::InRange
-                } else {
-                    StatValidationStatus::OutOfRange
-                },
-                range: prop.range,
-            });
-        } else {
-            stats.push(StatValidation {
-                stat_id: prop.stat_id,
-                name: prop.name.clone(),
-                param: prop.param,
-                current: prop.value,
-                min: 0,
-                max: 0,
-                is_perfect: false,
-                score: 0.0,
-                status: StatValidationStatus::UnexpectedOnItem,
-                range: prop.range,
-            });
-        }
-    }
-
-    for (idx, spec_stat) in spec_stats.iter().enumerate() {
-        if used_specs[idx] {
-            continue;
-        }
-
-        stats.push(StatValidation {
-            stat_id: spec_stat.stat_id,
-            name: format!("stat_{}", spec_stat.stat_id),
-            param: spec_stat.param,
-            current: 0,
-            min: spec_stat.min,
-            max: spec_stat.max,
-            is_perfect: false,
-            score: 0.0,
-            status: StatValidationStatus::MissingOnItem,
-            range: ItemBitRange::default(),
-        });
-    }
-
-    let variable_scores: Vec<f32> = stats
-        .iter()
-        .filter(|entry| {
-            (entry.status == StatValidationStatus::InRange
-                || entry.status == StatValidationStatus::OutOfRange)
-                && entry.min != entry.max
-        })
-        .map(|entry| entry.score)
-        .collect();
-
-    let score = if !variable_scores.is_empty() {
-        variable_scores.iter().sum::<f32>() / variable_scores.len() as f32
-    } else {
-        let matched_scores: Vec<f32> = stats
-            .iter()
-            .filter(|entry| {
-                entry.status == StatValidationStatus::InRange
-                    || entry.status == StatValidationStatus::OutOfRange
-            })
-            .map(|entry| entry.score)
-            .collect();
-        if matched_scores.is_empty() {
-            0.0
-        } else {
-            matched_scores.iter().sum::<f32>() / matched_scores.len() as f32
-        }
-    };
-
-    let has_only_in_range = stats
-        .iter()
-        .all(|entry| entry.status == StatValidationStatus::InRange);
-    let variable_perfect = stats
-        .iter()
-        .filter(|entry| entry.min != entry.max)
-        .all(|entry| entry.is_perfect);
-    let is_perfect = !stats.is_empty() && has_only_in_range && variable_perfect;
-
-    ValidationResult {
-        spec_name: spec_name.to_string(),
-        is_perfect,
-        score,
-        stats,
-        warnings: Vec::new(),
-        detailed_warnings: Vec::new(),
-    }
-}
-
-fn find_matching_spec_index(
-    prop: &ItemProperty,
-    spec_stats: &[ItemStatRange],
-    used_specs: &[bool],
-) -> Option<usize> {
-    spec_stats
-        .iter()
-        .enumerate()
-        .find_map(|(idx, spec_stat)| {
-            if used_specs[idx] {
-                return None;
-            }
-
-            if spec_stat.stat_id == prop.stat_id && spec_stat.param == prop.param {
-                Some(idx)
-            } else {
-                None
-            }
-        })
-}
-
-fn calculate_score(current: i32, min: i32, max: i32) -> (f32, bool, bool) {
-    if min == max {
-        let in_range = current == min;
-        let score = if in_range { 1.0 } else { 0.0 };
-        return (score, in_range, in_range);
-    }
-
-    if min < max {
-        if current < min || current > max {
-            return (0.0, false, false);
-        }
-
-        let range = (max - min) as f32;
-        let ratio = ((current - min) as f32 / range).clamp(0.0, 1.0);
-        return (ratio, true, current == max);
-    }
-
-    if current > min || current < max {
-        return (0.0, false, false);
-    }
-
-    let range = (min - max) as f32;
-    let ratio = ((min - current) as f32 / range).clamp(0.0, 1.0);
-    (ratio, true, current == max)
 }
 
 #[cfg(test)]
