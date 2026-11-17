@@ -363,20 +363,7 @@ impl ItemBoundaryValidator {
         let effective_max_sockets = if let Some(item) = current_item {
             let types = crate::domain::item::type_hierarchy::get_all_item_types(&item.code);
             let ilvl = item.header.level.unwrap_or(99);
-            let mut max_sock = None;
-            for type_code in types {
-                if let Some(rule) = crate::data::legitimacy::SOCKET_RULES.iter().find(|r| r.item_type == type_code) {
-                    let m = if ilvl >= 41 {
-                        rule.max_sock_high
-                    } else if ilvl >= 26 {
-                        rule.max_sock_mid
-                    } else {
-                        rule.max_sock_low
-                    };
-                    max_sock = Some(m);
-                    break;
-                }
-            }
+            let max_sock = crate::domain::item::socket_policy::source_socket_limit(types, ilvl);
             max_sock.unwrap_or(Self::MAX_SOCKETS)
         } else {
             Self::MAX_SOCKETS

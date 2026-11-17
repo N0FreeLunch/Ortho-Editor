@@ -28,7 +28,6 @@
 
 use crate::data::item_specs::get_base_item_spec;
 use crate::data::DataRepository;
-use crate::data::legitimacy::SOCKET_RULES;
 use crate::item::{Item, ItemQuality};
 #[cfg(test)]
 use crate::item::{ItemBitRange, ItemProperty};
@@ -189,21 +188,7 @@ pub fn check_socket_legitimacy(item: &Item) -> Vec<String> {
     };
 
     let types = get_all_item_types(&item.code);
-    let mut max_sockets = None;
-
-    for type_code in types {
-        if let Some(rule) = SOCKET_RULES.iter().find(|r| r.item_type == type_code) {
-            let max = if ilvl >= 41 {
-                rule.max_sock_high
-            } else if ilvl >= 26 {
-                rule.max_sock_mid
-            } else {
-                rule.max_sock_low
-            };
-            max_sockets = Some(max);
-            break;
-        }
-    }
+    let max_sockets = crate::domain::item::socket_policy::source_socket_limit(types, ilvl);
 
     if let Some(max) = max_sockets {
         if let Some(actual) = item.sockets {

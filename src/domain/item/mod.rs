@@ -1,5 +1,6 @@
 pub mod quality;
 pub(crate) mod type_hierarchy;
+pub(crate) mod socket_policy;
 pub(crate) mod affix_catalog;
 pub(crate) mod runeword;
 pub(crate) mod specification;
