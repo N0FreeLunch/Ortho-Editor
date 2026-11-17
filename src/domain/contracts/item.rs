@@ -304,10 +304,7 @@ impl ItemBoundaryValidator {
             let current = current_item.and_then(|i| i.defense).unwrap_or(0);
             match Self::evaluate_u32_op("item.defense", *op, current, Self::MIN_DEFENSE, Self::MAX_DEFENSE) {
                 Ok(val) => Some(val),
-                Err(violation) => {
-                    errors.entry("item.defense".to_string()).or_default().push(violation);
-                    None
-                }
+                Err(violation) => Self::record_numeric_violation(&mut errors, "item.defense", violation),
             }
         } else {
             None
@@ -318,10 +315,7 @@ impl ItemBoundaryValidator {
             let current = current_item.and_then(|i| i.max_durability).unwrap_or(0);
             match Self::evaluate_u32_op("item.max_durability", *op, current, Self::MIN_DURABILITY, Self::MAX_DURABILITY) {
                 Ok(val) => Some(val),
-                Err(violation) => {
-                    errors.entry("item.max_durability".to_string()).or_default().push(violation);
-                    None
-                }
+                Err(violation) => Self::record_numeric_violation(&mut errors, "item.max_durability", violation),
             }
         } else {
             None
@@ -336,10 +330,7 @@ impl ItemBoundaryValidator {
             let current = current_item.and_then(|i| i.current_durability).unwrap_or(0);
             match Self::evaluate_u32_op("item.durability", *op, current, Self::MIN_DURABILITY, effective_max_durability) {
                 Ok(val) => Some(val),
-                Err(violation) => {
-                    errors.entry("item.durability".to_string()).or_default().push(violation);
-                    None
-                }
+                Err(violation) => Self::record_numeric_violation(&mut errors, "item.durability", violation),
             }
         } else {
             None
@@ -350,10 +341,7 @@ impl ItemBoundaryValidator {
             let current = current_item.and_then(|i| i.quantity).unwrap_or(0);
             match Self::evaluate_u32_op("item.quantity", *op, current, Self::MIN_QUANTITY, Self::MAX_QUANTITY) {
                 Ok(val) => Some(val),
-                Err(violation) => {
-                    errors.entry("item.quantity".to_string()).or_default().push(violation);
-                    None
-                }
+                Err(violation) => Self::record_numeric_violation(&mut errors, "item.quantity", violation),
             }
         } else {
             None
@@ -512,10 +500,7 @@ impl ItemBoundaryValidator {
                     upsert_stat(17, val);
                     Some(val)
                 }
-                Err(v) => {
-                    errors.entry("item.enhanced_damage".to_string()).or_default().push(v);
-                    None
-                }
+                Err(v) => Self::record_numeric_violation(&mut errors, "item.enhanced_damage", v),
             }
         } else {
             None
@@ -529,10 +514,7 @@ impl ItemBoundaryValidator {
                     upsert_stat(21, val);
                     Some(val)
                 }
-                Err(v) => {
-                    errors.entry("item.min_damage".to_string()).or_default().push(v);
-                    None
-                }
+                Err(v) => Self::record_numeric_violation(&mut errors, "item.min_damage", v),
             }
         } else {
             None
@@ -546,10 +528,7 @@ impl ItemBoundaryValidator {
                     upsert_stat(22, val);
                     Some(val)
                 }
-                Err(v) => {
-                    errors.entry("item.max_damage".to_string()).or_default().push(v);
-                    None
-                }
+                Err(v) => Self::record_numeric_violation(&mut errors, "item.max_damage", v),
             }
         } else {
             None
@@ -563,10 +542,7 @@ impl ItemBoundaryValidator {
                     upsert_stat(252, val);
                     Some(val)
                 }
-                Err(v) => {
-                    errors.entry("item.replenish_durability".to_string()).or_default().push(v);
-                    None
-                }
+                Err(v) => Self::record_numeric_violation(&mut errors, "item.replenish_durability", v),
             }
         } else {
             None
@@ -580,10 +556,7 @@ impl ItemBoundaryValidator {
                     upsert_stat(253, val);
                     Some(val)
                 }
-                Err(v) => {
-                    errors.entry("item.replenish_quantity".to_string()).or_default().push(v);
-                    None
-                }
+                Err(v) => Self::record_numeric_violation(&mut errors, "item.replenish_quantity", v),
             }
         } else {
             None
@@ -628,6 +601,16 @@ impl ItemBoundaryValidator {
             replenish_quantity: evaluated_rep_quant,
             stats: evaluated_stats,
         })
+    }
+
+    /// Record one numeric violation and keep later field evaluation active.
+    fn record_numeric_violation<T>(
+        errors: &mut HashMap<String, Vec<FieldViolation>>,
+        field: &str,
+        violation: FieldViolation,
+    ) -> Option<T> {
+        errors.entry(field.to_string()).or_default().push(violation);
+        None
     }
 
     pub fn evaluate_u32_op(
