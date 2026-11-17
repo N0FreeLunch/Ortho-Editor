@@ -2,6 +2,7 @@
 
 use crate::data::gems::GEMS;
 use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::engine::is_explicit_v105;
@@ -159,9 +160,7 @@ impl Modifiers {
         if item.socketed_items.is_empty() {
             return Ok(());
         }
-        let template = ITEM_TEMPLATES
-            .iter()
-            .find(|t| t.code == item.code.trim())
+        let template = DataRepository::get_item_template(item.code.trim())
             .ok_or(DurabilityContextError::SocketContext)?;
         let types = get_all_item_types(&item.code);
         let shield = types.contains(&"shld");

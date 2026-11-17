@@ -1,6 +1,6 @@
 //! Calculate qualified stack capacity without formatting or mutating item data.
 
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::item::{Item, ItemProperty};
 
 pub(crate) fn qualified_quantity_capacity(
@@ -12,9 +12,7 @@ pub(crate) fn qualified_quantity_capacity(
     if item.header.save_is_alpha || quantity > QUANTITY_MAX {
         return None;
     }
-    let template = ITEM_TEMPLATES
-        .iter()
-        .find(|template| template.code == item.code.trim())?;
+    let template = DataRepository::get_item_template(item.code.trim())?;
     if !template.is_stackable {
         return None;
     }

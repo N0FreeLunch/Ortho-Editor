@@ -1,6 +1,6 @@
 //! Project existing weapon-tooltip values independently of localization.
 
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::item_specs::get_base_item_spec;
 use crate::data::weapons::get_weapon_base_speed;
 use crate::item::Item;
@@ -47,7 +47,7 @@ fn damage_range(
 }
 
 pub(crate) fn displayed_weapon(item: &Item) -> Option<WeaponDisplay> {
-    let template = ITEM_TEMPLATES.iter().find(|t| t.code == item.code.trim())?;
+    let template = DataRepository::get_item_template(item.code.trim())?;
     if !template.is_weapon {
         return None;
     }

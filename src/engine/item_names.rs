@@ -3,7 +3,10 @@
 use crate::data::affixes::AFFIX_NAMES;
 #[cfg(test)]
 use crate::data::affixes::SUFFIXES;
-use crate::data::item_codes::{ITEM_NAME_SOURCES, ITEM_TEMPLATES};
+use crate::data::item_codes::ITEM_NAME_SOURCES;
+#[cfg(test)]
+use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::localization::LOCALIZATIONS;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
 use crate::data::set_items::SET_ITEMS;
@@ -177,7 +180,7 @@ pub fn quality_display_name(quality: Option<ItemQuality>, language: &str) -> Str
 }
 
 fn base_item_name<'a>(item: &'a Item, language: &str) -> &'a str {
-    let Some(template) = ITEM_TEMPLATES.iter().find(|t| t.code == item.code.trim()) else {
+    let Some(template) = DataRepository::get_item_template(item.code.trim()) else {
         return &item.code;
     };
     ITEM_NAME_SOURCES

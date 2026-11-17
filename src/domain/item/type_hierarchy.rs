@@ -1,12 +1,12 @@
 //! Query source item-type ancestry independently of validation policy.
 
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::item_types::ITEM_TYPES;
 use std::collections::HashSet;
 
 pub fn get_all_item_types(item_code: &str) -> Vec<&'static str> {
     let trimmed = item_code.trim();
-    let template = match ITEM_TEMPLATES.iter().find(|t| t.code == trimmed) {
+    let template = match DataRepository::get_item_template(trimmed) {
         Some(t) => t,
         None => return Vec::new(),
     };

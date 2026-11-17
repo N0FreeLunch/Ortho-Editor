@@ -28,7 +28,7 @@
 
 use crate::data::item_specs::{Affix, ItemStatRange, Runeword, SetItem, UniqueItem, BASE_ITEM_SPECS};
 use crate::data::{set_items, unique_items};
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::item_types::ITEM_TYPES;
 use crate::data::legitimacy::{SOCKET_RULES, calc_alvl, STAFFMOD_ENTRIES};
 use crate::item::{Item, ItemQuality};
@@ -205,7 +205,7 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
 pub fn check_item_code_legitimacy(item: &Item) -> Vec<String> {
     let mut warnings = Vec::new();
     let trimmed = item.code.trim();
-    if ITEM_TEMPLATES.iter().find(|t| t.code == trimmed).is_none() {
+    if DataRepository::get_item_template(trimmed).is_none() {
         warnings.push(format!("Invalid item code '{}': not found in game database", trimmed));
     }
     warnings

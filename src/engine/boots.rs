@@ -1,6 +1,6 @@
 //! Project unmodified boot kick damage independently of localized text.
 
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::item::Item;
 
 pub(crate) struct BootKickDamage {
@@ -9,9 +9,7 @@ pub(crate) struct BootKickDamage {
 }
 
 pub(crate) fn displayed_boot_kick_damage(item: &Item) -> Option<BootKickDamage> {
-    let is_boot = ITEM_TEMPLATES
-        .iter()
-        .find(|t| t.code == item.code.trim())
+    let is_boot = DataRepository::get_item_template(item.code.trim())
         .map_or(false, |t| t.item_type == Some("boot"));
 
     if is_boot {

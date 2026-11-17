@@ -2,7 +2,7 @@
 //! These checks prove encoding/layout, not an item's unknown creation history.
 
 use crate::data::gems::GEMS;
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
 use crate::domain::stats::{stat_save_add, stat_save_bits};
 use crate::engine::is_explicit_v105;
@@ -56,7 +56,7 @@ pub enum DefenseDisplay {
 
 pub(crate) fn stored_defense_warnings(item: &Item) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
-    let Some(template) = ITEM_TEMPLATES.iter().find(|t| t.code == item.code.trim()) else {
+    let Some(template) = DataRepository::get_item_template(item.code.trim()) else {
         return warnings;
     };
     let mut warn = |category, message| {

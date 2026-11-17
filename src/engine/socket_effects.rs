@@ -2,7 +2,7 @@
 //! Poison duration is an item projection, not a character or skill damage aggregate.
 
 use crate::data::gems::{determine_gem_slot, get_gem_stats, GEMS};
-use crate::data::item_codes::ITEM_TEMPLATES;
+use crate::data::DataRepository;
 use crate::data::item_specs::ItemStatRange;
 use crate::data::stat_costs::STAT_COSTS;
 use crate::domain::stats::entity::StatMaturityTier;
@@ -67,9 +67,7 @@ pub fn resolve_socketed_child_properties(child: &Item, parent: &Item) -> Vec<Ite
         return jewel_props;
     }
 
-    let is_weapon = ITEM_TEMPLATES
-        .iter()
-        .find(|t| t.code == parent.code.trim())
+    let is_weapon = DataRepository::get_item_template(parent.code.trim())
         .map_or(false, |t| t.is_weapon);
     let types = get_all_item_types(&parent.code);
     let is_shield = types.contains(&"shld");
@@ -176,7 +174,7 @@ pub(crate) fn project(item: &Item) -> Result<Option<Vec<ItemProperty>>, SocketCo
     if !is_explicit_v105(item) || !item.is_identified || item.socketed_items.is_empty() {
         return Ok(None);
     }
-    let Some(template) = ITEM_TEMPLATES.iter().find(|t| t.code == item.code.trim()) else {
+    let Some(template) = DataRepository::get_item_template(item.code.trim()) else {
         return Ok(None);
     };
     let types = get_all_item_types(&item.code);
