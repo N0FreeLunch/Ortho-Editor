@@ -27,7 +27,7 @@
 //! ```
 
 use crate::data::item_specs::{Affix, ItemStatRange, Runeword, SetItem, UniqueItem, BASE_ITEM_SPECS};
-use crate::data::{affixes, set_items, unique_items};
+use crate::data::{set_items, unique_items};
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::item_types::ITEM_TYPES;
 use crate::data::legitimacy::{SOCKET_RULES, calc_alvl, STAFFMOD_ENTRIES};
@@ -66,13 +66,7 @@ impl ItemSpec {
     }
 }
 
-pub fn lookup_prefix(id: u16) -> Option<&'static Affix> {
-    affixes::PREFIXES.iter().find(|a| a.id == id as u32)
-}
-
-pub fn lookup_suffix(id: u16) -> Option<&'static Affix> {
-    affixes::SUFFIXES.iter().find(|a| a.id == id as u32)
-}
+pub use crate::domain::item::affix_catalog::{lookup_prefix, lookup_suffix};
 
 pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
     if item.is_runeword || item.header.is_runeword {

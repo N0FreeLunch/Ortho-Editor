@@ -1135,19 +1135,13 @@ impl Item {
     pub fn prefixes(&self) -> Vec<&'static crate::data::item_specs::Affix> {
         let mut result = Vec::new();
         if let Some(id) = self.magic_prefix.filter(|&id| id != 0) {
-            if let Some(affix) = crate::data::affixes::PREFIXES
-                .iter()
-                .find(|a| a.id == id as u32)
-            {
+            if let Some(affix) = crate::domain::item::affix_catalog::lookup_prefix(id) {
                 result.push(affix);
             }
         }
         for i in [0, 2, 4] {
             if let Some(id) = self.rare_affixes[i].filter(|&id| id != 0) {
-                if let Some(affix) = crate::data::affixes::PREFIXES
-                    .iter()
-                    .find(|a| a.id == id as u32)
-                {
+                if let Some(affix) = crate::domain::item::affix_catalog::lookup_prefix(id) {
                     result.push(affix);
                 }
             }
@@ -1158,19 +1152,13 @@ impl Item {
     pub fn suffixes(&self) -> Vec<&'static crate::data::item_specs::Affix> {
         let mut result = Vec::new();
         if let Some(id) = self.magic_suffix.filter(|&id| id != 0) {
-            if let Some(affix) = crate::data::affixes::SUFFIXES
-                .iter()
-                .find(|a| a.id == id as u32)
-            {
+            if let Some(affix) = crate::domain::item::affix_catalog::lookup_suffix(id) {
                 result.push(affix);
             }
         }
         for i in [1, 3, 5] {
             if let Some(id) = self.rare_affixes[i].filter(|&id| id != 0) {
-                if let Some(affix) = crate::data::affixes::SUFFIXES
-                    .iter()
-                    .find(|a| a.id == id as u32)
-                {
+                if let Some(affix) = crate::domain::item::affix_catalog::lookup_suffix(id) {
                     result.push(affix);
                 }
             }

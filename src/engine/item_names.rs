@@ -1,11 +1,14 @@
 //! Item naming policy and quality labels.
 
-use crate::data::affixes::{AFFIX_NAMES, PREFIXES, SUFFIXES};
+use crate::data::affixes::AFFIX_NAMES;
+#[cfg(test)]
+use crate::data::affixes::SUFFIXES;
 use crate::data::item_codes::{ITEM_NAME_SOURCES, ITEM_TEMPLATES};
 use crate::data::localization::LOCALIZATIONS;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
 use crate::data::set_items::SET_ITEMS;
 use crate::data::unique_items::UNIQUE_ITEMS;
+use crate::domain::item::affix_catalog::{lookup_prefix, lookup_suffix};
 use crate::domain::item::runeword::{resolve_runeword, runeword_display_name};
 use crate::engine::is_explicit_v105;
 use crate::item::{Item, ItemQuality};
@@ -24,28 +27,24 @@ fn rare_name_key(raw_id: u8) -> Option<&'static str> {
 
 fn magic_affix_name(item: &Item, kind: &str, id: u16) -> Option<&'static str> {
     let primary = match kind {
-        "prefix" => PREFIXES,
-        "suffix" => SUFFIXES,
+        "prefix" => lookup_prefix(id),
+        "suffix" => lookup_suffix(id),
         _ => return None,
     };
-    primary
-        .iter()
-        .find(|a| a.id == u32::from(id))
-        .map(|a| a.name)
-        .or_else(|| {
-            if is_explicit_v105(item)
-                && item.is_identified
-                && item.header.is_identified
-                && item.is_completely_parsed()
-            {
-                AFFIX_NAMES
-                    .iter()
-                    .find(|a| a.kind == kind && a.id == u32::from(id))
-                    .map(|a| a.name_key)
-            } else {
-                None
-            }
-        })
+    primary.map(|a| a.name).or_else(|| {
+        if is_explicit_v105(item)
+            && item.is_identified
+            && item.header.is_identified
+            && item.is_completely_parsed()
+        {
+            AFFIX_NAMES
+                .iter()
+                .find(|a| a.kind == kind && a.id == u32::from(id))
+                .map(|a| a.name_key)
+        } else {
+            None
+        }
+    })
 }
 
 pub fn resolve_item_name(item: &Item, language: &str) -> String {
