@@ -47,7 +47,7 @@ pub use model::{
     StatValidation, StatValidationStatus, ValidationResult, ValidationWarning, WarningConfidenceTier,
 };
 
-pub use crate::domain::item::affix_catalog::{lookup_prefix, lookup_suffix};
+pub use crate::domain::item::affix_catalog::{is_affix_eligible_for, lookup_prefix, lookup_suffix};
 
 pub use crate::domain::item::specification::{ItemSpec, lookup_spec};
 
@@ -645,23 +645,6 @@ fn consolidate_affix_stats(prefixes: &[&Affix], suffixes: &[&Affix]) -> Vec<Item
     merged.into_values().collect()
 }
 
-pub fn is_affix_eligible_for(affix: &Affix, item_types: &[&str]) -> bool {
-    // If include_types is empty, it's generally allowed on all types unless excluded
-    if !affix.include_types.is_empty() {
-        let has_included = affix.include_types.iter().any(|&inc| item_types.contains(&inc));
-        if !has_included {
-            return false;
-        }
-    }
-
-    // If any excluded type is in item_types, it's not eligible
-    let has_excluded = affix.exclude_types.iter().any(|&exc| item_types.contains(&exc));
-    if has_excluded {
-        return false;
-    }
-
-    true
-}
 
 #[cfg(test)]
 mod tests {
