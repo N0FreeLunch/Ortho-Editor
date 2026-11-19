@@ -863,9 +863,7 @@ impl Item {
                 for prop in list {
                     let effective_id = axiom.map_alpha_id(prop.stat_id);
                     if effective_id == stat_id {
-                        let cost = crate::data::stat_costs::STAT_COSTS
-                            .iter()
-                            .find(|s| s.id == effective_id);
+                        let cost = crate::domain::stats::stat_cost(effective_id);
                         if let Some(c) = cost {
                             let logical_value = value.value();
                             let raw_value = logical_value.wrapping_add(c.save_add);

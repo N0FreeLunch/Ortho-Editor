@@ -37,9 +37,7 @@ pub(super) fn d2r_v3_write_scalar_list(
                 "Opaque, unverified, paired or premature terminal property is unsupported",
             ));
         }
-        let stat = crate::data::stat_costs::STAT_COSTS
-            .iter()
-            .find(|stat| stat.id == property.stat_id)
+        let stat = crate::domain::stats::stat_cost(property.stat_id)
             .ok_or_else(|| invalid("Missing D2R v3 property definition"))?;
         if stat.save_bits == 0 || stat.save_bits > 31 {
             return Err(invalid("Unsupported D2R v3 scalar value width"));
@@ -89,9 +87,7 @@ pub(super) fn d2r_v3_write_weapon_list(
         {
             return Err(invalid("Unsupported weapon property state"));
         }
-        let stat = crate::data::stat_costs::STAT_COSTS
-            .iter()
-            .find(|stat| stat.id == property.stat_id)
+        let stat = crate::domain::stats::stat_cost(property.stat_id)
             .ok_or_else(|| invalid("Missing weapon property definition"))?;
         if stat.save_bits == 0 || stat.save_bits > 32 {
             return Err(invalid("Unsupported weapon property width"));

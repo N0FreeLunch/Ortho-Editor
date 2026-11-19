@@ -151,7 +151,7 @@ impl<'a> ItemEditor<'a> {
     /// Appends a new property to the item.
     pub fn add_property(&mut self, stat_id: u32, value: i32) -> &mut Self {
         self.ensure_extended();
-        let cost = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == stat_id);
+        let cost = crate::domain::stats::stat_cost(stat_id);
         let name = cost.map(|c| c.name.to_string()).unwrap_or_else(|| format!("stat_{}", stat_id));
         let raw_value = cost.map(|c| value.wrapping_add(c.save_add)).unwrap_or(value);
         let prop = crate::domain::stats::ItemProperty {

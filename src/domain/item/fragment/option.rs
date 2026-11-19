@@ -1,5 +1,5 @@
 use super::{BitFragment, FragmentContext, FragmentError, FragmentType};
-use crate::data::stat_costs::STAT_COSTS;
+use crate::domain::stats::stat_cost;
 use bitstream_io::{BitRead, BitWrite};
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +39,7 @@ impl OptionFragment {
     }
 
     pub fn lookup_stat_width(stat_id: u16) -> Option<(u8, i32)> {
-        STAT_COSTS.iter().find(|s| s.id == stat_id as u32).map(|s| {
+        stat_cost(stat_id as u32).map(|s| {
             (s.save_bits as u8, s.save_add as i32)
         })
     }
