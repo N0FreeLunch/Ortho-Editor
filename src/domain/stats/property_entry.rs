@@ -186,9 +186,7 @@ pub(crate) fn read_property_entry<R: BitRead, P: PropertyEntryPolicy, T>(
     let mut param = 0;
     let mut nested_items = Vec::new();
     let mapped_id = policy.map_id(stat_id);
-    let stat_cost = crate::data::stat_costs::STAT_COSTS
-        .iter()
-        .find(|s| s.id == mapped_id);
+    let stat_cost = super::stat_cost(mapped_id);
     let suppress_authority_params = policy.omit_parameter();
     if let Some(stat) = stat_cost {
         if stat.save_param_bits > 0 && !suppress_authority_params {

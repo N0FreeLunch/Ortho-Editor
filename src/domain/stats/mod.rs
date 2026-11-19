@@ -1,4 +1,4 @@
-use crate::data::stat_costs::STAT_COSTS;
+use crate::data::stat_costs::{StatCost, STAT_COSTS};
 pub mod entity;
 pub mod axiom;
 mod budget;
@@ -40,23 +40,21 @@ pub fn lookup_alpha_map_by_effective(effective_id: u32) -> Option<MappingInfo> {
     reg.mappings.values().find(|m| m.effective_id == effective_id).cloned()
 }
 
+pub(crate) fn stat_cost(stat_id: u32) -> Option<&'static StatCost> {
+    STAT_COSTS.iter().find(|stat| stat.id == stat_id)
+}
+
 pub fn stat_save_add(stat_id: u32) -> Option<i32> {
-    STAT_COSTS
-        .iter()
-        .find(|stat| stat.id == stat_id)
-        .map(|stat| stat.save_add)
+    stat_cost(stat_id).map(|stat| stat.save_add)
 }
 
 pub fn stat_save_bits(stat_id: u32) -> Option<u32> {
-    STAT_COSTS
-        .iter()
-        .find(|stat| stat.id == stat_id)
-        .map(|stat| stat.save_bits as u32)
+    stat_cost(stat_id).map(|stat| stat.save_bits as u32)
 }
 
 /// Check whether an unsigned logical scalar fits its stored field after SaveAdd.
 pub(crate) fn fits_unsigned_save_field(stat_id: u32, value: u32) -> bool {
-    STAT_COSTS.iter().find(|s| s.id == stat_id).is_some_and(|s| {
+    stat_cost(stat_id).is_some_and(|s| {
         let encoded = i64::from(value) + i64::from(s.save_add);
         (1..=32).contains(&s.save_bits) && encoded >= 0 && encoded < (1_i64 << s.save_bits)
     })

@@ -4,8 +4,7 @@ use crate::data::gems::GEMS;
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
-use crate::data::stat_costs::STAT_COSTS;
-use crate::domain::stats::fits_unsigned_save_field;
+use crate::domain::stats::{fits_unsigned_save_field, stat_cost};
 use crate::engine::is_explicit_v105;
 use crate::domain::item::type_hierarchy::get_all_item_types;
 use crate::item::{Item, ItemProperty, ItemQuality};
@@ -85,9 +84,7 @@ impl Modifiers {
             let valid = p.is_verified()
                 && p.param == 0
                 && seen.insert(p.stat_id)
-                && STAT_COSTS
-                    .iter()
-                    .find(|s| s.id == p.stat_id)
+                && stat_cost(p.stat_id)
                     .is_some_and(|s| {
                         (1..=31).contains(&s.save_bits)
                             && p.raw_value >= 0

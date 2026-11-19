@@ -117,7 +117,7 @@ impl ItemProperty {
         if self.is_opaque {
             return false;
         }
-        if let Some(cost) = crate::data::stat_costs::STAT_COSTS.iter().find(|s| s.id == self.stat_id) {
+        if let Some(cost) = super::stat_cost(self.stat_id) {
             let max_raw_val = if cost.save_bits > 0 && cost.save_bits <= 31 {
                 (1i64 << cost.save_bits) - 1
             } else {

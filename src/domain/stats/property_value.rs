@@ -85,10 +85,7 @@ pub(super) fn read_property_values<R: BitRead>(
                 });
         if let Some(companion_stat_ids) = companion_stat_ids {
             for companion_stat_id in companion_stat_ids.iter().copied() {
-                if let Some(companion_stat) = crate::data::stat_costs::STAT_COSTS
-                    .iter()
-                    .find(|stat| stat.id == companion_stat_id)
-                {
+                if let Some(companion_stat) = super::stat_cost(companion_stat_id) {
                     let companion_start = recorder.pos();
                     let companion_width = companion_stat.save_bits as u32;
                     let companion_raw_value = if companion_width > 32 {

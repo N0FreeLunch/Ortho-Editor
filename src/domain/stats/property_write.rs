@@ -34,9 +34,7 @@ pub(super) fn write_property_stream(
         emitter.write_bits(raw_id, id_bits)?;
         if !children.try_write(emitter, raw_id)? {
             let mapped_id = policy.map_id(raw_id);
-            let stat_cost = crate::data::stat_costs::STAT_COSTS
-                .iter()
-                .find(|s| s.id == mapped_id);
+            let stat_cost = super::stat_cost(mapped_id);
             let suppress_authority_params = policy.omit_parameter();
             if let Some(stat) = stat_cost {
                 if stat.save_param_bits > 0 && !suppress_authority_params {
