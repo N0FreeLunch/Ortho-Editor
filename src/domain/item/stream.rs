@@ -47,10 +47,7 @@ impl PlayerItemStream {
     /// retain the legacy recovery path and an explicit diagnostic for consumers.
     /// This bounded policy does not assert universal dialect detection.
     pub fn read(bytes: &[u8], huffman: &HuffmanTree) -> Result<Self, String> {
-        let version = bytes
-            .get(4..8)
-            .and_then(|raw| <[u8; 4]>::try_from(raw).ok())
-            .map(u32::from_le_bytes)
+        let version = crate::domain::header::axiom::try_read_save_version(bytes)
             .ok_or_else(|| "Truncated save version".to_string())?;
         if bytes.get(..4) != Some(crate::save::D2S_MAGIC.to_le_bytes().as_slice()) {
             return Err("Player item streams require a full save header".to_string());

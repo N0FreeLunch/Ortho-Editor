@@ -4,6 +4,7 @@
 pub mod transport;
 
 use crate::item::{HuffmanTree, Item};
+use crate::domain::header::axiom::{read_save_version, try_read_save_version};
 pub use crate::domain::progression::axiom::PROG_START_FILE;
 pub use crate::domain::header::axiom::{
     ACTIVE_ACT_OFFSET, ACTIVE_WEAPON_OFFSET, CHAR_CLASS_OFFSET, CHAR_LEVEL_OFFSET,
@@ -96,11 +97,7 @@ impl SaveSectionMap {
 }
 
 pub fn map_core_sections(bytes: &[u8]) -> io::Result<SaveSectionMap> {
-    let version = if bytes.len() >= 8 {
-        u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
-    } else {
-        0
-    };
+    let version = try_read_save_version(bytes).unwrap_or(0);
 
     let section_axiom = V105SectionMarkerAxiom::default();
     let gf_pos = section_axiom.find_gf(bytes).ok_or_else(|| {
@@ -273,7 +270,7 @@ pub fn rebuild_status_and_player_items(
     let mut header_bytes = bytes[..map.gf_pos].to_vec();
     
     // Detect version from header_bytes
-    let version = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version = read_save_version(&header_bytes);
 
     let section_axiom = V105SectionMarkerAxiom::default();
 
@@ -350,7 +347,7 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
     // Update level in gf section (stat_id=12, save_add=0, bit_width=7)
     attrs.set_raw(12, new_level as u32);
 
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version = read_save_version(bytes);
     // Synchronize header CHAR_LEVEL_OFFSET (byte 27)
     let items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
         stream.items
@@ -383,7 +380,7 @@ pub fn try_apply_character_mutation(
         .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to map sections: {}", e)))?;
     let mut attrs = AttributeSection::parse(bytes, map.gf_pos, map.if_pos)
         .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to parse attributes: {}", e)))?;
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version = read_save_version(bytes);
     let is_alpha = version == 105;
 
     // Snapshot existing character attributes for resulting-value boundary validation
@@ -578,7 +575,7 @@ pub fn try_apply_skill_mutation(
     let map = map_core_sections(bytes).map_err(|e| {
         crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to map sections: {}", e))
     })?;
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version = read_save_version(bytes);
     let is_alpha = version == 105;
     let char_class = if CHAR_CLASS_OFFSET < bytes.len() {
         bytes[CHAR_CLASS_OFFSET]
@@ -664,7 +661,7 @@ pub fn try_apply_batch_item_mutation(
     contract: &crate::domain::contracts::BatchItemContract,
     huffman: &HuffmanTree,
 ) -> Result<Vec<u8>, crate::domain::contracts::ItemContractError> {
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version = read_save_version(bytes);
     let is_alpha = version == 105;
 
     let mut items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
@@ -736,7 +733,7 @@ pub fn try_apply_item_mutation(
     contract: &crate::domain::contracts::ItemMutationContract,
     huffman: &HuffmanTree,
 ) -> Result<Vec<u8>, crate::domain::contracts::ItemContractError> {
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let version = read_save_version(bytes);
     let is_alpha = version == 105;
 
     // Read player items with version-aware detection (supports modern v3, alpha, legacy)
@@ -1011,7 +1008,7 @@ impl Save {
             ));
         }
 
-        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let version = read_save_version(bytes);
         let file_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
         let checksum = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
         let active_weapon = u32::from_le_bytes(

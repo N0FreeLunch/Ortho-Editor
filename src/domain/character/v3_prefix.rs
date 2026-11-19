@@ -14,10 +14,7 @@ pub(crate) fn locate_v3_player_list<F>(bytes: &[u8], failure: F) -> ParsingResul
 where
     F: Fn(&str, u64, &str) -> ParsingFailure,
 {
-    let save_version = bytes
-        .get(4..8)
-        .and_then(|raw| <[u8; 4]>::try_from(raw).ok())
-        .map(u32::from_le_bytes)
+    let save_version = crate::domain::header::axiom::try_read_save_version(bytes)
         .ok_or_else(|| ParsingFailure {
             error: ParsingError::UnexpectedValue {
                 field: "D2R v3 save version".to_string(),

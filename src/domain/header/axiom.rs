@@ -8,6 +8,17 @@ pub const D2S_MAGIC: u32 = 0xaa55aa55;
 
 pub const MAGIC_OFFSET: usize = 0;
 pub const VERSION_OFFSET: usize = 4;
+
+const VERSION_END: usize = VERSION_OFFSET + size_of::<u32>();
+
+#[track_caller]
+pub(crate) fn read_save_version(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes(bytes[VERSION_OFFSET..VERSION_END].try_into().unwrap())
+}
+
+pub(crate) fn try_read_save_version(bytes: &[u8]) -> Option<u32> {
+    (bytes.len() >= VERSION_END).then(|| read_save_version(bytes))
+}
 pub const FILE_SIZE_OFFSET: usize = 8;
 pub const CHECKSUM_OFFSET: usize = 12;
 pub const ACTIVE_WEAPON_OFFSET: usize = 16;

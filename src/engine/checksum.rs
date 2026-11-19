@@ -22,11 +22,7 @@ pub use crate::domain::header::checksum::{ChecksumStrategy, StandardRollingSum};
 use std::io;
 
 fn strategy_for_save(bytes: &[u8]) -> Box<dyn ChecksumStrategy> {
-    let version = if bytes.len() >= 8 {
-        u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]))
-    } else {
-        0
-    };
+    let version = crate::domain::header::axiom::try_read_save_version(bytes).unwrap_or(0);
     HeaderAxiom::new(version).checksum_strategy()
 }
 
