@@ -1,9 +1,11 @@
 //! Affix level, staffmod, and group warning policies.
 
-use super::model::{ValidationWarning, WarningConfidenceTier};
+use super::grading::{consolidate_affix_stats, validate_item_properties};
+use super::model::{ValidationResult, ValidationWarning, WarningConfidenceTier};
 use crate::data::item_specs::get_base_item_spec;
 use crate::data::item_types::ITEM_TYPES;
 use crate::data::legitimacy::{STAFFMOD_ENTRIES, calc_alvl};
+use crate::domain::item::affix_catalog::is_affix_eligible_for;
 use crate::domain::item::specification::{ItemSpec, lookup_spec};
 use crate::domain::item::type_hierarchy::get_all_item_types;
 use crate::item::{Item, ItemQuality};
@@ -197,4 +199,52 @@ pub fn check_affix_group_legitimacy(item: &Item) -> Vec<String> {
     }
 
     warnings
+}
+
+pub(super) fn grade_item_affixes(item: &Item) -> ValidationResult {
+    let prefixes = item.prefixes();
+    let suffixes = item.suffixes();
+
+    if prefixes.is_empty() && suffixes.is_empty() {
+        ValidationResult {
+            spec_name: format!("{:?}", item.quality.unwrap_or(ItemQuality::Normal)),
+            is_perfect: true,
+            score: 1.0,
+            stats: Vec::new(),
+            warnings: Vec::new(),
+            detailed_warnings: Vec::new(),
+        }
+    } else {
+        let item_types = get_all_item_types(&item.code);
+        let mut warnings = Vec::new();
+
+        for affix in prefixes.iter().chain(suffixes.iter()) {
+            if !is_affix_eligible_for(affix, &item_types) {
+                warnings.push(format!(
+                    "Affix '{}' (id:{}) is not eligible for this item type",
+                    affix.name, affix.id
+                ));
+            }
+        }
+
+        let consolidated_stats = consolidate_affix_stats(&prefixes, &suffixes);
+        let names: Vec<&str> = prefixes
+            .iter()
+            .chain(suffixes.iter())
+            .map(|a| a.name)
+            .collect();
+        let spec_name = if names.is_empty() {
+            "Unknown Affix Item".to_string()
+        } else {
+            names.join(" ")
+        };
+
+        let mut res = validate_item_properties(
+            &spec_name,
+            &consolidated_stats,
+            &item.properties,
+        );
+        res.warnings.extend(warnings);
+        res
+    }
 }

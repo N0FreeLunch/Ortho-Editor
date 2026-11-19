@@ -49,7 +49,7 @@ pub use affix_policy::{
     check_staffmod_legitimacy, check_staffmod_legitimacy_detailed,
 };
 
-use grading::{consolidate_affix_stats, validate_item_properties};
+use grading::validate_item_properties;
 pub use model::{
     StatValidation, StatValidationStatus, ValidationResult, ValidationWarning, WarningConfidenceTier,
 };
@@ -94,51 +94,7 @@ pub fn validate_item(item: &Item) -> Option<ValidationResult> {
     } else {
         match item.quality {
             Some(ItemQuality::Magic) | Some(ItemQuality::Rare) | Some(ItemQuality::Crafted) => {
-                let prefixes = item.prefixes();
-                let suffixes = item.suffixes();
-
-                if prefixes.is_empty() && suffixes.is_empty() {
-                    Some(ValidationResult {
-                        spec_name: format!("{:?}", item.quality.unwrap_or(ItemQuality::Normal)),
-                        is_perfect: true,
-                        score: 1.0,
-                        stats: Vec::new(),
-                        warnings: Vec::new(),
-                        detailed_warnings: Vec::new(),
-                    })
-                } else {
-                    let item_types = get_all_item_types(&item.code);
-                    let mut warnings = Vec::new();
-
-                for affix in prefixes.iter().chain(suffixes.iter()) {
-                    if !is_affix_eligible_for(affix, &item_types) {
-                        warnings.push(format!(
-                            "Affix '{}' (id:{}) is not eligible for this item type",
-                            affix.name, affix.id
-                        ));
-                    }
-                }
-
-                let consolidated_stats = consolidate_affix_stats(&prefixes, &suffixes);
-                let names: Vec<&str> = prefixes
-                    .iter()
-                    .chain(suffixes.iter())
-                    .map(|a| a.name)
-                    .collect();
-                let spec_name = if names.is_empty() {
-                    "Unknown Affix Item".to_string()
-                } else {
-                    names.join(" ")
-                };
-
-                let mut res = validate_item_properties(
-                    &spec_name,
-                    &consolidated_stats,
-                    &item.properties,
-                );
-                res.warnings.extend(warnings);
-                Some(res)
-                }
+                Some(affix_policy::grade_item_affixes(item))
             }
             _ => Some(ValidationResult {
                 spec_name: format!("{:?}", item.quality.unwrap_or(ItemQuality::Normal)),
