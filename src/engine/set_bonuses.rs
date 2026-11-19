@@ -1,7 +1,7 @@
 //! Select existing set bonuses independently of localized rendering.
 
 use crate::data::item_specs::ItemStatRange;
-use crate::data::set_items::SET_ITEMS;
+use crate::domain::item::specification::lookup_set_item;
 use crate::data::sets::{get_set_group, get_set_items, get_set_total_pieces};
 use crate::item::{Item, ItemBitRange, ItemProperty, ItemQuality};
 
@@ -49,7 +49,7 @@ pub(crate) fn displayed_set_bonuses(
         return None;
     }
     let id = item.unique_id?;
-    let set_item = SET_ITEMS.iter().find(|s| s.id == id as u32)?;
+    let set_item = lookup_set_item(id)?;
     let member_keys = get_set_items(set_item.set_id).map(|s| s.index).collect();
     let mut pieces = Vec::new();
     let flags = item

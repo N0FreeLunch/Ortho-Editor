@@ -23,6 +23,14 @@ impl ItemSpec {
     }
 }
 
+pub(crate) fn lookup_set_item(id: u16) -> Option<&'static SetItem> {
+    set_items::SET_ITEMS.iter().find(|row| row.id == u32::from(id))
+}
+
+pub(crate) fn lookup_unique_item(id: u16) -> Option<&'static UniqueItem> {
+    unique_items::UNIQUE_ITEMS.iter().find(|row| row.id == u32::from(id))
+}
+
 pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
     if item.is_runeword || item.header.is_runeword {
         return resolve_runeword(item).map(|resolved| ItemSpec::Runeword(resolved.template));
@@ -31,18 +39,12 @@ pub fn lookup_spec(item: &Item) -> Option<ItemSpec> {
     match item.quality {
         Some(ItemQuality::Unique) => {
             if let Some(uid) = item.unique_id {
-                return unique_items::UNIQUE_ITEMS
-                    .iter()
-                    .find(|ui| ui.id == uid as u32)
-                    .map(ItemSpec::Unique);
+                return lookup_unique_item(uid).map(ItemSpec::Unique);
             }
         }
         Some(ItemQuality::Set) => {
             if let Some(sid) = item.unique_id {
-                return set_items::SET_ITEMS
-                    .iter()
-                    .find(|si| si.id == sid as u32)
-                    .map(ItemSpec::Set);
+                return lookup_set_item(sid).map(ItemSpec::Set);
             }
         }
         _ => {}

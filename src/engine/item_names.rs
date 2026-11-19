@@ -9,8 +9,7 @@ use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::DataRepository;
 use crate::data::localization::LOCALIZATIONS;
 use crate::data::rare_names::{RARE_PREFIXES, RARE_SUFFIXES};
-use crate::data::set_items::SET_ITEMS;
-use crate::data::unique_items::UNIQUE_ITEMS;
+use crate::domain::item::specification::{lookup_set_item, lookup_unique_item};
 use crate::domain::item::affix_catalog::{lookup_prefix, lookup_suffix};
 use crate::domain::item::runeword::{resolve_runeword, runeword_display_name};
 use crate::engine::is_explicit_v105;
@@ -71,7 +70,7 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
     // 2. Unique
     if item.quality == Some(ItemQuality::Unique) && item.is_identified {
         if let Some(id) = item.unique_id {
-            if let Some(unique) = UNIQUE_ITEMS.iter().find(|u| u.id == id as u32) {
+            if let Some(unique) = lookup_unique_item(id) {
                 return get_loc(unique.index, language).to_string();
             }
         }
@@ -80,7 +79,7 @@ pub fn resolve_item_name(item: &Item, language: &str) -> String {
     // 3. Set
     if item.quality == Some(ItemQuality::Set) && item.is_identified {
         if let Some(id) = item.unique_id {
-            if let Some(set_item) = SET_ITEMS.iter().find(|s| s.id == id as u32) {
+            if let Some(set_item) = lookup_set_item(id) {
                 return get_loc(set_item.index, language).to_string();
             }
         }

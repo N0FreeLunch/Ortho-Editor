@@ -3,7 +3,9 @@
 use crate::data::gems::GEMS;
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::DataRepository;
+#[cfg(test)]
 use crate::data::set_items::SET_ITEMS;
+use crate::domain::item::specification::lookup_set_item;
 use crate::domain::stats::{fits_unsigned_save_field, stat_cost};
 use crate::engine::is_explicit_v105;
 use crate::domain::item::type_hierarchy::get_all_item_types;
@@ -112,7 +114,7 @@ impl Modifiers {
         let set = item
             .unique_id
             .filter(|_| item.quality == Some(ItemQuality::Set))
-            .and_then(|id| SET_ITEMS.iter().find(|s| s.id == u32::from(id)))
+            .and_then(lookup_set_item)
             .ok_or(DurabilityContextError::SetContext)?;
         // Count-based activation is supported; membership-based activation needs the actual members.
         if set.add_func != 2 {

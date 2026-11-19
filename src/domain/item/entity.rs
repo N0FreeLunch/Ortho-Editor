@@ -1179,7 +1179,7 @@ impl Item {
         // 1. Unique item level requirement
         if self.quality == Some(ItemQuality::Unique) && self.is_identified {
             if let Some(id) = self.unique_id {
-                if let Some(u) = crate::data::unique_items::UNIQUE_ITEMS.iter().find(|u| u.id == id as u32) {
+                if let Some(u) = crate::domain::item::specification::lookup_unique_item(id) {
                     req_lvl = req_lvl.max(u.level_req as u8);
                 }
             }
@@ -1188,7 +1188,7 @@ impl Item {
         // 2. Set item level requirement
         if self.quality == Some(ItemQuality::Set) && self.is_identified {
             if let Some(id) = self.unique_id {
-                if let Some(s) = crate::data::set_items::SET_ITEMS.iter().find(|s| s.id == id as u32) {
+                if let Some(s) = crate::domain::item::specification::lookup_set_item(id) {
                     if let Some(lvl) = s.level_req {
                         req_lvl = req_lvl.max(lvl as u8);
                     }

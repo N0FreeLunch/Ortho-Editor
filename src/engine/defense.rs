@@ -2,7 +2,9 @@
 //! These checks prove encoding/layout, not an item's unknown creation history.
 
 use crate::data::gems::GEMS;
+#[cfg(test)]
 use crate::data::set_items::SET_ITEMS;
+use crate::domain::item::specification::lookup_set_item;
 use crate::engine::is_explicit_v105;
 use crate::domain::item::type_hierarchy::get_all_item_types;
 use crate::item::{Item, ItemProperty, ItemQuality};
@@ -109,7 +111,7 @@ impl Modifiers {
         let set = item
             .unique_id
             .filter(|_| item.quality == Some(ItemQuality::Set))
-            .and_then(|id| SET_ITEMS.iter().find(|s| s.id == u32::from(id)))
+            .and_then(lookup_set_item)
             .ok_or(DefenseContextError::SetLayout)?;
         if set.add_func != 2 {
             return Err(DefenseContextError::SetMembers);
@@ -240,10 +242,7 @@ pub fn equipped_set_piece_counts<'a>(
         if item.is_identified
             && item.quality == Some(ItemQuality::Set)
             && let Some((id, set)) = item.unique_id.and_then(|id| {
-                SET_ITEMS
-                    .iter()
-                    .find(|s| s.id == u32::from(id))
-                    .map(|set| (id, set))
+                lookup_set_item(id).map(|set| (id, set))
             })
         {
             groups.entry(set.set_id).or_default().insert(id);
