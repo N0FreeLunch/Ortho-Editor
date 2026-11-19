@@ -41,6 +41,17 @@ fn group_property(stat: &ItemStatRange) -> ItemProperty {
     )
 }
 
+/// Pairs each present flag's required piece count with its packed property list.
+pub(super) fn packed_set_bonus_lists(
+    flags: [bool; 5],
+    lists: &[Vec<ItemProperty>],
+) -> impl Iterator<Item = (usize, &[ItemProperty])> {
+    flags.into_iter()
+        .enumerate()
+        .filter_map(|(ordinal, present)| present.then_some(ordinal + 2))
+        .zip(lists.iter().map(Vec::as_slice))
+}
+
 pub(crate) fn displayed_set_bonuses(
     item: &Item,
     active_set_count: usize,
@@ -59,20 +70,13 @@ pub(crate) fn displayed_set_bonuses(
         .and_then(|a| a.set_property_flags);
 
     if let Some(flags) = flags {
-        let mut packed = 0;
-        for (ordinal, present) in flags.into_iter().enumerate() {
-            if present {
-                if packed < item.set_attributes.len() {
-                    let required_count = (ordinal + 2) as u8;
-                    pieces.push(PieceBonusDisplay {
-                        active: active_set_count >= required_count as usize,
-                        required_count,
-                        properties: &item.set_attributes[packed],
-                        mode: PieceBonusMode::Requested,
-                    });
-                }
-                packed += 1;
-            }
+        for (required_count, properties) in packed_set_bonus_lists(flags, &item.set_attributes) {
+            pieces.push(PieceBonusDisplay {
+                active: active_set_count >= required_count,
+                required_count: required_count as u8,
+                properties,
+                mode: PieceBonusMode::Requested,
+            });
         }
     } else {
         for (idx, list) in item.set_attributes.iter().enumerate() {

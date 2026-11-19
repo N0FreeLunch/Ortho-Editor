@@ -8,6 +8,7 @@ use crate::data::set_items::SET_ITEMS;
 use crate::domain::item::specification::lookup_set_item;
 use crate::domain::stats::{fits_unsigned_save_field, stat_cost};
 use crate::engine::is_explicit_v105;
+use crate::engine::set_bonuses::packed_set_bonus_lists;
 use crate::domain::item::type_hierarchy::get_all_item_types;
 use crate::item::{Item, ItemProperty, ItemQuality};
 use std::collections::HashSet;
@@ -129,13 +130,9 @@ impl Modifiers {
         if flags.iter().filter(|&&x| x).count() != item.set_attributes.len() {
             return Err(DurabilityContextError::SetContext);
         }
-        let mut packed = 0;
-        for (ordinal, present) in flags.into_iter().enumerate() {
-            if present {
-                if active >= ordinal + 2 {
-                    self.list(&item.set_attributes[packed])?;
-                }
-                packed += 1;
+        for (required_count, properties) in packed_set_bonus_lists(flags, &item.set_attributes) {
+            if active >= required_count {
+                self.list(properties)?;
             }
         }
         Ok(())
