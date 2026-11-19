@@ -1512,3 +1512,46 @@ fn cycle_25_stat_mode_legit_free_reset_sync_and_vitals_breakdown() {
     assert!(free_env.ok);
     assert_eq!(free_env.session.unwrap().stats.unspent_stat_points, 321);
 }
+
+#[test]
+fn cycle_27_skill_tree_meta_and_prereq_guard() {
+    let bytes = fixture_bytes("tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s");
+    let mut session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("open TESTDRUID_Quest3_AnyaRescued");
+    let view = session.project();
+    assert_eq!(view.skills.len(), 30);
+    for sk in &view.skills {
+        assert!((0..3).contains(&sk.tree_index));
+        assert!((1..=6).contains(&sk.row));
+        assert!((1..=3).contains(&sk.col));
+        assert!(!sk.desc_en.is_empty(), "missing desc_en for skill {}", sk.skill_id);
+    }
+
+    // Reset skills and ensure Legit mode blocks investing in a skill whose prereqs are 0
+    assert!(session.apply_intent(UiIntent::SelectSkillMode { mode: EditMode::Legit }).ok);
+    assert!(session.apply_intent(UiIntent::ResetSkills).ok);
+    let after_reset = session.project();
+    let gated = after_reset
+        .skills
+        .iter()
+        .find(|sk| !sk.prereq_ids.is_empty() && sk.req_level <= after_reset.char_level)
+        .expect("at least one prereq-gated skill within char_level");
+
+    let rej_env = session.apply_intent(UiIntent::AdjustSkillRank {
+        skill_id: gated.skill_id,
+        delta: 1,
+    });
+    assert!(!rej_env.ok);
+    assert_eq!(
+        rej_env.rejection.as_ref().map(|r| r.raw_code.as_str()),
+        Some("skill_prereq_not_met")
+    );
+
+    // Free mode bypasses prereq guard
+    assert!(session.apply_intent(UiIntent::SelectSkillMode { mode: EditMode::Free }).ok);
+    let free_env = session.apply_intent(UiIntent::AdjustSkillRank {
+        skill_id: gated.skill_id,
+        delta: 1,
+    });
+    assert!(free_env.ok);
+}

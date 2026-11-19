@@ -833,7 +833,7 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                                 max 1 item.height
 
                             ( gx, gy ) =
-                                UiState.resolveGridDropAnchor session.allowedMoveTargets containerTag w h target.x target.y
+                                UiState.resolveGridDropAnchorWithSub session.allowedMoveTargets containerTag w h target.x target.y ui.hoveredDropSub
 
                             fitsBounds =
                                 gx + w <= cols && gy + h <= rows
@@ -901,7 +901,29 @@ viewSpatialGrid containerTag cols rows gridClass ui session items =
                     , dropClick
                     , hoverEnter
                     ]
-                    []
+                    [ div [ class "grid-quad-overlay" ]
+                        [ div
+                            [ class "grid-quad-zone"
+                            , onMouseEnter (HoverDropTargetSub (Just { container = containerTag, x = col, y = logicalY }) ( 0, 0 ))
+                            ]
+                            []
+                        , div
+                            [ class "grid-quad-zone"
+                            , onMouseEnter (HoverDropTargetSub (Just { container = containerTag, x = col, y = logicalY }) ( 1, 0 ))
+                            ]
+                            []
+                        , div
+                            [ class "grid-quad-zone"
+                            , onMouseEnter (HoverDropTargetSub (Just { container = containerTag, x = col, y = logicalY }) ( 0, 1 ))
+                            ]
+                            []
+                        , div
+                            [ class "grid-quad-zone"
+                            , onMouseEnter (HoverDropTargetSub (Just { container = containerTag, x = col, y = logicalY }) ( 1, 1 ))
+                            ]
+                            []
+                        ]
+                    ]
 
             else
                 div [ class "grid-cell" ] []

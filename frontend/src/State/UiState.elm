@@ -20,24 +20,30 @@ module State.UiState exposing
     , clearToast
     , closeItemMenu
     , closeItemEditorModal
+    , closeSkillDropdown
     , containerLabel
     , extendMarquee
     , focusedDraftValue
     , init
+    , itemEditorSkillSearchQuery
     , openActionPalette
     , openContextMenu
     , openItemEditorModal
     , qualityLabel
     , resolveGridDropAnchor
+    , resolveGridDropAnchorWithSub
     , selectItemEditorInjectStat
     , setContainerFilter
     , setHoverMousePos
     , setHoveredDropTarget
+    , setHoveredDropTargetSub
     , setHoveredItem
+    , setHoveredSkill
     , setItemEditorInjectParam
     , setItemEditorInjectValue
     , setItemEditorNotice
     , setItemEditorSearch
+    , setItemEditorSkillSearch
     , setPaintMode
     , setProgressionDifficulty
     , setQuickMoveOrigin
@@ -52,11 +58,13 @@ module State.UiState exposing
     , setView
     , toggleCombatLab
     , togglePaintMode
+    , toggleSkillDropdown
     , toggleTheme
     , updateFocusInput
     , updateMarquee
     )
 
+import Dict exposing (Dict)
 import Generated.Protocol exposing (ActionRejection, AllowedMoveTargetView, ContainerKind(..), DifficultyMode(..), ItemQualityKind(..), RejectionCode(..), SuggestedRecovery(..))
 
 {-| Ephemeral UI state owned exclusively by Elm (tabs, theme, stash tab preview,
@@ -140,18 +148,22 @@ type alias UiState =
     , hoveredItemIndex : Maybe Int
     , hoverMousePos : Maybe { x : Int, y : Int, vw : Int, vh : Int }
     , hoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int }
+    , hoveredDropSub : ( Int, Int )
     , quickMoveOrigin : Maybe QuickMoveOrigin
     , statusBanner : Maybe String
     , toast : Maybe Toast
     , focusedInput : Maybe FocusedInput
     , combatLabOpen : Bool
     , skillTreeTab : String
+    , hoveredSkillId : Maybe Int
     , shopQualityTab : ItemQualityKind
     , shopCategoryFilter : String
     , shopPage : Int
     , itemMenu : ItemMenuState
     , itemEditorModalIndex : Maybe Int
     , itemEditorSearch : String
+    , itemEditorSkillQueries : Dict String String
+    , openSkillDropdown : Maybe String
     , itemEditorInjectStatId : Maybe Int
     , itemEditorInjectValue : Int
     , itemEditorInjectParam : Int
@@ -172,18 +184,22 @@ init =
     , hoveredItemIndex = Nothing
     , hoverMousePos = Nothing
     , hoveredDropTarget = Nothing
+    , hoveredDropSub = ( 1, 1 )
     , quickMoveOrigin = Nothing
     , statusBanner = Nothing
     , toast = Nothing
     , focusedInput = Nothing
     , combatLabOpen = False
     , skillTreeTab = "tree0"
+    , hoveredSkillId = Nothing
     , shopQualityTab = QualityUnique
     , shopCategoryFilter = "all"
     , shopPage = 0
     , itemMenu = NoItemMenu
     , itemEditorModalIndex = Nothing
     , itemEditorSearch = ""
+    , itemEditorSkillQueries = Dict.empty
+    , openSkillDropdown = Nothing
     , itemEditorInjectStatId = Nothing
     , itemEditorInjectValue = 10
     , itemEditorInjectParam = 0
@@ -193,7 +209,7 @@ init =
 
 setView : ViewTab -> UiState -> UiState
 setView tab ui =
-    { ui | activeView = tab, hoveredItemIndex = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing, quickMoveOrigin = Nothing, itemMenu = NoItemMenu }
+    { ui | activeView = tab, hoveredItemIndex = Nothing, hoveredSkillId = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing, hoveredDropSub = ( 1, 1 ), quickMoveOrigin = Nothing, itemMenu = NoItemMenu }
 
 
 openActionPalette : Int -> Int -> Int -> UiState -> UiState
@@ -218,6 +234,8 @@ openItemEditorModal idx ui =
         , itemMenu = NoItemMenu
         , itemEditorModalIndex = Just idx
         , itemEditorSearch = ""
+        , itemEditorSkillQueries = Dict.empty
+        , openSkillDropdown = Nothing
         , itemEditorInjectStatId = Nothing
         , itemEditorInjectValue = 10
         , itemEditorInjectParam = 0
@@ -227,7 +245,7 @@ openItemEditorModal idx ui =
 
 closeItemEditorModal : UiState -> UiState
 closeItemEditorModal ui =
-    { ui | itemEditorModalIndex = Nothing, itemEditorNotice = Nothing }
+    { ui | itemEditorModalIndex = Nothing, itemEditorNotice = Nothing, itemEditorSkillQueries = Dict.empty, openSkillDropdown = Nothing }
 
 
 setItemEditorNotice : Maybe ModalNotice -> UiState -> UiState
@@ -238,6 +256,33 @@ setItemEditorNotice notice ui =
 setItemEditorSearch : String -> UiState -> UiState
 setItemEditorSearch query ui =
     { ui | itemEditorSearch = query }
+
+
+itemEditorSkillSearchQuery : String -> UiState -> String
+itemEditorSkillSearchQuery tid ui =
+    Dict.get tid ui.itemEditorSkillQueries |> Maybe.withDefault ""
+
+
+setItemEditorSkillSearch : String -> String -> UiState -> UiState
+setItemEditorSkillSearch tid query ui =
+    { ui | itemEditorSkillQueries = Dict.insert tid query ui.itemEditorSkillQueries }
+
+
+toggleSkillDropdown : String -> UiState -> UiState
+toggleSkillDropdown tid ui =
+    { ui
+        | openSkillDropdown =
+            if ui.openSkillDropdown == Just tid then
+                Nothing
+
+            else
+                Just tid
+    }
+
+
+closeSkillDropdown : UiState -> UiState
+closeSkillDropdown ui =
+    { ui | openSkillDropdown = Nothing }
 
 
 selectItemEditorInjectStat : Int -> Int -> UiState -> UiState
@@ -426,6 +471,11 @@ setSkillTreeTab treeId ui =
     { ui | skillTreeTab = treeId }
 
 
+setHoveredSkill : Maybe Int -> UiState -> UiState
+setHoveredSkill maybeSkillId ui =
+    { ui | hoveredSkillId = maybeSkillId }
+
+
 setShopQualityTab : ItemQualityKind -> UiState -> UiState
 setShopQualityTab tab ui =
     { ui | shopQualityTab = tab, shopCategoryFilter = "all", shopPage = 0 }
@@ -501,6 +551,11 @@ setHoverMousePos x y vw vh ui =
 
 setHoveredDropTarget : Maybe { container : ContainerKind, x : Int, y : Int } -> UiState -> UiState
 setHoveredDropTarget target ui =
+    setHoveredDropTargetSub target ( 1, 1 ) ui
+
+
+setHoveredDropTargetSub : Maybe { container : ContainerKind, x : Int, y : Int } -> ( Int, Int ) -> UiState -> UiState
+setHoveredDropTargetSub target sub ui =
     let
         nextQuickOrigin =
             case ( target, ui.quickMoveOrigin ) of
@@ -534,7 +589,7 @@ setHoveredDropTarget target ui =
                 _ ->
                     Nothing
     in
-    { ui | hoveredDropTarget = target, quickMoveOrigin = nextQuickOrigin }
+    { ui | hoveredDropTarget = target, hoveredDropSub = sub, quickMoveOrigin = nextQuickOrigin }
 
 
 containerGridDims : ContainerKind -> Maybe ( Int, Int )
@@ -580,6 +635,11 @@ clampDropAnchor kind itemW itemH targetX targetY =
 
 resolveGridDropAnchor : List AllowedMoveTargetView -> ContainerKind -> Int -> Int -> Int -> Int -> ( Int, Int )
 resolveGridDropAnchor allowedTargets kind itemW itemH targetX targetY =
+    resolveGridDropAnchorWithSub allowedTargets kind itemW itemH targetX targetY ( 1, 1 )
+
+
+resolveGridDropAnchorWithSub : List AllowedMoveTargetView -> ContainerKind -> Int -> Int -> Int -> Int -> ( Int, Int ) -> ( Int, Int )
+resolveGridDropAnchorWithSub _ kind itemW itemH targetX targetY ( qx, qy ) =
     case containerGridDims kind of
         Nothing ->
             ( targetX, targetY )
@@ -593,49 +653,20 @@ resolveGridDropAnchor allowedTargets kind itemW itemH targetX targetY =
                     max 1 itemH
 
                 preferredX =
-                    targetX - ((w - 1) // 2)
+                    if modBy 2 w == 0 then
+                        targetX - (w // 2) + clamp 0 1 qx
+
+                    else
+                        targetX - ((w - 1) // 2)
 
                 preferredY =
-                    targetY - ((h - 1) // 2)
+                    if modBy 2 h == 0 then
+                        targetY - (h // 2) + clamp 0 1 qy
 
-                ( gx0, gy0 ) =
-                    clampDropAnchor kind w h preferredX preferredY
-
-                isAllowed ax ay =
-                    List.any (\t -> t.container == kind && t.x == ax && t.y == ay) allowedTargets
+                    else
+                        targetY - ((h - 1) // 2)
             in
-            if isAllowed gx0 gy0 then
-                ( gx0, gy0 )
-
-            else
-                let
-                    coveringCandidates =
-                        allowedTargets
-                            |> List.filter
-                                (\t ->
-                                    t.container
-                                        == kind
-                                        && (t.x <= targetX && targetX < t.x + w)
-                                        && (t.y <= targetY && targetY < t.y + h)
-                                )
-                            |> List.sortBy
-                                (\t ->
-                                    let
-                                        dx =
-                                            targetX - t.x
-
-                                        dy =
-                                            targetY - t.y
-                                    in
-                                    ( dx * dx + dy * dy, t.y, t.x )
-                                )
-                in
-                case List.head coveringCandidates of
-                    Just best ->
-                        ( best.x, best.y )
-
-                    Nothing ->
-                        ( gx0, gy0 )
+            clampDropAnchor kind w h preferredX preferredY
 
 
 containerLabel : ContainerKind -> String

@@ -60,7 +60,7 @@ sampleSessionJson =
           "item_defense_max": 2037,
           "item_quantity_max": 511,
           "skill_legit_max": 20,
-          "skill_free_max": 99
+          "skill_free_max": 20
         },
         "stats": {
           "strength_base": 60, "strength_bonus": 18,
@@ -231,7 +231,13 @@ sampleSessionJson =
             "name_ko": "큰까마귀",
             "req_level": 1,
             "level": 5,
-            "bonus_level": 2
+            "bonus_level": 2,
+            "desc_en": "Summon ravens to peck at your enemies",
+            "desc_ko": "큰까마귀를 소환합니다",
+            "prereq_ids": [],
+            "synergy_ids": [],
+            "unlock_ids": [225],
+            "damage": null
           },
           {
             "skill_id": 225,
@@ -243,7 +249,25 @@ sampleSessionJson =
             "name_ko": "화염 폭풍",
             "req_level": 1,
             "level": 0,
-            "bonus_level": 0
+            "bonus_level": 0,
+            "desc_en": "Unleash fiery waves",
+            "desc_ko": "불타는 파도",
+            "prereq_ids": [221],
+            "synergy_ids": [221],
+            "unlock_ids": [],
+            "damage": {
+              "elem_type": "Fire",
+              "pure_min": 4,
+              "pure_max": 9,
+              "synergy_pct": 115,
+              "synergy_bonus_min": 4,
+              "synergy_bonus_max": 10,
+              "gear_bonus_min": 0,
+              "gear_bonus_max": 0,
+              "total_min": 8,
+              "total_max": 19,
+              "preview_only": true
+            }
           },
           {
             "skill_id": 231,
@@ -255,7 +279,13 @@ sampleSessionJson =
             "name_ko": "늑대인간",
             "req_level": 1,
             "level": 3,
-            "bonus_level": 2
+            "bonus_level": 2,
+            "desc_en": "Transform into a werewolf",
+            "desc_ko": "늑대인간으로 변신합니다",
+            "prereq_ids": [],
+            "synergy_ids": [],
+            "unlock_ids": [],
+            "damage": null
           }
         ],
         "shop_catalog": [
@@ -1360,7 +1390,7 @@ suite =
                             |> Query.fromHtml
                             |> Expect.all
                                 [ Query.find [ testId "skill-node-221" ]
-                                    >> Query.has [ Selector.text "Raven", Selector.text "5 (7)" ]
+                                    >> Query.has [ Selector.text "Raven", Selector.text "5/20 (+2)" ]
                                 , Query.find [ testId "skill-plus-221" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect (ClickAdjustSkillRank 221 1)
@@ -1938,11 +1968,11 @@ suite =
                             |> Update.update (SwitchView ViewA)
                             |> Tuple.first
 
-                    checkPocketCell ( hx, hy ) _ =
+                    checkPocketCell ( hx, hy, sub ) _ =
                         let
                             hovered =
                                 pocketModel
-                                    |> Update.update (HoverDropTarget (Just { container = Inventory, x = hx, y = hy }))
+                                    |> Update.update (HoverDropTargetSub (Just { container = Inventory, x = hx, y = hy }) sub)
                                     |> Tuple.first
 
                             ( _, spaceOut ) =
@@ -1972,7 +2002,13 @@ suite =
                             ()
                 in
                 Expect.all
-                    (List.map checkPocketCell [ ( 0, 0 ), ( 1, 0 ), ( 0, 1 ), ( 1, 1 ) ])
+                    (List.map checkPocketCell
+                        [ ( 0, 0, ( 1, 1 ) )
+                        , ( 1, 0, ( 0, 1 ) )
+                        , ( 0, 1, ( 1, 0 ) )
+                        , ( 1, 1, ( 0, 0 ) )
+                        ]
+                    )
                     ()
         , test "Centered drop anchor aligns 2x3 held ghost item vertically around cursor" <|
             \_ ->
@@ -2554,9 +2590,9 @@ suite =
                             |> Expect.all
                                 [ Query.find [ testId "modal-prop-row-59" ]
                                     >> Query.has [ Selector.text "Skill Level", Selector.text "Skill", Selector.text "Teleport" ]
-                                , Query.find [ testId "modal-prop-param-input-59" ]
-                                    >> Event.simulate (Event.input "54")
-                                    >> Event.expect (SetItemPropertyParam 0 59 54)
+                                , Query.find [ testId "modal-prop-param-input-59-toggle" ]
+                                    >> Event.simulate Event.click
+                                    >> Event.expect (ToggleItemEditorSkillDropdown "modal-prop-param-input-59")
                                 , Query.find [ testId "modal-prop-param-input-22" ]
                                     >> Query.has [ Selector.attribute (Html.Attributes.value "7") ]
                                 , Query.find [ testId "item-editor-notice" ]
@@ -3043,6 +3079,104 @@ suite =
                         Expect.equal
                             (Just "STR at boundary 135 (allowed 15..135).")
                             clampedLegitModel.ui.statusBanner
+                    ]
+                    ()
+        , test "Cycle 27 Skill Tree split-click zones, hover dependency classes, and detail panel" <|
+            \_ ->
+                let
+                    hoveredModel =
+                        loadedModel
+                            |> Update.update (HoverSkill (Just 225))
+                            |> Tuple.first
+
+                    htmlQuery =
+                        Workspace.view hoveredModel
+                            |> Query.fromHtml
+                in
+                Expect.all
+                    [ \_ ->
+                        Expect.equal (Just 225) hoveredModel.ui.hoveredSkillId
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "skill-minus-221" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (ClickAdjustSkillRank 221 -1)
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "skill-plus-221" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (ClickAdjustSkillRank 221 1)
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "skill-node-225" ]
+                            |> Query.has [ Selector.class "active-hover" ]
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "skill-node-221" ]
+                            |> Query.has [ Selector.class "dep-prereq" ]
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "skill-detail-panel" ]
+                            |> Query.has [ Selector.text "Firestorm", Selector.text "Unleash fiery waves", Selector.text "Raven", Selector.text "순수 스킬 (Pure)", Selector.text "시너지 보정 (+115%)", Selector.text "최종 데미지 (Total)" ]
+                    ]
+                    ()
+        , test "Item Forge searchable skill parameter filters catalog.skills by name or #id while keeping selected value" <|
+            \_ ->
+                let
+                    skillJson =
+                        sampleSessionJson
+                            |> String.replace
+                                "\"stat_catalog\": ["
+                                "\"stat_catalog\": [{ \"stat_id\": 97, \"name\": \"item_nonclassskill\", \"min_value\": 1, \"max_value\": 63, \"param_bits\": 9, \"value_label\": \"Value\", \"param_label\": \"Skill\", \"param_kind\": \"ParamSkill\" },"
+                            |> String.replace
+                                "\"skills\": [ { \"value\": 54, \"label\": \"#54 Teleport\" } ],"
+                                "\"skills\": [ { \"value\": 54, \"label\": \"#54 Teleport\" }, { \"value\": 59, \"label\": \"#59 Blizzard\" } ],"
+
+                    skillModel =
+                        case Json.Decode.decodeString Json.Decode.value skillJson of
+                            Ok rawVal ->
+                                Update.init
+                                    |> Update.update (ReceiveSessionEnvelope rawVal)
+                                    |> Tuple.first
+                                    |> Update.update (SwitchView ViewA)
+                                    |> Tuple.first
+                                    |> Update.update (ContextEditItem 0)
+                                    |> Tuple.first
+                                    |> Update.update (SelectItemEditorInjectStat 97 1)
+                                    |> Tuple.first
+                                    |> Update.update (ToggleItemEditorSkillDropdown "item-editor-inject-param")
+                                    |> Tuple.first
+                                    |> Update.update (SetItemEditorSkillSearch "item-editor-inject-param" "Blizz")
+                                    |> Tuple.first
+
+                            Err _ ->
+                                Update.init
+
+                    htmlQuery =
+                        Workspace.view skillModel
+                            |> Query.fromHtml
+                in
+                Expect.all
+                    [ \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "item-editor-inject-param-search" ]
+                            |> Event.simulate (Event.input "Teleport")
+                            |> Event.expect (SetItemEditorSkillSearch "item-editor-inject-param" "Teleport")
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "item-editor-inject-param-opt-59" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (SetItemEditorInjectParam "59")
+                    ]
+                    ()
+        , test "2x2 grid drop anchor uses 4-quadrant sub-cell snapping to hold center anchor until crossing outer half" <|
+            \_ ->
+                Expect.all
+                    [ \_ -> Expect.equal ( 2, 2 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 2 2 ( 1, 1 ))
+                    , \_ -> Expect.equal ( 2, 2 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 3 2 ( 0, 1 ))
+                    , \_ -> Expect.equal ( 2, 2 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 2 3 ( 1, 0 ))
+                    , \_ -> Expect.equal ( 2, 2 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 3 3 ( 0, 0 ))
+                    , \_ -> Expect.equal ( 1, 3 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 2 3 ( 0, 1 ))
                     ]
                     ()
         ]

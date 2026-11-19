@@ -8,11 +8,12 @@ import Generated.Protocol
         , EditMode(..)
         , ResistanceCardView
         , SessionView
+        , SkillDamageView
         , SkillNodeView
         )
 import Html exposing (Html, button, div, h2, input, p, section, span, text)
 import Html.Attributes exposing (attribute, class, classList, disabled, style, title, type_, value)
-import Html.Events exposing (on, onBlur, onClick, onFocus, onInput)
+import Html.Events exposing (on, onBlur, onClick, onFocus, onInput, onMouseEnter, onMouseLeave)
 import Json.Decode
 import State.UiState exposing (UiState)
 import Update exposing (Msg(..))
@@ -74,7 +75,6 @@ view ui session =
                 ("<= " ++ String.fromInt schema.goldStashMax)
                 "input-gold-stash"
             ]
-        , viewSkillModeStrip ui schema session.skillMode session.stats
         , viewResistancesSection session.resistances
         ]
 
@@ -123,7 +123,7 @@ viewStatModeStrip ui schema activeMode stats =
     let
         statModeBtn targetMode label =
             button
-                [ classList [ ( "seg-btn", True ), ( "active", activeMode == targetMode ) ]
+                [ classList [ ( "seg-btn", True ), ( "active", activeMode == targetMode ), ( "is-active", activeMode == targetMode ) ]
                 , attribute "data-testid" ("stat-mode-" ++ String.toLower label)
                 , onClick (SelectStatMode targetMode)
                 ]
@@ -175,7 +175,7 @@ viewStatModeStrip ui schema activeMode stats =
 
 
 viewSkillModeStrip : UiState -> CharacterSchemaView -> EditMode -> CharacterStatsView -> Html Msg
-viewSkillModeStrip _ _ activeMode stats =
+viewSkillModeStrip _ _ activeMode _ =
     div [ class "res-section", attribute "data-testid" "skill-mode-panel" ]
         [ div [ class "res-header" ]
             [ span [] [ text "Skill Mode" ]
@@ -183,10 +183,6 @@ viewSkillModeStrip _ _ activeMode stats =
                 [ modeButton activeMode Legit "Legit"
                 , modeButton activeMode Free "Free"
                 ]
-            ]
-        , div [ class "stat-strip" ]
-            [ plainChip "Unspent Skills" (String.fromInt stats.unspentSkillPoints)
-            , plainChip "Active Skills" (String.fromInt stats.activeSkillCount)
             ]
         ]
 
@@ -255,6 +251,7 @@ viewSkillTreePreview ui session =
                 ]
                 [ text "Reset Skills" ]
             ]
+        , viewSkillModeStrip ui session.schema session.skillMode session.stats
         , div [ class "meta-line" ]
             [ text
                 ("Unspent Skills: "
@@ -270,20 +267,39 @@ viewSkillTreePreview ui session =
             , treeTab "tree1" "Tree II"
             , treeTab "tree2" "Tree III"
             ]
-        , div [ class "skill-tree-preview-grid", attribute "data-testid" "skill-tree-grid" ]
-            (List.map (viewSkillNode session) treeSkills)
+        , div [ class "skill-dep-legend", attribute "data-testid" "skill-dep-legend" ]
+            [ span [ class "legend-item legend-prereq" ] [ span [ class "legend-dot" ] [], text "REQ 선행" ]
+            , span [ class "legend-item legend-synergy" ] [ span [ class "legend-dot" ] [], text "SYN 시너지" ]
+            , span [ class "legend-item legend-unlock" ] [ span [ class "legend-dot" ] [], text "NEXT 해금" ]
+            ]
+        , let
+            hoveredSkill =
+                ui.hoveredSkillId
+                    |> Maybe.andThen (\hid -> List.filter (\s -> s.skillId == hid) session.skills |> List.head)
+          in
+          div [ class "skill-tree-workspace" ]
+            [ div [ class "skill-tree-preview-grid", attribute "data-testid" "skill-tree-grid" ]
+                (List.map (viewSkillNode session hoveredSkill) treeSkills)
+            , viewSkillDetailPanel session hoveredSkill
+            ]
         ]
 
 
-viewSkillNode : SessionView -> SkillNodeView -> Html Msg
-viewSkillNode session s =
+viewSkillNode : SessionView -> Maybe SkillNodeView -> SkillNodeView -> Html Msg
+viewSkillNode session hoveredSkill s =
     let
-        effectiveRank =
-            if s.level > 0 then
-                s.level + s.bonusLevel
+        maxRank =
+            case session.skillMode of
+                Free ->
+                    session.schema.skillFreeMax
 
-            else
-                0
+                Legit ->
+                    session.schema.skillLegitMax
+
+        prereqsMet =
+            List.all
+                (\pid -> List.any (\other -> other.skillId == pid && other.level >= 1) session.skills)
+                s.prereqIds
 
         canDecrease =
             s.level > 0
@@ -291,55 +307,236 @@ viewSkillNode session s =
         canIncrease =
             case session.skillMode of
                 Free ->
-                    s.level < session.schema.skillFreeMax
+                    s.level < maxRank
 
                 Legit ->
-                    s.level < session.schema.skillLegitMax
+                    s.level < maxRank
                         && session.stats.unspentSkillPoints > 0
                         && session.charLevel >= s.reqLevel
+                        && prereqsMet
+
+        isActiveHover =
+            Maybe.map .skillId hoveredSkill == Just s.skillId
+
+        isPrereq =
+            Maybe.map (\h -> List.member s.skillId h.prereqIds) hoveredSkill |> Maybe.withDefault False
+
+        isSynergy =
+            Maybe.map (\h -> List.member s.skillId h.synergyIds) hoveredSkill |> Maybe.withDefault False
+
+        isUnlock =
+            Maybe.map (\h -> List.member s.skillId h.unlockIds) hoveredSkill |> Maybe.withDefault False
+
+        depTags =
+            [ if isPrereq then
+                Just (span [ class "skill-dep-tag dep-prereq-tag" ] [ text "REQ" ])
+
+              else
+                Nothing
+            , if isSynergy then
+                Just (span [ class "skill-dep-tag dep-synergy-tag" ] [ text "SYN" ])
+
+              else
+                Nothing
+            , if isUnlock then
+                Just (span [ class "skill-dep-tag dep-unlock-tag" ] [ text "NEXT" ])
+
+              else
+                Nothing
+            ]
+                |> List.filterMap identity
+
+        depTag =
+            if List.isEmpty depTags then
+                []
+
+            else
+                [ div [ class "skill-dep-tags" ] depTags ]
     in
     div
         [ classList
             [ ( "skill-node-card", True )
             , ( "is-allocated", s.level > 0 )
+            , ( "active-hover", isActiveHover )
+            , ( "dep-prereq", isPrereq )
+            , ( "dep-unlock", isUnlock )
+            , ( "dep-synergy", isSynergy )
             ]
+        , style "grid-row" (String.fromInt s.row)
+        , style "grid-column" (String.fromInt s.col)
         , attribute "data-testid" ("skill-node-" ++ String.fromInt s.skillId)
+        , onMouseEnter (HoverSkill (Just s.skillId))
+        , onMouseLeave (HoverSkill Nothing)
         ]
-        [ div [ class "skill-node-header" ]
-            [ span [ class "skill-node-name" ] [ text s.nameEn ]
-            , span [ class "skill-node-req" ] [ text ("Req Lv " ++ String.fromInt s.reqLevel) ]
-            ]
-        , div [ class "skill-node-controls" ]
-            [ button
-                [ class "btn-tiny"
-                , attribute "data-testid" ("skill-minus-" ++ String.fromInt s.skillId)
-                , disabled (not canDecrease)
-                , onClick (ClickAdjustSkillRank s.skillId -1)
-                ]
-                [ text "-" ]
-            , span
-                [ class "skill-node-rank"
-                , attribute "data-testid" ("skill-rank-" ++ String.fromInt s.skillId)
-                ]
-                [ text
-                    (String.fromInt s.level
-                        ++ (if s.bonusLevel > 0 && s.level > 0 then
-                                " (" ++ String.fromInt effectiveRank ++ ")"
+        (depTag
+            ++ [ div [ class "skill-node-header" ]
+                    [ span [ class "skill-node-name" ] [ text s.nameEn ]
+                    , span [ class "skill-node-req" ] [ text ("Lv " ++ String.fromInt s.reqLevel) ]
+                    ]
+               , div [ class "node-split-overlay" ]
+                    [ button
+                        [ class "node-half-zone node-half-left"
+                        , attribute "data-testid" ("skill-minus-" ++ String.fromInt s.skillId)
+                        , title "-1 Skill"
+                        , disabled (not canDecrease)
+                        , onClick (ClickAdjustSkillRank s.skillId -1)
+                        ]
+                        [ span [ class "zone-glyph" ] [ text "−" ] ]
+                    , button
+                        [ class "node-half-zone node-half-right"
+                        , attribute "data-testid" ("skill-plus-" ++ String.fromInt s.skillId)
+                        , title "+1 Skill"
+                        , disabled (not canIncrease)
+                        , onClick (ClickAdjustSkillRank s.skillId 1)
+                        ]
+                        [ span [ class "zone-glyph" ] [ text "+" ] ]
+                    ]
+               , div
+                    [ class "node-pts-track"
+                    , attribute "data-testid" ("skill-rank-" ++ String.fromInt s.skillId)
+                    ]
+                    [ text
+                        (String.fromInt s.level
+                            ++ "/"
+                            ++ String.fromInt maxRank
+                            ++ (if s.bonusLevel > 0 && s.level > 0 then
+                                    " (+" ++ String.fromInt s.bonusLevel ++ ")"
 
-                            else
-                                ""
-                           )
-                    )
+                                else
+                                    ""
+                               )
+                        )
+                    ]
+               ]
+        )
+
+
+viewSkillDetailPanel : SessionView -> Maybe SkillNodeView -> Html Msg
+viewSkillDetailPanel session hoveredSkill =
+    let
+        skillNameById sid =
+            session.skills
+                |> List.filter (\sk -> sk.skillId == sid)
+                |> List.head
+                |> Maybe.map .nameEn
+                |> Maybe.withDefault ("Skill #" ++ String.fromInt sid)
+
+        renderDepRow label cls ids =
+            if List.isEmpty ids then
+                text ""
+
+            else
+                div [ class "skill-detail-dep-group" ]
+                    [ div [ class "skill-detail-dep-label" ] [ text label ]
+                    , div [ class "skill-detail-dep-chips" ]
+                        (List.map
+                            (\sid -> span [ class ("dep-chip " ++ cls) ] [ text (skillNameById sid) ])
+                            ids
+                        )
+                    ]
+    in
+    div [ class "skill-detail-panel", attribute "data-testid" "skill-detail-panel" ]
+        (case hoveredSkill of
+            Nothing ->
+                [ div [ class "skill-detail-empty" ]
+                    [ text "Hover a skill node to inspect prerequisites, synergies, and description." ]
                 ]
-            , button
-                [ class "btn-tiny"
-                , attribute "data-testid" ("skill-plus-" ++ String.fromInt s.skillId)
-                , disabled (not canIncrease)
-                , onClick (ClickAdjustSkillRank s.skillId 1)
+
+            Just h ->
+                let
+                    effectiveRank =
+                        if h.level > 0 then
+                            h.level + h.bonusLevel
+
+                        else
+                            0
+                in
+                [ div [ class "skill-detail-title" ] [ text h.nameEn ]
+                , if String.isEmpty h.nameKo || h.nameKo == h.nameEn then
+                    text ""
+
+                  else
+                    div [ class "skill-detail-subtitle" ] [ text h.nameKo ]
+                , div [ class "skill-detail-meta" ]
+                    [ text
+                        ("Req Lv "
+                            ++ String.fromInt h.reqLevel
+                            ++ " · Rank "
+                            ++ String.fromInt h.level
+                            ++ (if h.bonusLevel > 0 && h.level > 0 then
+                                    " (+" ++ String.fromInt h.bonusLevel ++ " = " ++ String.fromInt effectiveRank ++ ")"
+
+                                else
+                                    ""
+                               )
+                        )
+                    ]
+                , if String.isEmpty h.descEn then
+                    text ""
+
+                  else
+                    p [ class "skill-detail-desc" ] [ text h.descEn ]
+                , if String.isEmpty h.descKo || h.descKo == h.descEn then
+                    text ""
+
+                  else
+                    p [ class "skill-detail-desc skill-detail-desc-ko" ] [ text h.descKo ]
+                , viewSkillDamageBox h.bonusLevel h.damage
+                , renderDepRow "Prerequisites (선행)" "dep-prereq" h.prereqIds
+                , renderDepRow "Synergies (시너지)" "dep-synergy" h.synergyIds
+                , renderDepRow "Unlocks (해금)" "dep-unlock" h.unlockIds
                 ]
-                [ text "+" ]
-            ]
-        ]
+        )
+
+
+viewSkillDamageBox : Int -> Maybe SkillDamageView -> Html Msg
+viewSkillDamageBox bonusLevel maybeDmg =
+    case maybeDmg of
+        Nothing ->
+            text ""
+
+        Just d ->
+            let
+                rangeText lo hi =
+                    if lo == hi then
+                        String.fromInt lo
+
+                    else
+                        String.fromInt lo ++ " – " ++ String.fromInt hi
+
+                plusRangeText lo hi =
+                    if lo == hi then
+                        "+" ++ String.fromInt lo
+
+                    else
+                        "+" ++ String.fromInt lo ++ " – +" ++ String.fromInt hi
+            in
+            div [ class "skill-damage-box", attribute "data-testid" "skill-damage-breakdown" ]
+                [ div [ class "skill-damage-header" ]
+                    [ span [] [ text ("Damage · " ++ d.elemType) ]
+                    , if d.previewOnly then
+                        span [ class "skill-damage-preview-tag" ] [ text "Lv 1 Preview" ]
+
+                      else
+                        text ""
+                    ]
+                , div [ class "skill-damage-row" ]
+                    [ span [ class "dmg-label" ] [ text "순수 스킬 (Pure)" ]
+                    , span [ class "dmg-val" ] [ text (rangeText d.pureMin d.pureMax) ]
+                    ]
+                , div [ class "skill-damage-row dmg-synergy" ]
+                    [ span [ class "dmg-label" ] [ text ("시너지 보정 (+" ++ String.fromInt d.synergyPct ++ "%)") ]
+                    , span [ class "dmg-val" ] [ text (plusRangeText d.synergyBonusMin d.synergyBonusMax) ]
+                    ]
+                , div [ class "skill-damage-row dmg-gear" ]
+                    [ span [ class "dmg-label" ] [ text ("장비 보정 (+" ++ String.fromInt bonusLevel ++ " Skills)") ]
+                    , span [ class "dmg-val" ] [ text (plusRangeText d.gearBonusMin d.gearBonusMax) ]
+                    ]
+                , div [ class "skill-damage-row skill-damage-total" ]
+                    [ span [ class "dmg-label" ] [ text "최종 데미지 (Total)" ]
+                    , span [ class "dmg-val" ] [ text (rangeText d.totalMin d.totalMax) ]
+                    ]
+                ]
 
 
 viewCombatLabAccordion : UiState -> SessionView -> Html Msg

@@ -172,6 +172,22 @@ pub struct CharacterStatsView {
     pub stamina_bonus: i32,
 }
 
+/// Computed skill damage breakdown (pure skill + synergy bonus + gear +skills bonus).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct SkillDamageView {
+    pub elem_type: String,
+    pub pure_min: i32,
+    pub pure_max: i32,
+    pub synergy_pct: i32,
+    pub synergy_bonus_min: i32,
+    pub synergy_bonus_max: i32,
+    pub gear_bonus_min: i32,
+    pub gear_bonus_max: i32,
+    pub total_min: i32,
+    pub total_max: i32,
+    pub preview_only: bool,
+}
+
 /// Projected class skill node for the 30-skill tree in View B.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
 pub struct SkillNodeView {
@@ -185,6 +201,18 @@ pub struct SkillNodeView {
     pub req_level: i32,
     pub level: i32,
     pub bonus_level: i32,
+    #[serde(default)]
+    pub desc_en: String,
+    #[serde(default)]
+    pub desc_ko: String,
+    #[serde(default)]
+    pub prereq_ids: Vec<i32>,
+    #[serde(default)]
+    pub synergy_ids: Vec<i32>,
+    #[serde(default)]
+    pub unlock_ids: Vec<i32>,
+    #[serde(default)]
+    pub damage: Option<SkillDamageView>,
 }
 
 /// Editable character profile/attribute fields mapped onto Rust `CharacterMutationContract`.
@@ -1405,7 +1433,7 @@ impl EditorSession {
             item_defense_max: 2037,
             item_quantity_max: 511,
             skill_legit_max: 20,
-            skill_free_max: 99,
+            skill_free_max: 20,
         };
 
         let export_unsupported_reason = export_unsupported_reason(self.save_version).or_else(|| {
@@ -2279,22 +2307,173 @@ impl EditorSession {
             } else {
                 0
             };
+            let meta = crate::data::skill_tree_meta::skill_tree_meta(sid);
+            let (desc_en, desc_ko, prereq_ids, synergy_ids, damage) = match meta {
+                Some(m) => (
+                    format_skill_desc(get_loc(m.desc_key, "en"), false),
+                    format_skill_desc(get_loc(m.desc_key, "ko"), true),
+                    m.prereqs.iter().map(|&id| id as i32).collect(),
+                    m.synergies.iter().map(|&id| id as i32).collect(),
+                    compute_skill_damage(m, level, bonus_level, base_id, &self.skill_section.0),
+                ),
+                None => (String::new(), String::new(), Vec::new(), Vec::new(), None),
+            };
+            let unlock_ids: Vec<i32> = (0..SKILL_SECTION_LEN)
+                .filter_map(|other_slot| {
+                    let other_sid = base_id + other_slot as u32;
+                    crate::data::skill_tree_meta::skill_tree_meta(other_sid)
+                        .filter(|m| m.prereqs.contains(&sid))
+                        .map(|_| other_sid as i32)
+                })
+                .collect();
             let within = (slot % 10) as i32;
             nodes.push(SkillNodeView {
                 skill_id: sid as i32,
                 slot_index: slot as i32,
-                tree_index: (slot / 10) as i32,
-                row: (within / 3) + 1,
-                col: (within % 3) + 1,
+                tree_index: meta.map(|m| i32::from(m.tree_index)).unwrap_or((slot / 10) as i32),
+                row: meta.map(|m| i32::from(m.row)).unwrap_or((within / 3) + 1),
+                col: meta.map(|m| i32::from(m.col)).unwrap_or((within % 3) + 1),
                 name_en,
                 name_ko,
                 req_level,
                 level,
                 bonus_level,
+                desc_en,
+                desc_ko,
+                prereq_ids,
+                synergy_ids,
+                unlock_ids,
+                damage,
             });
         }
         nodes
     }
+}
+
+fn format_skill_desc(raw: &str, reverse_lines: bool) -> String {
+    let lines: Vec<&str> = raw
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if reverse_lines {
+        lines.into_iter().rev().collect::<Vec<_>>().join(" ")
+    } else {
+        lines.join(" ")
+    }
+}
+
+fn d2_bracket_raw(base: i32, lev: &[i32; 5], lvl: i32) -> i32 {
+    if lvl <= 0 || (base == 0 && lev.iter().all(|&x| x == 0)) {
+        return 0;
+    }
+    let mut acc = base;
+    let rem = lvl - 1;
+    if rem > 0 {
+        acc += rem.min(7) * lev[0];
+    }
+    if rem > 7 {
+        acc += (rem - 7).min(8) * lev[1];
+    }
+    if rem > 15 {
+        acc += (rem - 15).min(6) * lev[2];
+    }
+    if rem > 21 {
+        acc += (rem - 21).min(6) * lev[3];
+    }
+    if rem > 27 {
+        acc += (rem - 27) * lev[4];
+    }
+    acc
+}
+
+fn scale_hit_shift(raw: i32, hit_shift: u8) -> i32 {
+    ((raw as f64) * 2.0_f64.powi(i32::from(hit_shift) - 8)).round() as i32
+}
+
+fn compute_skill_damage(
+    meta: &crate::data::skill_tree_meta::SkillTreeMeta,
+    pure_level: i32,
+    bonus_level: i32,
+    base_id: u32,
+    skill_bytes: &[u8; SKILL_SECTION_LEN],
+) -> Option<SkillDamageView> {
+    if meta.max_dam == 0 && meta.e_max == 0 {
+        return None;
+    }
+    let preview_only = pure_level <= 0;
+    let calc_level = pure_level.max(1);
+    let eff_level = if pure_level > 0 {
+        (pure_level + bonus_level).max(1)
+    } else {
+        1
+    };
+
+    let damage_at = |lvl: i32| -> (i32, i32) {
+        let raw_min = d2_bracket_raw(meta.min_dam, &meta.min_lev_dam, lvl)
+            + d2_bracket_raw(meta.e_min, &meta.e_min_lev, lvl);
+        let raw_max = d2_bracket_raw(meta.max_dam, &meta.max_lev_dam, lvl)
+            + d2_bracket_raw(meta.e_max, &meta.e_max_lev, lvl);
+        (
+            scale_hit_shift(raw_min, meta.hit_shift),
+            scale_hit_shift(raw_max, meta.hit_shift),
+        )
+    };
+
+    let (pure_min, pure_max) = damage_at(calc_level);
+    let (eff_base_min, eff_base_max) = damage_at(eff_level);
+
+    let synergy_pct: i32 = meta
+        .synergy_bonuses
+        .iter()
+        .map(|&(syn_id, pct)| {
+            if syn_id >= base_id {
+                let slot = (syn_id - base_id) as usize;
+                if slot < SKILL_SECTION_LEN {
+                    return i32::from(skill_bytes[slot]) * pct;
+                }
+            }
+            0
+        })
+        .sum();
+
+    let synergy_bonus_min = (pure_min * synergy_pct) / 100;
+    let synergy_bonus_max = (pure_max * synergy_pct) / 100;
+    let gear_bonus_min = ((eff_base_min - pure_min) * (100 + synergy_pct)) / 100;
+    let gear_bonus_max = ((eff_base_max - pure_max) * (100 + synergy_pct)) / 100;
+    let total_min = (eff_base_min * (100 + synergy_pct)) / 100;
+    let total_max = (eff_base_max * (100 + synergy_pct)) / 100;
+
+    let elem_label = match meta.e_type {
+        "fire" => "Fire",
+        "cold" => "Cold",
+        "ltng" => "Lightning",
+        "pois" => "Poison",
+        "mag" => "Magic",
+        _ => "Physical",
+    };
+    let elem_type = if meta.max_dam > 0 && meta.e_max > 0 && !meta.e_type.is_empty() {
+        format!("Phys + {elem_label}")
+    } else {
+        elem_label.to_string()
+    };
+
+    Some(SkillDamageView {
+        elem_type,
+        pure_min,
+        pure_max,
+        synergy_pct,
+        synergy_bonus_min,
+        synergy_bonus_max,
+        gear_bonus_min,
+        gear_bonus_max,
+        total_min,
+        total_max,
+        preview_only,
+    })
+}
+
+impl EditorSession {
 
     fn dispose_item_by_index(&mut self, item_index: i32) -> Result<(), ActionRejection> {
         let idx = usize::try_from(item_index)
@@ -2874,7 +3053,7 @@ impl EditorSession {
         }
         let slot = (sid - base_id) as usize;
         let current = i32::from(self.skill_section.0[slot]);
-        let max_rank = if self.skill_mode == EditMode::Free { 99 } else { 20 };
+        let max_rank = 20;
         let next = current + delta;
         if next < 0 || next > max_rank {
             return Err(ActionRejection::new(
@@ -2910,6 +3089,24 @@ impl EditorSession {
                 )
                 .with_target(format!("skill_{sid}"))
                 .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+            }
+            if delta > 0 {
+                if let Some(meta) = crate::data::skill_tree_meta::skill_tree_meta(sid) {
+                    for &prereq_id in meta.prereqs {
+                        if prereq_id >= base_id {
+                            let prereq_slot = (prereq_id - base_id) as usize;
+                            if prereq_slot < SKILL_SECTION_LEN && self.skill_section.0[prereq_slot] < 1 {
+                                return Err(ActionRejection::new(
+                                    RejectionCode::RejectionSkillPrerequisiteNotMet,
+                                    "skill_prereq_not_met",
+                                    format!("Requires prerequisite skill ID {prereq_id} to have at least 1 point."),
+                                )
+                                .with_target(format!("skill_{sid}"))
+                                .with_recovery(SuggestedRecovery::SuggestAdjustValue));
+                            }
+                        }
+                    }
+                }
             }
             let next_unspent = (unspent - delta).max(0);
             let save_add = crate::domain::stats::attribute::char_stat_save_add(5, alpha);
@@ -3820,46 +4017,72 @@ impl EditorSession {
             .with_target("character_field")
             .with_recovery(SuggestedRecovery::SuggestAdjustValue)
         })?;
-        let huffman = HuffmanTree::new();
-        let rebuilt = try_apply_character_mutation(&self.source_bytes, &next_edits, &huffman)
-            .map_err(|e| {
-                ActionRejection::new(
-                    RejectionCode::RejectionStatOutOfRange,
-                    "invalid_character_mutation",
-                    e.to_string(),
-                )
-                .with_target("character_field")
-                .with_recovery(SuggestedRecovery::SuggestAdjustValue)
-            })?;
-        let rebuilt_map = map_core_sections(&rebuilt).map_err(|e| {
-            ActionRejection::new(
-                RejectionCode::RejectionUnknown,
-                "invalid_character_mutation",
-                format!("Failed to remap character sections: {e}"),
-            )
-        })?;
-        let rebuilt_attrs =
-            AttributeSection::parse(&rebuilt, rebuilt_map.gf_pos, rebuilt_map.if_pos).map_err(
-                |e| {
-                    ActionRejection::new(
-                        RejectionCode::RejectionUnknown,
-                        "invalid_character_mutation",
-                        format!("Failed to parse updated attributes: {e}"),
-                    )
-                },
-            )?;
         let alpha = self.save_version == 105;
-        self.char_level = rebuilt_attrs
-            .actual_value(12, alpha)
-            .unwrap_or(i32::from(self.char_level))
-            .clamp(1, 99) as u8;
-        self.experience = rebuilt_attrs
-            .actual_value(13, alpha)
-            .unwrap_or(self.experience);
+        let snapshot = crate::domain::contracts::CharacterSnapshot {
+            level: self.attributes.actual_value(12, alpha).unwrap_or(1).clamp(1, 99) as u8,
+            experience: self.attributes.actual_value(13, alpha).unwrap_or(0).max(0) as u32,
+            strength: self.attributes.actual_value(0, alpha).unwrap_or(1).max(0) as u32,
+            energy: self.attributes.actual_value(1, alpha).unwrap_or(1).max(0) as u32,
+            dexterity: self.attributes.actual_value(2, alpha).unwrap_or(1).max(0) as u32,
+            vitality: self.attributes.actual_value(3, alpha).unwrap_or(1).max(0) as u32,
+            stat_points: self.attributes.actual_value(4, alpha).unwrap_or(0).max(0) as u32,
+            gold_character: self.attributes.actual_value(14, alpha).unwrap_or(0).max(0) as u32,
+            gold_stash: self.attributes.actual_value(15, alpha).unwrap_or(0).max(0) as u32,
+        };
+        let evaluated =
+            crate::domain::contracts::CharacterBoundaryValidator::validate_mutation(&snapshot, &next_edits)
+                .map_err(|e| {
+                    ActionRejection::new(
+                        RejectionCode::RejectionStatOutOfRange,
+                        "invalid_character_mutation",
+                        e.to_string(),
+                    )
+                    .with_target("character_field")
+                    .with_recovery(SuggestedRecovery::SuggestAdjustValue)
+                })?;
+
+        use crate::domain::stats::attribute::char_stat_save_add;
+        if next_edits.level.is_some() {
+            self.attributes
+                .set_value(12, i32::from(evaluated.level), char_stat_save_add(12, alpha));
+            self.char_level = evaluated.level;
+        }
+        if next_edits.strength.is_some() {
+            self.attributes
+                .set_value(0, evaluated.strength as i32, char_stat_save_add(0, alpha));
+        }
+        if next_edits.energy.is_some() {
+            self.attributes
+                .set_value(1, evaluated.energy as i32, char_stat_save_add(1, alpha));
+        }
+        if next_edits.dexterity.is_some() {
+            self.attributes
+                .set_value(2, evaluated.dexterity as i32, char_stat_save_add(2, alpha));
+        }
+        if next_edits.vitality.is_some() {
+            self.attributes
+                .set_value(3, evaluated.vitality as i32, char_stat_save_add(3, alpha));
+        }
+        if next_edits.stat_points.is_some() {
+            self.attributes
+                .set_value(4, evaluated.stat_points as i32, char_stat_save_add(4, alpha));
+        }
+        if next_edits.experience.is_some() {
+            self.attributes
+                .set_value(13, evaluated.experience as i32, char_stat_save_add(13, alpha));
+            self.experience = evaluated.experience as i32;
+        }
+        if next_edits.gold_character.is_some() {
+            self.attributes
+                .set_value(14, evaluated.gold_character as i32, char_stat_save_add(14, alpha));
+        }
+        if next_edits.gold_stash.is_some() {
+            self.attributes
+                .set_value(15, evaluated.gold_stash as i32, char_stat_save_add(15, alpha));
+        }
         if let Some(ref name) = next_edits.name {
             self.char_name = name.clone();
         }
-        self.attributes = rebuilt_attrs;
         self.char_edits = next_edits;
         self.has_char_edits = true;
         self.dirty = true;
@@ -4871,6 +5094,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             SocketedItemView,
             ItemCardView,
             AllowedMoveTargetView,
+            SkillDamageView,
             SkillNodeView,
             ShopCatalogItemView,
             StatParamKind,

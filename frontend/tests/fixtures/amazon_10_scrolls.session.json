@@ -32,7 +32,7 @@
     "item_defense_max": 2037,
     "item_quantity_max": 511,
     "skill_legit_max": 20,
-    "skill_free_max": 99
+    "skill_free_max": 20
   },
   "stats": {
     "strength_base": 20,
@@ -975,360 +975,859 @@
       "slot_index": 0,
       "tree_index": 0,
       "row": 1,
-      "col": 1,
+      "col": 2,
       "name_en": "Magic Arrow",
       "name_ko": "매직 애로우",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "creates a magical arrow or bolt that does extra damage",
+      "desc_ko": "추가적인 데미지를 입히는 마법화살을 만듬",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        12
+      ],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 1,
+        "pure_max": 1,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 1,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 7,
       "slot_index": 1,
       "tree_index": 0,
       "row": 1,
-      "col": 2,
+      "col": 3,
       "name_en": "Fire Arrow",
       "name_ko": "파이어 애로우 ",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically enhances your arrows or bolts with fire",
+      "desc_ko": "",
+      "prereq_ids": [],
+      "synergy_ids": [
+        16
+      ],
+      "unlock_ids": [
+        16
+      ],
+      "damage": {
+        "elem_type": "Fire",
+        "pure_min": 1,
+        "pure_max": 4,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 4,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 8,
       "slot_index": 2,
-      "tree_index": 0,
+      "tree_index": 1,
       "row": 1,
-      "col": 3,
+      "col": 1,
       "name_en": "Inner Sight",
       "name_ko": "이너 사이트",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "illuminates nearby enemies making them easier to hit for you and your party",
+      "desc_ko": "파티 구성원들이 공격하기 쉽도록 범위 안의 몬스터를 비추고, 방어력을 약화시킴",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        17
+      ],
+      "damage": null
     },
     {
       "skill_id": 9,
       "slot_index": 3,
-      "tree_index": 0,
-      "row": 2,
-      "col": 1,
+      "tree_index": 1,
+      "row": 1,
+      "col": 3,
       "name_en": "Critical Strike",
       "name_ko": "크리티컬 스트라이크",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - your attacks have a chance to do double damage",
+      "desc_ko": "패시브 - 2배의 기본 데미지로 공격 확률을 높임",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        23
+      ],
+      "damage": null
     },
     {
       "skill_id": 10,
       "slot_index": 4,
-      "tree_index": 0,
-      "row": 2,
-      "col": 2,
+      "tree_index": 2,
+      "row": 1,
+      "col": 1,
       "name_en": "Jab",
       "name_ko": "잽",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "attacks with a series of rapid thrusts using a javelin or spear class weapon",
+      "desc_ko": "재벌린이나 스피어 종류 무기를 이용한 신속한 공격",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        14,
+        19
+      ],
+      "damage": null
     },
     {
       "skill_id": 11,
       "slot_index": 5,
       "tree_index": 0,
       "row": 2,
-      "col": 3,
+      "col": 1,
       "name_en": "Cold Arrow",
       "name_ko": "콜드 애로우",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically enhances your arrows or bolts by adding cold damage and a slowing effect cold arrows only do half of their regular damage",
+      "desc_ko": "",
+      "prereq_ids": [],
+      "synergy_ids": [
+        21
+      ],
+      "unlock_ids": [
+        21,
+        22
+      ],
+      "damage": {
+        "elem_type": "Cold",
+        "pure_min": 3,
+        "pure_max": 4,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 3,
+        "total_max": 4,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 12,
       "slot_index": 6,
       "tree_index": 0,
-      "row": 3,
-      "col": 1,
+      "row": 2,
+      "col": 2,
       "name_en": "Multiple Shot",
       "name_ko": "멀티플 샷",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically splits one arrow or bolt into many",
+      "desc_ko": "마법으로 하나의 화살을 여러 개로 나누어 공격",
+      "prereq_ids": [
+        6
+      ],
+      "synergy_ids": [
+        22
+      ],
+      "unlock_ids": [
+        16,
+        22
+      ],
+      "damage": null
     },
     {
       "skill_id": 13,
       "slot_index": 7,
-      "tree_index": 0,
-      "row": 3,
+      "tree_index": 1,
+      "row": 2,
       "col": 2,
       "name_en": "Dodge",
       "name_ko": "닷지",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - you have a chance to dodge a melee attack when attacking or standing still",
+      "desc_ko": "패시브 - 서 있는 상태에서 근접 공격시 피할 수 있는 확률을 증가시킴",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        18
+      ],
+      "damage": null
     },
     {
       "skill_id": 14,
       "slot_index": 8,
-      "tree_index": 0,
-      "row": 3,
-      "col": 3,
+      "tree_index": 2,
+      "row": 2,
+      "col": 2,
       "name_en": "Power Strike",
       "name_ko": "파워 스트라이크",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "adds lightning damage to attacks with javelin and spear class weapons",
+      "desc_ko": "재벌린과 스피어 종류의 무기에 라이트닝 데미지 추가",
+      "prereq_ids": [
+        10
+      ],
+      "synergy_ids": [
+        20,
+        24,
+        34
+      ],
+      "unlock_ids": [
+        24
+      ],
+      "damage": {
+        "elem_type": "Lightning",
+        "pure_min": 1,
+        "pure_max": 16,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 16,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 15,
       "slot_index": 9,
-      "tree_index": 0,
-      "row": 4,
-      "col": 1,
+      "tree_index": 2,
+      "row": 2,
+      "col": 3,
       "name_en": "Poison Javelin",
       "name_ko": "포이즌 재벌린",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically enhances your javelin to leave a trail of poison clouds",
+      "desc_ko": "던지는 방향을 따라 포이즌 구름이 형성되고 재벌린에 포이즌 데미지를 추가함",
+      "prereq_ids": [],
+      "synergy_ids": [
+        25
+      ],
+      "unlock_ids": [
+        20
+      ],
+      "damage": {
+        "elem_type": "Poison",
+        "pure_min": 0,
+        "pure_max": 0,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 0,
+        "total_max": 0,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 16,
       "slot_index": 10,
-      "tree_index": 1,
-      "row": 1,
-      "col": 1,
+      "tree_index": 0,
+      "row": 3,
+      "col": 3,
       "name_en": "Exploding Arrow",
       "name_ko": "익스플로딩 애로우",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "enchants an arrow or bolt that explodes on contact, damaging all nearby enemies",
+      "desc_ko": "",
+      "prereq_ids": [
+        7,
+        12
+      ],
+      "synergy_ids": [
+        7
+      ],
+      "unlock_ids": [
+        27
+      ],
+      "damage": {
+        "elem_type": "Fire",
+        "pure_min": 5,
+        "pure_max": 13,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 5,
+        "total_max": 13,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 17,
       "slot_index": 11,
       "tree_index": 1,
-      "row": 1,
-      "col": 2,
+      "row": 3,
+      "col": 1,
       "name_en": "Slow Missiles",
       "name_ko": "슬로우 미사일",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "illuminates nearby enemies and slows their ranged attacks",
+      "desc_ko": "근처의 몬스터를 비추고 그들의 원거리 공격속도를 둔화시킴",
+      "prereq_ids": [
+        8
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        28
+      ],
+      "damage": null
     },
     {
       "skill_id": 18,
       "slot_index": 12,
       "tree_index": 1,
-      "row": 1,
-      "col": 3,
+      "row": 3,
+      "col": 2,
       "name_en": "Avoid",
       "name_ko": "어보이드",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - you have a chance to dodge enemy missiles when attacking or standing still",
+      "desc_ko": "패시브 - 서 있는 상태에서 몬스터의 원거리 공격을 피할수 있는 확률을 증가시킴",
+      "prereq_ids": [
+        13
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        29
+      ],
+      "damage": null
     },
     {
       "skill_id": 19,
       "slot_index": 13,
-      "tree_index": 1,
-      "row": 2,
+      "tree_index": 2,
+      "row": 3,
       "col": 1,
       "name_en": "Impale",
       "name_ko": "임페일",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "increases attack damage but rapidly degrades the weapon",
+      "desc_ko": "데미지는 증가하나 무기의 내구력을 급속히 약화 시킴",
+      "prereq_ids": [
+        10
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        30
+      ],
+      "damage": null
     },
     {
       "skill_id": 20,
       "slot_index": 14,
-      "tree_index": 1,
-      "row": 2,
-      "col": 2,
+      "tree_index": 2,
+      "row": 3,
+      "col": 3,
       "name_en": "Lightning Bolt",
       "name_ko": "라이트닝 볼트",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically converts your javelin into a bolt of lightning",
+      "desc_ko": "재벌린을 라이트닝으로 전환하여 던짐",
+      "prereq_ids": [
+        15
+      ],
+      "synergy_ids": [
+        14,
+        24,
+        34,
+        35
+      ],
+      "unlock_ids": [
+        24,
+        25
+      ],
+      "damage": {
+        "elem_type": "Lightning",
+        "pure_min": 1,
+        "pure_max": 40,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 40,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 21,
       "slot_index": 15,
-      "tree_index": 1,
-      "row": 2,
-      "col": 3,
+      "tree_index": 0,
+      "row": 4,
+      "col": 1,
       "name_en": "Ice Arrow",
       "name_ko": "아이스 애로우",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically enhances your arrow or bolt to freeze your enemies",
+      "desc_ko": "",
+      "prereq_ids": [
+        11
+      ],
+      "synergy_ids": [
+        11,
+        31
+      ],
+      "unlock_ids": [
+        31
+      ],
+      "damage": {
+        "elem_type": "Cold",
+        "pure_min": 6,
+        "pure_max": 10,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 6,
+        "total_max": 10,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 22,
       "slot_index": 16,
-      "tree_index": 1,
-      "row": 3,
-      "col": 1,
+      "tree_index": 0,
+      "row": 4,
+      "col": 2,
       "name_en": "Guided Arrow",
       "name_ko": "가이드 애로우",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "enhances your arrows and bolts to track your target or seek one of its own",
+      "desc_ko": "목표물을 추적할 수 있도록 화살에 마법을 부여함 항상명중",
+      "prereq_ids": [
+        11,
+        12
+      ],
+      "synergy_ids": [
+        12
+      ],
+      "unlock_ids": [
+        26
+      ],
+      "damage": null
     },
     {
       "skill_id": 23,
       "slot_index": 17,
       "tree_index": 1,
-      "row": 3,
-      "col": 2,
+      "row": 4,
+      "col": 3,
       "name_en": "Penetrate",
       "name_ko": "페니트레이트",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - increases your attack rating",
+      "desc_ko": "패시브 - 공격등급 향상 시킴",
+      "prereq_ids": [
+        9
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        33
+      ],
+      "damage": null
     },
     {
       "skill_id": 24,
       "slot_index": 18,
-      "tree_index": 1,
-      "row": 3,
-      "col": 3,
+      "tree_index": 2,
+      "row": 4,
+      "col": 2,
       "name_en": "Charged Strike",
       "name_ko": "차지드 스트라이크",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "adds lightning damage to javelin and spear class weapons and releases charged bolts upon impact",
+      "desc_ko": "재벌린과 스피어 종류 무기에 라이트닝 계열(차지드 볼트) 데미지 추가",
+      "prereq_ids": [
+        14,
+        20
+      ],
+      "synergy_ids": [
+        14,
+        20,
+        34
+      ],
+      "unlock_ids": [
+        34
+      ],
+      "damage": {
+        "elem_type": "Lightning",
+        "pure_min": 1,
+        "pure_max": 30,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 30,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 25,
       "slot_index": 19,
-      "tree_index": 1,
+      "tree_index": 2,
       "row": 4,
-      "col": 1,
+      "col": 3,
       "name_en": "Plague Javelin",
       "name_ko": "플레이그 재벌린",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically enhances your javelin to release expanding clouds of poison upon impact",
+      "desc_ko": "적중시 독구름(포이즌)을 형성하여 주변 다수의 적에게 포이즌 데미지를 줌",
+      "prereq_ids": [
+        20
+      ],
+      "synergy_ids": [
+        15
+      ],
+      "unlock_ids": [
+        35
+      ],
+      "damage": {
+        "elem_type": "Poison",
+        "pure_min": 0,
+        "pure_max": 1,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 0,
+        "total_max": 1,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 26,
       "slot_index": 20,
-      "tree_index": 2,
-      "row": 1,
-      "col": 1,
+      "tree_index": 0,
+      "row": 5,
+      "col": 2,
       "name_en": "Strafe",
       "name_ko": "스트레이프",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically splits one arrow into several that target multiple nearby enemies",
+      "desc_ko": "주변에 있는 다수의 적을 향하여 하나의 화살을 나누어 공격함",
+      "prereq_ids": [
+        22
+      ],
+      "synergy_ids": [
+        12,
+        22
+      ],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 27,
       "slot_index": 21,
-      "tree_index": 2,
-      "row": 1,
-      "col": 2,
+      "tree_index": 0,
+      "row": 5,
+      "col": 3,
       "name_en": "Immolation Arrow",
       "name_ko": "이몰레이션 애로우",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "enhances arrows or bolts to cause severe fire damage and creates a pyre upon impact",
+      "desc_ko": "",
+      "prereq_ids": [
+        16
+      ],
+      "synergy_ids": [
+        7,
+        16
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Fire",
+        "pure_min": 12,
+        "pure_max": 23,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 12,
+        "total_max": 23,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 28,
       "slot_index": 22,
-      "tree_index": 2,
-      "row": 1,
-      "col": 3,
+      "tree_index": 1,
+      "row": 5,
+      "col": 1,
       "name_en": "Decoy",
       "name_ko": "디코이",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "creates a duplicate of yourself that draws fire from enemies",
+      "desc_ko": "적의 공격을 유도하는 자신의 허상을 만듬",
+      "prereq_ids": [
+        17
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        32
+      ],
+      "damage": null
     },
     {
       "skill_id": 29,
       "slot_index": 23,
-      "tree_index": 2,
-      "row": 2,
-      "col": 1,
+      "tree_index": 1,
+      "row": 5,
+      "col": 2,
       "name_en": "Evade",
       "name_ko": "이베이드",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - you have a chance to dodge a melee or missile attack when walking or running",
+      "desc_ko": "패시브 - 이동중에 적의 근거리나 원거리 공격을 회피할 확률을 높임",
+      "prereq_ids": [
+        18
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        32
+      ],
+      "damage": null
     },
     {
       "skill_id": 30,
       "slot_index": 24,
       "tree_index": 2,
-      "row": 2,
-      "col": 2,
+      "row": 5,
+      "col": 1,
       "name_en": "Fend",
       "name_ko": "펜드",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "attacks all adjacent targets",
+      "desc_ko": "근접전에서 주변의 모든 적을 공격",
+      "prereq_ids": [
+        19
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 31,
       "slot_index": 25,
-      "tree_index": 2,
-      "row": 2,
-      "col": 3,
+      "tree_index": 0,
+      "row": 6,
+      "col": 1,
       "name_en": "Freezing Arrow",
       "name_ko": "프리징 애로우",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "magically enhances an arrow or bolt to freeze entire groups of monsters",
+      "desc_ko": "",
+      "prereq_ids": [
+        21
+      ],
+      "synergy_ids": [
+        11,
+        21
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Cold",
+        "pure_min": 40,
+        "pure_max": 50,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 40,
+        "total_max": 50,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 32,
       "slot_index": 26,
-      "tree_index": 2,
-      "row": 3,
+      "tree_index": 1,
+      "row": 6,
       "col": 1,
       "name_en": "Valkyrie",
       "name_ko": "발키리",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summons a powerful Valkyrie ally",
+      "desc_ko": "발키리를 소환하여 함께 적과 싸움",
+      "prereq_ids": [
+        28,
+        29
+      ],
+      "synergy_ids": [
+        9,
+        13,
+        18,
+        23,
+        28,
+        29
+      ],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 33,
       "slot_index": 27,
-      "tree_index": 2,
-      "row": 3,
-      "col": 2,
+      "tree_index": 1,
+      "row": 6,
+      "col": 3,
       "name_en": "Pierce",
       "name_ko": "피어스",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - your missiles have a chance to pass through enemies that they hit",
+      "desc_ko": "패시브 - 원거리 공격시 적을 관통하여 다수의 적에게 데미지를 줌",
+      "prereq_ids": [
+        23
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 34,
       "slot_index": 28,
       "tree_index": 2,
-      "row": 3,
-      "col": 3,
+      "row": 6,
+      "col": 2,
       "name_en": "Lightning Strike",
       "name_ko": "라이트닝 스트라이크",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "adds lightning damage to javelin and spear class weapons and releases chain lightning upon impact",
+      "desc_ko": "재벌린과 스피어류의 무기에 강력한 라이트닝 데미지를 추가하고, 근접전의 적에게 라이트닝이 연쇄적으로 퍼져나감",
+      "prereq_ids": [
+        24
+      ],
+      "synergy_ids": [
+        14,
+        20,
+        24
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Lightning",
+        "pure_min": 1,
+        "pure_max": 25,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 25,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 35,
       "slot_index": 29,
       "tree_index": 2,
-      "row": 4,
-      "col": 1,
+      "row": 6,
+      "col": 3,
       "name_en": "Lightning Fury",
       "name_ko": "라이트닝 퓨리",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "changes a thrown javelin into a powerful bolt of lightning that splits on impact",
+      "desc_ko": "재벌린에 강력한 라이트닝 데미지를 가하고, 원거리 적에게 라이트닝이 연쇄적으로 퍼저나감",
+      "prereq_ids": [
+        25
+      ],
+      "synergy_ids": [
+        14,
+        20,
+        24,
+        34
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Lightning",
+        "pure_min": 1,
+        "pure_max": 40,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 1,
+        "total_max": 40,
+        "preview_only": true
+      }
     }
   ],
   "shop_catalog": [

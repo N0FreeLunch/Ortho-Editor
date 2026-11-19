@@ -32,7 +32,7 @@
     "item_defense_max": 2037,
     "item_quantity_max": 511,
     "skill_legit_max": 20,
-    "skill_free_max": 99
+    "skill_free_max": 20
   },
   "stats": {
     "strength_base": 60,
@@ -3310,360 +3310,887 @@
       "slot_index": 0,
       "tree_index": 0,
       "row": 1,
-      "col": 1,
+      "col": 2,
       "name_en": "Raven",
       "name_ko": "레이번",
       "req_level": 1,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon ravens to peck out the eyes of your enemies",
+      "desc_ko": "레이번을 소환하여 적의 눈을 멀게함",
+      "prereq_ids": [],
+      "synergy_ids": [
+        227,
+        237,
+        247
+      ],
+      "unlock_ids": [
+        227
+      ],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 2,
+        "pure_max": 4,
+        "synergy_pct": 168,
+        "synergy_bonus_min": 3,
+        "synergy_bonus_max": 6,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 5,
+        "total_max": 10,
+        "preview_only": false
+      }
     },
     {
       "skill_id": 222,
       "slot_index": 1,
       "tree_index": 0,
       "row": 1,
-      "col": 2,
+      "col": 3,
       "name_en": "Poison Creeper",
       "name_ko": "워울프",
       "req_level": 1,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a vine that spreads disease to all it contacts",
+      "desc_ko": "워울프로 변신",
+      "prereq_ids": [],
+      "synergy_ids": [
+        238
+      ],
+      "unlock_ids": [
+        231
+      ],
+      "damage": {
+        "elem_type": "Poison",
+        "pure_min": 0,
+        "pure_max": 0,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 0,
+        "total_max": 0,
+        "preview_only": false
+      }
     },
     {
       "skill_id": 223,
       "slot_index": 2,
-      "tree_index": 0,
+      "tree_index": 1,
       "row": 1,
-      "col": 3,
+      "col": 1,
       "name_en": "Werewolf",
       "name_ko": "워울프",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "transform into a werewolf",
+      "desc_ko": "워울프로 변신",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        224,
+        232
+      ],
+      "damage": null
     },
     {
       "skill_id": 224,
       "slot_index": 3,
-      "tree_index": 0,
-      "row": 2,
-      "col": 1,
+      "tree_index": 1,
+      "row": 1,
+      "col": 2,
       "name_en": "Lycanthropy",
       "name_ko": "변신술",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "passive - improves duration and life when in werewolf or werebear form",
+      "desc_ko": "패시브 - 지속시간과 라이프 향상 워울프 또는 워베어 상태일때",
+      "prereq_ids": [
+        223
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 225,
       "slot_index": 4,
-      "tree_index": 0,
-      "row": 2,
-      "col": 2,
+      "tree_index": 2,
+      "row": 1,
+      "col": 1,
       "name_en": "Firestorm",
       "name_ko": "파이어스톰",
       "req_level": 1,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "unleash fiery chaos to burn your enemies",
+      "desc_ko": "파이어리 카오스를 불러내 적을 태워버림",
+      "prereq_ids": [],
+      "synergy_ids": [
+        229,
+        234
+      ],
+      "unlock_ids": [
+        229
+      ],
+      "damage": {
+        "elem_type": "Fire",
+        "pure_min": 0,
+        "pure_max": 0,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 0,
+        "total_max": 0,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 226,
       "slot_index": 5,
       "tree_index": 0,
       "row": 2,
-      "col": 3,
+      "col": 1,
       "name_en": "Oak Sage",
       "name_ko": "오크 세이지",
       "req_level": 6,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a spirit pet that increases life for you and your party",
+      "desc_ko": "스피리트 페트를 소환하여 자신과 파티원의 라이프 증가",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        236,
+        237
+      ],
+      "damage": null
     },
     {
       "skill_id": 227,
       "slot_index": 6,
       "tree_index": 0,
-      "row": 3,
-      "col": 1,
+      "row": 2,
+      "col": 2,
       "name_en": "Summon Spirit Wolf",
       "name_ko": "스피리트 울프",
       "req_level": 6,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a wolf with teleporting ability to fight by your side",
+      "desc_ko": "순간이동능력이 있는 늑대를 소환하여 싸우게함",
+      "prereq_ids": [
+        221
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        237
+      ],
+      "damage": {
+        "elem_type": "Cold",
+        "pure_min": 2,
+        "pure_max": 6,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 2,
+        "total_max": 6,
+        "preview_only": false
+      }
     },
     {
       "skill_id": 228,
       "slot_index": 7,
-      "tree_index": 0,
-      "row": 3,
-      "col": 2,
+      "tree_index": 1,
+      "row": 2,
+      "col": 3,
       "name_en": "Werebear",
       "name_ko": "워베어",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "transform into a werebear with unstoppable attacks",
+      "desc_ko": "워베어로 변신",
+      "prereq_ids": [],
+      "synergy_ids": [],
+      "unlock_ids": [
+        233
+      ],
+      "damage": null
     },
     {
       "skill_id": 229,
       "slot_index": 8,
-      "tree_index": 0,
-      "row": 3,
-      "col": 3,
+      "tree_index": 2,
+      "row": 2,
+      "col": 1,
       "name_en": "Molten Boulder",
       "name_ko": "몰튼 보울더",
       "req_level": 6,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "launch a boulder of flaming hot magma that knocks back your enemies",
+      "desc_ko": "마그마를 뿜어내는 보울더를 발사하여 적을 공격함",
+      "prereq_ids": [
+        225
+      ],
+      "synergy_ids": [
+        225,
+        244
+      ],
+      "unlock_ids": [
+        234
+      ],
+      "damage": {
+        "elem_type": "Phys + Fire",
+        "pure_min": 12,
+        "pure_max": 24,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 12,
+        "total_max": 24,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 230,
       "slot_index": 9,
-      "tree_index": 0,
-      "row": 4,
-      "col": 1,
+      "tree_index": 2,
+      "row": 2,
+      "col": 3,
       "name_en": "Arctic Blast",
       "name_ko": "아틱 블라스트",
       "req_level": 6,
       "level": 8,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "blast a continuous jet of ice to burn your enemies with frost",
+      "desc_ko": "아이스 제트를 연속발사하여 적을 얼려버림",
+      "prereq_ids": [],
+      "synergy_ids": [
+        235
+      ],
+      "unlock_ids": [
+        235
+      ],
+      "damage": {
+        "elem_type": "Cold",
+        "pure_min": 5,
+        "pure_max": 7,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 5,
+        "total_max": 7,
+        "preview_only": false
+      }
     },
     {
       "skill_id": 231,
       "slot_index": 10,
-      "tree_index": 1,
-      "row": 1,
-      "col": 1,
+      "tree_index": 0,
+      "row": 3,
+      "col": 3,
       "name_en": "Carrion Vine",
       "name_ko": "캐리언 바인",
       "req_level": 12,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a vine that eats corpses and replenishes your life",
+      "desc_ko": "시체를 흡수하여 라이프를 올려주는 바인소환",
+      "prereq_ids": [
+        222
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        241
+      ],
+      "damage": null
     },
     {
       "skill_id": 232,
       "slot_index": 11,
       "tree_index": 1,
-      "row": 1,
-      "col": 2,
+      "row": 3,
+      "col": 1,
       "name_en": "Feral Rage",
       "name_ko": "피어럴 레이지",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werewolf form, go into a frenzied rage to steal increasing amounts of life from your enemies with successive hits",
+      "desc_ko": "워울프 상태일때 사납게 공격하여 적의 라이프 흡수 (명중시)",
+      "prereq_ids": [
+        223
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        238,
+        239
+      ],
+      "damage": null
     },
     {
       "skill_id": 233,
       "slot_index": 12,
       "tree_index": 1,
-      "row": 1,
+      "row": 3,
       "col": 3,
       "name_en": "Maul",
       "name_ko": "마울",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werebear form, maul your enemies for increasing extra damage with successive hits",
+      "desc_ko": "워베어 상태일때 추가 데미지를 주는 마울 공격 (명중시)",
+      "prereq_ids": [
+        228
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        239,
+        243
+      ],
+      "damage": null
     },
     {
       "skill_id": 234,
       "slot_index": 13,
-      "tree_index": 1,
-      "row": 2,
+      "tree_index": 2,
+      "row": 3,
       "col": 1,
       "name_en": "Fissure",
       "name_ko": "피셔",
       "req_level": 12,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "open volcanic vents below your enemies, burning them to a crisp",
+      "desc_ko": "적이 서있는 곳에 분화구를 만들어 태워버림",
+      "prereq_ids": [
+        229
+      ],
+      "synergy_ids": [
+        225,
+        244
+      ],
+      "unlock_ids": [
+        244
+      ],
+      "damage": {
+        "elem_type": "Fire",
+        "pure_min": 15,
+        "pure_max": 25,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 15,
+        "total_max": 25,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 235,
       "slot_index": 14,
-      "tree_index": 1,
-      "row": 2,
-      "col": 2,
+      "tree_index": 2,
+      "row": 3,
+      "col": 3,
       "name_en": "Cyclone Armor",
       "name_ko": "사이클론 아머",
       "req_level": 12,
       "level": 2,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "shield yourself from damage caused by fire, cold, and lightning",
+      "desc_ko": "파이어, 콜드, 라이트닝 계열의 데미지로부터 보호",
+      "prereq_ids": [
+        230
+      ],
+      "synergy_ids": [
+        240,
+        245,
+        250
+      ],
+      "unlock_ids": [
+        240
+      ],
+      "damage": null
     },
     {
       "skill_id": 236,
       "slot_index": 15,
-      "tree_index": 1,
-      "row": 2,
-      "col": 3,
+      "tree_index": 0,
+      "row": 4,
+      "col": 1,
       "name_en": "Heart of Wolverine",
       "name_ko": "하트 오브 울버린",
       "req_level": 18,
       "level": 4,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a spirit pet that adds to the damage and attack rating of you and your party",
+      "desc_ko": "스피리트 페트를 소환하여 자신과 파티원의 데미지등급과 공격등급 증가",
+      "prereq_ids": [
+        226
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        246
+      ],
+      "damage": null
     },
     {
       "skill_id": 237,
       "slot_index": 16,
-      "tree_index": 1,
-      "row": 3,
-      "col": 1,
+      "tree_index": 0,
+      "row": 4,
+      "col": 2,
       "name_en": "Summon Dire Wolf",
       "name_ko": "다이어 울프",
       "req_level": 18,
       "level": 12,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a wolf that becomes enraged, eating corpses to increase damage it does to enemies",
+      "desc_ko": "시체를 흡수하여 적에게 주는 데미지가 증가된 격노한 울프소환",
+      "prereq_ids": [
+        226,
+        227
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [
+        247
+      ],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 37,
+        "pure_max": 53,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 37,
+        "total_max": 53,
+        "preview_only": false
+      }
     },
     {
       "skill_id": 238,
       "slot_index": 17,
       "tree_index": 1,
-      "row": 3,
-      "col": 2,
+      "row": 4,
+      "col": 1,
       "name_en": "Rabies",
       "name_ko": "레이비즈",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werewolf form, bite your enemies to inflict them with disease that spreads to other monsters",
+      "desc_ko": "워울프상태일때, 적을 물어뜯어 다른적에게도 전염시키는 일격을 가함",
+      "prereq_ids": [
+        232
+      ],
+      "synergy_ids": [
+        222
+      ],
+      "unlock_ids": [
+        248
+      ],
+      "damage": {
+        "elem_type": "Poison",
+        "pure_min": 0,
+        "pure_max": 0,
+        "synergy_pct": 20,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 0,
+        "total_max": 0,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 239,
       "slot_index": 18,
       "tree_index": 1,
-      "row": 3,
-      "col": 3,
+      "row": 4,
+      "col": 2,
       "name_en": "Fire Claws",
       "name_ko": "파이러 클러",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werewolf or werebear form, maul your enemies with a fiery claw attack",
+      "desc_ko": "워울프 또는 워베어상태일때, 파이어리 클러계열의 마울 공격",
+      "prereq_ids": [
+        232,
+        233
+      ],
+      "synergy_ids": [
+        225,
+        229
+      ],
+      "unlock_ids": [
+        242
+      ],
+      "damage": {
+        "elem_type": "Fire",
+        "pure_min": 32,
+        "pure_max": 48,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 32,
+        "total_max": 48,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 240,
       "slot_index": 19,
-      "tree_index": 1,
+      "tree_index": 2,
       "row": 4,
-      "col": 1,
+      "col": 2,
       "name_en": "Twister",
       "name_ko": "트위스터",
       "req_level": 18,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "release several small whirlwinds that cut a path through your enemies",
+      "desc_ko": "작은 회오리바람을 방출하여 적의 길을 차단함",
+      "prereq_ids": [
+        235
+      ],
+      "synergy_ids": [
+        230,
+        245,
+        250
+      ],
+      "unlock_ids": [
+        245
+      ],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 6,
+        "pure_max": 8,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 6,
+        "total_max": 8,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 241,
       "slot_index": 20,
-      "tree_index": 2,
-      "row": 1,
-      "col": 1,
+      "tree_index": 0,
+      "row": 5,
+      "col": 3,
       "name_en": "Solar Creeper",
       "name_ko": "솔라 크리퍼",
       "req_level": 24,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a vine that eats corpses and replenishes your mana",
+      "desc_ko": "시체를 흡수하여 마나를 올려주는 바인 소환",
+      "prereq_ids": [
+        231
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 242,
       "slot_index": 21,
-      "tree_index": 2,
-      "row": 1,
+      "tree_index": 1,
+      "row": 5,
       "col": 2,
       "name_en": "Hunger",
       "name_ko": "헝거",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werewolf or werebear form, bite your enemies to gain life and mana",
+      "desc_ko": "워울프 또는 워베어상태일때, 적을 물어뜯어 라이프와 마나를 흡수함",
+      "prereq_ids": [
+        239
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 243,
       "slot_index": 22,
-      "tree_index": 2,
-      "row": 1,
+      "tree_index": 1,
+      "row": 5,
       "col": 3,
       "name_en": "Shock Wave",
       "name_ko": "쇼크 웨이브",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werebear form, create a shock wave that stuns nearby enemies",
+      "desc_ko": "워베어 상태일때, 스턴의 효과가 있는 쇼크웨이브로 주위 적을 짓밟음",
+      "prereq_ids": [
+        233
+      ],
+      "synergy_ids": [
+        233
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 10,
+        "pure_max": 20,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 10,
+        "total_max": 20,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 244,
       "slot_index": 23,
       "tree_index": 2,
-      "row": 2,
+      "row": 5,
       "col": 1,
       "name_en": "Volcano",
       "name_ko": "볼케이노",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon forth a volcano to rain death and destruction over your enemies",
+      "desc_ko": "적에게 죽음과 파괴를 안겨주는 볼케이노 소환",
+      "prereq_ids": [
+        234
+      ],
+      "synergy_ids": [
+        229,
+        234,
+        249
+      ],
+      "unlock_ids": [
+        249
+      ],
+      "damage": {
+        "elem_type": "Phys + Fire",
+        "pure_min": 16,
+        "pure_max": 20,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 16,
+        "total_max": 20,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 245,
       "slot_index": 24,
       "tree_index": 2,
-      "row": 2,
+      "row": 5,
       "col": 2,
       "name_en": "Tornado",
       "name_ko": "토네이도",
       "req_level": 24,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "create a funnel of wind and debris to blast your enemies",
+      "desc_ko": "바람과 파편을 불러들여 적을 날려버림",
+      "prereq_ids": [
+        240
+      ],
+      "synergy_ids": [
+        235,
+        240,
+        250
+      ],
+      "unlock_ids": [
+        250
+      ],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 25,
+        "pure_max": 35,
+        "synergy_pct": 18,
+        "synergy_bonus_min": 4,
+        "synergy_bonus_max": 6,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 29,
+        "total_max": 41,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 246,
       "slot_index": 25,
-      "tree_index": 2,
-      "row": 2,
-      "col": 3,
+      "tree_index": 0,
+      "row": 6,
+      "col": 1,
       "name_en": "Spirit of Barbs",
       "name_ko": "스피리트 오브 바브",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon spirit pet that reflects damage taken by you and your party back at your enemies",
+      "desc_ko": "스피리트 페트를 소환하여 자신과 파티원에게 데미지를 반사하는 능력부여",
+      "prereq_ids": [
+        236
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 247,
       "slot_index": 26,
-      "tree_index": 2,
-      "row": 3,
-      "col": 1,
+      "tree_index": 0,
+      "row": 6,
+      "col": 2,
       "name_en": "Summon Grizzly",
       "name_ko": "그리즐리",
       "req_level": 30,
       "level": 1,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "summon a ferocious grizzly bear",
+      "desc_ko": "포악한 그리즐리베어 소환",
+      "prereq_ids": [
+        237
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Physical",
+        "pure_min": 30,
+        "pure_max": 60,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 30,
+        "total_max": 60,
+        "preview_only": false
+      }
     },
     {
       "skill_id": 248,
       "slot_index": 27,
-      "tree_index": 2,
-      "row": 3,
-      "col": 2,
+      "tree_index": 1,
+      "row": 6,
+      "col": 1,
       "name_en": "Fury",
       "name_ko": "퓨리",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "when in werewolf form, attack either multiple adjacent targets or one target multiple times",
+      "desc_ko": "워울프상태일때, 복수의 적 혹은 하나의 적에게 여러 번의 공격을 함",
+      "prereq_ids": [
+        238
+      ],
+      "synergy_ids": [],
+      "unlock_ids": [],
+      "damage": null
     },
     {
       "skill_id": 249,
       "slot_index": 28,
       "tree_index": 2,
-      "row": 3,
-      "col": 3,
+      "row": 6,
+      "col": 1,
       "name_en": "Armageddon",
       "name_ko": "아마게돈",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "create a meteor shower to rain fiery destruction on nearby enemies",
+      "desc_ko": "작은 유성들의 비를 생성하여 근처의 적에게 화염공격을 함",
+      "prereq_ids": [
+        244
+      ],
+      "synergy_ids": [
+        225,
+        229,
+        234,
+        244
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Phys + Fire",
+        "pure_min": 43,
+        "pure_max": 101,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 43,
+        "total_max": 101,
+        "preview_only": true
+      }
     },
     {
       "skill_id": 250,
       "slot_index": 29,
       "tree_index": 2,
-      "row": 4,
-      "col": 1,
+      "row": 6,
+      "col": 2,
       "name_en": "Hurricane",
       "name_ko": "허리케인",
       "req_level": 30,
       "level": 0,
-      "bonus_level": 0
+      "bonus_level": 0,
+      "desc_en": "create a massive storm of wind and debris to pound your enemies to bits",
+      "desc_ko": "적에게 고통을 안겨주는 바람과 파편의 거대한 폭풍 소환",
+      "prereq_ids": [
+        245
+      ],
+      "synergy_ids": [
+        235,
+        240,
+        245
+      ],
+      "unlock_ids": [],
+      "damage": {
+        "elem_type": "Cold",
+        "pure_min": 25,
+        "pure_max": 50,
+        "synergy_pct": 0,
+        "synergy_bonus_min": 0,
+        "synergy_bonus_max": 0,
+        "gear_bonus_min": 0,
+        "gear_bonus_max": 0,
+        "total_min": 25,
+        "total_max": 50,
+        "preview_only": true
+      }
     }
   ],
   "shop_catalog": [

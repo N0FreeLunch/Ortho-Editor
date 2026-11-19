@@ -450,6 +450,96 @@ viewParamRows ui catalog kind paramLabel maxParam currentParam lvlFieldKey tid o
                         optionsList
                     )
 
+        renderSearchableSkillSelect selectTid selectedVal optionsList onPick =
+            if List.isEmpty optionsList then
+                fallbackInput
+
+            else
+                let
+                    isOpen =
+                        ui.openSkillDropdown == Just selectTid
+
+                    selectedLabel =
+                        optionsList
+                            |> List.filter (\opt -> opt.value == selectedVal)
+                            |> List.head
+                            |> Maybe.map .label
+                            |> Maybe.withDefault ("#" ++ String.fromInt selectedVal)
+
+                    query =
+                        UiState.itemEditorSkillSearchQuery selectTid ui
+
+                    trimmed =
+                        String.toLower (String.trim query)
+
+                    filtered =
+                        if String.isEmpty trimmed then
+                            optionsList
+
+                        else
+                            List.filter
+                                (\opt -> String.contains trimmed (String.toLower opt.label))
+                                optionsList
+                in
+                div [ class "skill-combobox", attribute "data-testid" selectTid ]
+                    [ button
+                        [ type_ "button"
+                        , classList [ ( "item-editor-input", True ), ( "skill-combobox-trigger", True ), ( "is-open", isOpen ) ]
+                        , attribute "data-testid" (selectTid ++ "-toggle")
+                        , onClick (ToggleItemEditorSkillDropdown selectTid)
+                        ]
+                        [ span [ class "skill-combobox-value" ] [ text selectedLabel ]
+                        , span [ class "skill-combobox-arrow" ]
+                            [ text
+                                (if isOpen then
+                                    "▴"
+
+                                 else
+                                    "▾"
+                                )
+                            ]
+                        ]
+                    , if isOpen then
+                        div [ class "skill-combobox-popover", attribute "data-testid" (selectTid ++ "-popover") ]
+                            [ div [ class "skill-param-search-row" ]
+                                [ input
+                                    [ type_ "text"
+                                    , class "item-editor-input skill-param-search-input"
+                                    , attribute "data-testid" (selectTid ++ "-search")
+                                    , placeholder "🔍 Search skill (name / #id)..."
+                                    , value query
+                                    , onInput (SetItemEditorSkillSearch selectTid)
+                                    ]
+                                    []
+                                , span [ class "skill-param-search-count" ]
+                                    [ text (String.fromInt (List.length filtered) ++ "/" ++ String.fromInt (List.length optionsList)) ]
+                                ]
+                            , div [ class "skill-combobox-list" ]
+                                (if List.isEmpty filtered then
+                                    [ div [ class "skill-combobox-empty" ] [ text "No matching skills." ] ]
+
+                                 else
+                                    List.map
+                                        (\opt ->
+                                            button
+                                                [ type_ "button"
+                                                , classList
+                                                    [ ( "skill-combobox-option", True )
+                                                    , ( "is-selected", opt.value == selectedVal )
+                                                    ]
+                                                , attribute "data-testid" (selectTid ++ "-opt-" ++ String.fromInt opt.value)
+                                                , onClick (onPick opt.value)
+                                                ]
+                                                [ text opt.label ]
+                                        )
+                                        filtered
+                                )
+                            ]
+
+                      else
+                        text ""
+                    ]
+
         previewOrRange =
             case maybePreview of
                 Just preview ->
@@ -477,7 +567,7 @@ viewParamRows ui catalog kind paramLabel maxParam currentParam lvlFieldKey tid o
             singleRow (renderSelect tid currentParam catalog.skillTabs onSelect)
 
         ParamSkill ->
-            singleRow (renderSelect tid currentParam catalog.skills onSelect)
+            singleRow (renderSearchableSkillSelect tid currentParam catalog.skills onSelect)
 
         ParamPackedSkill ->
             if List.isEmpty catalog.skills then
@@ -501,7 +591,7 @@ viewParamRows ui catalog kind paramLabel maxParam currentParam lvlFieldKey tid o
                         modBy stride currentParam
                 in
                 [ div [ class "item-editor-prop-controls" ]
-                    [ renderSelect tid skillId catalog.skills (\newSid -> onSelect (newSid * stride + clamp minLvl maxLvl skillLevel))
+                    [ renderSearchableSkillSelect tid skillId catalog.skills (\newSid -> onSelect (newSid * stride + clamp minLvl maxLvl skillLevel))
                     , span [ class "item-editor-param-label" ] [ text paramLabel ]
                     ]
                 , div [ class "item-editor-prop-controls" ]

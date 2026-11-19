@@ -1065,6 +1065,37 @@ allowedMoveTargetViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "y" (Json.Decode.int)))
 
 
+type alias SkillDamageView =
+    { elemType : String
+    , pureMin : Int
+    , pureMax : Int
+    , synergyPct : Int
+    , synergyBonusMin : Int
+    , synergyBonusMax : Int
+    , gearBonusMin : Int
+    , gearBonusMax : Int
+    , totalMin : Int
+    , totalMax : Int
+    , previewOnly : Bool
+    }
+
+
+skillDamageViewDecoder : Json.Decode.Decoder SkillDamageView
+skillDamageViewDecoder =
+    Json.Decode.succeed SkillDamageView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "elem_type" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "pure_min" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "pure_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "synergy_pct" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "synergy_bonus_min" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "synergy_bonus_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "gear_bonus_min" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "gear_bonus_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "total_min" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "total_max" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "preview_only" (Json.Decode.bool)))
+
+
 type alias SkillNodeView =
     { skillId : Int
     , slotIndex : Int
@@ -1076,6 +1107,12 @@ type alias SkillNodeView =
     , reqLevel : Int
     , level : Int
     , bonusLevel : Int
+    , descEn : String
+    , descKo : String
+    , prereqIds : List (Int)
+    , synergyIds : List (Int)
+    , unlockIds : List (Int)
+    , damage : Maybe (SkillDamageView)
     }
 
 
@@ -1092,6 +1129,12 @@ skillNodeViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "req_level" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "level" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "bonus_level" (Json.Decode.int)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_en" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_ko" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "prereq_ids" (Json.Decode.list (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "synergy_ids" (Json.Decode.list (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "unlock_ids" (Json.Decode.list (Json.Decode.int))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "damage" (Json.Decode.nullable (skillDamageViewDecoder))))
 
 
 type alias ShopCatalogItemView =

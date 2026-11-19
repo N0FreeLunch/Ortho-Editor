@@ -340,6 +340,21 @@ pub fn rebuild_status_and_player_items(
     rebuild_item_section(&result, items, huffman, is_alpha)
 }
 
+fn read_mutation_player_items(
+    bytes: &[u8],
+    huffman: &HuffmanTree,
+    is_alpha: bool,
+) -> io::Result<(Vec<Item>, Option<crate::domain::item::stream::ItemStreamDialect>)> {
+    use crate::domain::item::stream::PlayerItemStream;
+
+    if let Ok(stream) = PlayerItemStream::read(bytes, huffman) {
+        return Ok((stream.items, Some(stream.dialect)));
+    }
+    Item::read_player_items(bytes, huffman, is_alpha)
+        .map(|items| (items, None))
+        .map_err(Into::into)
+}
+
 pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Result<Vec<u8>> {
     let map = map_core_sections(bytes)?;
     let mut attrs = AttributeSection::parse(bytes, map.gf_pos, map.if_pos)?;
@@ -349,11 +364,7 @@ pub fn patch_level(bytes: &[u8], new_level: u8, huffman: &HuffmanTree) -> io::Re
 
     let version = read_save_version(bytes);
     // Synchronize header CHAR_LEVEL_OFFSET (byte 27)
-    let items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
-        stream.items
-    } else {
-        Item::read_player_items(bytes, huffman, version == 105)?
-    };
+    let (items, _) = read_mutation_player_items(bytes, huffman, version == 105)?;
     let mut working = rebuild_status_and_player_items(
         bytes,
         Some(&attrs),
@@ -443,12 +454,8 @@ pub fn try_apply_character_mutation(
     }
 
     // Rebuild sections
-    let player_items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
-        stream.items
-    } else {
-        Item::read_player_items(bytes, huffman, is_alpha)
-            .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?
-    };
+    let (player_items, _) = read_mutation_player_items(bytes, huffman, is_alpha)
+        .map_err(|e| crate::domain::contracts::ContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?;
 
     let mut working = rebuild_status_and_player_items(
         bytes,
@@ -626,13 +633,9 @@ pub fn try_apply_skill_mutation(
         attrs.set_value(5, pts as i32, save_add);
     }
 
-    let items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
-        stream.items
-    } else {
-        Item::read_player_items(bytes, huffman, is_alpha).map_err(|e| {
-            crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to read player items: {}", e))
-        })?
-    };
+    let (items, _) = read_mutation_player_items(bytes, huffman, is_alpha).map_err(|e| {
+        crate::domain::contracts::SkillContractError::ValidationFailed(format!("Failed to read player items: {}", e))
+    })?;
 
     let mut rebuilt = rebuild_status_and_player_items(
         bytes,
@@ -664,12 +667,8 @@ pub fn try_apply_batch_item_mutation(
     let version = read_save_version(bytes);
     let is_alpha = version == 105;
 
-    let mut items = if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
-        stream.items
-    } else {
-        Item::read_player_items(bytes, huffman, is_alpha)
-            .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?
-    };
+    let (mut items, _) = read_mutation_player_items(bytes, huffman, is_alpha)
+        .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?;
 
     for item in &mut items {
         let mut editor = crate::domain::item::editor::ItemEditor::new(item);
@@ -736,15 +735,8 @@ pub fn try_apply_item_mutation(
     let version = read_save_version(bytes);
     let is_alpha = version == 105;
 
-    // Read player items with version-aware detection (supports modern v3, alpha, legacy)
-    let (mut items, dialect) =
-        if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
-            (stream.items, Some(stream.dialect))
-        } else {
-            let fallback_items = Item::read_player_items(bytes, huffman, is_alpha)
-                .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?;
-            (fallback_items, None)
-        };
+    let (mut items, dialect) = read_mutation_player_items(bytes, huffman, is_alpha)
+        .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?;
 
     let mut matched_idx = None;
     for (idx, item) in items.iter().enumerate() {

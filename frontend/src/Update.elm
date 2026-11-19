@@ -79,6 +79,7 @@ type Msg
     | ClickRedo
     | HoverItem (Maybe Int)
     | HoverDropTarget (Maybe { container : ContainerKind, x : Int, y : Int })
+    | HoverDropTargetSub (Maybe { container : ContainerKind, x : Int, y : Int }) ( Int, Int )
     | MoveTooltipHover Int Int Int Int
     | FocusField String String
     | EditFocusedInput String
@@ -90,6 +91,7 @@ type Msg
     | SelectStashTab StashTab
     | ToggleCombatLab
     | SelectSkillTreeTab String
+    | HoverSkill (Maybe Int)
     | ClickToggleWeaponSwap
     | ClickDisposeHeldItem
     | ClickAdjustSkillRank Int Int
@@ -114,6 +116,8 @@ type Msg
     | OpenItemEditorModal Int
     | CloseItemEditorModal
     | SetItemEditorSearch String
+    | SetItemEditorSkillSearch String String
+    | ToggleItemEditorSkillDropdown String
     | SelectItemEditorInjectStat Int Int
     | SetItemEditorInjectValue String
     | SetItemEditorInjectParam String
@@ -424,6 +428,9 @@ update msg model =
         SelectSkillTreeTab treeId ->
             ( { model | ui = UiState.setSkillTreeTab treeId model.ui }, NoOut )
 
+        HoverSkill maybeSkillId ->
+            ( { model | ui = UiState.setHoveredSkill maybeSkillId model.ui }, NoOut )
+
         ClickToggleWeaponSwap ->
             ( model, EmitIntent Protocol.ToggleWeaponSwap )
 
@@ -454,6 +461,9 @@ update msg model =
 
         HoverDropTarget maybeTarget ->
             ( { model | ui = UiState.setHoveredDropTarget maybeTarget model.ui }, NoOut )
+
+        HoverDropTargetSub maybeTarget sub ->
+            ( { model | ui = UiState.setHoveredDropTargetSub maybeTarget sub model.ui }, NoOut )
 
         MoveSelectedItemTo targetContainer x y ->
             case Maybe.andThen .selectedMoveItemIndex model.session of
@@ -683,6 +693,16 @@ update msg model =
             , NoOut
             )
 
+        SetItemEditorSkillSearch tid query ->
+            ( { model | ui = UiState.setItemEditorSkillSearch tid query model.ui }
+            , NoOut
+            )
+
+        ToggleItemEditorSkillDropdown tid ->
+            ( { model | ui = UiState.toggleSkillDropdown tid model.ui }
+            , NoOut
+            )
+
         SelectItemEditorInjectStat statId defaultVal ->
             ( { model | ui = UiState.selectItemEditorInjectStat statId defaultVal model.ui }
             , NoOut
@@ -776,7 +796,7 @@ update msg model =
                                 Nothing ->
                                     ( param, UiState.clearFocusInput model.ui )
                     in
-                    ( { model | ui = UiState.setItemEditorInjectParam nextParam nextUi }, NoOut )
+                    ( { model | ui = UiState.setItemEditorInjectParam nextParam nextUi |> UiState.closeSkillDropdown }, NoOut )
 
                 Nothing ->
                     ( model, NoOut )
@@ -833,7 +853,7 @@ update msg model =
                         ( { model | ui = nextUi }, NoOut )
 
                     else
-                        ( { model | ui = nextUi }
+                        ( { model | ui = UiState.closeSkillDropdown nextUi }
                         , EmitIntent
                             (Protocol.SetItemPropertyParam
                                 { itemIndex = itemIndex
@@ -844,7 +864,7 @@ update msg model =
                         )
 
                 Nothing ->
-                    ( model
+                    ( { model | ui = UiState.closeSkillDropdown model.ui }
                     , EmitIntent
                         (Protocol.SetItemPropertyParam
                             { itemIndex = itemIndex
@@ -942,7 +962,7 @@ handleKeyShortcut payload model =
                                     ( 1, 1, [] )
 
                         ( dropX, dropY ) =
-                            UiState.resolveGridDropAnchor allowedTargets tgt.container heldW heldH tgt.x tgt.y
+                            UiState.resolveGridDropAnchorWithSub allowedTargets tgt.container heldW heldH tgt.x tgt.y model.ui.hoveredDropSub
                     in
                     ( { model | ui = UiState.closeItemMenu model.ui }
                     , EmitIntent
