@@ -90,6 +90,8 @@ pub fn parse_skill_section(bytes: &[u8], if_pos: usize, jm0: Option<usize>) -> i
     }
 }
 
+pub(crate) use crate::data::char_base_stats::class_code;
+
 /// Finds the base skill ID for a given character class.
 pub fn find_base_skill_id(class_code: &str) -> Option<u32> {
     crate::data::skills::SKILLS

@@ -16,13 +16,7 @@ use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 /// Class-to-code mapping for Diablo II Resurrected.
 pub fn class_id_to_code(class_id: u8) -> &'static str {
     match class_id {
-        0 => "ama",
-        1 => "sor",
-        2 => "nec",
-        3 => "pal",
-        4 => "bar",
-        5 => "dru",
-        6 => "ass",
+        0..=6 => crate::domain::character::skills::class_code(class_id).unwrap_or("unknown"),
         _ => "unknown",
     }
 }
@@ -30,13 +24,8 @@ pub fn class_id_to_code(class_id: u8) -> &'static str {
 /// Base skill ID for a character class (each class has 30 sequential skills).
 pub fn class_base_skill_id(class_id: u8) -> Option<u32> {
     match class_id {
-        0 => Some(6),
-        1 => Some(36),
-        2 => Some(66),
-        3 => Some(96),
-        4 => Some(126),
-        5 => Some(221),
-        6 => Some(251),
+        0..=6 => crate::domain::character::skills::class_code(class_id)
+            .and_then(crate::domain::character::skills::find_base_skill_id),
         _ => None,
     }
 }
