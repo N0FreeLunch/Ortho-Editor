@@ -3,6 +3,14 @@ use crate::data::quests::{QuestEntry, V105_QUESTS};
 /// Alpha v105 quest sections include a 12-byte header before the quest payload.
 pub const V105_QUEST_PAYLOAD_START: usize = 12;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuestSemanticStatus {
+    Unstarted,
+    InProgress,
+    RewardPending,
+    Completed,
+}
+
 #[derive(Clone, Copy)]
 pub struct Quest {
     entry: &'static QuestEntry,
@@ -61,6 +69,19 @@ impl Quest {
 
     pub fn is_completed(&self) -> bool {
         (self.state & 0x01) != 0
+    }
+
+    /// Maps the 16-bit quest state word into a coarse semantic status.
+    pub fn semantic_status(&self) -> QuestSemanticStatus {
+        if (self.state & 0x0001) != 0 {
+            QuestSemanticStatus::Completed
+        } else if (self.state & 0x0002) != 0 {
+            QuestSemanticStatus::RewardPending
+        } else if (self.state & 0x0FFC) != 0 {
+            QuestSemanticStatus::InProgress
+        } else {
+            QuestSemanticStatus::Unstarted
+        }
     }
 
     pub fn set_completed(&mut self, completed: bool) {

@@ -325,6 +325,29 @@ pub struct QuestCatalogEntryView {
     pub act: i32,
     pub index: i32,
     pub name: String,
+    #[serde(default)]
+    pub name_ko: String,
+    #[serde(default)]
+    pub desc_en: String,
+    #[serde(default)]
+    pub desc_ko: String,
+}
+
+/// Coarse semantic progression stage derived from the 16-bit quest state word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub enum QuestSemanticStatusView {
+    QuestUnstarted,
+    QuestInProgress,
+    QuestRewardPending,
+    QuestCompleted,
+}
+
+/// Per-quest semantic status and raw 16-bit state for a single difficulty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Elm, ElmEncode, ElmDecode)]
+pub struct QuestStateEntryView {
+    pub key: String,
+    pub status: QuestSemanticStatusView,
+    pub raw_state: i32,
 }
 
 /// Canonical waypoint definition projected from `d2r-data` (`WAYPOINTS`).
@@ -349,6 +372,12 @@ pub struct ProgressionSummaryView {
     pub normal_quests_completed: Vec<String>,
     pub nightmare_quests_completed: Vec<String>,
     pub hell_quests_completed: Vec<String>,
+    #[serde(default)]
+    pub normal_quest_states: Vec<QuestStateEntryView>,
+    #[serde(default)]
+    pub nightmare_quest_states: Vec<QuestStateEntryView>,
+    #[serde(default)]
+    pub hell_quest_states: Vec<QuestStateEntryView>,
     pub normal_waypoints_active: Vec<i32>,
     pub nightmare_waypoints_active: Vec<i32>,
     pub hell_waypoints_active: Vec<i32>,
@@ -1412,6 +1441,9 @@ impl EditorSession {
             normal_quests_completed: completed_quest_keys(&self.progression, 0),
             nightmare_quests_completed: completed_quest_keys(&self.progression, 1),
             hell_quests_completed: completed_quest_keys(&self.progression, 2),
+            normal_quest_states: collect_quest_states(&self.progression, 0, self.is_expansion),
+            nightmare_quest_states: collect_quest_states(&self.progression, 1, self.is_expansion),
+            hell_quest_states: collect_quest_states(&self.progression, 2, self.is_expansion),
             normal_waypoints_active: active_waypoint_bits(&self.waypoints_by_diff[0]),
             nightmare_waypoints_active: active_waypoint_bits(&self.waypoints_by_diff[1]),
             hell_waypoints_active: active_waypoint_bits(&self.waypoints_by_diff[2]),
@@ -4440,7 +4472,45 @@ fn build_quest_catalog(is_expansion: bool) -> Vec<QuestCatalogEntryView> {
             key: quest_key(entry.act, entry.index),
             act: i32::from(entry.act),
             index: i32::from(entry.index),
-            name: entry.name.to_string(),
+            name: get_loc(entry.loc_key, "en").to_string(),
+            name_ko: get_loc(entry.loc_key, "ko").to_string(),
+            desc_en: get_loc(entry.desc_loc_key, "en").to_string(),
+            desc_ko: get_loc(entry.desc_loc_key, "ko").to_string(),
+        })
+        .collect()
+}
+
+fn collect_quest_states(
+    progression: &Progression,
+    difficulty: u8,
+    is_expansion: bool,
+) -> Vec<QuestStateEntryView> {
+    let max_act = if is_expansion { 5 } else { 4 };
+    progression
+        .quests
+        .quests()
+        .iter()
+        .filter(|q| q.difficulty() == difficulty && q.act() <= max_act)
+        .map(|q| {
+            let status = match q.semantic_status() {
+                crate::domain::progression::quest::QuestSemanticStatus::Unstarted => {
+                    QuestSemanticStatusView::QuestUnstarted
+                }
+                crate::domain::progression::quest::QuestSemanticStatus::InProgress => {
+                    QuestSemanticStatusView::QuestInProgress
+                }
+                crate::domain::progression::quest::QuestSemanticStatus::RewardPending => {
+                    QuestSemanticStatusView::QuestRewardPending
+                }
+                crate::domain::progression::quest::QuestSemanticStatus::Completed => {
+                    QuestSemanticStatusView::QuestCompleted
+                }
+            };
+            QuestStateEntryView {
+                key: quest_key(q.act(), q.index()),
+                status,
+                raw_state: i32::from(q.state()),
+            }
         })
         .collect()
 }
@@ -5090,6 +5160,8 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             DismissedMercView,
             MercSummaryView,
             QuestCatalogEntryView,
+            QuestSemanticStatusView,
+            QuestStateEntryView,
             WaypointCatalogEntryView,
             ProgressionSummaryView,
             SetBonusView,

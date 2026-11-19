@@ -856,6 +856,9 @@ type alias QuestCatalogEntryView =
     , act : Int
     , index : Int
     , name : String
+    , nameKo : String
+    , descEn : String
+    , descKo : String
     }
 
 
@@ -866,6 +869,72 @@ questCatalogEntryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "act" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "index" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_en" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_ko" (Json.Decode.string)))
+
+
+type QuestSemanticStatusView
+    = QuestUnstarted
+    | QuestInProgress
+    | QuestRewardPending
+    | QuestCompleted
+
+
+questSemanticStatusViewDecoder : Json.Decode.Decoder QuestSemanticStatusView
+questSemanticStatusViewDecoder = 
+    Json.Decode.oneOf
+        [ Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QuestUnstarted" ->
+                            Json.Decode.succeed QuestUnstarted
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QuestInProgress" ->
+                            Json.Decode.succeed QuestInProgress
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QuestRewardPending" ->
+                            Json.Decode.succeed QuestRewardPending
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        , Json.Decode.string
+            |> Json.Decode.andThen
+                (\x ->
+                    case x of
+                        "QuestCompleted" ->
+                            Json.Decode.succeed QuestCompleted
+                        unexpected ->
+                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
+                )
+        ]
+
+type alias QuestStateEntryView =
+    { key : String
+    , status : QuestSemanticStatusView
+    , rawState : Int
+    }
+
+
+questStateEntryViewDecoder : Json.Decode.Decoder QuestStateEntryView
+questStateEntryViewDecoder =
+    Json.Decode.succeed QuestStateEntryView
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "key" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "status" (questSemanticStatusViewDecoder)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "raw_state" (Json.Decode.int)))
 
 
 type alias WaypointCatalogEntryView =
@@ -896,6 +965,9 @@ type alias ProgressionSummaryView =
     , normalQuestsCompleted : List (String)
     , nightmareQuestsCompleted : List (String)
     , hellQuestsCompleted : List (String)
+    , normalQuestStates : List (QuestStateEntryView)
+    , nightmareQuestStates : List (QuestStateEntryView)
+    , hellQuestStates : List (QuestStateEntryView)
     , normalWaypointsActive : List (Int)
     , nightmareWaypointsActive : List (Int)
     , hellWaypointsActive : List (Int)
@@ -913,6 +985,9 @@ progressionSummaryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "normal_quests_completed" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "nightmare_quests_completed" (Json.Decode.list (Json.Decode.string))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "hell_quests_completed" (Json.Decode.list (Json.Decode.string))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "normal_quest_states" (Json.Decode.list (questStateEntryViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "nightmare_quest_states" (Json.Decode.list (questStateEntryViewDecoder))))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "hell_quest_states" (Json.Decode.list (questStateEntryViewDecoder))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "normal_waypoints_active" (Json.Decode.list (Json.Decode.int))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "nightmare_waypoints_active" (Json.Decode.list (Json.Decode.int))))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "hell_waypoints_active" (Json.Decode.list (Json.Decode.int))))

@@ -1605,3 +1605,71 @@ fn waypoint_catalog_projects_localized_names_from_d2r_data() {
         "프리지드 하이랜드"
     );
 }
+
+#[test]
+fn quest_catalog_and_semantic_subquest_states_project_from_d2r_data() {
+    for entry in d2r_core::data::quests::V105_QUESTS {
+        let name_en = d2r_core::localization::get_loc(entry.loc_key, "en");
+        let name_ko = d2r_core::localization::get_loc(entry.loc_key, "ko");
+        let desc_en = d2r_core::localization::get_loc(entry.desc_loc_key, "en");
+        let desc_ko = d2r_core::localization::get_loc(entry.desc_loc_key, "ko");
+        assert!(!name_en.is_empty(), "empty EN quest name for {}", entry.loc_key);
+        assert!(!name_ko.is_empty(), "empty KO quest name for {}", entry.loc_key);
+        assert!(!desc_en.is_empty(), "empty EN quest desc for {}", entry.desc_loc_key);
+        assert!(!desc_ko.is_empty(), "empty KO quest desc for {}", entry.desc_loc_key);
+    }
+
+    let pre_akara_bytes =
+        fixture_bytes("tests/fixtures/savegames/gameplay/normal/act1/TESTDRUID_Quest1_DenOfEvil_Done_PreAkara.d2s");
+    let mut pre_akara = EditorSession::from_bytes(&pre_akara_bytes, "TESTDRUID_Quest1_DenOfEvil_Done_PreAkara.d2s")
+        .expect("open pre-akara fixture");
+    let view = pre_akara.project();
+    let a1q1_cat = view
+        .progression
+        .quest_catalog
+        .iter()
+        .find(|q| q.key == "a1q1")
+        .expect("a1q1 catalog");
+    assert_eq!(a1q1_cat.name, "Den of Evil");
+    assert_eq!(a1q1_cat.name_ko, "덴 오브 이블");
+    assert!(a1q1_cat.desc_en.contains("Den"));
+    assert!(!a1q1_cat.desc_ko.is_empty());
+
+    assert_eq!(
+        view.progression.normal_quest_states.len(),
+        view.progression.quest_catalog.len()
+    );
+    let a1q1_state = view
+        .progression
+        .normal_quest_states
+        .iter()
+        .find(|s| s.key == "a1q1")
+        .expect("a1q1 state");
+    assert_ne!(
+        a1q1_state.status,
+        d2r_core::projection::QuestSemanticStatusView::QuestCompleted
+    );
+    assert_ne!(
+        a1q1_state.status,
+        d2r_core::projection::QuestSemanticStatusView::QuestUnstarted
+    );
+    assert_ne!(a1q1_state.raw_state, 0);
+
+    let done_env = pre_akara.apply_intent(UiIntent::SetQuestsBatch {
+        difficulty: DifficultyMode::Normal,
+        keys: vec!["a1q1".to_string()],
+        completed: true,
+    });
+    assert!(done_env.ok);
+    let done_view = done_env.session.expect("updated session");
+    let a1q1_done = done_view
+        .progression
+        .normal_quest_states
+        .iter()
+        .find(|s| s.key == "a1q1")
+        .expect("a1q1 done state");
+    assert_eq!(
+        a1q1_done.status,
+        d2r_core::projection::QuestSemanticStatusView::QuestCompleted
+    );
+}
