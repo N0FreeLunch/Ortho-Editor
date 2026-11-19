@@ -127,9 +127,9 @@ sampleSessionJson =
           "total_quests_per_difficulty": 27,
           "total_waypoints_per_difficulty": 39,
           "quest_catalog": [
-            { "key": "a1q1", "act": 1, "index": 0, "name": "Den of Evil", "name_ko": "덴 오브 이블", "desc_en": "Look for the Den in the wilderness outside the Rogues' Camp.", "desc_ko": "로그 캠프 밖에 있는 덴 오브 이블을 찾으시오.", "has_npc_reward": true },
-            { "key": "a1q2", "act": 1, "index": 1, "name": "Sisters' Burial Grounds", "name_ko": "베리얼 그라운드", "desc_en": "Look for Blood Raven in the Burial Grounds next to the Cold Plains.", "desc_ko": "콜드 플레인 부근 베리얼 그라운드에서 블러드 레이븐을 찾으시오.", "has_npc_reward": false },
-            { "key": "a5q3", "act": 5, "index": 2, "name": "Prison of Ice", "name_ko": "얼음 감옥", "desc_en": "Look for Anya under the Crystalline Passage by the Frozen River.", "desc_ko": "크리스탈라인을 지나 프로즌리버에서 앤야를 찾으시오", "has_npc_reward": true }
+            { "key": "a1q1", "act": 1, "index": 0, "name": "Den of Evil", "name_ko": "덴 오브 이블", "desc_en": "Look for the Den in the wilderness outside the Rogues' Camp.", "desc_ko": "로그 캠프 밖에 있는 덴 오브 이블을 찾으시오." },
+            { "key": "a1q2", "act": 1, "index": 1, "name": "Sisters' Burial Grounds", "name_ko": "베리얼 그라운드", "desc_en": "Look for Blood Raven in the Burial Grounds next to the Cold Plains.", "desc_ko": "콜드 플레인 부근 베리얼 그라운드에서 블러드 레이븐을 찾으시오." },
+            { "key": "a5q3", "act": 5, "index": 2, "name": "Prison of Ice", "name_ko": "얼음 감옥", "desc_en": "Look for Anya under the Crystalline Passage by the Frozen River.", "desc_ko": "크리스탈라인을 지나 프로즌리버에서 앤야를 찾으시오" }
           ],
           "waypoint_catalog": [
             { "bit": 0, "act": 1, "index": 0, "name": "Rogue Encampment", "name_ko": "로그 캠프" },
@@ -3482,7 +3482,7 @@ suite =
                             outCycleReward
                     , \_ ->
                         Expect.equal
-                            (EmitIntent (Protocol.SetQuestSemanticStatus { difficulty = Normal, key = "a1q2", status = Protocol.QuestCompleted }))
+                            (EmitIntent (Protocol.SetQuestSemanticStatus { difficulty = Normal, key = "a1q2", status = Protocol.QuestRewardPending }))
                             outCycleNoReward
                     , \_ ->
                         Workspace.view mFirstClick
@@ -3491,7 +3491,7 @@ suite =
                                 [ Query.find [ testId "quest-detail-bar" ]
                                     >> Query.has [ Selector.class "diff-normal", Selector.text "Den of Evil", Selector.text "[0x1001]" ]
                                 , Query.find [ testId "quest-status-reward-pending" ]
-                                    >> Query.has [ Selector.class "status-reward-pending", Selector.attribute (Html.Attributes.disabled False) ]
+                                    >> Query.has [ Selector.class "status-reward-pending" ]
                                 , Query.find [ testId "quest-status-reward-pending" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect (SetQuestSemanticStatus Normal "a1q1" Protocol.QuestRewardPending)
@@ -3500,7 +3500,8 @@ suite =
                         Workspace.view mSelectedNoRewardInProg
                             |> Query.fromHtml
                             |> Query.find [ testId "quest-status-reward-pending" ]
-                            |> Query.has [ Selector.attribute (Html.Attributes.disabled True) ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (SetQuestSemanticStatus Normal "a1q2" Protocol.QuestRewardPending)
                     ]
                     ()
         ]

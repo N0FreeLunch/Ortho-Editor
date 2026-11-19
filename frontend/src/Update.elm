@@ -272,18 +272,14 @@ questStatesForDiff diff prog =
             prog.hellQuestStates
 
 
-nextQuestStatus : Bool -> QuestSemanticStatusView -> QuestSemanticStatusView
-nextQuestStatus hasReward current =
+nextQuestStatus : QuestSemanticStatusView -> QuestSemanticStatusView
+nextQuestStatus current =
     case current of
         Protocol.QuestUnstarted ->
             Protocol.QuestInProgress
 
         Protocol.QuestInProgress ->
-            if hasReward then
-                Protocol.QuestRewardPending
-
-            else
-                Protocol.QuestCompleted
+            Protocol.QuestRewardPending
 
         Protocol.QuestRewardPending ->
             Protocol.QuestCompleted
@@ -565,13 +561,6 @@ update msg model =
 
                             Just session ->
                                 let
-                                    hasReward =
-                                        session.progression.questCatalog
-                                            |> List.filter (\q -> q.key == key)
-                                            |> List.head
-                                            |> Maybe.map .hasNpcReward
-                                            |> Maybe.withDefault False
-
                                     currentStatus =
                                         questStatesForDiff diff session.progression
                                             |> List.filter (\s -> s.key == key)
@@ -585,7 +574,7 @@ update msg model =
                                                     Protocol.QuestUnstarted
                                                 )
                                 in
-                                nextQuestStatus hasReward currentStatus
+                                nextQuestStatus currentStatus
                 in
                 ( model
                 , EmitIntent

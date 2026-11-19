@@ -266,14 +266,7 @@ viewQuestDetailBar ui prog =
                             , button
                                 [ classList [ ( "seg-btn quest-status-btn status-reward-pending", True ), ( "is-active", currentStatus == QuestRewardPending ) ]
                                 , attribute "data-testid" "quest-status-reward-pending"
-                                , disabled (not entry.hasNpcReward)
-                                , title
-                                    (if entry.hasNpcReward then
-                                        "Set Reward Pending (0x0002) to claim NPC reward in-game"
-
-                                     else
-                                        "No repeatable NPC reward for this quest"
-                                    )
+                                , title "Set Reward Pending (0x0002)"
                                 , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestRewardPending)
                                 ]
                                 [ text "Reward Pending" ]
