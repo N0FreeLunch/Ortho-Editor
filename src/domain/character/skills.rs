@@ -2,6 +2,13 @@ use std::io;
 
 pub const SKILL_SECTION_LEN: usize = 30;
 
+pub(crate) fn skill_payload_range(if_pos: usize, limit: Option<usize>) -> std::ops::Range<usize> {
+    let start = if_pos + crate::domain::forensic::v105::V105SectionMarkerAxiom::MARKER_IF.len();
+    let full_end = start + SKILL_SECTION_LEN;
+    let end = limit.map_or(full_end, |limit| full_end.min(limit));
+    start..end
+}
+
 #[derive(Clone, Debug)]
 pub struct SkillSection(pub [u8; SKILL_SECTION_LEN]);
 
@@ -62,15 +69,9 @@ pub struct SkillLevel {
 }
 
 pub fn parse_skill_section(bytes: &[u8], if_pos: usize, jm0: Option<usize>) -> io::Result<SkillSection> {
-    let start = if_pos + 2;
-    let mut end = start + SKILL_SECTION_LEN;
-    
-    // For Alpha v105, the skill section might be shorter if JM follows immediately.
-    if let Some(jm_pos) = jm0 {
-        if jm_pos < end {
-            end = jm_pos;
-        }
-    }
+    let payload = skill_payload_range(if_pos, jm0);
+    let start = payload.start;
+    let end = payload.end;
 
     if end > bytes.len() {
         return Err(io::Error::new(

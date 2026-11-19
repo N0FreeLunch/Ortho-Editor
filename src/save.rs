@@ -14,6 +14,7 @@ pub use crate::domain::header::axiom::{
 pub use crate::domain::stats::{AttributeSection, AttributeEntry};
 pub use crate::domain::stats::attribute::char_stat_save_add;
 pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
+use crate::domain::character::skills::skill_payload_range;
 pub use crate::domain::progression::{QuestSection, WaypointSection};
 use crate::domain::progression::waypoint::legacy_waypoint_bit;
 use crate::domain::gateway::ItemGateway;
@@ -311,26 +312,16 @@ pub fn rebuild_status_and_player_items(
     }
 
     // 3. IF Section (Marker + skills)
-    let section_axiom = V105SectionMarkerAxiom::default();
+    let jm0 = map.jm_positions[0];
+    let skill_end_original = skill_payload_range(map.if_pos, is_alpha.then_some(jm0)).end;
     if let Some(skills) = skills {
         result.extend_from_slice(section_axiom.if_bytes());
         result.extend_from_slice(skills.as_slice());
     } else {
-        let skill_end = if version == 105 {
-            map.jm_positions[0].min(map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN)
-        } else {
-            map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN
-        };
-        result.extend_from_slice(&bytes[map.if_pos..skill_end]);
+        result.extend_from_slice(&bytes[map.if_pos..skill_end_original]);
     }
 
     // 4. Quest/Progression Section (Gap between IF end and first JM)
-    let jm0 = map.jm_positions[0];
-    let skill_end_original = if version == 105 {
-        jm0.min(map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN)
-    } else {
-        map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN
-    };
 
     if let Some(q) = quests {
         if version != 105 {
@@ -346,7 +337,6 @@ pub fn rebuild_status_and_player_items(
     }
 
     // 5. Item Sections (Player, Corpse, etc.)
-    let jm0 = map.jm_positions[0];
     result.extend_from_slice(&bytes[jm0..]);
 
     let is_alpha = version == 105;
@@ -860,10 +850,8 @@ pub fn patch_skill_section(
     map: &SaveSectionMap,
     skills: &SkillSection,
 ) -> io::Result<Vec<u8>> {
-    let section_axiom = V105SectionMarkerAxiom::default();
-    let start = map.if_pos + section_axiom.if_len();
-    let end = start + SKILL_SECTION_LEN;
-    if end > bytes.len() {
+    let payload = skill_payload_range(map.if_pos, None);
+    if payload.end > bytes.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "skill section truncated",
@@ -871,7 +859,7 @@ pub fn patch_skill_section(
     }
 
     let mut rebuilt = bytes.to_vec();
-    rebuilt[start..end].copy_from_slice(skills.as_slice());
+    rebuilt[payload].copy_from_slice(skills.as_slice());
     finalize_save_bytes(&mut rebuilt, false)?;
     Ok(rebuilt)
 }
@@ -923,8 +911,7 @@ impl ExpansionSection {
 }
 
 pub fn parse_quest_section(bytes: &[u8], map: &SaveSectionMap) -> io::Result<QuestSection> {
-    let section_axiom = V105SectionMarkerAxiom::default();
-    let skill_end = map.if_pos + section_axiom.if_len() + SKILL_SECTION_LEN;
+    let skill_end = skill_payload_range(map.if_pos, None).end;
     let jm0 = map.jm_positions[0];
     if jm0 < skill_end {
         return Err(io::Error::new(

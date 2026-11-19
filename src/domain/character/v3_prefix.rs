@@ -91,7 +91,7 @@ where
             "The character-stat terminator and alignment must end immediately before if",
         ));
     }
-    let player_pos = if_pos + 2 + super::skills::SKILL_SECTION_LEN;
+    let player_pos = super::skills::skill_payload_range(if_pos, None).end;
     Ok((player_pos, save_version))
 }
 
