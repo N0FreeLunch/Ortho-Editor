@@ -71,6 +71,8 @@ type Msg
     | SetWaypointsBatch DifficultyMode (List Int) Bool
     | ToggleAllDiffQuests
     | ToggleAllDiffWaypoints
+    | ToggleCurrentDiffQuests
+    | ToggleCurrentDiffWaypoints
     | SelectContainerFilter (Maybe ContainerKind)
     | ClearTempInventory
     | SelectItem (Maybe Int)
@@ -238,6 +240,50 @@ allWaypointsActiveAllDiffs session =
         && (List.length session.progression.normalWaypointsActive >= total)
         && (List.length session.progression.nightmareWaypointsActive >= total)
         && (List.length session.progression.hellWaypointsActive >= total)
+
+
+questsInDiff : DifficultyMode -> Protocol.ProgressionSummaryView -> List String
+questsInDiff diff prog =
+    case diff of
+        Normal ->
+            prog.normalQuestsCompleted
+
+        Nightmare ->
+            prog.nightmareQuestsCompleted
+
+        Hell ->
+            prog.hellQuestsCompleted
+
+
+waypointsInDiff : DifficultyMode -> Protocol.ProgressionSummaryView -> List Int
+waypointsInDiff diff prog =
+    case diff of
+        Normal ->
+            prog.normalWaypointsActive
+
+        Nightmare ->
+            prog.nightmareWaypointsActive
+
+        Hell ->
+            prog.hellWaypointsActive
+
+
+allQuestsCompletedInDiff : DifficultyMode -> SessionView -> Bool
+allQuestsCompletedInDiff diff session =
+    let
+        total =
+            List.length session.progression.questCatalog
+    in
+    total > 0 && (List.length (questsInDiff diff session.progression) >= total)
+
+
+allWaypointsActiveInDiff : DifficultyMode -> SessionView -> Bool
+allWaypointsActiveInDiff diff session =
+    let
+        total =
+            List.length session.progression.waypointCatalog
+    in
+    total > 0 && (List.length (waypointsInDiff diff session.progression) >= total)
 
 
 update : Msg -> Model -> ( Model, OutMsg )
@@ -415,6 +461,56 @@ update msg model =
                         |> Maybe.withDefault True
             in
             ( model, EmitIntent (Protocol.SetAllDiffWaypoints { active = targetActive }) )
+
+        ToggleCurrentDiffQuests ->
+            let
+                diff =
+                    model.ui.progressionDifficulty
+
+                keys =
+                    model.session
+                        |> Maybe.map (.progression >> .questCatalog >> List.map .key)
+                        |> Maybe.withDefault []
+
+                targetCompleted =
+                    model.session
+                        |> Maybe.map (not << allQuestsCompletedInDiff diff)
+                        |> Maybe.withDefault True
+            in
+            ( model
+            , EmitIntent
+                (Protocol.SetQuestsBatch
+                    { difficulty = diff
+                    , keys = keys
+                    , completed = targetCompleted
+                    }
+                )
+            )
+
+        ToggleCurrentDiffWaypoints ->
+            let
+                diff =
+                    model.ui.progressionDifficulty
+
+                bits =
+                    model.session
+                        |> Maybe.map (.progression >> .waypointCatalog >> List.map .bit)
+                        |> Maybe.withDefault []
+
+                targetActive =
+                    model.session
+                        |> Maybe.map (not << allWaypointsActiveInDiff diff)
+                        |> Maybe.withDefault True
+            in
+            ( model
+            , EmitIntent
+                (Protocol.SetWaypointsBatch
+                    { difficulty = diff
+                    , bits = bits
+                    , active = targetActive
+                    }
+                )
+            )
 
         SelectContainerFilter filterKey ->
             ( { model | ui = UiState.setContainerFilter filterKey model.ui }, NoOut )

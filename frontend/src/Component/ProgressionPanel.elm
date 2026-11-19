@@ -63,18 +63,6 @@ viewProgressionHeader ui =
                 , onClick (TogglePaintMode Deactivate)
                 ]
                 [ text "Deactivate Box (Red)" ]
-            , button
-                [ class "seg-btn"
-                , attribute "data-testid" "all-diff-quests-btn"
-                , onClick ToggleAllDiffQuests
-                ]
-                [ text "All Diff Quests" ]
-            , button
-                [ class "seg-btn"
-                , attribute "data-testid" "all-diff-waypoints-btn"
-                , onClick ToggleAllDiffWaypoints
-                ]
-                [ text "All Diff WPs" ]
             ]
         , div [ class "segmented", attribute "data-testid" "progression-diff-tabs" ]
             [ progDiffButton ui.progressionDifficulty Normal "Normal"
@@ -97,14 +85,23 @@ viewQuestsPanel ui prog =
                         "Quests (4 Acts x 3 Diff)"
                     )
                 ]
-            , span [ class "meta-line" ]
-                [ text
-                    (diffLabel ui.progressionDifficulty
-                        ++ " · "
-                        ++ String.fromInt (List.length (questsForDiff ui.progressionDifficulty prog))
-                        ++ "/"
-                        ++ String.fromInt (List.length prog.questCatalog)
-                    )
+            , div [ class "progression-section-actions" ]
+                [ span [ class "meta-line" ]
+                    [ text
+                        (diffLabel ui.progressionDifficulty
+                            ++ " · "
+                            ++ String.fromInt (List.length (questsForDiff ui.progressionDifficulty prog))
+                            ++ "/"
+                            ++ String.fromInt (List.length prog.questCatalog)
+                        )
+                    ]
+                , button
+                    [ class "seg-btn"
+                    , attribute "data-testid" "all-diff-quests-btn"
+                    , title ("Toggle all quests in " ++ diffLabel ui.progressionDifficulty)
+                    , onClick ToggleCurrentDiffQuests
+                    ]
+                    [ text "Diff Quests" ]
                 ]
             ]
         , div
@@ -276,14 +273,23 @@ viewWaypointsPanel ui prog =
                         "Waypoints (4 Acts)"
                     )
                 ]
-            , span [ class "meta-line" ]
-                [ text
-                    (diffLabel activeDiff
-                        ++ " · "
-                        ++ String.fromInt (List.length activeWaypoints)
-                        ++ "/"
-                        ++ String.fromInt (List.length prog.waypointCatalog)
-                    )
+            , div [ class "progression-section-actions" ]
+                [ span [ class "meta-line" ]
+                    [ text
+                        (diffLabel activeDiff
+                            ++ " · "
+                            ++ String.fromInt (List.length activeWaypoints)
+                            ++ "/"
+                            ++ String.fromInt (List.length prog.waypointCatalog)
+                        )
+                    ]
+                , button
+                    [ class "seg-btn"
+                    , attribute "data-testid" "all-diff-waypoints-btn"
+                    , title ("Toggle all waypoints in " ++ diffLabel activeDiff)
+                    , onClick ToggleCurrentDiffWaypoints
+                    ]
+                    [ text "Diff WPs" ]
                 ]
             ]
         , div

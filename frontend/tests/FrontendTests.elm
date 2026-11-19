@@ -3277,15 +3277,17 @@ suite =
                             |> Event.simulate Event.click
                             |> Event.expect (TogglePaintMode State.UiState.Deactivate)
                     , \_ ->
-                        headerQuery
+                        htmlQuery
+                            |> Query.find [ testId "quests-panel" ]
                             |> Query.find [ testId "all-diff-quests-btn" ]
                             |> Event.simulate Event.click
-                            |> Event.expect ToggleAllDiffQuests
+                            |> Event.expect ToggleCurrentDiffQuests
                     , \_ ->
-                        headerQuery
+                        htmlQuery
+                            |> Query.find [ testId "waypoint-matrix" ]
                             |> Query.find [ testId "all-diff-waypoints-btn" ]
                             |> Event.simulate Event.click
-                            |> Event.expect ToggleAllDiffWaypoints
+                            |> Event.expect ToggleCurrentDiffWaypoints
                     , \_ ->
                         headerQuery
                             |> Query.find [ testId "prog-diff-nightmare" ]
@@ -3303,6 +3305,71 @@ suite =
                         htmlQuery
                             |> Query.find [ testId "wp-tile-1" ]
                             |> Query.has [ Selector.text "Cold Plains" ]
+                    ]
+                    ()
+        , test "ToggleCurrentDiffQuests and ToggleCurrentDiffWaypoints target only selected difficulty" <|
+            \_ ->
+                let
+                    ( _, outNormalQuests ) =
+                        Update.update ToggleCurrentDiffQuests loadedModel
+
+                    ( nmModel, _ ) =
+                        Update.update (SelectProgressionDifficulty Nightmare) loadedModel
+
+                    ( _, outNmWps ) =
+                        Update.update ToggleCurrentDiffWaypoints nmModel
+
+                    fullNormalWpModel =
+                        { loadedModel
+                            | session =
+                                Maybe.map
+                                    (\s ->
+                                        let
+                                            prog =
+                                                s.progression
+                                        in
+                                        { s | progression = { prog | normalWaypointsActive = [ 0, 1 ] } }
+                                    )
+                                    loadedModel.session
+                        }
+
+                    ( _, outNormalWpsOff ) =
+                        Update.update ToggleCurrentDiffWaypoints fullNormalWpModel
+                in
+                Expect.all
+                    [ \_ ->
+                        Expect.equal
+                            (EmitIntent
+                                (Protocol.SetQuestsBatch
+                                    { difficulty = Normal
+                                    , keys = [ "a1q1", "a1q2", "a5q3" ]
+                                    , completed = True
+                                    }
+                                )
+                            )
+                            outNormalQuests
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent
+                                (Protocol.SetWaypointsBatch
+                                    { difficulty = Nightmare
+                                    , bits = [ 0, 1 ]
+                                    , active = True
+                                    }
+                                )
+                            )
+                            outNmWps
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent
+                                (Protocol.SetWaypointsBatch
+                                    { difficulty = Normal
+                                    , bits = [ 0, 1 ]
+                                    , active = False
+                                    }
+                                )
+                            )
+                            outNormalWpsOff
                     ]
                     ()
         ]
