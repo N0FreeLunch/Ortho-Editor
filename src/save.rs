@@ -48,17 +48,9 @@ pub struct Save {
 }
 
 pub fn class_name(class_id: u8) -> &'static str {
-    match class_id {
-        0 => "Amazon",
-        1 => "Sorceress",
-        2 => "Necromancer",
-        3 => "Paladin",
-        4 => "Barbarian",
-        5 => "Druid",
-        6 => "Assassin",
-        7 => "Warlock",
-        _ => "Unknown",
-    }
+    crate::data::char_stats::CHAR_STATS
+        .get(usize::from(class_id))
+        .map_or("Unknown", |row| row.class)
 }
 
 /// Returns the base skill ID for a given character class.
