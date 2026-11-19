@@ -737,19 +737,18 @@ pub fn try_apply_item_mutation(
     let is_alpha = version == 105;
 
     // Read player items with version-aware detection (supports modern v3, alpha, legacy)
-    let (mut items, slot_lookup): (Vec<Item>, Box<dyn Fn(usize) -> Option<&'static str>>) =
+    let (mut items, dialect) =
         if let Ok(stream) = crate::domain::item::stream::PlayerItemStream::read(bytes, huffman) {
-            let slots: Vec<Option<&'static str>> = stream.items.iter().map(|it| stream.placement(it).equipment_slot).collect();
-            (stream.items, Box::new(move |idx| slots.get(idx).copied().flatten()))
+            (stream.items, Some(stream.dialect))
         } else {
             let fallback_items = Item::read_player_items(bytes, huffman, is_alpha)
                 .map_err(|e| crate::domain::contracts::ItemContractError::ValidationFailed(format!("Failed to read player items: {}", e)))?;
-            (fallback_items, Box::new(|_| None))
+            (fallback_items, None)
         };
 
     let mut matched_idx = None;
     for (idx, item) in items.iter().enumerate() {
-        let equipment_slot = slot_lookup(idx);
+        let equipment_slot = dialect.and_then(|dialect| dialect.placement(item).equipment_slot);
 
         if contract.target.matches(idx, item, equipment_slot) {
             matched_idx = Some(idx);
