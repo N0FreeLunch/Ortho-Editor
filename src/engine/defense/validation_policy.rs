@@ -2,7 +2,7 @@
 
 use crate::data::DataRepository;
 use crate::data::item_specs::get_base_item_spec;
-use crate::domain::stats::{stat_save_add, stat_save_bits};
+use crate::domain::stats::fits_unsigned_save_field;
 use crate::engine::validation::model::{ValidationWarning, WarningConfidenceTier};
 use crate::item::{Item, ItemQuality};
 
@@ -40,15 +40,7 @@ pub(crate) fn stored_defense_warnings(item: &Item) -> Vec<ValidationWarning> {
         );
         return warnings;
     };
-    let representable = stat_save_bits(31)
-        .zip(stat_save_add(31))
-        .is_some_and(|(bits, add)| {
-            if !(1..=32).contains(&bits) {
-                return false;
-            }
-            let encoded = i64::from(base) + i64::from(add);
-            encoded >= 0 && encoded < (1_i64 << bits)
-        });
+    let representable = fits_unsigned_save_field(31, base);
     if !representable {
         warn(
             "defense_encoding",

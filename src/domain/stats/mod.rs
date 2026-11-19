@@ -53,3 +53,11 @@ pub fn stat_save_bits(stat_id: u32) -> Option<u32> {
         .find(|stat| stat.id == stat_id)
         .map(|stat| stat.save_bits as u32)
 }
+
+/// Check whether an unsigned logical scalar fits its stored field after SaveAdd.
+pub(crate) fn fits_unsigned_save_field(stat_id: u32, value: u32) -> bool {
+    STAT_COSTS.iter().find(|s| s.id == stat_id).is_some_and(|s| {
+        let encoded = i64::from(value) + i64::from(s.save_add);
+        (1..=32).contains(&s.save_bits) && encoded >= 0 && encoded < (1_i64 << s.save_bits)
+    })
+}

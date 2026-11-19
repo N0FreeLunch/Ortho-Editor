@@ -5,6 +5,7 @@ use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::DataRepository;
 use crate::data::set_items::SET_ITEMS;
 use crate::data::stat_costs::STAT_COSTS;
+use crate::domain::stats::fits_unsigned_save_field;
 use crate::engine::is_explicit_v105;
 use crate::domain::item::type_hierarchy::get_all_item_types;
 use crate::item::{Item, ItemProperty, ItemQuality};
@@ -48,13 +49,6 @@ pub(crate) enum DurabilityDisplay {
         base: u32,
         reason: DurabilityContextError,
     },
-}
-
-fn stored_scalar(id: u32, value: u32) -> bool {
-    STAT_COSTS.iter().find(|s| s.id == id).is_some_and(|s| {
-        let encoded = i64::from(value) + i64::from(s.save_add);
-        (1..=32).contains(&s.save_bits) && encoded >= 0 && encoded < (1_i64 << s.save_bits)
-    })
 }
 
 #[derive(Default)]
@@ -246,8 +240,8 @@ pub(crate) fn displayed_durability(
     let calculate = || {
         if item.body.max_durability != item.max_durability
             || item.body.current_durability != item.current_durability
-            || !stored_scalar(73, base)
-            || !stored_scalar(72, current)
+            || !fits_unsigned_save_field(73, base)
+            || !fits_unsigned_save_field(72, current)
             || item.header.is_identified != item.is_identified
             || !ITEM_TEMPLATES
                 .iter()
