@@ -2184,9 +2184,18 @@ body.is-drag-painting * {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 8px 10px;
+  min-height: 76px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 6px;
+}
+
+.quest-detail-bar-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .quest-detail-bar-head {
@@ -2217,6 +2226,47 @@ body.is-drag-painting * {
 .quest-detail-bar-actions .seg-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.quest-status-btn.status-unstarted {
+  background: var(--bg-card);
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+.quest-status-btn.status-in-progress {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(192, 132, 252, 0.72);
+  color: #d8b4fe;
+}
+
+.quest-status-btn.status-reward-pending {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+.quest-detail-bar.diff-normal .quest-status-btn.status-completed {
+  background: rgba(201, 162, 74, 0.2);
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+}
+
+.quest-detail-bar.diff-nm .quest-status-btn.status-completed {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: var(--q-rare);
+  color: var(--q-rare);
+}
+
+.quest-detail-bar.diff-hell .quest-status-btn.status-completed {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--c-danger);
+  color: var(--c-danger);
+}
+
+.quest-status-btn.is-active {
+  font-weight: 700;
+  box-shadow: 0 0 0 1.5px currentColor;
 }
 
 .quest-cell-dot.empty {

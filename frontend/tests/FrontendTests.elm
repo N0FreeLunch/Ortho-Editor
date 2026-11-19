@@ -866,7 +866,7 @@ suite =
                             |> Query.fromHtml
                             |> Query.find [ testId "quest-tile-a1q1" ]
                             |> Event.simulate Event.click
-                            |> Event.expect (ClickQuestTile Normal "a1q1")
+                            |> Event.expect (CycleOrSelectQuest Normal "a1q1")
                     , \_ ->
                         Workspace.view progModel
                             |> Query.fromHtml
@@ -1135,7 +1135,7 @@ suite =
                             |> Query.fromHtml
                             |> Query.find [ testId "quest-tile-nightmare-a1q1" ]
                             |> Event.simulate Event.click
-                            |> Event.expect (ClickQuestTile Nightmare "a1q1")
+                            |> Event.expect (CycleOrSelectQuest Nightmare "a1q1")
                     ]
                     ()
         , test "Cycle 11 View A renders item images, bottom-up belt coordinates (y=0 -> top 122px), and hover item tooltip" <|
@@ -3419,36 +3419,85 @@ suite =
                                 ]
                     ]
                     ()
-        , test "Right-clicking a quest opens detail bar and gates Reward Pending by hasNpcReward" <|
+        , test "Left-clicking a quest selects first then cycles semantic stages in sync with detail bar" <|
             \_ ->
                 let
-                    ( mSelectedReward, _ ) =
-                        Update.update (SelectQuestTarget (Just { difficulty = Normal, key = "a1q1" })) loadedModel
+                    ( mFirstClick, outFirstClick ) =
+                        Update.update (CycleOrSelectQuest Normal "a1q1") loadedModel
 
-                    ( mSelectedNoReward, _ ) =
-                        Update.update (SelectQuestTarget (Just { difficulty = Normal, key = "a1q2" })) loadedModel
+                    ( _, outSecondClickCompletedToUnstarted ) =
+                        Update.update (CycleOrSelectQuest Normal "a1q1") mFirstClick
+
+                    ( mSelectedRewardQuest, _ ) =
+                        Update.update (SelectQuestTarget (Just { difficulty = Normal, key = "a5q3" })) loadedModel
+
+                    ( _, outCycleReward ) =
+                        Update.update (CycleOrSelectQuest Normal "a5q3") mSelectedRewardQuest
+
+                    ( mSelectedNoRewardInProg, _ ) =
+                        Update.update (SelectQuestTarget (Just { difficulty = Normal, key = "a1q2" }))
+                            { loadedModel
+                                | session =
+                                    Maybe.map
+                                        (\s ->
+                                            let
+                                                prog =
+                                                    s.progression
+                                            in
+                                            { s
+                                                | progression =
+                                                    { prog
+                                                        | normalQuestStates =
+                                                            [ { key = "a1q2", status = Protocol.QuestInProgress, rawState = 4 } ]
+                                                    }
+                                            }
+                                        )
+                                        loadedModel.session
+                            }
+
+                    ( _, outCycleNoReward ) =
+                        Update.update (CycleOrSelectQuest Normal "a1q2") mSelectedNoRewardInProg
                 in
                 Expect.all
                     [ \_ ->
                         Workspace.view loadedModel
                             |> Query.fromHtml
-                            |> Query.find [ testId "quest-tile-a1q1" ]
-                            |> Event.simulate (Event.custom "contextmenu" (Json.Encode.object []))
-                            |> Event.expect (SelectQuestTarget (Just { difficulty = Normal, key = "a1q1" }))
+                            |> Query.find [ testId "quest-detail-bar" ]
+                            |> Query.has [ Selector.class "is-empty" ]
                     , \_ ->
-                        Workspace.view mSelectedReward
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                            |> Query.find [ testId "quest-tile-a1q1" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (CycleOrSelectQuest Normal "a1q1")
+                    , \_ -> Expect.equal NoOut outFirstClick
+                    , \_ -> Expect.equal (Just { difficulty = Normal, key = "a1q1" }) mFirstClick.ui.selectedQuestTarget
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetQuestSemanticStatus { difficulty = Normal, key = "a1q1", status = Protocol.QuestUnstarted }))
+                            outSecondClickCompletedToUnstarted
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetQuestSemanticStatus { difficulty = Normal, key = "a5q3", status = Protocol.QuestRewardPending }))
+                            outCycleReward
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntent (Protocol.SetQuestSemanticStatus { difficulty = Normal, key = "a1q2", status = Protocol.QuestCompleted }))
+                            outCycleNoReward
+                    , \_ ->
+                        Workspace.view mFirstClick
                             |> Query.fromHtml
                             |> Expect.all
                                 [ Query.find [ testId "quest-detail-bar" ]
-                                    >> Query.has [ Selector.text "Den of Evil", Selector.text "[0x1001]" ]
+                                    >> Query.has [ Selector.class "diff-normal", Selector.text "Den of Evil", Selector.text "[0x1001]" ]
                                 , Query.find [ testId "quest-status-reward-pending" ]
-                                    >> Query.has [ Selector.attribute (Html.Attributes.disabled False) ]
+                                    >> Query.has [ Selector.class "status-reward-pending", Selector.attribute (Html.Attributes.disabled False) ]
                                 , Query.find [ testId "quest-status-reward-pending" ]
                                     >> Event.simulate Event.click
                                     >> Event.expect (SetQuestSemanticStatus Normal "a1q1" Protocol.QuestRewardPending)
                                 ]
                     , \_ ->
-                        Workspace.view mSelectedNoReward
+                        Workspace.view mSelectedNoRewardInProg
                             |> Query.fromHtml
                             |> Query.find [ testId "quest-status-reward-pending" ]
                             |> Query.has [ Selector.attribute (Html.Attributes.disabled True) ]

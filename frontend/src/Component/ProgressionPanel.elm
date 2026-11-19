@@ -163,7 +163,10 @@ viewQuestDetailBar : UiState -> ProgressionSummaryView -> Html Msg
 viewQuestDetailBar ui prog =
     case ui.selectedQuestTarget of
         Nothing ->
-            text ""
+            div [ class "quest-detail-bar is-empty", attribute "data-testid" "quest-detail-bar" ]
+                [ div [ class "quest-detail-bar-empty" ]
+                    [ text "퀘스트를 클릭하면 상세 설명과 4단계 상태 편집 버튼이 표시됩니다." ]
+                ]
 
         Just target ->
             let
@@ -174,7 +177,10 @@ viewQuestDetailBar ui prog =
             in
             case maybeEntry of
                 Nothing ->
-                    text ""
+                    div [ class "quest-detail-bar is-empty", attribute "data-testid" "quest-detail-bar" ]
+                        [ div [ class "quest-detail-bar-empty" ]
+                            [ text "퀘스트를 클릭하면 상세 설명과 4단계 상태 편집 버튼이 표시됩니다." ]
+                        ]
 
                 Just entry ->
                     let
@@ -214,8 +220,19 @@ viewQuestDetailBar ui prog =
 
                             else
                                 entry.descEn
+
+                        diffCardClass =
+                            case target.difficulty of
+                                Normal ->
+                                    "diff-normal"
+
+                                Nightmare ->
+                                    "diff-nm"
+
+                                Hell ->
+                                    "diff-hell"
                     in
-                    div [ class "quest-detail-bar", attribute "data-testid" "quest-detail-bar" ]
+                    div [ class ("quest-detail-bar " ++ diffCardClass), attribute "data-testid" "quest-detail-bar" ]
                         [ div [ class "quest-detail-bar-head" ]
                             [ div [ class "quest-detail-bar-title" ]
                                 [ text titleText
@@ -235,19 +252,19 @@ viewQuestDetailBar ui prog =
                             div [ class "quest-detail-bar-desc" ] [ text descText ]
                         , div [ class "quest-detail-bar-actions" ]
                             [ button
-                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestUnstarted ) ]
+                                [ classList [ ( "seg-btn quest-status-btn status-unstarted", True ), ( "is-active", currentStatus == QuestUnstarted ) ]
                                 , attribute "data-testid" "quest-status-unstarted"
                                 , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestUnstarted)
                                 ]
                                 [ text "Unstarted" ]
                             , button
-                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestInProgress ) ]
+                                [ classList [ ( "seg-btn quest-status-btn status-in-progress", True ), ( "is-active", currentStatus == QuestInProgress ) ]
                                 , attribute "data-testid" "quest-status-in-progress"
                                 , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestInProgress)
                                 ]
                                 [ text "In Progress" ]
                             , button
-                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestRewardPending ) ]
+                                [ classList [ ( "seg-btn quest-status-btn status-reward-pending", True ), ( "is-active", currentStatus == QuestRewardPending ) ]
                                 , attribute "data-testid" "quest-status-reward-pending"
                                 , disabled (not entry.hasNpcReward)
                                 , title
@@ -261,7 +278,7 @@ viewQuestDetailBar ui prog =
                                 ]
                                 [ text "Reward Pending" ]
                             , button
-                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestCompleted ) ]
+                                [ classList [ ( "seg-btn quest-status-btn status-completed", True ), ( "is-active", currentStatus == QuestCompleted ) ]
                                 , attribute "data-testid" "quest-status-completed"
                                 , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestCompleted)
                                 ]
@@ -378,15 +395,8 @@ viewQuestDot diff isActiveDiff paintMode completed questStates selectedTarget ma
          , attribute "data-marquee-kind" "quests"
          , attribute "data-marquee-id" marqueeId
          , title (formatQuestTooltip entry maybeState isCompleted)
-         , custom "contextmenu"
-            (Json.Decode.succeed
-                { message = SelectQuestTarget (Just { difficulty = diff, key = entry.key })
-                , stopPropagation = True
-                , preventDefault = True
-                }
-            )
          ]
-            ++ tileInteractionAttrs paintMode diff DragQuests interactionId (ClickQuestTile diff entry.key)
+            ++ tileInteractionAttrs paintMode diff DragQuests interactionId (CycleOrSelectQuest diff entry.key)
         )
         [ text ("Q" ++ String.fromInt entry.index) ]
 

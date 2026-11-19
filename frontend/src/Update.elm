@@ -75,6 +75,7 @@ type Msg
     | ToggleCurrentDiffQuests
     | ToggleCurrentDiffWaypoints
     | SelectQuestTarget (Maybe { difficulty : DifficultyMode, key : String })
+    | CycleOrSelectQuest DifficultyMode String
     | SetQuestSemanticStatus DifficultyMode String QuestSemanticStatusView
     | SelectContainerFilter (Maybe ContainerKind)
     | ClearTempInventory
@@ -256,6 +257,39 @@ questsInDiff diff prog =
 
         Hell ->
             prog.hellQuestsCompleted
+
+
+questStatesForDiff : DifficultyMode -> Protocol.ProgressionSummaryView -> List Protocol.QuestStateEntryView
+questStatesForDiff diff prog =
+    case diff of
+        Normal ->
+            prog.normalQuestStates
+
+        Nightmare ->
+            prog.nightmareQuestStates
+
+        Hell ->
+            prog.hellQuestStates
+
+
+nextQuestStatus : Bool -> QuestSemanticStatusView -> QuestSemanticStatusView
+nextQuestStatus hasReward current =
+    case current of
+        Protocol.QuestUnstarted ->
+            Protocol.QuestInProgress
+
+        Protocol.QuestInProgress ->
+            if hasReward then
+                Protocol.QuestRewardPending
+
+            else
+                Protocol.QuestCompleted
+
+        Protocol.QuestRewardPending ->
+            Protocol.QuestCompleted
+
+        Protocol.QuestCompleted ->
+            Protocol.QuestUnstarted
 
 
 waypointsInDiff : DifficultyMode -> Protocol.ProgressionSummaryView -> List Int
@@ -517,6 +551,51 @@ update msg model =
 
         SelectQuestTarget maybeTarget ->
             ( { model | ui = UiState.setSelectedQuestTarget maybeTarget model.ui }, NoOut )
+
+        CycleOrSelectQuest diff key ->
+            if model.ui.selectedQuestTarget /= Just { difficulty = diff, key = key } then
+                ( { model | ui = UiState.setSelectedQuestTarget (Just { difficulty = diff, key = key }) model.ui }, NoOut )
+
+            else
+                let
+                    nextStatus =
+                        case model.session of
+                            Nothing ->
+                                Protocol.QuestCompleted
+
+                            Just session ->
+                                let
+                                    hasReward =
+                                        session.progression.questCatalog
+                                            |> List.filter (\q -> q.key == key)
+                                            |> List.head
+                                            |> Maybe.map .hasNpcReward
+                                            |> Maybe.withDefault False
+
+                                    currentStatus =
+                                        questStatesForDiff diff session.progression
+                                            |> List.filter (\s -> s.key == key)
+                                            |> List.head
+                                            |> Maybe.map .status
+                                            |> Maybe.withDefault
+                                                (if List.member key (questsInDiff diff session.progression) then
+                                                    Protocol.QuestCompleted
+
+                                                 else
+                                                    Protocol.QuestUnstarted
+                                                )
+                                in
+                                nextQuestStatus hasReward currentStatus
+                in
+                ( model
+                , EmitIntent
+                    (Protocol.SetQuestSemanticStatus
+                        { difficulty = diff
+                        , key = key
+                        , status = nextStatus
+                        }
+                    )
+                )
 
         SetQuestSemanticStatus diff key status ->
             ( model
