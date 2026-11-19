@@ -82,9 +82,7 @@ pub fn check_staffmod_legitimacy_detailed(item: &Item) -> Vec<ValidationWarning>
             // Pick the highest level required among satisfied tiers
             // (normally only one, but theoretically could match overlapping ranges)
             let req_lvl = violations.into_iter().max().unwrap();
-            let stat_name = crate::data::stat_costs::STAT_COSTS
-                .iter()
-                .find(|s| s.id == prop.stat_id)
+            let stat_name = crate::domain::stats::stat_cost(prop.stat_id)
                 .map(|s| s.name)
                 .unwrap_or("unknown");
 

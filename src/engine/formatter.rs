@@ -42,9 +42,7 @@ fn stat_ranges_to_properties(ranges: &[crate::data::item_specs::ItemStatRange]) 
     ranges
         .iter()
         .map(|r| {
-            let name = crate::data::stat_costs::STAT_COSTS
-                .iter()
-                .find(|s| s.id == r.stat_id)
+            let name = crate::domain::stats::stat_cost(r.stat_id)
                 .map_or("", |s| s.name);
             ItemProperty::new(
                 r.stat_id,

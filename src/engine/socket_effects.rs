@@ -4,7 +4,9 @@
 use crate::data::gems::{determine_gem_slot, get_gem_stats, GEMS};
 use crate::data::DataRepository;
 use crate::data::item_specs::ItemStatRange;
+#[cfg(test)]
 use crate::data::stat_costs::STAT_COSTS;
+use crate::domain::stats::stat_cost;
 use crate::domain::stats::entity::StatMaturityTier;
 use crate::engine::is_explicit_v105;
 use crate::domain::item::type_hierarchy::get_all_item_types;
@@ -42,10 +44,7 @@ impl SocketContextError {
 
 /// Creates a virtual property with an explicit param, stat id, and value.
 pub fn virtual_property_with_param(id: u32, param: u32, value: i32) -> ItemProperty {
-    let name = STAT_COSTS
-        .iter()
-        .find(|s| s.id == id)
-        .map_or("", |s| s.name);
+    let name = stat_cost(id).map_or("", |s| s.name);
     ItemProperty::new(id, name.into(), param, value, value, ItemBitRange::default())
 }
 
@@ -89,9 +88,7 @@ fn saved_scalar(p: &ItemProperty) -> bool {
         && p.opaque_bits.is_none()
         && p.maturity == StatMaturityTier::Verified
         && p.param == 0
-        && STAT_COSTS
-            .iter()
-            .find(|s| s.id == p.stat_id)
+        && stat_cost(p.stat_id)
             .is_some_and(|s| {
                 (1..=31).contains(&s.save_bits)
                     && p.raw_value >= 0
@@ -312,7 +309,7 @@ pub(crate) fn project(item: &Item) -> Result<Option<Vec<ItemProperty>>, SocketCo
                     .iter()
                     .map(|p| {
                         let mut p = p.clone();
-                        if let Some(cost) = STAT_COSTS.iter().find(|s| s.id == p.stat_id) {
+                        if let Some(cost) = stat_cost(p.stat_id) {
                             p.raw_value = p.value.checked_add(cost.save_add).unwrap_or(i32::MIN);
                         }
                         p
@@ -401,10 +398,7 @@ fn compose(
             total.raw_value = total.value;
         } else {
             positions.insert(key, output.len());
-            let name = STAT_COSTS
-                .iter()
-                .find(|s| s.id == effect.stat_id)
-                .map_or("", |s| s.name);
+            let name = stat_cost(effect.stat_id).map_or("", |s| s.name);
             output.push(ItemProperty::new(
                 effect.stat_id,
                 name.to_string(),

@@ -1,7 +1,7 @@
 //! Stat input labels, parameter previews, and choice catalogs.
 
 use crate::data::char_stats::CHAR_STATS;
-use crate::data::stat_costs::STAT_COSTS;
+use crate::domain::stats::stat_cost;
 use crate::domain::stats::semantics::{
     decode_skill_param, decode_skill_tab_param, monster_type_name, skill_name,
     skill_tab_template as skill_tab_name,
@@ -12,7 +12,7 @@ pub const STAT_ID_ELEM_SKILL: u32 = 126;
 
 /// Returns `(value_label, param_label, param_kind_tag)` for UI input guidance.
 pub fn describe_stat_input_labels(stat_id: u32) -> (&'static str, &'static str, &'static str) {
-    let Some(cost) = STAT_COSTS.iter().find(|s| s.id == stat_id) else {
+    let Some(cost) = stat_cost(stat_id) else {
         return ("Value", "Param", "none");
     };
     if cost.save_param_bits == 0 {
@@ -37,7 +37,7 @@ pub fn describe_stat_input_labels(stat_id: u32) -> (&'static str, &'static str, 
 
 /// Formats a human-readable preview of `param` for the given `stat_id`.
 pub fn describe_stat_param_value(stat_id: u32, param: u32, language: &str) -> Option<String> {
-    let cost = STAT_COSTS.iter().find(|s| s.id == stat_id)?;
+    let cost = stat_cost(stat_id)?;
     if cost.save_param_bits == 0 {
         return None;
     }
