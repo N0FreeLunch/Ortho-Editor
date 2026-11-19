@@ -1,6 +1,8 @@
 //! Project effective durability without changing the stored base or current fields.
 
+#[cfg(test)]
 use crate::data::gems::GEMS;
+use crate::data::gems::get_gem_spec;
 use crate::data::item_codes::ITEM_TEMPLATES;
 use crate::data::DataRepository;
 #[cfg(test)]
@@ -172,7 +174,7 @@ impl Modifiers {
             {
                 return Err(DurabilityContextError::SocketContext);
             }
-            if let Some(gem) = GEMS.iter().find(|g| g.code == child.code.trim()) {
+            if let Some(gem) = get_gem_spec(&child.code) {
                 if !child.header.is_compact
                     || child
                         .properties

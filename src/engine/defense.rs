@@ -1,7 +1,7 @@
 //! Keep the explicit-v105 stored armor field separate from its display projection.
 //! These checks prove encoding/layout, not an item's unknown creation history.
 
-use crate::data::gems::GEMS;
+use crate::data::gems::get_gem_spec;
 #[cfg(test)]
 use crate::data::set_items::SET_ITEMS;
 use crate::domain::item::specification::lookup_set_item;
@@ -155,7 +155,7 @@ impl Modifiers {
             if !child.socketed_items.is_empty() {
                 return Err(DefenseContextError::SocketChild);
             }
-            if let Some(gem) = GEMS.iter().find(|g| g.code == child.code.trim()) {
+            if let Some(gem) = get_gem_spec(&child.code) {
                 // Compact gems/runes use host-specific source effects, not a second typed copy.
                 let effects = if shield {
                     gem.shield_stats

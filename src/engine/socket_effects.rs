@@ -1,7 +1,7 @@
 //! Transient socket totals for tooltips; never stored or serialized as item fields.
 //! Poison duration is an item projection, not a character or skill damage aggregate.
 
-use crate::data::gems::{determine_gem_slot, get_gem_stats, GEMS};
+use crate::data::gems::{determine_gem_slot, get_gem_spec, get_gem_stats};
 use crate::data::DataRepository;
 use crate::data::item_specs::ItemStatRange;
 #[cfg(test)]
@@ -182,7 +182,7 @@ pub(crate) fn project(item: &Item) -> Result<Option<Vec<ItemProperty>>, SocketCo
         return Ok(None);
     }
     if item.socketed_items.iter().any(|c| {
-        !GEMS.iter().any(|g| g.code == c.code.trim())
+        get_gem_spec(&c.code).is_none()
             && (c.code.trim() != "jew" || c.header.is_compact)
     }) {
         return Ok(None);
@@ -221,7 +221,7 @@ pub(crate) fn project(item: &Item) -> Result<Option<Vec<ItemProperty>>, SocketCo
         {
             return Err(SocketContextError::ChildProperties);
         }
-        if let Some(gem) = GEMS.iter().find(|g| g.code == child.code.trim()) {
+        if let Some(gem) = get_gem_spec(&child.code) {
             if !child.header.is_compact
                 || child
                     .properties
