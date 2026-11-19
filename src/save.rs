@@ -395,17 +395,7 @@ pub fn try_apply_character_mutation(
     let is_alpha = version == 105;
 
     // Snapshot existing character attributes for resulting-value boundary validation
-    let snapshot = crate::domain::contracts::CharacterSnapshot {
-        level: attrs.actual_value(12, is_alpha).unwrap_or(1).clamp(1, 99) as u8,
-        experience: attrs.actual_value(13, is_alpha).unwrap_or(0).max(0) as u32,
-        strength: attrs.actual_value(0, is_alpha).unwrap_or(1).max(0) as u32,
-        energy: attrs.actual_value(1, is_alpha).unwrap_or(1).max(0) as u32,
-        dexterity: attrs.actual_value(2, is_alpha).unwrap_or(1).max(0) as u32,
-        vitality: attrs.actual_value(3, is_alpha).unwrap_or(1).max(0) as u32,
-        stat_points: attrs.actual_value(4, is_alpha).unwrap_or(0).max(0) as u32,
-        gold_character: attrs.actual_value(14, is_alpha).unwrap_or(0).max(0) as u32,
-        gold_stash: attrs.actual_value(15, is_alpha).unwrap_or(0).max(0) as u32,
-    };
+    let snapshot = crate::domain::contracts::CharacterSnapshot::from_attributes(Some(&attrs), is_alpha);
 
     // Pre-flight boundary and invariant validation
     let evaluated = crate::domain::contracts::CharacterBoundaryValidator::validate_mutation(

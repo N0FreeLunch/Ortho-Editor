@@ -114,17 +114,7 @@ impl SaveMutationValidator {
         let validated_character = if let Some(ref char_dto) = dto.character {
             match CharacterMutationContract::try_from(char_dto.clone()) {
                 Ok(char_contract) => {
-                    let snapshot = CharacterSnapshot {
-                        level: attrs.as_ref().and_then(|a| a.actual_value(12, is_alpha)).unwrap_or(1).clamp(1, 99) as u8,
-                        experience: attrs.as_ref().and_then(|a| a.actual_value(13, is_alpha)).unwrap_or(0).max(0) as u32,
-                        strength: attrs.as_ref().and_then(|a| a.actual_value(0, is_alpha)).unwrap_or(1).max(0) as u32,
-                        energy: attrs.as_ref().and_then(|a| a.actual_value(1, is_alpha)).unwrap_or(1).max(0) as u32,
-                        dexterity: attrs.as_ref().and_then(|a| a.actual_value(2, is_alpha)).unwrap_or(1).max(0) as u32,
-                        vitality: attrs.as_ref().and_then(|a| a.actual_value(3, is_alpha)).unwrap_or(1).max(0) as u32,
-                        stat_points: attrs.as_ref().and_then(|a| a.actual_value(4, is_alpha)).unwrap_or(0).max(0) as u32,
-                        gold_character: attrs.as_ref().and_then(|a| a.actual_value(14, is_alpha)).unwrap_or(0).max(0) as u32,
-                        gold_stash: attrs.as_ref().and_then(|a| a.actual_value(15, is_alpha)).unwrap_or(0).max(0) as u32,
-                    };
+                    let snapshot = CharacterSnapshot::from_attributes(attrs.as_ref(), is_alpha);
 
                     match CharacterBoundaryValidator::validate_mutation(&snapshot, &char_contract) {
                         Ok(_) => Some(char_contract),

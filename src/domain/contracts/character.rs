@@ -306,6 +306,26 @@ pub struct CharacterSnapshot {
     pub gold_stash: u32,
 }
 
+impl CharacterSnapshot {
+    pub(crate) fn from_attributes(
+        attrs: Option<&crate::domain::stats::AttributeSection>,
+        is_alpha: bool,
+    ) -> Self {
+        let value = |stat_id| attrs.and_then(|attrs| attrs.actual_value(stat_id, is_alpha));
+        Self {
+            level: value(12).unwrap_or(1).clamp(1, 99) as u8,
+            experience: value(13).unwrap_or(0).max(0) as u32,
+            strength: value(0).unwrap_or(1).max(0) as u32,
+            energy: value(1).unwrap_or(1).max(0) as u32,
+            dexterity: value(2).unwrap_or(1).max(0) as u32,
+            vitality: value(3).unwrap_or(1).max(0) as u32,
+            stat_points: value(4).unwrap_or(0).max(0) as u32,
+            gold_character: value(14).unwrap_or(0).max(0) as u32,
+            gold_stash: value(15).unwrap_or(0).max(0) as u32,
+        }
+    }
+}
+
 /// Boundary and invariant validator for character mutations.
 /// Inspects the resulting values of relative or absolute operations against in-game and bitstream bounds.
 pub struct CharacterBoundaryValidator;
