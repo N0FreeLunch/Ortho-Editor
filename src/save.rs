@@ -1035,6 +1035,12 @@ impl Save {
             true
         };
 
+        let map = if version == 105 {
+            map_core_sections(bytes).ok()
+        } else {
+            None
+        };
+
         let header = Header {
             magic,
             version,
@@ -1054,7 +1060,6 @@ impl Save {
             .min(bytes.len())]
                 .to_vec(),
             quests: if version == 105 {
-                let map = map_core_sections(bytes).ok();
                 let start = map.as_ref().and_then(|m| m.woo_pos).unwrap_or(V105SectionMarkerAxiom::V105_QUEST_OFFSET);
                 let end = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
                 if bytes.len() >= start + 12 {
@@ -1066,7 +1071,6 @@ impl Save {
                 None
             },
             waypoints: if version == 105 {
-                let map = map_core_sections(bytes).ok();
                 let start = map.as_ref().and_then(|m| m.ws_pos).unwrap_or(V105SectionMarkerAxiom::V105_WAYPOINT_OFFSET);
                 let end = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
                 if bytes.len() >= start + 2 {
@@ -1078,7 +1082,6 @@ impl Save {
                 None
             },
             expansion: if version == 105 {
-                let map = map_core_sections(bytes).ok();
                 let start = map.as_ref().and_then(|m| m.w4_pos).unwrap_or(V105SectionMarkerAxiom::V105_NPC_OFFSET);
                 let end = V105SectionMarkerAxiom::V105_HEADER_LEN;
                 if bytes.len() >= start + 2 {
