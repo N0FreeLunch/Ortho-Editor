@@ -34,6 +34,94 @@
       const app = window.Elm.Main.init({ node, flags: null });
       window.__orthoApp = app;
 
+      (function wireMarqueeBridge() {
+        let activeDrag = null;
+
+        function rectsIntersect(a, b) {
+          return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+        }
+
+        function clearDragState() {
+          if (!activeDrag) return false;
+          activeDrag = null;
+          if (document.body) {
+            document.body.classList.remove("is-drag-painting");
+          }
+          return true;
+        }
+
+        window.addEventListener("mousedown", (e) => {
+          if (!e || e.button !== 0 || !e.target || !e.target.closest) return;
+          const container = e.target.closest(".quests-matrix-stack.is-marquee-mode, .waypoint-box.is-marquee-mode");
+          if (!container) return;
+          const kind = container.dataset.marqueeContainer;
+          if (!kind) return;
+          activeDrag = {
+            kind,
+            container,
+            anchorX: e.clientX || 0,
+            anchorY: e.clientY || 0,
+            moved: false,
+          };
+          if (document.body) {
+            document.body.classList.add("is-drag-painting");
+          }
+        }, true);
+
+        window.addEventListener("mousemove", (e) => {
+          if (!activeDrag || !e) return;
+          const curX = e.clientX || 0;
+          const curY = e.clientY || 0;
+          const dx = Math.abs(curX - activeDrag.anchorX);
+          const dy = Math.abs(curY - activeDrag.anchorY);
+          if (dx >= 4 || dy >= 4) {
+            activeDrag.moved = true;
+          }
+          if (!activeDrag.moved) return;
+
+          const bounds = {
+            left: Math.min(activeDrag.anchorX, curX),
+            top: Math.min(activeDrag.anchorY, curY),
+            right: Math.max(activeDrag.anchorX, curX),
+            bottom: Math.max(activeDrag.anchorY, curY),
+          };
+          const selector = '[data-marquee-kind="' + activeDrag.kind + '"][data-marquee-id]';
+          const candidateIds = [];
+          activeDrag.container.querySelectorAll(selector).forEach((el) => {
+            if (el.getBoundingClientRect && rectsIntersect(bounds, el.getBoundingClientRect())) {
+              if (el.dataset && el.dataset.marqueeId) {
+                candidateIds.push(el.dataset.marqueeId);
+              }
+            }
+          });
+          if (app.ports && app.ports.receiveMarqueeMove) {
+            app.ports.receiveMarqueeMove.send({ x: curX, y: curY, candidateIds });
+          }
+        });
+
+        window.addEventListener("mouseup", () => {
+          if (!clearDragState()) return;
+          if (app.ports && app.ports.receiveMarqueeUp) {
+            app.ports.receiveMarqueeUp.send(null);
+          }
+        });
+
+        window.addEventListener("blur", () => {
+          if (!clearDragState()) return;
+          if (app.ports && app.ports.receiveMarqueeCancel) {
+            app.ports.receiveMarqueeCancel.send(null);
+          }
+        });
+
+        window.addEventListener("keydown", (e) => {
+          if (e && e.key === "Escape" && clearDragState()) {
+            if (app.ports && app.ports.receiveMarqueeCancel) {
+              app.ports.receiveMarqueeCancel.send(null);
+            }
+          }
+        });
+      })();
+
       const modePill = document.getElementById("host-mode-pill");
       const fixtureSelect = document.getElementById("host-fixture-select");
       const reloadBtn = document.getElementById("host-reload-btn");

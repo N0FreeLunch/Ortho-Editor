@@ -1059,6 +1059,7 @@ button:disabled {
 .merc-slot.filled {
   border-style: solid;
   background: var(--slot-filled-bg);
+  cursor: pointer;
 }
 
 /* Selected Item Inspector + Filter Index Strip */
@@ -1197,15 +1198,89 @@ button:disabled {
    ========================================================== */
 .spec-grid {
   display: grid;
-  grid-template-columns: 380px minmax(490px, 1fr) 286px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
+  width: 100%;
   max-width: 1520px;
+  box-sizing: border-box;
   margin: 0 auto;
 }
 
+.spec-left-col,
+.spec-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.spec-lower-bento {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(380px, 1fr) minmax(640px, 1.75fr);
+  gap: 14px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+.spec-lower-left {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
 .spec-progression-wrap {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.progression-shared-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.progression-section {
+  background: rgba(0, 0, 0, 0.14);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.theme-light .progression-section {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.progression-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.progression-section-title {
+  font-family: "Cinzel", "Palatino Linotype", Georgia, serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--title-color);
+  letter-spacing: 0.02em;
 }
 
 .col1-card {
@@ -1213,6 +1288,21 @@ button:disabled {
   flex-direction: column;
   gap: 10px;
   width: 100%;
+  min-width: 0;
+}
+
+.col1-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.col1-left-stats,
+.col1-right-vitals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -1224,34 +1314,10 @@ button:disabled {
   min-width: 0;
 }
 
-.quests-panel {
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.spec-col4-stack {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(420px, 1.35fr) minmax(360px, 1fr);
-  gap: 14px;
-  align-items: start;
-  width: 100%;
-  min-width: 0;
-}
-
-.waypoints-panel {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-  width: 100%;
-  min-width: 0;
-}
-
+.quests-panel,
+.waypoints-panel,
 .merc-summary-card,
 .combat-lab-accordion {
-  grid-column: 2;
   width: 100%;
   min-width: 0;
 }
@@ -1484,6 +1550,37 @@ button:disabled {
   background: #38bdf8;
 }
 
+.skill-panel-quad-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: 140px 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.skill-q1-controls,
+.skill-q3-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.skill-deps-panel {
+  background: var(--surface-inset);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
 .skill-tree-workspace {
   display: grid;
   grid-template-columns: minmax(255px, 1.25fr) minmax(205px, 1fr);
@@ -1707,6 +1804,9 @@ button:disabled {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 12px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
   min-height: 356px;
   display: flex;
   flex-direction: column;
@@ -1865,17 +1965,68 @@ button:disabled {
 }
 
 .progression-panel.is-marquee-mode,
-.progression-panel.is-marquee-mode .matrix-tile {
+.progression-panel.is-marquee-mode .matrix-tile,
+.quests-matrix-stack.is-marquee-mode,
+.quests-matrix-stack.is-marquee-mode .quest-cell-dot:not(.empty),
+.waypoint-box.is-marquee-mode,
+.waypoint-box.is-marquee-mode .wp-node {
   user-select: none;
   -webkit-user-select: none;
   cursor: crosshair;
 }
 
+body.is-drag-painting,
+body.is-drag-painting * {
+  cursor: crosshair !important;
+  user-select: none !important;
+}
+
+.marquee-floating-root .marquee-box {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9998;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+#drag-marquee-box,
+.marquee-selection-box {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  border-radius: 4px;
+  border: 1.5px solid rgba(34, 197, 94, 0.92);
+  background: rgba(34, 197, 94, 0.18);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.28);
+}
+
+#drag-marquee-box.is-deactivate,
+.marquee-selection-box.is-deactivate {
+  border-color: rgba(239, 68, 68, 0.92);
+  background: rgba(239, 68, 68, 0.18);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.28);
+}
+
+.marquee-hit-activate {
+  outline: 2px solid #4ade80 !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25) !important;
+}
+
+.marquee-hit-deactivate {
+  outline: 2px solid #f87171 !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25) !important;
+}
+
+.progression-panel.is-marquee-mode.mode-activate,
 .progression-panel.is-marquee-mode.mode-activate .quests-panel,
 .progression-panel.is-marquee-mode.mode-activate .waypoints-panel {
   border-color: var(--c-success);
 }
 
+.progression-panel.is-marquee-mode.mode-deactivate,
 .progression-panel.is-marquee-mode.mode-deactivate .quests-panel,
 .progression-panel.is-marquee-mode.mode-deactivate .waypoints-panel {
   border-color: var(--c-danger);
@@ -1901,16 +2052,20 @@ button:disabled {
 }
 
 .quests-matrix-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
 }
 
 .quest-diff-card {
   background: var(--surface-inset);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 6px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1938,6 +2093,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
   border-bottom: 1px dashed var(--border-color);
   padding-bottom: 3px;
 }
@@ -1948,22 +2104,26 @@ button:disabled {
 }
 
 .quest-matrix-act-label {
-  font-size: 9.5px;
+  font-size: 8.5px;
   font-weight: 600;
   color: var(--text-muted);
-  min-width: 34px;
+  min-width: 24px;
+  flex-shrink: 0;
 }
 
 .quest-matrix-cells {
   display: grid;
-  grid-template-columns: repeat(6, 30px);
-  grid-template-rows: 28px;
-  gap: 3px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: 24px;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .quest-cell-dot {
-  width: 30px;
-  height: 28px;
+  width: 100%;
+  max-width: 24px;
+  height: 24px;
   padding: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -1971,7 +2131,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   color: var(--text-muted);
 }
@@ -2007,9 +2167,13 @@ button:disabled {
 /* Column 4: Waypoints 5-Act Cards */
 .waypoint-box {
   display: grid;
-  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   align-items: stretch;
+}
+
+.waypoint-box.is-classic {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .wp-act-card {
@@ -2190,45 +2354,29 @@ button:disabled {
   .header-right {
     justify-content: flex-end;
   }
-  .waypoint-box {
-    grid-template-columns: repeat(3, minmax(150px, 1fr));
+}
+
+@media (max-width: 1080px) {
+  .spec-grid,
+  .spec-lower-bento,
+  .col1-split-grid {
+    grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 1220px) {
-  .spec-grid {
-    grid-template-columns: 380px minmax(460px, 1fr);
-  }
-  .quests-panel {
-    grid-column: 1 / -1;
-  }
+@media (max-width: 900px) {
   .quests-matrix-stack {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(240px, 1fr));
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 980px) {
-  .spec-grid {
-    grid-template-columns: 1fr;
-  }
-  .spec-col4-stack {
-    grid-template-columns: 1fr;
-  }
-  .waypoints-panel,
-  .merc-summary-card,
-  .combat-lab-accordion {
-    grid-column: 1;
-    grid-row: auto;
-  }
-  .quests-matrix-stack {
-    grid-template-columns: 1fr;
-  }
   .item-inspector-dock {
     grid-template-columns: 1fr;
   }
-  .waypoint-box {
-    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  .waypoint-box,
+  .waypoint-box.is-classic {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .header-right {
     justify-content: flex-start;
@@ -2238,6 +2386,7 @@ button:disabled {
 @media (max-width: 620px) {
   .quests-matrix-stack,
   .waypoint-box,
+  .waypoint-box.is-classic,
   .merc-stats-grid,
   .merc-res-grid {
     grid-template-columns: 1fr;

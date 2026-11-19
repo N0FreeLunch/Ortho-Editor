@@ -1,4 +1,4 @@
-module Component.ProgressionPanel exposing (view, viewQuestsPanel, viewWaypointsPanel)
+module Component.ProgressionPanel exposing (view, viewMarqueeOverlay, viewMarqueePreview, viewQuestsPanel, viewWaypointsPanel)
 
 import Generated.Protocol
     exposing
@@ -8,8 +8,8 @@ import Generated.Protocol
         , WaypointCatalogEntryView
         )
 import Html exposing (Html, button, div, section, span, text)
-import Html.Attributes exposing (attribute, class, classList, title)
-import Html.Events exposing (on, onClick, stopPropagationOn)
+import Html.Attributes exposing (attribute, class, classList, id, style, title)
+import Html.Events exposing (custom, on, onClick)
 import Json.Decode
 import State.UiState exposing (DragKind(..), MarqueeSelection, PaintMode(..), UiState)
 import Update exposing (Msg(..))
@@ -30,7 +30,8 @@ view ui prog =
     in
     section
         ([ classList
-            [ ( "spec-progression-wrap", True )
+            [ ( "glass-panel", True )
+            , ( "spec-progression-wrap", True )
             , ( "progression-panel", True )
             , ( "is-marquee-mode", ui.paintMode /= Nothing )
             , ( "mode-activate", ui.paintMode == Just Activate )
@@ -40,23 +41,16 @@ view ui prog =
          ]
             ++ panelMouseAttrs
         )
-        [ viewQuestsPanel ui prog
+        [ viewProgressionHeader ui
+        , viewQuestsPanel ui prog
         , viewWaypointsPanel ui prog
         ]
 
 
-viewQuestsPanel : UiState -> ProgressionSummaryView -> Html Msg
-viewQuestsPanel ui prog =
-    section [ class "glass-panel quests-panel", attribute "data-testid" "quests-panel" ]
-        [ div [ class "panel-header" ]
-            [ div [ class "panel-title" ] [ text "Quests (5 Acts x 3 Diff)" ]
-            , div [ class "segmented" ]
-                [ progDiffButton ui.progressionDifficulty Normal "Normal"
-                , progDiffButton ui.progressionDifficulty Nightmare "Nightmare"
-                , progDiffButton ui.progressionDifficulty Hell "Hell"
-                ]
-            ]
-        , div [ class "paint-toolbar", attribute "data-testid" "paint-toolbar" ]
+viewProgressionHeader : UiState -> Html Msg
+viewProgressionHeader ui =
+    div [ class "panel-header progression-shared-header", attribute "data-testid" "progression-header" ]
+        [ div [ class "paint-toolbar", attribute "data-testid" "paint-toolbar" ]
             [ button
                 [ classList [ ( "paint-btn", True ), ( "paint-activate", True ), ( "is-active", ui.paintMode == Just Activate ) ]
                 , attribute "data-testid" "paint-mode-activate"
@@ -82,13 +76,47 @@ viewQuestsPanel ui prog =
                 ]
                 [ text "All Diff WPs" ]
             ]
-        , case ui.marquee of
-            Just box ->
-                viewMarqueePreview ui.progressionDifficulty box
+        , div [ class "segmented", attribute "data-testid" "progression-diff-tabs" ]
+            [ progDiffButton ui.progressionDifficulty Normal "Normal"
+            , progDiffButton ui.progressionDifficulty Nightmare "Nightmare"
+            , progDiffButton ui.progressionDifficulty Hell "Hell"
+            ]
+        ]
 
-            Nothing ->
-                text ""
-        , div [ class "quests-matrix-stack", attribute "data-testid" "quest-matrix" ]
+
+viewQuestsPanel : UiState -> ProgressionSummaryView -> Html Msg
+viewQuestsPanel ui prog =
+    section [ class "progression-section quests-panel", attribute "data-testid" "quests-panel" ]
+        [ div [ class "progression-section-header" ]
+            [ div [ class "progression-section-title" ]
+                [ text
+                    (if prog.isExpansion then
+                        "Quests (5 Acts x 3 Diff)"
+
+                     else
+                        "Quests (4 Acts x 3 Diff)"
+                    )
+                ]
+            , span [ class "meta-line" ]
+                [ text
+                    (diffLabel ui.progressionDifficulty
+                        ++ " · "
+                        ++ String.fromInt (List.length (questsForDiff ui.progressionDifficulty prog))
+                        ++ "/"
+                        ++ String.fromInt (List.length prog.questCatalog)
+                    )
+                ]
+            ]
+        , div
+            ([ classList
+                [ ( "quests-matrix-stack", True )
+                , ( "is-marquee-mode", ui.paintMode /= Nothing )
+                ]
+             , attribute "data-testid" "quest-matrix"
+             , attribute "data-marquee-container" "quests"
+             ]
+                ++ containerMarqueeAttrs ui.paintMode DragQuests
+            )
             [ viewQuestDiffCard ui prog Normal "diff-normal" "Normal"
             , viewQuestDiffCard ui prog Nightmare "diff-nm" "Nightmare"
             , viewQuestDiffCard ui prog Hell "diff-hell" "Hell"
@@ -169,15 +197,30 @@ viewQuestDot diff isActiveDiff paintMode completed maybeMarquee entry =
         isCompleted =
             List.member entry.key completed
 
-        inMarquee =
-            isActiveDiff
-                && (case maybeMarquee of
-                        Just box ->
-                            box.kind == DragQuests && List.member entry.key box.candidateIds
+        marqueeId =
+            diffSlug diff ++ ":" ++ entry.key
 
-                        Nothing ->
-                            False
-                   )
+        marqueeMatch =
+            case maybeMarquee of
+                Just box ->
+                    if box.kind == DragQuests && (List.member marqueeId box.candidateIds || (isActiveDiff && List.member entry.key box.candidateIds)) then
+                        Just box.mode
+
+                    else
+                        Nothing
+
+                Nothing ->
+                    Nothing
+
+        inMarquee =
+            marqueeMatch /= Nothing
+
+        interactionId =
+            if isActiveDiff then
+                entry.key
+
+            else
+                marqueeId
 
         testIdAttr =
             if isActiveDiff then
@@ -193,11 +236,15 @@ viewQuestDot diff isActiveDiff paintMode completed maybeMarquee entry =
             , ( "is-completed", isCompleted )
             , ( "completed", isCompleted )
             , ( "is-marquee-target", inMarquee )
+            , ( "marquee-hit-activate", marqueeMatch == Just Activate )
+            , ( "marquee-hit-deactivate", marqueeMatch == Just Deactivate )
             ]
          , attribute "data-testid" testIdAttr
+         , attribute "data-marquee-kind" "quests"
+         , attribute "data-marquee-id" marqueeId
          , title (entry.key ++ " · " ++ entry.name)
          ]
-            ++ tileInteractionAttrs paintMode diff DragQuests entry.key (ClickQuestTile diff entry.key)
+            ++ tileInteractionAttrs paintMode diff DragQuests interactionId (ClickQuestTile diff entry.key)
         )
         [ text ("Q" ++ String.fromInt entry.index) ]
 
@@ -218,13 +265,37 @@ viewWaypointsPanel ui prog =
             else
                 [ 1, 2, 3, 4 ]
     in
-    section [ class "glass-panel waypoints-panel", attribute "data-testid" "waypoint-matrix" ]
-        [ div [ class "panel-header" ]
-            [ div [ class "panel-title" ] [ text "Waypoints (5 Acts)" ]
+    section [ class "progression-section waypoints-panel", attribute "data-testid" "waypoint-matrix" ]
+        [ div [ class "progression-section-header" ]
+            [ div [ class "progression-section-title" ]
+                [ text
+                    (if prog.isExpansion then
+                        "Waypoints (5 Acts)"
+
+                     else
+                        "Waypoints (4 Acts)"
+                    )
+                ]
             , span [ class "meta-line" ]
-                [ text (String.fromInt (List.length activeWaypoints) ++ "/" ++ String.fromInt (List.length prog.waypointCatalog)) ]
+                [ text
+                    (diffLabel activeDiff
+                        ++ " · "
+                        ++ String.fromInt (List.length activeWaypoints)
+                        ++ "/"
+                        ++ String.fromInt (List.length prog.waypointCatalog)
+                    )
+                ]
             ]
-        , div [ class "waypoint-box" ]
+        , div
+            ([ classList
+                [ ( "waypoint-box", True )
+                , ( "is-classic", not prog.isExpansion )
+                , ( "is-marquee-mode", ui.paintMode /= Nothing )
+                ]
+             , attribute "data-marquee-container" "waypoints"
+             ]
+                ++ containerMarqueeAttrs ui.paintMode DragWaypoints
+            )
             (List.map (viewWaypointActCard activeDiff ui.paintMode activeWaypoints ui.marquee prog.waypointCatalog) acts)
         ]
 
@@ -290,6 +361,79 @@ viewMarqueePreview activeDiff box =
         ]
 
 
+viewMarqueeOverlay : MarqueeSelection -> Html Msg
+viewMarqueeOverlay box =
+    let
+        left =
+            min box.anchorX box.currentX
+
+        top =
+            min box.anchorY box.currentY
+
+        width =
+            abs (box.currentX - box.anchorX)
+
+        height =
+            abs (box.currentY - box.anchorY)
+
+        isMoved =
+            width >= 4 || height >= 4
+    in
+    div
+        [ id "drag-marquee-box"
+        , classList
+            [ ( "marquee-selection-box", True )
+            , ( "is-deactivate", box.mode == Deactivate )
+            ]
+        , attribute "data-testid" "drag-marquee-box"
+        , style "display"
+            (if isMoved then
+                "block"
+
+             else
+                "none"
+            )
+        , style "left" (String.fromFloat left ++ "px")
+        , style "top" (String.fromFloat top ++ "px")
+        , style "width" (String.fromFloat width ++ "px")
+        , style "height" (String.fromFloat height ++ "px")
+        ]
+        []
+
+
+marqueeMouseDownDecoder : (Float -> Float -> Msg) -> Bool -> Json.Decode.Decoder { message : Msg, stopPropagation : Bool, preventDefault : Bool }
+marqueeMouseDownDecoder toMsg stopProp =
+    Json.Decode.map3
+        (\_ x y ->
+            { message = toMsg x y
+            , stopPropagation = stopProp
+            , preventDefault = True
+            }
+        )
+        (Json.Decode.oneOf [ Json.Decode.field "button" Json.Decode.int, Json.Decode.succeed 0 ]
+            |> Json.Decode.andThen
+                (\btn ->
+                    if btn == 0 then
+                        Json.Decode.succeed ()
+
+                    else
+                        Json.Decode.fail "Not left mouse button"
+                )
+        )
+        (Json.Decode.oneOf [ Json.Decode.field "clientX" Json.Decode.float, Json.Decode.succeed 0 ])
+        (Json.Decode.oneOf [ Json.Decode.field "clientY" Json.Decode.float, Json.Decode.succeed 0 ])
+
+
+containerMarqueeAttrs : Maybe PaintMode -> DragKind -> List (Html.Attribute Msg)
+containerMarqueeAttrs paintMode kind =
+    case paintMode of
+        Nothing ->
+            []
+
+        Just _ ->
+            [ custom "mousedown" (marqueeMouseDownDecoder (\x y -> BeginMarquee kind x y []) False) ]
+
+
 tileInteractionAttrs : Maybe PaintMode -> DifficultyMode -> DragKind -> String -> Msg -> List (Html.Attribute Msg)
 tileInteractionAttrs paintMode diff kind tileId clickMsg =
     case paintMode of
@@ -297,9 +441,15 @@ tileInteractionAttrs paintMode diff kind tileId clickMsg =
             [ onClick clickMsg ]
 
         Just _ ->
-            [ on "mousedown" (Json.Decode.succeed (BeginMarquee kind 0 0 [ tileId ]))
+            [ custom "mousedown" (marqueeMouseDownDecoder (\x y -> BeginMarquee kind x y [ tileId ]) True)
             , on "mouseenter" (Json.Decode.succeed (ExtendMarquee kind tileId))
-            , stopPropagationOn "mouseup" (Json.Decode.succeed ( CommitMarquee diff, True ))
+            , custom "mouseup"
+                (Json.Decode.succeed
+                    { message = CommitMarquee diff
+                    , stopPropagation = True
+                    , preventDefault = False
+                    }
+                )
             ]
 
 
@@ -312,13 +462,20 @@ viewWaypointTile diff paintMode activeBits maybeMarquee entry =
         bitKey =
             String.fromInt entry.bit
 
-        inMarquee =
+        marqueeMatch =
             case maybeMarquee of
                 Just box ->
-                    box.kind == DragWaypoints && List.member bitKey box.candidateIds
+                    if box.kind == DragWaypoints && List.member bitKey box.candidateIds then
+                        Just box.mode
+
+                    else
+                        Nothing
 
                 Nothing ->
-                    False
+                    Nothing
+
+        inMarquee =
+            marqueeMatch /= Nothing
     in
     button
         ([ classList
@@ -327,8 +484,19 @@ viewWaypointTile diff paintMode activeBits maybeMarquee entry =
             , ( "is-completed", isActive )
             , ( "active", isActive )
             , ( "is-marquee-target", inMarquee )
+            , ( "marquee-hit-activate", marqueeMatch == Just Activate )
+            , ( "marquee-hit-deactivate", marqueeMatch == Just Deactivate )
             ]
          , attribute "data-testid" ("wp-tile-" ++ bitKey)
+         , attribute "data-marquee-kind" "waypoints"
+         , attribute "data-marquee-id" bitKey
+         , title
+            (if String.isEmpty entry.nameKo || entry.nameKo == entry.name then
+                entry.name
+
+             else
+                entry.name ++ " (" ++ entry.nameKo ++ ")"
+            )
          ]
             ++ tileInteractionAttrs paintMode diff DragWaypoints bitKey (ClickWaypointTile diff entry.bit)
         )
@@ -345,6 +513,19 @@ progDiffButton active target label =
         , onClick (SelectProgressionDifficulty target)
         ]
         [ text label ]
+
+
+diffLabel : DifficultyMode -> String
+diffLabel diff =
+    case diff of
+        Normal ->
+            "Normal"
+
+        Nightmare ->
+            "Nightmare"
+
+        Hell ->
+            "Hell"
 
 
 diffSlug : DifficultyMode -> String

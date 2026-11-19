@@ -132,8 +132,8 @@ sampleSessionJson =
             { "key": "a5q3", "act": 5, "index": 2, "name": "Prison of Ice" }
           ],
           "waypoint_catalog": [
-            { "bit": 0, "act": 1, "index": 0, "name": "Act 1 - Town" },
-            { "bit": 1, "act": 1, "index": 1, "name": "Act 1 - Wilderness 2" }
+            { "bit": 0, "act": 1, "index": 0, "name": "Rogue Encampment", "name_ko": "로그 캠프" },
+            { "bit": 1, "act": 1, "index": 1, "name": "Cold Plains", "name_ko": "콜드 플레인" }
           ],
           "normal_quests_completed": ["a1q1"],
           "nightmare_quests_completed": [],
@@ -596,6 +596,79 @@ suite =
                             |> Query.count (Expect.equal 0)
                     ]
                     ()
+        , test "Marquee selection box renders fixed rect coordinates, hit classes, and multi-difficulty quest batch" <|
+            \_ ->
+                let
+                    ( mActivate, _ ) =
+                        Update.update (TogglePaintMode Activate) loadedModel
+
+                    ( mQuestStart, _ ) =
+                        Update.update (BeginMarquee DragQuests 120 90 []) mActivate
+
+                    ( mQuestMove, _ ) =
+                        Update.update (MoveMarquee 40 30 [ "normal:a1q1", "hell:a1q2" ]) mQuestStart
+
+                    ( mQuestCommitted, questOut ) =
+                        Update.update (CommitMarquee Normal) mQuestMove
+
+                    ( mDeactivate, _ ) =
+                        Update.update (TogglePaintMode Deactivate) loadedModel
+
+                    ( mWpStart, _ ) =
+                        Update.update (BeginMarquee DragWaypoints 10 20 []) mDeactivate
+
+                    ( mWpMove, _ ) =
+                        Update.update (MoveMarquee 60 80 [ "0", "1" ]) mWpStart
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view mQuestMove
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "drag-marquee-box" ]
+                                    >> Query.has
+                                        [ Selector.class "marquee-selection-box"
+                                        , Selector.style "display" "block"
+                                        , Selector.style "left" "40px"
+                                        , Selector.style "top" "30px"
+                                        , Selector.style "width" "80px"
+                                        , Selector.style "height" "60px"
+                                        ]
+                                , Query.find [ testId "quest-tile-a1q1" ]
+                                    >> Query.has [ Selector.class "marquee-hit-activate" ]
+                                , Query.find [ testId "quest-tile-hell-a1q2" ]
+                                    >> Query.has [ Selector.class "marquee-hit-activate" ]
+                                ]
+                    , \_ -> Expect.equal Nothing mQuestCommitted.ui.marquee
+                    , \_ ->
+                        Expect.equal
+                            (EmitIntents
+                                [ Protocol.SetQuestsBatch { difficulty = Normal, keys = [ "a1q1" ], completed = True }
+                                , Protocol.SetQuestsBatch { difficulty = Hell, keys = [ "a1q2" ], completed = True }
+                                ]
+                            )
+                            questOut
+                    , \_ ->
+                        Workspace.view mWpMove
+                            |> Query.fromHtml
+                            |> Expect.all
+                                [ Query.find [ testId "drag-marquee-box" ]
+                                    >> Query.has
+                                        [ Selector.class "marquee-selection-box"
+                                        , Selector.class "is-deactivate"
+                                        , Selector.style "display" "block"
+                                        , Selector.style "left" "10px"
+                                        , Selector.style "top" "20px"
+                                        , Selector.style "width" "50px"
+                                        , Selector.style "height" "60px"
+                                        ]
+                                , Query.find [ testId "wp-tile-0" ]
+                                    >> Query.has [ Selector.class "marquee-hit-deactivate" ]
+                                , Query.find [ testId "wp-tile-1" ]
+                                    >> Query.has [ Selector.class "marquee-hit-deactivate" ]
+                                ]
+                    ]
+                    ()
         , test "View A Temp Inventory provides Clear only and no Move All to Stash button" <|
             \_ ->
                 Workspace.view (withView ViewA loadedModel)
@@ -872,8 +945,6 @@ suite =
                         , { tid = "input-stat-dexterity", fieldKey = "dexterity", rawVal = "20", nextRaw = "45", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Dexterity, value = 45 }) }
                         , { tid = "input-stat-vitality", fieldKey = "vitality", rawVal = "60", nextRaw = "85", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Vitality, value = 85 }) }
                         , { tid = "input-stat-energy", fieldKey = "energy", rawVal = "20", nextRaw = "35", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.Energy, value = 35 }) }
-                        , { tid = "input-gold-inventory", fieldKey = "gold_character", rawVal = "229492", nextRaw = "150000", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.GoldCharacter, value = 150000 }) }
-                        , { tid = "input-gold-stash", fieldKey = "gold_stash", rawVal = "281974", nextRaw = "500000", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.GoldStash, value = 500000 }) }
                         , { tid = "input-stat-points", fieldKey = "stat_points", rawVal = "75", nextRaw = "10", expectedOut = EmitIntent (Protocol.SetCharacterField { field = Protocol.StatPoints, value = 10 }) }
                         ]
 
@@ -3116,8 +3187,12 @@ suite =
                             |> Query.has [ Selector.class "dep-prereq" ]
                     , \_ ->
                         htmlQuery
+                            |> Query.find [ testId "skill-deps-panel" ]
+                            |> Query.has [ Selector.text "Raven" ]
+                    , \_ ->
+                        htmlQuery
                             |> Query.find [ testId "skill-detail-panel" ]
-                            |> Query.has [ Selector.text "Firestorm", Selector.text "Unleash fiery waves", Selector.text "Raven", Selector.text "순수 스킬 (Pure)", Selector.text "시너지 보정 (+115%)", Selector.text "최종 데미지 (Total)" ]
+                            |> Query.has [ Selector.text "Firestorm", Selector.text "Unleash fiery waves", Selector.text "순수 스킬 (Pure)", Selector.text "시너지 보정 (+115%)", Selector.text "최종 데미지 (Total)" ]
                     ]
                     ()
         , test "Item Forge searchable skill parameter filters catalog.skills by name or #id while keeping selected value" <|
@@ -3177,6 +3252,57 @@ suite =
                     , \_ -> Expect.equal ( 2, 2 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 2 3 ( 1, 0 ))
                     , \_ -> Expect.equal ( 2, 2 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 3 3 ( 0, 0 ))
                     , \_ -> Expect.equal ( 1, 3 ) (State.UiState.resolveGridDropAnchorWithSub [] Stash 2 2 2 3 ( 0, 1 ))
+                    ]
+                    ()
+        , test "Unified progression header controls shared paint/difficulty actions and Waypoints show localized names" <|
+            \_ ->
+                let
+                    htmlQuery =
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+
+                    headerQuery =
+                        htmlQuery
+                            |> Query.find [ testId "progression-header" ]
+                in
+                Expect.all
+                    [ \_ ->
+                        headerQuery
+                            |> Query.find [ testId "paint-mode-activate" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (TogglePaintMode State.UiState.Activate)
+                    , \_ ->
+                        headerQuery
+                            |> Query.find [ testId "paint-mode-deactivate" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (TogglePaintMode State.UiState.Deactivate)
+                    , \_ ->
+                        headerQuery
+                            |> Query.find [ testId "all-diff-quests-btn" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect ToggleAllDiffQuests
+                    , \_ ->
+                        headerQuery
+                            |> Query.find [ testId "all-diff-waypoints-btn" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect ToggleAllDiffWaypoints
+                    , \_ ->
+                        headerQuery
+                            |> Query.find [ testId "prog-diff-nightmare" ]
+                            |> Event.simulate Event.click
+                            |> Event.expect (SelectProgressionDifficulty Nightmare)
+                    , \_ ->
+                        htmlQuery
+                            |> Query.findAll [ testId "wp-paint-toolbar" ]
+                            |> Query.count (Expect.equal 0)
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "wp-tile-0" ]
+                            |> Query.has [ Selector.text "Rogue Encampment" ]
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "wp-tile-1" ]
+                            |> Query.has [ Selector.text "Cold Plains" ]
                     ]
                     ()
         ]

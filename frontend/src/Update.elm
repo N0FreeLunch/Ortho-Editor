@@ -132,6 +132,7 @@ type Msg
 type OutMsg
     = NoOut
     | EmitIntent UiIntent
+    | EmitIntents (List UiIntent)
     | ReportDecodeError String
 
 
@@ -152,6 +153,65 @@ paintModeToBool mode =
 
         Deactivate ->
             False
+
+
+parseQuestCandidate : DifficultyMode -> String -> ( DifficultyMode, String )
+parseQuestCandidate fallbackDiff rawId =
+    case String.split ":" rawId of
+        [ "normal", key ] ->
+            ( Normal, key )
+
+        [ "nightmare", key ] ->
+            ( Nightmare, key )
+
+        [ "hell", key ] ->
+            ( Hell, key )
+
+        _ ->
+            ( fallbackDiff, rawId )
+
+
+commitQuestGroups : DifficultyMode -> Bool -> List String -> OutMsg
+commitQuestGroups fallbackDiff completed candidateIds =
+    let
+        tagged =
+            List.map (parseQuestCandidate fallbackDiff) candidateIds
+
+        forDiff targetDiff =
+            tagged
+                |> List.filter (\( d, _ ) -> d == targetDiff)
+                |> List.map Tuple.second
+
+        intents =
+            [ Normal, Nightmare, Hell ]
+                |> List.filterMap
+                    (\d ->
+                        let
+                            keys =
+                                forDiff d
+                        in
+                        if List.isEmpty keys then
+                            Nothing
+
+                        else
+                            Just
+                                (Protocol.SetQuestsBatch
+                                    { difficulty = d
+                                    , keys = keys
+                                    , completed = completed
+                                    }
+                                )
+                    )
+    in
+    case intents of
+        [] ->
+            NoOut
+
+        [ single ] ->
+            EmitIntent single
+
+        many ->
+            EmitIntents many
 
 
 allQuestsCompletedAllDiffs : SessionView -> Bool
@@ -292,19 +352,7 @@ update msg model =
                     in
                     case box.kind of
                         DragQuests ->
-                            if List.isEmpty box.candidateIds then
-                                ( nextModel, NoOut )
-
-                            else
-                                ( nextModel
-                                , EmitIntent
-                                    (Protocol.SetQuestsBatch
-                                        { difficulty = difficulty
-                                        , keys = box.candidateIds
-                                        , completed = targetState
-                                        }
-                                    )
-                                )
+                            ( nextModel, commitQuestGroups difficulty targetState box.candidateIds )
 
                         DragWaypoints ->
                             let

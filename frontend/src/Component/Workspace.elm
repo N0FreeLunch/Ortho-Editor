@@ -7,9 +7,8 @@ import Component.ProgressionPanel as ProgressionPanel
 import Generated.Protocol exposing (RejectionCode(..), SessionView, SuggestedRecovery(..))
 import Html exposing (Html, button, div, h1, h2, p, section, span, text)
 import Html.Attributes exposing (attribute, class, classList, disabled, title)
-import Html.Events exposing (on, onClick)
-import Json.Decode
-import State.UiState exposing (PaintMode(..), ThemeMode(..), Toast, ViewTab(..))
+import Html.Events exposing (onClick)
+import State.UiState exposing (ThemeMode(..), Toast, ViewTab(..))
 import Update exposing (Model, Msg(..))
 
 
@@ -60,41 +59,27 @@ view model =
                             ContainersPanel.view model.ui session
 
                         ViewB ->
-                            let
-                                panelMouseAttrs =
-                                    case model.ui.marquee of
-                                        Just _ ->
-                                            [ on "mouseup" (Json.Decode.succeed (CommitMarquee model.ui.progressionDifficulty))
-                                            , on "mouseleave" (Json.Decode.succeed CancelMarquee)
-                                            ]
-
-                                        Nothing ->
-                                            []
-                            in
                             Html.main_ [ class "spec-grid", attribute "data-testid" "view-b-workspace" ]
                                 [ CharacterPanel.view model.ui session
                                 , CharacterPanel.viewSkillTreePreview model.ui session
-                                , section
-                                    ([ classList
-                                        [ ( "spec-progression-wrap", True )
-                                        , ( "progression-panel", True )
-                                        , ( "is-marquee-mode", model.ui.paintMode /= Nothing )
-                                        , ( "mode-activate", model.ui.paintMode == Just Activate )
-                                        , ( "mode-deactivate", model.ui.paintMode == Just Deactivate )
-                                        ]
-                                     , attribute "data-testid" "progression-panel"
-                                     ]
-                                        ++ panelMouseAttrs
-                                    )
-                                    [ ProgressionPanel.viewQuestsPanel model.ui session.progression
-                                    , div [ class "spec-col4-stack" ]
-                                        [ ProgressionPanel.viewWaypointsPanel model.ui session.progression
-                                        , MercenaryPanel.view session.merc session.mercItems
+                                , div [ class "spec-lower-bento" ]
+                                    [ div [ class "spec-lower-left" ]
+                                        [ MercenaryPanel.view session.merc session.mercItems
                                         , CharacterPanel.viewCombatLabAccordion model.ui session
                                         ]
+                                    , ProgressionPanel.view model.ui session.progression
                                     ]
                                 ]
                     ]
+        , case model.ui.marquee of
+            Just box ->
+                div [ class "marquee-floating-root" ]
+                    [ ProgressionPanel.viewMarqueeOverlay box
+                    , ProgressionPanel.viewMarqueePreview model.ui.progressionDifficulty box
+                    ]
+
+            Nothing ->
+                text ""
         ]
 
 

@@ -39,43 +39,35 @@ view ui session =
                     ]
                 ]
             ]
-        , div [ class "stat-strip" ]
-            [ editableFieldChip ui
-                "char_name"
-                "Name"
-                session.charName
-                (String.fromInt schema.nameMinLen ++ ".." ++ String.fromInt schema.nameMaxLen ++ " ASCII")
-                "input-char-name"
-            , editableStepperFieldChip ui
-                "level"
-                "Level"
-                (String.fromInt session.charLevel)
-                (String.fromInt schema.levelMin ++ ".." ++ String.fromInt schema.levelMax)
-                "input-char-level"
+        , div [ class "col1-split-grid" ]
+            [ div [ class "col1-left-stats" ]
+                [ div [ class "stat-strip" ]
+                    [ editableFieldChip ui
+                        "char_name"
+                        "Name"
+                        session.charName
+                        (String.fromInt schema.nameMinLen ++ ".." ++ String.fromInt schema.nameMaxLen ++ " ASCII")
+                        "input-char-name"
+                    , editableStepperFieldChip ui
+                        "level"
+                        "Level"
+                        (String.fromInt session.charLevel)
+                        (String.fromInt schema.levelMin ++ ".." ++ String.fromInt schema.levelMax)
+                        "input-char-level"
+                    ]
+                , viewStatModeStrip ui schema session.statMode session.stats
+                , div [ class "stat-breakdown-grid" ]
+                    [ editableStatChip ui session.statMode "strength" "STR" session.stats.strengthBase session.stats.strengthBonus schema.classBaseStr schema "input-stat-strength"
+                    , editableStatChip ui session.statMode "dexterity" "DEX" session.stats.dexterityBase session.stats.dexterityBonus schema.classBaseDex schema "input-stat-dexterity"
+                    , editableStatChip ui session.statMode "vitality" "VIT" session.stats.vitalityBase session.stats.vitalityBonus schema.classBaseVit schema "input-stat-vitality"
+                    , editableStatChip ui session.statMode "energy" "ENE" session.stats.energyBase session.stats.energyBonus schema.classBaseEne schema "input-stat-energy"
+                    ]
+                ]
+            , div [ class "col1-right-vitals" ]
+                [ viewVitalsGauges session.stats
+                , viewResistancesSection session.resistances
+                ]
             ]
-        , viewStatModeStrip ui schema session.statMode session.stats
-        , div [ class "stat-breakdown-grid" ]
-            [ editableStatChip ui session.statMode "strength" "STR" session.stats.strengthBase session.stats.strengthBonus schema.classBaseStr schema "input-stat-strength"
-            , editableStatChip ui session.statMode "dexterity" "DEX" session.stats.dexterityBase session.stats.dexterityBonus schema.classBaseDex schema "input-stat-dexterity"
-            , editableStatChip ui session.statMode "vitality" "VIT" session.stats.vitalityBase session.stats.vitalityBonus schema.classBaseVit schema "input-stat-vitality"
-            , editableStatChip ui session.statMode "energy" "ENE" session.stats.energyBase session.stats.energyBonus schema.classBaseEne schema "input-stat-energy"
-            ]
-        , viewVitalsGauges session.stats
-        , div [ class "stat-strip" ]
-            [ editableFieldChip ui
-                "gold_character"
-                "Gold Inv"
-                (String.fromInt session.stats.goldInventory)
-                ("<= " ++ String.fromInt schema.goldCharacterMax)
-                "input-gold-inventory"
-            , editableFieldChip ui
-                "gold_stash"
-                "Gold Stash"
-                (String.fromInt session.stats.goldStash)
-                ("<= " ++ String.fromInt schema.goldStashMax)
-                "input-gold-stash"
-            ]
-        , viewResistancesSection session.resistances
         ]
 
 
@@ -240,47 +232,51 @@ viewSkillTreePreview ui session =
                 , onClick (SelectSkillTreeTab key)
                 ]
                 [ text label ]
+
+        hoveredSkill =
+            ui.hoveredSkillId
+                |> Maybe.andThen (\hid -> List.filter (\s -> s.skillId == hid) session.skills |> List.head)
     in
     section [ class "glass-panel col2-skill-panel", attribute "data-testid" "skill-tree-preview" ]
-        [ div [ class "panel-header" ]
-            [ div [ class "panel-title" ] [ text ("Skill Tree (" ++ session.charClass ++ ")") ]
-            , button
-                [ class "btn-danger-ghost"
-                , attribute "data-testid" "reset-skills-btn"
-                , onClick ClickResetSkills
+        [ div [ class "skill-panel-quad-grid" ]
+            [ div [ class "skill-q1-controls" ]
+                [ div [ class "panel-header" ]
+                    [ div [ class "panel-title" ] [ text ("Skill Tree (" ++ session.charClass ++ ")") ]
+                    , button
+                        [ class "btn-danger-ghost"
+                        , attribute "data-testid" "reset-skills-btn"
+                        , onClick ClickResetSkills
+                        ]
+                        [ text "Reset Skills" ]
+                    ]
+                , viewSkillModeStrip ui session.schema session.skillMode session.stats
+                , div [ class "meta-line" ]
+                    [ text
+                        ("Unspent Skills: "
+                            ++ String.fromInt session.stats.unspentSkillPoints
+                            ++ " · Active Skills: "
+                            ++ String.fromInt session.stats.activeSkillCount
+                            ++ " · All Skills Bonus: +"
+                            ++ String.fromInt session.stats.allSkillsBonus
+                        )
+                    ]
                 ]
-                [ text "Reset Skills" ]
-            ]
-        , viewSkillModeStrip ui session.schema session.skillMode session.stats
-        , div [ class "meta-line" ]
-            [ text
-                ("Unspent Skills: "
-                    ++ String.fromInt session.stats.unspentSkillPoints
-                    ++ " · Active Skills: "
-                    ++ String.fromInt session.stats.activeSkillCount
-                    ++ " · All Skills Bonus: +"
-                    ++ String.fromInt session.stats.allSkillsBonus
-                )
-            ]
-        , div [ class "skill-subtabs" ]
-            [ treeTab "tree0" "Tree I"
-            , treeTab "tree1" "Tree II"
-            , treeTab "tree2" "Tree III"
-            ]
-        , div [ class "skill-dep-legend", attribute "data-testid" "skill-dep-legend" ]
-            [ span [ class "legend-item legend-prereq" ] [ span [ class "legend-dot" ] [], text "REQ 선행" ]
-            , span [ class "legend-item legend-synergy" ] [ span [ class "legend-dot" ] [], text "SYN 시너지" ]
-            , span [ class "legend-item legend-unlock" ] [ span [ class "legend-dot" ] [], text "NEXT 해금" ]
-            ]
-        , let
-            hoveredSkill =
-                ui.hoveredSkillId
-                    |> Maybe.andThen (\hid -> List.filter (\s -> s.skillId == hid) session.skills |> List.head)
-          in
-          div [ class "skill-tree-workspace" ]
-            [ div [ class "skill-tree-preview-grid", attribute "data-testid" "skill-tree-grid" ]
-                (List.map (viewSkillNode session hoveredSkill) treeSkills)
-            , viewSkillDetailPanel session hoveredSkill
+            , viewSkillDepsPanel session hoveredSkill
+            , div [ class "skill-q3-tree" ]
+                [ div [ class "skill-subtabs" ]
+                    [ treeTab "tree0" "Tree I"
+                    , treeTab "tree1" "Tree II"
+                    , treeTab "tree2" "Tree III"
+                    ]
+                , div [ class "skill-dep-legend", attribute "data-testid" "skill-dep-legend" ]
+                    [ span [ class "legend-item legend-prereq" ] [ span [ class "legend-dot" ] [], text "REQ 선행" ]
+                    , span [ class "legend-item legend-synergy" ] [ span [ class "legend-dot" ] [], text "SYN 시너지" ]
+                    , span [ class "legend-item legend-unlock" ] [ span [ class "legend-dot" ] [], text "NEXT 해금" ]
+                    ]
+                , div [ class "skill-tree-preview-grid", attribute "data-testid" "skill-tree-grid" ]
+                    (List.map (viewSkillNode session hoveredSkill) treeSkills)
+                ]
+            , viewSkillDetailPanel hoveredSkill
             ]
         ]
 
@@ -411,8 +407,8 @@ viewSkillNode session hoveredSkill s =
         )
 
 
-viewSkillDetailPanel : SessionView -> Maybe SkillNodeView -> Html Msg
-viewSkillDetailPanel session hoveredSkill =
+viewSkillDepsPanel : SessionView -> Maybe SkillNodeView -> Html Msg
+viewSkillDepsPanel session hoveredSkill =
     let
         skillNameById sid =
             session.skills
@@ -435,11 +431,34 @@ viewSkillDetailPanel session hoveredSkill =
                         )
                     ]
     in
+    div [ class "skill-deps-panel", attribute "data-testid" "skill-deps-panel" ]
+        (case hoveredSkill of
+            Nothing ->
+                [ div [ class "skill-detail-empty" ]
+                    [ text "선행 · 시너지 · 해금 스킬이 여기에 표시됩니다." ]
+                ]
+
+            Just h ->
+                if List.isEmpty h.prereqIds && List.isEmpty h.synergyIds && List.isEmpty h.unlockIds then
+                    [ div [ class "skill-detail-empty" ]
+                        [ text (h.nameEn ++ " — 선행 / 시너지 / 해금 없음") ]
+                    ]
+
+                else
+                    [ renderDepRow "Prerequisites (선행)" "dep-prereq" h.prereqIds
+                    , renderDepRow "Synergies (시너지)" "dep-synergy" h.synergyIds
+                    , renderDepRow "Unlocks (해금)" "dep-unlock" h.unlockIds
+                    ]
+        )
+
+
+viewSkillDetailPanel : Maybe SkillNodeView -> Html Msg
+viewSkillDetailPanel hoveredSkill =
     div [ class "skill-detail-panel", attribute "data-testid" "skill-detail-panel" ]
         (case hoveredSkill of
             Nothing ->
                 [ div [ class "skill-detail-empty" ]
-                    [ text "Hover a skill node to inspect prerequisites, synergies, and description." ]
+                    [ text "스킬 노드에 커서를 올리면 상세 설명과 데미지가 표시됩니다." ]
                 ]
 
             Just h ->
@@ -482,9 +501,6 @@ viewSkillDetailPanel session hoveredSkill =
                   else
                     p [ class "skill-detail-desc skill-detail-desc-ko" ] [ text h.descKo ]
                 , viewSkillDamageBox h.bonusLevel h.damage
-                , renderDepRow "Prerequisites (선행)" "dep-prereq" h.prereqIds
-                , renderDepRow "Synergies (시너지)" "dep-synergy" h.synergyIds
-                , renderDepRow "Unlocks (해금)" "dep-unlock" h.unlockIds
                 ]
         )
 

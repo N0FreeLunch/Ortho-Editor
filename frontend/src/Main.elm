@@ -16,10 +16,13 @@ main =
         , view = view
         , update = updateWithPorts
         , subscriptions =
-            \_ ->
+            \model ->
                 Sub.batch
                     [ Ports.receiveSessionEnvelope ReceiveSessionEnvelope
                     , Ports.receiveKeyShortcut HandleKeyShortcut
+                    , Ports.receiveMarqueeMove (\p -> MoveMarquee p.x p.y p.candidateIds)
+                    , Ports.receiveMarqueeUp (\_ -> CommitMarquee model.ui.progressionDifficulty)
+                    , Ports.receiveMarqueeCancel (\_ -> CancelMarquee)
                     ]
         }
 
@@ -55,6 +58,9 @@ outMsgToCmd outMsg =
 
         EmitIntent intent ->
             Ports.sendIntent (uiIntentEncoder intent)
+
+        EmitIntents intents ->
+            Cmd.batch (List.map (uiIntentEncoder >> Ports.sendIntent) intents)
 
         ReportDecodeError _ ->
             Cmd.none

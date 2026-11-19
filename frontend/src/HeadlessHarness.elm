@@ -89,6 +89,9 @@ outMsgToCmd outMsg =
         EmitIntent intent ->
             Ports.sendIntent (uiIntentEncoder intent)
 
+        EmitIntents intents ->
+            Cmd.batch (List.map (uiIntentEncoder >> Ports.sendIntent) intents)
+
         ReportDecodeError _ ->
             Cmd.none
 

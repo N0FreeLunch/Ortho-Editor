@@ -1,8 +1,12 @@
 port module Bridge.Ports exposing
     ( KeyShortcutPayload
+    , MarqueeMovePayload
     , emitHarnessSnapshot
     , receiveHarnessCommand
     , receiveKeyShortcut
+    , receiveMarqueeCancel
+    , receiveMarqueeMove
+    , receiveMarqueeUp
     , receiveSessionEnvelope
     , sendIntent
     )
@@ -18,6 +22,13 @@ type alias KeyShortcutPayload =
     , altKey : Bool
     , metaKey : Bool
     , isInput : Bool
+    }
+
+
+type alias MarqueeMovePayload =
+    { x : Float
+    , y : Float
+    , candidateIds : List String
     }
 
 
@@ -44,3 +55,18 @@ port receiveHarnessCommand : (Json.Decode.Value -> msg) -> Sub msg
 {-| Emits serialized `Model` state snapshots for headless `Platform.worker` assertions.
 -}
 port emitHarnessSnapshot : Json.Encode.Value -> Cmd msg
+
+
+{-| Receives live marquee pointer coordinates and DOM-intersected candidate IDs from the host.
+-}
+port receiveMarqueeMove : (MarqueeMovePayload -> msg) -> Sub msg
+
+
+{-| Receives global mouseup notification to commit an active marquee selection.
+-}
+port receiveMarqueeUp : (() -> msg) -> Sub msg
+
+
+{-| Receives global cancel notification (Escape / window blur) for an active marquee selection.
+-}
+port receiveMarqueeCancel : (() -> msg) -> Sub msg
