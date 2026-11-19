@@ -257,181 +257,211 @@
         "bit": 0,
         "act": 1,
         "index": 0,
-        "name": "Act 1 - Town"
+        "name": "Rogue Encampment",
+        "name_ko": "로그 캠프"
       },
       {
         "bit": 1,
         "act": 1,
         "index": 1,
-        "name": "Act 1 - Wilderness 2"
+        "name": "Cold Plains",
+        "name_ko": "콜드 플레인"
       },
       {
         "bit": 2,
         "act": 1,
         "index": 2,
-        "name": "Act 1 - Wilderness 3"
+        "name": "Stony Field",
+        "name_ko": "스토니 필드"
       },
       {
         "bit": 3,
         "act": 1,
         "index": 3,
-        "name": "Act 1 - Wilderness 4"
+        "name": "Dark Wood",
+        "name_ko": "다크 우드"
       },
       {
         "bit": 4,
         "act": 1,
         "index": 4,
-        "name": "Act 1 - Wilderness 5"
+        "name": "Black Marsh",
+        "name_ko": "블랙 마쉬"
       },
       {
         "bit": 5,
         "act": 1,
         "index": 5,
-        "name": "Act 1 - Courtyard 1"
+        "name": "Outer Cloister",
+        "name_ko": "수도원 외곽"
       },
       {
         "bit": 6,
         "act": 1,
         "index": 6,
-        "name": "Act 1 - Jail 1"
+        "name": "Jail Level 1",
+        "name_ko": "감옥 1층"
       },
       {
         "bit": 7,
         "act": 1,
         "index": 7,
-        "name": "Act 1 - Courtyard 2"
+        "name": "Inner Cloister",
+        "name_ko": "수도원 안쪽"
       },
       {
         "bit": 8,
         "act": 1,
         "index": 8,
-        "name": "Act 1 - Catacombs 2"
+        "name": "Catacombs Level 2",
+        "name_ko": "카타콤 2층"
       },
       {
         "bit": 9,
         "act": 2,
         "index": 0,
-        "name": "Act 2 - Town"
+        "name": "Lut Gholein",
+        "name_ko": "루트 골레인"
       },
       {
         "bit": 10,
         "act": 2,
         "index": 1,
-        "name": "Act 2 - Sewer 1 B"
+        "name": "Sewers Level 2",
+        "name_ko": "하수구 2층"
       },
       {
         "bit": 11,
         "act": 2,
         "index": 2,
-        "name": "Act 2 - Desert 2"
+        "name": "Dry Hills",
+        "name_ko": "메마른 언덕"
       },
       {
         "bit": 12,
         "act": 2,
         "index": 3,
-        "name": "Act 2 - Tomb 2 B"
+        "name": "Halls of the Dead Level 2",
+        "name_ko": "죽음의 홀 2층"
       },
       {
         "bit": 13,
         "act": 2,
         "index": 4,
-        "name": "Act 2 - Desert 3"
+        "name": "Far Oasis",
+        "name_ko": "파 오아시스"
       },
       {
         "bit": 14,
         "act": 2,
         "index": 5,
-        "name": "Act 2 - Desert 4"
+        "name": "Lost City",
+        "name_ko": "잊혀진 도시"
       },
       {
         "bit": 15,
         "act": 2,
         "index": 6,
-        "name": "Act 2 - Basement 1"
+        "name": "Palace Cellar Level 1",
+        "name_ko": "궁전 지하 1층"
       },
       {
         "bit": 16,
         "act": 2,
         "index": 7,
-        "name": "Act 2 - Arcane"
+        "name": "Arcane Sanctuary",
+        "name_ko": "아케인 생츄어리"
       },
       {
         "bit": 17,
         "act": 2,
         "index": 8,
-        "name": "Act 2 - Valley of the Kings"
+        "name": "Canyon of the Magi",
+        "name_ko": "마기의 캐니언"
       },
       {
         "bit": 18,
         "act": 3,
         "index": 0,
-        "name": "Act 3 - Town"
+        "name": "Kurast Docks",
+        "name_ko": "쿠라스트 부두"
       },
       {
         "bit": 19,
         "act": 3,
         "index": 1,
-        "name": "Act 3 - Jungle 1"
+        "name": "Spider Forest",
+        "name_ko": "스파이더 포레스트"
       },
       {
         "bit": 20,
         "act": 3,
         "index": 2,
-        "name": "Act 3 - Jungle 2"
+        "name": "Great Marsh",
+        "name_ko": "그레이트 마쉬"
       },
       {
         "bit": 21,
         "act": 3,
         "index": 3,
-        "name": "Act 3 - Jungle 3"
+        "name": "Flayer Jungle",
+        "name_ko": "프레이어 정글"
       },
       {
         "bit": 22,
         "act": 3,
         "index": 4,
-        "name": "Act 3 - Kurast 1"
+        "name": "Lower Kurast",
+        "name_ko": "남부 쿠라스트"
       },
       {
         "bit": 23,
         "act": 3,
         "index": 5,
-        "name": "Act 3 - Kurast 2"
+        "name": "Kurast Bazaar",
+        "name_ko": "쿠라스트 바자"
       },
       {
         "bit": 24,
         "act": 3,
         "index": 6,
-        "name": "Act 3 - Kurast 3"
+        "name": "Upper Kurast",
+        "name_ko": "북부 쿠라스트"
       },
       {
         "bit": 25,
         "act": 3,
         "index": 7,
-        "name": "Act 3 - Travincal"
+        "name": "Travincal",
+        "name_ko": "트라빈컬"
       },
       {
         "bit": 26,
         "act": 3,
         "index": 8,
-        "name": "Act 3 - Mephisto 2"
+        "name": "Durance of Hate Level 2",
+        "name_ko": "증오의 사원 2층"
       },
       {
         "bit": 27,
         "act": 4,
         "index": 0,
-        "name": "Act 4 - Town"
+        "name": "The Pandemonium Fortress",
+        "name_ko": "지옥의 성채"
       },
       {
         "bit": 28,
         "act": 4,
         "index": 1,
-        "name": "Act 4 - Mesa 3"
+        "name": "City of the Damned",
+        "name_ko": "지옥 망령의 도시"
       },
       {
         "bit": 29,
         "act": 4,
         "index": 2,
-        "name": "Act 4 - Lava 1"
+        "name": "River of Flame",
+        "name_ko": "불길의 강"
       }
     ],
     "normal_quests_completed": [

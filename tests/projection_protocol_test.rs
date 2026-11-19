@@ -1555,3 +1555,53 @@ fn cycle_27_skill_tree_meta_and_prereq_guard() {
     });
     assert!(free_env.ok);
 }
+
+#[test]
+fn waypoint_catalog_projects_localized_names_from_d2r_data() {
+    let bytes = fixture_bytes(
+        "tests/fixtures/savegames/gameplay/normal/act5/TESTDRUID_Quest3_AnyaRescued.d2s",
+    );
+    let session = EditorSession::from_bytes(&bytes, "TESTDRUID_Quest3_AnyaRescued.d2s")
+        .expect("open TESTDRUID_Quest3_AnyaRescued");
+    let view = session.project();
+    assert!(!view.progression.is_expansion);
+    let wps = &view.progression.waypoint_catalog;
+    assert_eq!(wps.len(), 30);
+
+    let wp0 = wps.iter().find(|w| w.bit == 0).expect("bit 0");
+    assert_eq!(wp0.name, "Rogue Encampment");
+    assert_eq!(wp0.name_ko, "로그 캠프");
+
+    let wp1 = wps.iter().find(|w| w.bit == 1).expect("bit 1");
+    assert_eq!(wp1.name, "Cold Plains");
+    assert_eq!(wp1.name_ko, "콜드 플레인");
+
+    let wp29 = wps.iter().find(|w| w.bit == 29).expect("bit 29");
+    assert_eq!(wp29.name, "River of Flame");
+    assert_eq!(wp29.name_ko, "불길의 강");
+
+    assert!(wps.iter().all(|w| !w.name.starts_with("Act ")));
+
+    let all_wps = d2r_core::data::waypoints::WAYPOINTS;
+    assert_eq!(all_wps.len(), 39);
+    for entry in all_wps {
+        let en = d2r_core::localization::get_loc(entry.loc_key, "en");
+        let ko = d2r_core::localization::get_loc(entry.loc_key, "ko");
+        assert!(!en.is_empty(), "empty EN localization for bit {}", entry.ws_bit);
+        assert!(!ko.is_empty(), "empty KO localization for bit {}", entry.ws_bit);
+    }
+
+    let wp31 = all_wps
+        .iter()
+        .find(|w| w.ws_bit == 31)
+        .expect("ws_bit 31");
+    assert_eq!(wp31.loc_key, "Rigid Highlands");
+    assert_eq!(
+        d2r_core::localization::get_loc(wp31.loc_key, "en"),
+        "Frigid Highlands"
+    );
+    assert_eq!(
+        d2r_core::localization::get_loc(wp31.loc_key, "ko"),
+        "프리지드 하이랜드"
+    );
+}

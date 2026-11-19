@@ -334,6 +334,8 @@ pub struct WaypointCatalogEntryView {
     pub act: i32,
     pub index: i32,
     pub name: String,
+    #[serde(default)]
+    pub name_ko: String,
 }
 
 /// Quest and waypoint completion projection across all three difficulties.
@@ -4452,7 +4454,8 @@ fn build_waypoint_catalog(is_expansion: bool) -> Vec<WaypointCatalogEntryView> {
             bit: i32::from(entry.ws_bit),
             act: i32::from(entry.act),
             index: i32::from(entry.index),
-            name: entry.name.to_string(),
+            name: get_loc(entry.loc_key, "en").to_string(),
+            name_ko: get_loc(entry.loc_key, "ko").to_string(),
         })
         .collect()
 }

@@ -873,6 +873,7 @@ type alias WaypointCatalogEntryView =
     , act : Int
     , index : Int
     , name : String
+    , nameKo : String
     }
 
 
@@ -883,6 +884,7 @@ waypointCatalogEntryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "act" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "index" (Json.Decode.int)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.string)))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
 
 
 type alias ProgressionSummaryView =
