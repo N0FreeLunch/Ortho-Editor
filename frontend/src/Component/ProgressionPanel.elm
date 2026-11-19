@@ -5,6 +5,8 @@ import Generated.Protocol
         ( DifficultyMode(..)
         , ProgressionSummaryView
         , QuestCatalogEntryView
+        , QuestSemanticStatusView(..)
+        , QuestStateEntryView
         , WaypointCatalogEntryView
         )
 import Html exposing (Html, button, div, section, span, text)
@@ -127,6 +129,9 @@ viewQuestDiffCard ui prog diff diffClass titleLabel =
         completed =
             questsForDiff diff prog
 
+        questStates =
+            questStatesForDiff diff prog
+
         isActiveDiff =
             ui.progressionDifficulty == diff
 
@@ -149,7 +154,7 @@ viewQuestDiffCard ui prog diff diffClass titleLabel =
             , span [] [ text (String.fromInt (List.length completed) ++ "/" ++ String.fromInt (List.length prog.questCatalog)) ]
             ]
         , div [ class "quest-matrix" ]
-            (List.map (viewQuestActRow diff isActiveDiff ui.paintMode completed ui.marquee prog.questCatalog) acts)
+            (List.map (viewQuestActRow diff isActiveDiff ui.paintMode completed questStates ui.marquee prog.questCatalog) acts)
         ]
 
 
@@ -158,11 +163,12 @@ viewQuestActRow :
     -> Bool
     -> Maybe PaintMode
     -> List String
+    -> List QuestStateEntryView
     -> Maybe MarqueeSelection
     -> List QuestCatalogEntryView
     -> Int
     -> Html Msg
-viewQuestActRow diff isActiveDiff paintMode completed maybeMarquee catalog actNum =
+viewQuestActRow diff isActiveDiff paintMode completed questStates maybeMarquee catalog actNum =
     let
         actEntries =
             catalog
@@ -175,7 +181,7 @@ viewQuestActRow diff isActiveDiff paintMode completed maybeMarquee catalog actNu
     div [ class "quest-matrix-row" ]
         [ span [ class "quest-matrix-act-label" ] [ text ("Act " ++ String.fromInt actNum) ]
         , div [ class "quest-matrix-cells" ]
-            (List.map (viewQuestDot diff isActiveDiff paintMode completed maybeMarquee) actEntries
+            (List.map (viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee) actEntries
                 ++ List.repeat padCount (div [ class "quest-cell-dot empty" ] [])
             )
         ]
@@ -186,13 +192,25 @@ viewQuestDot :
     -> Bool
     -> Maybe PaintMode
     -> List String
+    -> List QuestStateEntryView
     -> Maybe MarqueeSelection
     -> QuestCatalogEntryView
     -> Html Msg
-viewQuestDot diff isActiveDiff paintMode completed maybeMarquee entry =
+viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee entry =
     let
+        maybeState =
+            questStates
+                |> List.filter (\s -> s.key == entry.key)
+                |> List.head
+
         isCompleted =
             List.member entry.key completed
+
+        isRewardPending =
+            not isCompleted && (Maybe.map .status maybeState == Just QuestRewardPending)
+
+        isInProgress =
+            not isCompleted && (Maybe.map .status maybeState == Just QuestInProgress)
 
         marqueeId =
             diffSlug diff ++ ":" ++ entry.key
@@ -232,6 +250,8 @@ viewQuestDot diff isActiveDiff paintMode completed maybeMarquee entry =
             , ( "quest-cell-dot", True )
             , ( "is-completed", isCompleted )
             , ( "completed", isCompleted )
+            , ( "is-reward-pending", isRewardPending )
+            , ( "is-in-progress", isInProgress )
             , ( "is-marquee-target", inMarquee )
             , ( "marquee-hit-activate", marqueeMatch == Just Activate )
             , ( "marquee-hit-deactivate", marqueeMatch == Just Deactivate )
@@ -239,11 +259,107 @@ viewQuestDot diff isActiveDiff paintMode completed maybeMarquee entry =
          , attribute "data-testid" testIdAttr
          , attribute "data-marquee-kind" "quests"
          , attribute "data-marquee-id" marqueeId
-         , title (entry.key ++ " · " ++ entry.name)
+         , title (formatQuestTooltip entry maybeState isCompleted)
          ]
             ++ tileInteractionAttrs paintMode diff DragQuests interactionId (ClickQuestTile diff entry.key)
         )
         [ text ("Q" ++ String.fromInt entry.index) ]
+
+
+formatQuestTooltip : QuestCatalogEntryView -> Maybe QuestStateEntryView -> Bool -> String
+formatQuestTooltip entry maybeState isCompleted =
+    let
+        titleLine =
+            if String.isEmpty entry.nameKo || entry.nameKo == entry.name then
+                entry.key ++ " · " ++ entry.name
+
+            else
+                entry.key ++ " · " ++ entry.name ++ " (" ++ entry.nameKo ++ ")"
+
+        statusText =
+            case Maybe.map .status maybeState of
+                Just QuestCompleted ->
+                    "Completed"
+
+                Just QuestRewardPending ->
+                    "Reward Pending"
+
+                Just QuestInProgress ->
+                    "In Progress"
+
+                Just QuestUnstarted ->
+                    "Unstarted"
+
+                Nothing ->
+                    if isCompleted then
+                        "Completed"
+
+                    else
+                        "Unstarted"
+
+        rawHex =
+            case maybeState of
+                Just st ->
+                    " (0x" ++ toHex4 st.rawState ++ ")"
+
+                Nothing ->
+                    ""
+
+        descLines =
+            [ if String.isEmpty entry.descEn then
+                Nothing
+
+              else
+                Just entry.descEn
+            , if String.isEmpty entry.descKo || entry.descKo == entry.descEn then
+                Nothing
+
+              else
+                Just entry.descKo
+            ]
+                |> List.filterMap identity
+    in
+    String.join "\n"
+        ([ titleLine
+         , "Status: " ++ statusText ++ rawHex
+         ]
+            ++ descLines
+        )
+
+
+toHex4 : Int -> String
+toHex4 val =
+    let
+        hexDigit n =
+            case n of
+                10 -> "A"
+                11 -> "B"
+                12 -> "C"
+                13 -> "D"
+                14 -> "E"
+                15 -> "F"
+                _ -> String.fromInt n
+
+        clamped =
+            modBy 65536 (max 0 val)
+    in
+    hexDigit (modBy 16 (clamped // 4096))
+        ++ hexDigit (modBy 16 (clamped // 256))
+        ++ hexDigit (modBy 16 (clamped // 16))
+        ++ hexDigit (modBy 16 clamped)
+
+
+questStatesForDiff : DifficultyMode -> ProgressionSummaryView -> List QuestStateEntryView
+questStatesForDiff diff prog =
+    case diff of
+        Normal ->
+            prog.normalQuestStates
+
+        Nightmare ->
+            prog.nightmareQuestStates
+
+        Hell ->
+            prog.hellQuestStates
 
 
 viewWaypointsPanel : UiState -> ProgressionSummaryView -> Html Msg

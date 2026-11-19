@@ -127,9 +127,9 @@ sampleSessionJson =
           "total_quests_per_difficulty": 27,
           "total_waypoints_per_difficulty": 39,
           "quest_catalog": [
-            { "key": "a1q1", "act": 1, "index": 0, "name": "Den of Evil" },
-            { "key": "a1q2", "act": 1, "index": 1, "name": "Sisters' Burial Grounds" },
-            { "key": "a5q3", "act": 5, "index": 2, "name": "Prison of Ice" }
+            { "key": "a1q1", "act": 1, "index": 0, "name": "Den of Evil", "name_ko": "덴 오브 이블", "desc_en": "Look for the Den in the wilderness outside the Rogues' Camp.", "desc_ko": "로그 캠프 밖에 있는 덴 오브 이블을 찾으시오." },
+            { "key": "a1q2", "act": 1, "index": 1, "name": "Sisters' Burial Grounds", "name_ko": "베리얼 그라운드", "desc_en": "Look for Blood Raven in the Burial Grounds next to the Cold Plains.", "desc_ko": "콜드 플레인 부근 베리얼 그라운드에서 블러드 레이븐을 찾으시오." },
+            { "key": "a5q3", "act": 5, "index": 2, "name": "Prison of Ice", "name_ko": "얼음 감옥", "desc_en": "Look for Anya under the Crystalline Passage by the Frozen River.", "desc_ko": "크리스탈라인을 지나 프로즌리버에서 앤야를 찾으시오" }
           ],
           "waypoint_catalog": [
             { "bit": 0, "act": 1, "index": 0, "name": "Rogue Encampment", "name_ko": "로그 캠프" },
@@ -138,6 +138,13 @@ sampleSessionJson =
           "normal_quests_completed": ["a1q1"],
           "nightmare_quests_completed": [],
           "hell_quests_completed": [],
+          "normal_quest_states": [
+            { "key": "a1q1", "status": "QuestCompleted", "raw_state": 4097 },
+            { "key": "a1q2", "status": "QuestRewardPending", "raw_state": 2 },
+            { "key": "a5q3", "status": "QuestInProgress", "raw_state": 4 }
+          ],
+          "nightmare_quest_states": [],
+          "hell_quest_states": [],
           "normal_waypoints_active": [0],
           "nightmare_waypoints_active": [],
           "hell_waypoints_active": []
@@ -3370,6 +3377,46 @@ suite =
                                 )
                             )
                             outNormalWpsOff
+                    ]
+                    ()
+        , test "Quest tiles render localized game-data tooltips and semantic sub-quest status classes" <|
+            \_ ->
+                let
+                    htmlQuery =
+                        Workspace.view loadedModel
+                            |> Query.fromHtml
+                in
+                Expect.all
+                    [ \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "quest-tile-a1q1" ]
+                            |> Query.has
+                                [ Selector.class "is-completed"
+                                , Selector.attribute
+                                    (Html.Attributes.title
+                                        "a1q1 · Den of Evil (덴 오브 이블)\nStatus: Completed (0x1001)\nLook for the Den in the wilderness outside the Rogues' Camp.\n로그 캠프 밖에 있는 덴 오브 이블을 찾으시오."
+                                    )
+                                ]
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "quest-tile-a1q2" ]
+                            |> Query.has
+                                [ Selector.class "is-reward-pending"
+                                , Selector.attribute
+                                    (Html.Attributes.title
+                                        "a1q2 · Sisters' Burial Grounds (베리얼 그라운드)\nStatus: Reward Pending (0x0002)\nLook for Blood Raven in the Burial Grounds next to the Cold Plains.\n콜드 플레인 부근 베리얼 그라운드에서 블러드 레이븐을 찾으시오."
+                                    )
+                                ]
+                    , \_ ->
+                        htmlQuery
+                            |> Query.find [ testId "quest-tile-a5q3" ]
+                            |> Query.has
+                                [ Selector.class "is-in-progress"
+                                , Selector.attribute
+                                    (Html.Attributes.title
+                                        "a5q3 · Prison of Ice (얼음 감옥)\nStatus: In Progress (0x0004)\nLook for Anya under the Crystalline Passage by the Frozen River.\n크리스탈라인을 지나 프로즌리버에서 앤야를 찾으시오"
+                                    )
+                                ]
                     ]
                     ()
         ]

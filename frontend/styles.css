@@ -2162,6 +2162,18 @@ body.is-drag-painting * {
   color: var(--c-danger);
 }
 
+.quest-cell-dot.is-reward-pending {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+.quest-cell-dot.is-in-progress {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(192, 132, 252, 0.72);
+  color: #d8b4fe;
+}
+
 .quest-cell-dot.empty {
   background: transparent;
   border: 1px dashed rgba(255, 255, 255, 0.05);
