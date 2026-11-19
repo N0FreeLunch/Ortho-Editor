@@ -181,6 +181,25 @@ shopSpawnTargetEncoder enum =
         SpawnTempInventory ->
             Json.Encode.string "SpawnTempInventory"
 
+type QuestSemanticStatusView
+    = QuestUnstarted
+    | QuestInProgress
+    | QuestRewardPending
+    | QuestCompleted
+
+
+questSemanticStatusViewEncoder : QuestSemanticStatusView -> Json.Encode.Value
+questSemanticStatusViewEncoder enum =
+    case enum of
+        QuestUnstarted ->
+            Json.Encode.string "QuestUnstarted"
+        QuestInProgress ->
+            Json.Encode.string "QuestInProgress"
+        QuestRewardPending ->
+            Json.Encode.string "QuestRewardPending"
+        QuestCompleted ->
+            Json.Encode.string "QuestCompleted"
+
 type UiIntent
     = SelectResDifficulty { difficulty : DifficultyMode }
     | SelectSkillMode { mode : EditMode }
@@ -194,6 +213,7 @@ type UiIntent
     | SetCharacterField { field : CharacterField, value : Int }
     | SetCharacterName { name : String }
     | ToggleQuest { difficulty : DifficultyMode, key : String }
+    | SetQuestSemanticStatus { difficulty : DifficultyMode, key : String, status : QuestSemanticStatusView }
     | SetQuestsBatch { difficulty : DifficultyMode, keys : List (String), completed : Bool }
     | SetAllDiffQuests { completed : Bool }
     | ToggleWaypoint { difficulty : DifficultyMode, bit : Int }
@@ -249,6 +269,8 @@ uiIntentEncoder enum =
             Json.Encode.object [ ( "SetCharacterName", Json.Encode.object [ ( "name", (Json.Encode.string) name ) ] ) ]
         ToggleQuest { difficulty, key } ->
             Json.Encode.object [ ( "ToggleQuest", Json.Encode.object [ ( "difficulty", (difficultyModeEncoder) difficulty ), ( "key", (Json.Encode.string) key ) ] ) ]
+        SetQuestSemanticStatus { difficulty, key, status } ->
+            Json.Encode.object [ ( "SetQuestSemanticStatus", Json.Encode.object [ ( "difficulty", (difficultyModeEncoder) difficulty ), ( "key", (Json.Encode.string) key ), ( "status", (questSemanticStatusViewEncoder) status ) ] ) ]
         SetQuestsBatch { difficulty, keys, completed } ->
             Json.Encode.object [ ( "SetQuestsBatch", Json.Encode.object [ ( "difficulty", (difficultyModeEncoder) difficulty ), ( "keys", (Json.Encode.list (Json.Encode.string)) keys ), ( "completed", (Json.Encode.bool) completed ) ] ) ]
         SetAllDiffQuests { completed } ->
@@ -859,6 +881,7 @@ type alias QuestCatalogEntryView =
     , nameKo : String
     , descEn : String
     , descKo : String
+    , hasNpcReward : Bool
     }
 
 
@@ -872,13 +895,7 @@ questCatalogEntryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_en" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_ko" (Json.Decode.string)))
-
-
-type QuestSemanticStatusView
-    = QuestUnstarted
-    | QuestInProgress
-    | QuestRewardPending
-    | QuestCompleted
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "has_npc_reward" (Json.Decode.bool)))
 
 
 questSemanticStatusViewDecoder : Json.Decode.Decoder QuestSemanticStatusView

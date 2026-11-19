@@ -1,4 +1,8 @@
-use crate::data::quests::{QuestEntry, V105_QUESTS};
+use crate::data::quests::{
+    QUEST_BIT_COMPLETED, QUEST_BIT_REWARD_PENDING, QUEST_PRESET_COMPLETED,
+    QUEST_PRESET_IN_PROGRESS, QUEST_PRESET_REWARD_PENDING, QUEST_PRESET_UNSTARTED,
+    QUEST_PROGRESS_MASK, QuestEntry, V105_QUESTS,
+};
 
 /// Alpha v105 quest sections include a 12-byte header before the quest payload.
 pub const V105_QUEST_PAYLOAD_START: usize = 12;
@@ -73,15 +77,25 @@ impl Quest {
 
     /// Maps the 16-bit quest state word into a coarse semantic status.
     pub fn semantic_status(&self) -> QuestSemanticStatus {
-        if (self.state & 0x0001) != 0 {
+        if (self.state & QUEST_BIT_COMPLETED) != 0 {
             QuestSemanticStatus::Completed
-        } else if (self.state & 0x0002) != 0 {
+        } else if (self.state & QUEST_BIT_REWARD_PENDING) != 0 {
             QuestSemanticStatus::RewardPending
-        } else if (self.state & 0x0FFC) != 0 {
+        } else if (self.state & QUEST_PROGRESS_MASK) != 0 {
             QuestSemanticStatus::InProgress
         } else {
             QuestSemanticStatus::Unstarted
         }
+    }
+
+    /// Sets the 16-bit quest state word using `d2r-data` semantic presets.
+    pub fn set_semantic_status(&mut self, status: QuestSemanticStatus) {
+        self.state = match status {
+            QuestSemanticStatus::Unstarted => QUEST_PRESET_UNSTARTED,
+            QuestSemanticStatus::InProgress => QUEST_PRESET_IN_PROGRESS,
+            QuestSemanticStatus::RewardPending => QUEST_PRESET_REWARD_PENDING,
+            QuestSemanticStatus::Completed => QUEST_PRESET_COMPLETED,
+        };
     }
 
     pub fn set_completed(&mut self, completed: bool) {

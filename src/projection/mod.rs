@@ -331,6 +331,8 @@ pub struct QuestCatalogEntryView {
     pub desc_en: String,
     #[serde(default)]
     pub desc_ko: String,
+    #[serde(default)]
+    pub has_npc_reward: bool,
 }
 
 /// Coarse semantic progression stage derived from the 16-bit quest state word.
@@ -778,6 +780,11 @@ pub enum UiIntent {
     ToggleQuest {
         difficulty: DifficultyMode,
         key: String,
+    },
+    SetQuestSemanticStatus {
+        difficulty: DifficultyMode,
+        key: String,
+        status: QuestSemanticStatusView,
     },
     SetQuestsBatch {
         difficulty: DifficultyMode,
@@ -1678,6 +1685,7 @@ impl EditorSession {
                     | UiIntent::RestoreReplacedMerc
                     | UiIntent::ClearReplacedMerc { .. }
                     | UiIntent::ToggleQuest { .. }
+                    | UiIntent::SetQuestSemanticStatus { .. }
                     | UiIntent::SetQuestsBatch { .. }
                     | UiIntent::SetAllDiffQuests { .. }
                     | UiIntent::ToggleWaypoint { .. }
@@ -1929,6 +1937,44 @@ impl EditorSession {
                 };
                 let next = !quest.is_completed();
                 quest.set_completed(next);
+                self.dirty = true;
+                Ok(())
+            }
+            UiIntent::SetQuestSemanticStatus {
+                difficulty,
+                key,
+                status,
+            } => {
+                let diff = difficulty.as_index();
+                let Some(quest) = self
+                    .progression
+                    .quests
+                    .quests_mut()
+                    .iter_mut()
+                    .find(|q| q.difficulty() == diff && quest_key(q.act(), q.index()) == key)
+                else {
+                    return Err(ActionRejection::new(
+                        RejectionCode::RejectionUnknown,
+                        "unknown_quest_key",
+                        format!("Unknown quest key `{key}` for {difficulty:?}"),
+                    )
+                    .with_target(key));
+                };
+                let domain_status = match status {
+                    QuestSemanticStatusView::QuestUnstarted => {
+                        crate::domain::progression::quest::QuestSemanticStatus::Unstarted
+                    }
+                    QuestSemanticStatusView::QuestInProgress => {
+                        crate::domain::progression::quest::QuestSemanticStatus::InProgress
+                    }
+                    QuestSemanticStatusView::QuestRewardPending => {
+                        crate::domain::progression::quest::QuestSemanticStatus::RewardPending
+                    }
+                    QuestSemanticStatusView::QuestCompleted => {
+                        crate::domain::progression::quest::QuestSemanticStatus::Completed
+                    }
+                };
+                quest.set_semantic_status(domain_status);
                 self.dirty = true;
                 Ok(())
             }
@@ -4476,6 +4522,7 @@ fn build_quest_catalog(is_expansion: bool) -> Vec<QuestCatalogEntryView> {
             name_ko: get_loc(entry.loc_key, "ko").to_string(),
             desc_en: get_loc(entry.desc_loc_key, "en").to_string(),
             desc_ko: get_loc(entry.desc_loc_key, "ko").to_string(),
+            has_npc_reward: entry.has_npc_reward,
         })
         .collect()
 }
@@ -5144,6 +5191,7 @@ pub fn generate_elm_protocol_module() -> Result<String, String> {
             ContainerKind,
             ItemQualityKind,
             ShopSpawnTarget,
+            QuestSemanticStatusView,
             UiIntent,
         ],
         decoders: [

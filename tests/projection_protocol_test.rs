@@ -1672,4 +1672,39 @@ fn quest_catalog_and_semantic_subquest_states_project_from_d2r_data() {
         a1q1_done.status,
         d2r_core::projection::QuestSemanticStatusView::QuestCompleted
     );
+
+    let reward_env = pre_akara.apply_intent(UiIntent::SetQuestSemanticStatus {
+        difficulty: DifficultyMode::Normal,
+        key: "a1q1".to_string(),
+        status: d2r_core::projection::QuestSemanticStatusView::QuestRewardPending,
+    });
+    assert!(reward_env.ok);
+    let reward_view = reward_env.session.expect("reward session");
+    let a1q1_reward = reward_view
+        .progression
+        .normal_quest_states
+        .iter()
+        .find(|s| s.key == "a1q1")
+        .expect("a1q1 reward state");
+    assert_eq!(
+        a1q1_reward.status,
+        d2r_core::projection::QuestSemanticStatusView::QuestRewardPending
+    );
+    assert_eq!(a1q1_reward.raw_state, 0x0002);
+
+    let saved = pre_akara.to_save_bytes().expect("export reward pending d2s");
+    let reloaded = EditorSession::from_bytes(&saved, "reward-pending.d2s")
+        .expect("reload exported d2s")
+        .project();
+    let a1q1_reloaded = reloaded
+        .progression
+        .normal_quest_states
+        .iter()
+        .find(|s| s.key == "a1q1")
+        .expect("reloaded a1q1");
+    assert_eq!(
+        a1q1_reloaded.status,
+        d2r_core::projection::QuestSemanticStatusView::QuestRewardPending
+    );
+    assert_eq!(a1q1_reloaded.raw_state, 0x0002);
 }
