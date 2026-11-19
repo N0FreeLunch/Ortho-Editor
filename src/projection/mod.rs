@@ -331,8 +331,6 @@ pub struct QuestCatalogEntryView {
     pub desc_en: String,
     #[serde(default)]
     pub desc_ko: String,
-    #[serde(default)]
-    pub has_npc_reward: bool,
 }
 
 /// Coarse semantic progression stage derived from the 16-bit quest state word.
@@ -4522,7 +4520,6 @@ fn build_quest_catalog(is_expansion: bool) -> Vec<QuestCatalogEntryView> {
             name_ko: get_loc(entry.loc_key, "ko").to_string(),
             desc_en: get_loc(entry.desc_loc_key, "en").to_string(),
             desc_ko: get_loc(entry.desc_loc_key, "ko").to_string(),
-            has_npc_reward: entry.has_npc_reward,
         })
         .collect()
 }

@@ -132,8 +132,7 @@
         "name": "Den of Evil",
         "name_ko": "덴 오브 이블",
         "desc_en": "Look for the Den in the wilderness outside the Rogues' Camp.",
-        "desc_ko": "로그 캠프 밖에 있는 덴 오브 이블을 찾으시오.",
-        "has_npc_reward": true
+        "desc_ko": "로그 캠프 밖에 있는 덴 오브 이블을 찾으시오."
       },
       {
         "key": "a1q2",
@@ -142,8 +141,7 @@
         "name": "Sisters' Burial Grounds",
         "name_ko": "베리얼 그라운드",
         "desc_en": "Look for Blood Raven in the Burial Grounds next to the Cold Plains.",
-        "desc_ko": "콜드 플레인 부근 베리얼 그라운드에서 블러드 레이븐을 찾으시오.",
-        "has_npc_reward": false
+        "desc_ko": "콜드 플레인 부근 베리얼 그라운드에서 블러드 레이븐을 찾으시오."
       },
       {
         "key": "a1q3",
@@ -152,8 +150,7 @@
         "name": "The Search for Cain",
         "name_ko": "케인을 찾아서",
         "desc_en": "Go through the Underground Passage to the Dark Wood, search for the Tree of Inifuss, and recover the Scroll.",
-        "desc_ko": "지하통로를 통하여 다크우드로 간 다음, 이니훠스 나무를 찾아 스크롤을 가져오시오.",
-        "has_npc_reward": true
+        "desc_ko": "지하통로를 통하여 다크우드로 간 다음, 이니훠스 나무를 찾아 스크롤을 가져오시오."
       },
       {
         "key": "a1q4",
@@ -162,8 +159,7 @@
         "name": "The Forgotten Tower",
         "name_ko": "포가튼 타워",
         "desc_en": "Look for the Tower in the Black Marsh beyond the Dark Wood.",
-        "desc_ko": "다크 우드를 지나 블랙 마쉬에 있는 페허가 된 타워를 살펴 보시오.",
-        "has_npc_reward": false
+        "desc_ko": "다크 우드를 지나 블랙 마쉬에 있는 페허가 된 타워를 살펴 보시오."
       },
       {
         "key": "a1q5",
@@ -172,8 +168,7 @@
         "name": "Tools of the Trade",
         "name_ko": "찰시의 연장",
         "desc_en": "Look for the Horadric Malus in the Monastery Barracks. Beware of the Smith that guards it.",
-        "desc_ko": "수도원 병영에서 호라드릭 마울을 찾아 보시오. 단, 그것을 지키고 있는 스미스를 조심 하시오.",
-        "has_npc_reward": true
+        "desc_ko": "수도원 병영에서 호라드릭 마울을 찾아 보시오. 단, 그것을 지키고 있는 스미스를 조심 하시오."
       },
       {
         "key": "a1q6",
@@ -182,8 +177,7 @@
         "name": "Sisters to the Slaughter",
         "name_ko": "로그 자매들의 학살자",
         "desc_en": "Find Andariel's Lair in the depths of the Monastery Catacombs.",
-        "desc_ko": "수도원 깊숙히 있는 카타콤에서 안다리엘의 소굴을 찾아 내시오.",
-        "has_npc_reward": false
+        "desc_ko": "수도원 깊숙히 있는 카타콤에서 안다리엘의 소굴을 찾아 내시오."
       },
       {
         "key": "a2q1",
@@ -192,8 +186,7 @@
         "name": "Radament's Lair",
         "name_ko": "라다먼트의 소굴",
         "desc_en": "Find Radament's Lair in the Lut Gholein sewers.",
-        "desc_ko": "루트 골레인 지하 하수도굴에서 라다먼트의 소굴을 찾으십시오.",
-        "has_npc_reward": true
+        "desc_ko": "루트 골레인 지하 하수도굴에서 라다먼트의 소굴을 찾으십시오."
       },
       {
         "key": "a2q2",
@@ -202,8 +195,7 @@
         "name": "The Horadric Staff",
         "name_ko": "호라드릭 스태프",
         "desc_en": "Show the scroll to Cain in Lut Gholein.",
-        "desc_ko": "루트 골레인에서 케인에게 스크롤을 보여주십시오.",
-        "has_npc_reward": false
+        "desc_ko": "루트 골레인에서 케인에게 스크롤을 보여주십시오."
       },
       {
         "key": "a2q3",
@@ -212,8 +204,7 @@
         "name": "Tainted Sun",
         "name_ko": "오염된 태양",
         "desc_en": "Look for the source of the darkness.",
-        "desc_ko": "암흑의 근원을 찾으십시오.",
-        "has_npc_reward": false
+        "desc_ko": "암흑의 근원을 찾으십시오."
       },
       {
         "key": "a2q4",
@@ -222,8 +213,7 @@
         "name": "Arcane Sanctuary",
         "name_ko": "아케인 생츄어리",
         "desc_en": "Look for the Arcane Sanctuary within the Palace.",
-        "desc_ko": "궁전 내에 위치한 아케인 생츄어리를 찾으십시오.",
-        "has_npc_reward": false
+        "desc_ko": "궁전 내에 위치한 아케인 생츄어리를 찾으십시오."
       },
       {
         "key": "a2q5",
@@ -232,8 +222,7 @@
         "name": "The Summoner",
         "name_ko": "소환술사",
         "desc_en": "Beware the Summoner.",
-        "desc_ko": "소환술사를 경계 하십시오.",
-        "has_npc_reward": false
+        "desc_ko": "소환술사를 경계 하십시오."
       },
       {
         "key": "a2q6",
@@ -242,8 +231,7 @@
         "name": "The Seven Tombs",
         "name_ko": "7개의 무덤",
         "desc_en": "Find Tal Rasha's Tomb.",
-        "desc_ko": "탈 라샤의 무덤을 찾으십시오. ",
-        "has_npc_reward": false
+        "desc_ko": "탈 라샤의 무덤을 찾으십시오. "
       },
       {
         "key": "a3q1",
@@ -252,8 +240,7 @@
         "name": "The Golden Bird",
         "name_ko": "황금새",
         "desc_en": "Ask Cain about the Jade Figurine.",
-        "desc_ko": "케인에게 제이드 동상에 대해 물어보십시오.",
-        "has_npc_reward": true
+        "desc_ko": "케인에게 제이드 동상에 대해 물어보십시오."
       },
       {
         "key": "a3q2",
@@ -262,8 +249,7 @@
         "name": "Blade of the Old Religion",
         "name_ko": "고대 종교의 블레이드",
         "desc_en": "Look for the Gidbinn in the Flayer Jungle.",
-        "desc_ko": "프레이어 정글에서 기드빈을 찾으십시오.",
-        "has_npc_reward": false
+        "desc_ko": "프레이어 정글에서 기드빈을 찾으십시오."
       },
       {
         "key": "a3q3",
@@ -272,8 +258,7 @@
         "name": "Lam Esen's Tome",
         "name_ko": "람 에센의 책",
         "desc_en": "Search the six temples in the Bazaar, Upper Kurast, and the Causeway for Lam Esen's Tome.",
-        "desc_ko": "쿠라스트 바자, 북부 쿠라스트 그리고 쿠라스트 코즈웨이에 위치하고 있는 6개의 신전에서 람 에센의 책을 찾으십시오.",
-        "has_npc_reward": true
+        "desc_ko": "쿠라스트 바자, 북부 쿠라스트 그리고 쿠라스트 코즈웨이에 위치하고 있는 6개의 신전에서 람 에센의 책을 찾으십시오."
       },
       {
         "key": "a3q4",
@@ -282,8 +267,7 @@
         "name": "Khalim's Will",
         "name_ko": "칼림스 윌",
         "desc_en": "Find Khalim's relics. Search for his Eye in the Spider Cavern.",
-        "desc_ko": "칼림의 유골들을 찾으십시오. 스파이더 동굴에서 칼림의 눈을 찾으십시오. ",
-        "has_npc_reward": false
+        "desc_ko": "칼림의 유골들을 찾으십시오. 스파이더 동굴에서 칼림의 눈을 찾으십시오. "
       },
       {
         "key": "a3q5",
@@ -292,8 +276,7 @@
         "name": "The Blackened Temple",
         "name_ko": "저주받은 신전",
         "desc_en": "Find the Blackened Temple within Travincal.",
-        "desc_ko": "트라빈컬 내에서 저주받은 신전을 찾으십시오.",
-        "has_npc_reward": false
+        "desc_ko": "트라빈컬 내에서 저주받은 신전을 찾으십시오."
       },
       {
         "key": "a3q6",
@@ -302,8 +285,7 @@
         "name": "The Guardian",
         "name_ko": "가디언",
         "desc_en": "Smash the Compelling Orb with Khalim's Will to open the way to Mephisto's Durance.",
-        "desc_ko": "메피스토가 감금 되어져 있는 곳을 열기 위해 칼림스 윌로 컴펠링 오브를 파괴하십시오.",
-        "has_npc_reward": false
+        "desc_ko": "메피스토가 감금 되어져 있는 곳을 열기 위해 칼림스 윌로 컴펠링 오브를 파괴하십시오."
       },
       {
         "key": "a4q1",
@@ -312,8 +294,7 @@
         "name": "The Fallen Angel",
         "name_ko": "타락한 천사",
         "desc_en": "Look for Izual in the Plains of Despair.",
-        "desc_ko": "절망의 평원에서 이주얼을 찾으십시오.",
-        "has_npc_reward": true
+        "desc_ko": "절망의 평원에서 이주얼을 찾으십시오."
       },
       {
         "key": "a4q2",
@@ -322,8 +303,7 @@
         "name": "Terror's End",
         "name_ko": "공포의 결말",
         "desc_en": "Find Diablo in his Sanctuary.",
-        "desc_ko": "카오스 생츄어리에서 디아블로를 찾으십시오.",
-        "has_npc_reward": false
+        "desc_ko": "카오스 생츄어리에서 디아블로를 찾으십시오."
       },
       {
         "key": "a4q3",
@@ -332,8 +312,7 @@
         "name": "Hell's Forge",
         "name_ko": "헬 포지",
         "desc_en": "Take Mephisto's Soulstone to the Hellforge.",
-        "desc_ko": "메피스토의 소울스톤을 헬포지로 가지고 가십시오. ",
-        "has_npc_reward": true
+        "desc_ko": "메피스토의 소울스톤을 헬포지로 가지고 가십시오. "
       }
     ],
     "waypoint_catalog": [

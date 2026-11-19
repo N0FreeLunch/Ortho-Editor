@@ -1707,4 +1707,23 @@ fn quest_catalog_and_semantic_subquest_states_project_from_d2r_data() {
         d2r_core::projection::QuestSemanticStatusView::QuestRewardPending
     );
     assert_eq!(a1q1_reloaded.raw_state, 0x0002);
+
+    let deactivate_env = pre_akara.apply_intent(UiIntent::SetQuestsBatch {
+        difficulty: DifficultyMode::Normal,
+        keys: vec!["a1q1".to_string()],
+        completed: false,
+    });
+    assert!(deactivate_env.ok);
+    let deactivate_view = deactivate_env.session.expect("deactivated session");
+    let a1q1_unstarted = deactivate_view
+        .progression
+        .normal_quest_states
+        .iter()
+        .find(|s| s.key == "a1q1")
+        .expect("a1q1 unstarted state");
+    assert_eq!(
+        a1q1_unstarted.status,
+        d2r_core::projection::QuestSemanticStatusView::QuestUnstarted
+    );
+    assert_eq!(a1q1_unstarted.raw_state, 0x0000);
 }

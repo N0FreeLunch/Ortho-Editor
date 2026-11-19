@@ -1,5 +1,5 @@
 use crate::data::quests::{
-    QUEST_BIT_COMPLETED, QUEST_BIT_REWARD_PENDING, QUEST_PRESET_COMPLETED,
+    QUEST_BIT_CLOSED, QUEST_BIT_COMPLETED, QUEST_BIT_REWARD_PENDING, QUEST_PRESET_COMPLETED,
     QUEST_PRESET_IN_PROGRESS, QUEST_PRESET_REWARD_PENDING, QUEST_PRESET_UNSTARTED,
     QUEST_PROGRESS_MASK, QuestEntry, V105_QUESTS,
 };
@@ -100,12 +100,9 @@ impl Quest {
 
     pub fn set_completed(&mut self, completed: bool) {
         if completed {
-            self.state |= 0x01;
-            // Also set 0x10 in high byte (seen/checked) as per save.rs logic
-            self.state |= 0x1000;
+            self.state |= QUEST_BIT_COMPLETED | QUEST_BIT_CLOSED;
         } else {
-            self.state &= !0x01;
-            self.state &= !0x1000;
+            self.state = QUEST_PRESET_UNSTARTED;
         }
     }
 

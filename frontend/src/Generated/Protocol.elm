@@ -881,7 +881,6 @@ type alias QuestCatalogEntryView =
     , nameKo : String
     , descEn : String
     , descKo : String
-    , hasNpcReward : Bool
     }
 
 
@@ -895,7 +894,6 @@ questCatalogEntryViewDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name_ko" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_en" (Json.Decode.string)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "desc_ko" (Json.Decode.string)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "has_npc_reward" (Json.Decode.bool)))
 
 
 questSemanticStatusViewDecoder : Json.Decode.Decoder QuestSemanticStatusView
