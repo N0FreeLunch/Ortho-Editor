@@ -48,6 +48,7 @@ module State.UiState exposing
     , setProgressionDifficulty
     , setQuickMoveOrigin
     , setSelectedItem
+    , setSelectedQuestTarget
     , setShopCategoryFilter
     , setShopPage
     , setShopQualityTab
@@ -168,6 +169,7 @@ type alias UiState =
     , itemEditorInjectValue : Int
     , itemEditorInjectParam : Int
     , itemEditorNotice : Maybe ModalNotice
+    , selectedQuestTarget : Maybe { difficulty : DifficultyMode, key : String }
     }
 
 
@@ -204,12 +206,18 @@ init =
     , itemEditorInjectValue = 10
     , itemEditorInjectParam = 0
     , itemEditorNotice = Nothing
+    , selectedQuestTarget = Nothing
     }
 
 
 setView : ViewTab -> UiState -> UiState
 setView tab ui =
     { ui | activeView = tab, hoveredItemIndex = Nothing, hoveredSkillId = Nothing, hoverMousePos = Nothing, hoveredDropTarget = Nothing, hoveredDropSub = ( 1, 1 ), quickMoveOrigin = Nothing, itemMenu = NoItemMenu }
+
+
+setSelectedQuestTarget : Maybe { difficulty : DifficultyMode, key : String } -> UiState -> UiState
+setSelectedQuestTarget target ui =
+    { ui | selectedQuestTarget = target }
 
 
 openActionPalette : Int -> Int -> Int -> UiState -> UiState
@@ -240,6 +248,7 @@ openItemEditorModal idx ui =
         , itemEditorInjectValue = 10
         , itemEditorInjectParam = 0
         , itemEditorNotice = Nothing
+    , selectedQuestTarget = Nothing
     }
 
 

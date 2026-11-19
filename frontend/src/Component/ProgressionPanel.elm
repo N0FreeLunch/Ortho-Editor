@@ -10,7 +10,7 @@ import Generated.Protocol
         , WaypointCatalogEntryView
         )
 import Html exposing (Html, button, div, section, span, text)
-import Html.Attributes exposing (attribute, class, classList, id, style, title)
+import Html.Attributes exposing (attribute, class, classList, disabled, id, style, title)
 import Html.Events exposing (custom, on, onClick)
 import Json.Decode
 import State.UiState exposing (DragKind(..), MarqueeSelection, PaintMode(..), UiState)
@@ -120,6 +120,7 @@ viewQuestsPanel ui prog =
             , viewQuestDiffCard ui prog Nightmare "diff-nm" "Nightmare"
             , viewQuestDiffCard ui prog Hell "diff-hell" "Hell"
             ]
+        , viewQuestDetailBar ui prog
         ]
 
 
@@ -154,8 +155,119 @@ viewQuestDiffCard ui prog diff diffClass titleLabel =
             , span [] [ text (String.fromInt (List.length completed) ++ "/" ++ String.fromInt (List.length prog.questCatalog)) ]
             ]
         , div [ class "quest-matrix" ]
-            (List.map (viewQuestActRow diff isActiveDiff ui.paintMode completed questStates ui.marquee prog.questCatalog) acts)
+            (List.map (viewQuestActRow diff isActiveDiff ui.paintMode completed questStates ui.selectedQuestTarget ui.marquee prog.questCatalog) acts)
         ]
+
+
+viewQuestDetailBar : UiState -> ProgressionSummaryView -> Html Msg
+viewQuestDetailBar ui prog =
+    case ui.selectedQuestTarget of
+        Nothing ->
+            text ""
+
+        Just target ->
+            let
+                maybeEntry =
+                    prog.questCatalog
+                        |> List.filter (\q -> q.key == target.key)
+                        |> List.head
+            in
+            case maybeEntry of
+                Nothing ->
+                    text ""
+
+                Just entry ->
+                    let
+                        maybeState =
+                            questStatesForDiff target.difficulty prog
+                                |> List.filter (\s -> s.key == entry.key)
+                                |> List.head
+
+                        currentStatus =
+                            Maybe.map .status maybeState
+                                |> Maybe.withDefault
+                                    (if List.member entry.key (questsForDiff target.difficulty prog) then
+                                        QuestCompleted
+
+                                     else
+                                        QuestUnstarted
+                                    )
+
+                        hexLabel =
+                            case maybeState of
+                                Just st ->
+                                    "0x" ++ toHex4 st.rawState
+
+                                Nothing ->
+                                    "-"
+
+                        titleText =
+                            if String.isEmpty entry.nameKo || entry.nameKo == entry.name then
+                                diffLabel target.difficulty ++ " · " ++ entry.key ++ " · " ++ entry.name
+
+                            else
+                                diffLabel target.difficulty ++ " · " ++ entry.key ++ " · " ++ entry.name ++ " (" ++ entry.nameKo ++ ")"
+
+                        descText =
+                            if not (String.isEmpty entry.descKo) then
+                                entry.descKo
+
+                            else
+                                entry.descEn
+                    in
+                    div [ class "quest-detail-bar", attribute "data-testid" "quest-detail-bar" ]
+                        [ div [ class "quest-detail-bar-head" ]
+                            [ div [ class "quest-detail-bar-title" ]
+                                [ text titleText
+                                , span [ class "meta-line" ] [ text (" [" ++ hexLabel ++ "]") ]
+                                ]
+                            , button
+                                [ class "btn-ghost btn-tiny"
+                                , attribute "data-testid" "quest-detail-close"
+                                , onClick (SelectQuestTarget Nothing)
+                                ]
+                                [ text "×" ]
+                            ]
+                        , if String.isEmpty descText then
+                            text ""
+
+                          else
+                            div [ class "quest-detail-bar-desc" ] [ text descText ]
+                        , div [ class "quest-detail-bar-actions" ]
+                            [ button
+                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestUnstarted ) ]
+                                , attribute "data-testid" "quest-status-unstarted"
+                                , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestUnstarted)
+                                ]
+                                [ text "Unstarted" ]
+                            , button
+                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestInProgress ) ]
+                                , attribute "data-testid" "quest-status-in-progress"
+                                , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestInProgress)
+                                ]
+                                [ text "In Progress" ]
+                            , button
+                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestRewardPending ) ]
+                                , attribute "data-testid" "quest-status-reward-pending"
+                                , disabled (not entry.hasNpcReward)
+                                , title
+                                    (if entry.hasNpcReward then
+                                        "Set Reward Pending (0x0002) to claim NPC reward in-game"
+
+                                     else
+                                        "No repeatable NPC reward for this quest"
+                                    )
+                                , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestRewardPending)
+                                ]
+                                [ text "Reward Pending" ]
+                            , button
+                                [ classList [ ( "seg-btn", True ), ( "is-active", currentStatus == QuestCompleted ) ]
+                                , attribute "data-testid" "quest-status-completed"
+                                , onClick (SetQuestSemanticStatus target.difficulty entry.key QuestCompleted)
+                                ]
+                                [ text "Completed" ]
+                            ]
+                        ]
 
 
 viewQuestActRow :
@@ -164,11 +276,12 @@ viewQuestActRow :
     -> Maybe PaintMode
     -> List String
     -> List QuestStateEntryView
+    -> Maybe { difficulty : DifficultyMode, key : String }
     -> Maybe MarqueeSelection
     -> List QuestCatalogEntryView
     -> Int
     -> Html Msg
-viewQuestActRow diff isActiveDiff paintMode completed questStates maybeMarquee catalog actNum =
+viewQuestActRow diff isActiveDiff paintMode completed questStates selectedTarget maybeMarquee catalog actNum =
     let
         actEntries =
             catalog
@@ -181,7 +294,7 @@ viewQuestActRow diff isActiveDiff paintMode completed questStates maybeMarquee c
     div [ class "quest-matrix-row" ]
         [ span [ class "quest-matrix-act-label" ] [ text ("Act " ++ String.fromInt actNum) ]
         , div [ class "quest-matrix-cells" ]
-            (List.map (viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee) actEntries
+            (List.map (viewQuestDot diff isActiveDiff paintMode completed questStates selectedTarget maybeMarquee) actEntries
                 ++ List.repeat padCount (div [ class "quest-cell-dot empty" ] [])
             )
         ]
@@ -193,10 +306,11 @@ viewQuestDot :
     -> Maybe PaintMode
     -> List String
     -> List QuestStateEntryView
+    -> Maybe { difficulty : DifficultyMode, key : String }
     -> Maybe MarqueeSelection
     -> QuestCatalogEntryView
     -> Html Msg
-viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee entry =
+viewQuestDot diff isActiveDiff paintMode completed questStates selectedTarget maybeMarquee entry =
     let
         maybeState =
             questStates
@@ -211,6 +325,9 @@ viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee entr
 
         isInProgress =
             not isCompleted && (Maybe.map .status maybeState == Just QuestInProgress)
+
+        isSelected =
+            selectedTarget == Just { difficulty = diff, key = entry.key }
 
         marqueeId =
             diffSlug diff ++ ":" ++ entry.key
@@ -252,6 +369,7 @@ viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee entr
             , ( "completed", isCompleted )
             , ( "is-reward-pending", isRewardPending )
             , ( "is-in-progress", isInProgress )
+            , ( "is-selected", isSelected )
             , ( "is-marquee-target", inMarquee )
             , ( "marquee-hit-activate", marqueeMatch == Just Activate )
             , ( "marquee-hit-deactivate", marqueeMatch == Just Deactivate )
@@ -260,6 +378,13 @@ viewQuestDot diff isActiveDiff paintMode completed questStates maybeMarquee entr
          , attribute "data-marquee-kind" "quests"
          , attribute "data-marquee-id" marqueeId
          , title (formatQuestTooltip entry maybeState isCompleted)
+         , custom "contextmenu"
+            (Json.Decode.succeed
+                { message = SelectQuestTarget (Just { difficulty = diff, key = entry.key })
+                , stopPropagation = True
+                , preventDefault = True
+                }
+            )
          ]
             ++ tileInteractionAttrs paintMode diff DragQuests interactionId (ClickQuestTile diff entry.key)
         )

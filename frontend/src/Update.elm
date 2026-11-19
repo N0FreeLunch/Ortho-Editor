@@ -19,6 +19,7 @@ import Generated.Protocol as Protocol
         , EditMode(..)
         , ItemCardView
         , ItemQualityKind(..)
+        , QuestSemanticStatusView(..)
         , SessionEnvelope
         , SessionView
         , ShopSpawnTarget(..)
@@ -73,6 +74,8 @@ type Msg
     | ToggleAllDiffWaypoints
     | ToggleCurrentDiffQuests
     | ToggleCurrentDiffWaypoints
+    | SelectQuestTarget (Maybe { difficulty : DifficultyMode, key : String })
+    | SetQuestSemanticStatus DifficultyMode String QuestSemanticStatusView
     | SelectContainerFilter (Maybe ContainerKind)
     | ClearTempInventory
     | SelectItem (Maybe Int)
@@ -508,6 +511,20 @@ update msg model =
                     { difficulty = diff
                     , bits = bits
                     , active = targetActive
+                    }
+                )
+            )
+
+        SelectQuestTarget maybeTarget ->
+            ( { model | ui = UiState.setSelectedQuestTarget maybeTarget model.ui }, NoOut )
+
+        SetQuestSemanticStatus diff key status ->
+            ( model
+            , EmitIntent
+                (Protocol.SetQuestSemanticStatus
+                    { difficulty = diff
+                    , key = key
+                    , status = status
                     }
                 )
             )

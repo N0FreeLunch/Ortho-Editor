@@ -2174,6 +2174,51 @@ body.is-drag-painting * {
   color: #d8b4fe;
 }
 
+.quest-cell-dot.is-selected {
+  outline: 2px solid var(--accent-gold);
+  outline-offset: 1px;
+}
+
+.quest-detail-bar {
+  background: var(--surface-inset);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quest-detail-bar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.quest-detail-bar-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent-gold);
+}
+
+.quest-detail-bar-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.quest-detail-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quest-detail-bar-actions .seg-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .quest-cell-dot.empty {
   background: transparent;
   border: 1px dashed rgba(255, 255, 255, 0.05);
