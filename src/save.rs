@@ -15,6 +15,7 @@ pub use crate::domain::stats::{AttributeSection, AttributeEntry};
 pub use crate::domain::stats::attribute::char_stat_save_add;
 pub use crate::domain::character::skills::{SkillSection, SKILL_SECTION_LEN};
 pub use crate::domain::progression::{QuestSection, WaypointSection};
+use crate::domain::progression::waypoint::legacy_waypoint_bit;
 use crate::domain::gateway::ItemGateway;
 use crate::domain::vo::InventoryPlacement;
 use std::io;
@@ -899,36 +900,25 @@ impl ExpansionSection {
     }
 
     pub fn is_activated_by_name(&self, difficulty: u8, name: &str) -> bool {
-        if let Some(entry) = crate::data::waypoints::WAYPOINTS.iter().find(|e| e.name == name) {
-            // ExpansionSection implementation for waypoints (fallback/legacy)
-            // It assumes raw_bytes starts at 'WS' marker (0x2BD) or follows standard WS mapping.
-            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(self.is_expansion);
-            let global_bit_idx = (difficulty as usize * axiom.difficulty_stride_bits) + (10 * 8) + entry.ws_bit as usize;
-            let byte_idx = global_bit_idx / 8;
-            let bit_in_byte = global_bit_idx % 8;
-            if byte_idx < self.raw_bytes.len() {
-                return self.raw_bytes[byte_idx] & (1 << bit_in_byte) != 0;
-            }
-        }
-        false
+        let Some((index, mask)) = legacy_waypoint_bit(name, difficulty, self.is_expansion) else {
+            return false;
+        };
+        self.raw_bytes.get(index).is_some_and(|byte| byte & mask != 0)
     }
 
     pub fn set_activated_by_name(&mut self, name: &str, difficulty: u8, active: bool) -> bool {
-        if let Some(entry) = crate::data::waypoints::WAYPOINTS.iter().find(|e| e.name == name) {
-            let axiom = crate::domain::progression::waypoint::VersionalWaypointAxiom::resolve(self.is_expansion);
-            let global_bit_idx = (difficulty as usize * axiom.difficulty_stride_bits) + (10 * 8) + entry.ws_bit as usize;
-            let byte_idx = global_bit_idx / 8;
-            let bit_in_byte = global_bit_idx % 8;
-            if byte_idx < self.raw_bytes.len() {
-                if active {
-                    self.raw_bytes[byte_idx] |= 1 << bit_in_byte;
-                } else {
-                    self.raw_bytes[byte_idx] &= !(1 << bit_in_byte);
-                }
-                return true;
-            }
+        let Some((index, mask)) = legacy_waypoint_bit(name, difficulty, self.is_expansion) else {
+            return false;
+        };
+        let Some(byte) = self.raw_bytes.get_mut(index) else {
+            return false;
+        };
+        if active {
+            *byte |= mask;
+        } else {
+            *byte &= !mask;
         }
-        false
+        true
     }
 }
 

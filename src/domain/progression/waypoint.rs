@@ -3,6 +3,20 @@ use crate::data::waypoints::{WaypointEntry, WAYPOINTS};
 /// Alpha v105 waypoint sections include a 10-byte header before the waypoint payload.
 pub const V105_WAYPOINT_PAYLOAD_START: usize = 10;
 
+/// Resolves a name in the legacy, unanchored waypoint layout used by ExpansionSection.
+pub(crate) fn legacy_waypoint_bit(
+    name: &str,
+    difficulty: u8,
+    is_expansion: bool,
+) -> Option<(usize, u8)> {
+    let entry = WAYPOINTS.iter().find(|entry| entry.name == name)?;
+    let stride = VersionalWaypointAxiom::resolve(is_expansion).difficulty_stride_bits;
+    let bit = V105_WAYPOINT_PAYLOAD_START * 8
+        + usize::from(difficulty) * stride
+        + usize::from(entry.ws_bit);
+    Some((bit / 8, 1 << (bit % 8)))
+}
+
 /// Abstract the versional layout axiom for Waypoints.
 /// Grounded in Axiom 2841 (Ordinal Correspondence).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
